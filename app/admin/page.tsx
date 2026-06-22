@@ -3,8 +3,17 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabaseClient'
 
+// ✅ TYPE (IMPORTANT)
+type Product = {
+  id: number
+  name: string
+  price: number
+  stock: number
+  weight: number
+}
+
 export default function Admin() {
-  const [products, setProducts] = useState<any[]>([])
+  const [products, setProducts] = useState<Product[]>([])
   const [name, setName] = useState('')
   const [price, setPrice] = useState('')
   const [stock, setStock] = useState('')
@@ -18,8 +27,16 @@ export default function Admin() {
   }, [])
 
   async function fetchProducts() {
-    const { data } = await supabase.from('products').select('*')
-    setProducts(data || [])
+    const { data, error } = await supabase
+      .from('products')
+      .select('*')
+
+    if (error) {
+      console.log(error)
+      return
+    }
+
+    setProducts(data as Product[])
   }
 
   // -------------------------
@@ -56,7 +73,7 @@ export default function Admin() {
   // -------------------------
   // DELETE PRODUCT
   // -------------------------
-  async function deleteProduct(id) {
+  async function deleteProduct(id: number) {
     await supabase.from('products').delete().eq('id', id)
     fetchProducts()
   }
@@ -64,7 +81,7 @@ export default function Admin() {
   // -------------------------
   // UPDATE STOCK
   // -------------------------
-  async function updateStock(id, newStock) {
+  async function updateStock(id: number, newStock: number) {
     await supabase
       .from('products')
       .update({ stock: Number(newStock) })
@@ -74,9 +91,9 @@ export default function Admin() {
   }
 
   // -------------------------
-  // UPDATE PRICE 🔥 (IMPORTANT)
+  // UPDATE PRICE
   // -------------------------
-  async function updatePrice(id, newPrice) {
+  async function updatePrice(id: number, newPrice: number) {
     await supabase
       .from('products')
       .update({ price: Number(newPrice) })
@@ -88,7 +105,7 @@ export default function Admin() {
   // -------------------------
   // UPDATE WEIGHT
   // -------------------------
-  async function updateWeight(id, newWeight) {
+  async function updateWeight(id: number, newWeight: number) {
     await supabase
       .from('products')
       .update({ weight: Number(newWeight) })
@@ -101,36 +118,57 @@ export default function Admin() {
     <div style={{ padding: 20 }}>
       <h2>Admin Panel</h2>
 
-      {/* ADD PRODUCT */}
       <h3>Add Product</h3>
 
-      <input placeholder="Name" value={name} onChange={e => setName(e.target.value)} />
+      <input
+        placeholder="Name"
+        value={name}
+        onChange={e => setName(e.target.value)}
+      />
       <br /><br />
 
-      <input placeholder="Price" value={price} onChange={e => setPrice(e.target.value)} />
+      <input
+        placeholder="Price"
+        value={price}
+        onChange={e => setPrice(e.target.value)}
+      />
       <br /><br />
 
-      <input placeholder="Stock" value={stock} onChange={e => setStock(e.target.value)} />
+      <input
+        placeholder="Stock"
+        value={stock}
+        onChange={e => setStock(e.target.value)}
+      />
       <br /><br />
 
-      <input placeholder="Weight (kg)" value={weight} onChange={e => setWeight(e.target.value)} />
+      <input
+        placeholder="Weight (kg)"
+        value={weight}
+        onChange={e => setWeight(e.target.value)}
+      />
       <br /><br />
 
       <button onClick={addProduct}>Add</button>
 
       <hr />
 
-      {/* PRODUCT LIST */}
       <h3>Product List</h3>
 
       {products.map((p) => (
-        <div key={p.id} style={{ border: '1px solid gray', margin: 10, padding: 10 }}>
+        <div
+          key={p.id}
+          style={{
+            border: '1px solid gray',
+            margin: 10,
+            padding: 10
+          }}
+        >
           <b>{p.name}</b><br />
 
           Price:
           <input
             defaultValue={p.price}
-            onBlur={(e) => updatePrice(p.id, e.target.value)}
+            onBlur={(e) => updatePrice(p.id, Number(e.target.value))}
             style={{ marginLeft: 10, width: 80 }}
           />
 
@@ -139,7 +177,7 @@ export default function Admin() {
           Stock:
           <input
             defaultValue={p.stock}
-            onBlur={(e) => updateStock(p.id, e.target.value)}
+            onBlur={(e) => updateStock(p.id, Number(e.target.value))}
             style={{ marginLeft: 10, width: 60 }}
           />
 
@@ -148,13 +186,15 @@ export default function Admin() {
           Weight (kg):
           <input
             defaultValue={p.weight}
-            onBlur={(e) => updateWeight(p.id, e.target.value)}
+            onBlur={(e) => updateWeight(p.id, Number(e.target.value))}
             style={{ marginLeft: 10, width: 60 }}
           />
 
           <br /><br />
 
-          <button onClick={() => deleteProduct(p.id)}>Delete</button>
+          <button onClick={() => deleteProduct(p.id)}>
+            Delete
+          </button>
         </div>
       ))}
     </div>
