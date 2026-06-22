@@ -17,7 +17,7 @@ const [history, setHistory] = useState<any[]>([])
     setProducts(data || [])
   }
 
-  async function fetchHistory(productId) {
+  async function fetchHistory(productId: any) {
     const { data } = await supabase
       .from('price_history')
       .select('*')
