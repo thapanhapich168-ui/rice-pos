@@ -28,18 +28,18 @@ export default function Admin() {
   }, [])
 
   async function fetchProducts() {
-    const { data, error } = await supabase
-      .from('products')
-      .select('*')
+  const { data, error } = await supabase
+    .from('products')
+    .select('*')
 
-    if (error) {
-      console.log(error)
-      return
-    }
-
-    // ✅ SAFE TYPE CAST
-    setProducts(data as Product[])
+  if (error) {
+    console.log(error)
+    return
   }
+
+  // Fallback to an empty array if data is null
+  setProducts((data as Product[]) || []) 
+}
 
   // -------------------------
   // ADD PRODUCT
