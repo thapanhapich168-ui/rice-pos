@@ -7,7 +7,7 @@ import { useParams } from 'next/navigation'
 export default function InvoicePage() {
   const { id } = useParams()
   const [sale, setSale] = useState(null)
-  cconst [items, setItems] = useState<any[]>([])
+  const [items, setItems] = useState<any[]>([])
 
   useEffect(() => {
     fetchInvoice()
