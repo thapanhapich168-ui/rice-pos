@@ -4,8 +4,8 @@ import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabaseClient'
 
 export default function RiceControl() {
-  const [products, setProducts] = useState([])
-  const [history, setHistory] = useState([])
+  const [products, setProducts] = useState<any[]>([])
+const [history, setHistory] = useState<any[]>([])
   const [selectedProduct, setSelectedProduct] = useState(null)
 
   useEffect(() => {
