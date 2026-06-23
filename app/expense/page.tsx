@@ -4,8 +4,8 @@ import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabaseClient'
 
 export default function ExpenseDashboard() {
-  // --- Active Tab State ---
-  const [activeTab, setActiveTab] = useState<'personal' | 'business'>('business')
+  // --- Active Tab State (Swapped default to personal) ---
+  const [activeTab, setActiveTab] = useState<'personal' | 'business'>('personal')
 
   // --- Form States ---
   const [expenseDate, setExpenseDate] = useState('')
@@ -38,11 +38,13 @@ export default function ExpenseDashboard() {
     setLoading(true)
 
     const finalAmountUsd = amountUsd ? Number(amountUsd) : 0
+    const finalAmountRiel = amountRiel ? Number(amountRiel) : 0
     
     const { error } = await supabase.from('expenses').insert([
       {
         description: `[${spender}][${activeTab.toUpperCase()}] ${remarks}`,
-        amount: finalAmountUsd, // Submits USD to standard total column
+        amount: finalAmountUsd, // Submits USD
+        amount_riel: finalAmountRiel, // Submits Riel if you track both
         expense_date: expenseDate,
       },
     ])
@@ -68,17 +70,8 @@ export default function ExpenseDashboard() {
           <p style={styles.subtitle}>Tracker & Ledger Dashboard</p>
         </div>
 
-        {/* TWO TAB HEADER */}
+        {/* TWO TAB HEADER (SWAPPED SIDES) */}
         <div style={styles.tabContainer}>
-          <button
-            onClick={() => setActiveTab('business')}
-            style={{
-              ...styles.tabButton,
-              ...(activeTab === 'business' ? styles.activeTab : {}),
-            }}
-          >
-            🏢 Business Expenses
-          </button>
           <button
             onClick={() => setActiveTab('personal')}
             style={{
@@ -87,6 +80,15 @@ export default function ExpenseDashboard() {
             }}
           >
             🏡 Personal Ledger
+          </button>
+          <button
+            onClick={() => setActiveTab('business')}
+            style={{
+              ...styles.tabButton,
+              ...(activeTab === 'business' ? styles.activeTab : {}),
+            }}
+          >
+            🏢 Business Expenses
           </button>
         </div>
 
@@ -164,9 +166,8 @@ export default function ExpenseDashboard() {
               </div>
             </div>
           </div>
-          <span style={styles.helperText}>* You can enter an amount in either currency box and leave the other completely blank.</span>
 
-          {/* REMARKS (MOVED BELOW AMOUNT) */}
+          {/* REMARKS */}
           <div style={styles.inputGroup}>
             <label style={styles.label}>Remarks</label>
             <input
@@ -190,10 +191,10 @@ export default function ExpenseDashboard() {
   )
 }
 
-// --- CSS-IN-JS BRAND THEME STYLING (WHITE BACKGROUND MOOD & TONE) ---
+// --- CSS-IN-JS BRAND THEME STYLING ---
 const styles = {
   pageContainer: {
-    backgroundColor: '#f8fafc', // Clean bright light background
+    backgroundColor: '#f8fafc',
     minHeight: '100vh',
     display: 'flex',
     alignItems: 'center',
@@ -202,7 +203,7 @@ const styles = {
     fontFamily: '"SF Pro Display", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
   },
   card: {
-    backgroundColor: '#ffffff', // Solid white card panel
+    backgroundColor: '#ffffff',
     maxWidth: '550px',
     width: '100%',
     borderRadius: '16px',
@@ -215,21 +216,21 @@ const styles = {
     marginBottom: '30px',
   },
   mainTitle: {
-    color: '#b59410', // Slightly deeper gold for accessible contrast on light backgrounds
+    color: '#b59410',
     fontSize: '28px',
     fontWeight: '700',
     letterSpacing: '-0.5px',
     margin: '0 0 4px 0',
   },
   subtitle: {
-    color: '#64748b', // Elegant slate gray subtitle text
+    color: '#64748b',
     fontSize: '14px',
     margin: 0,
   },
   tabContainer: {
     display: 'flex',
     gap: '10px',
-    backgroundColor: '#f1f5f9', // Muted background track for light mode
+    backgroundColor: '#f1f5f9',
     padding: '6px',
     borderRadius: '10px',
     marginBottom: '30px',
@@ -247,7 +248,7 @@ const styles = {
     transition: 'all 0.2s ease',
   },
   activeTab: {
-    backgroundColor: '#1b4d3e', // Retained vibrant green focus brand identity
+    backgroundColor: '#1b4d3e',
     color: '#ffffff',
     boxShadow: '0 4px 12px rgba(27,77,62,0.15)',
   },
@@ -273,7 +274,7 @@ const styles = {
     border: '1px solid #cbd5e1',
     borderRadius: '8px',
     padding: '12px 14px',
-    color: '#0f172a', // Dark text for easy readability
+    color: '#0f172a',
     fontSize: '15px',
     outline: 'none',
     transition: 'all 0.2s ease',
@@ -331,12 +332,6 @@ const styles = {
     color: '#b59410',
     fontWeight: '600',
     fontSize: '16px',
-  },
-  helperText: {
-    color: '#94a3b8',
-    fontSize: '12px',
-    fontStyle: 'italic',
-    marginTop: '-8px',
   },
   submitButton: {
     backgroundColor: '#b59410',
