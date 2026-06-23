@@ -38,16 +38,47 @@ export default function CustomerDatabasePage() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(true)
   const [searchQuery, setSearchQuery] = useState('')
 
-  // Customer Type Filter State: 'All' | 'Retail' | 'Wholesale'
-  const [customerTypeFilter, setCustomerTypeFilter] = useState<'All' | 'ហូប' | 'លក់បាយ' | 'លក់ត' | 'ធ្វើនំ' | 'អំណោយ'>('All')
+  // Customer Type Filter State: Persistent via localStorage
+  const [customerTypeFilter, setCustomerTypeFilter] = useState<'All' | 'ហូប' | 'លក់បាយ' | 'លក់ត' | 'ធ្វើនំ' | 'អំណោយ'>(() => {
+    if (typeof window !== 'undefined') {
+      return (localStorage.getItem('rice_pos_type_filter') as any) || 'All';
+    }
+    return 'All';
+  })
 
-  // Airtable Views State Configuration
-  const [views, setViews] = useState<CustomerView[]>([
-    { id: 'all', name: 'All Customers', filterOwner: 'All' },
-    { id: 'jing', name: 'Jing’s Accounts', filterOwner: 'Jing' },
-    { id: 'pich', name: 'Pich’s Accounts', filterOwner: 'Pich' },
-  ])
-  const [activeViewId, setActiveViewId] = useState<string>('all')
+  // Table Column Sort Configuration State: Persistent via localStorage
+  const [sortConfig, setSortConfig] = useState<{ key: string, direction: 'asc' | 'desc' } | null>(() => {
+    if (typeof window !== 'undefined') {
+      const savedSort = localStorage.getItem('rice_pos_sort');
+      return savedSort ? JSON.parse(savedSort) : null;
+    }
+    return null;
+  });
+
+  // Airtable Views State Configuration: Persistent via localStorage
+  const [views, setViews] = useState<CustomerView[]>(() => {
+    if (typeof window !== 'undefined') {
+      const savedViews = localStorage.getItem('rice_pos_views');
+      return savedViews ? JSON.parse(savedViews) : [
+        { id: 'all', name: 'All Customers', filterOwner: 'All' },
+        { id: 'jing', name: 'Jing’s Accounts', filterOwner: 'Jing' },
+        { id: 'pich', name: 'Pich’s Accounts', filterOwner: 'Pich' },
+      ];
+    }
+    return [
+      { id: 'all', name: 'All Customers', filterOwner: 'All' },
+      { id: 'jing', name: 'Jing’s Accounts', filterOwner: 'Jing' },
+      { id: 'pich', name: 'Pich’s Accounts', filterOwner: 'Pich' },
+    ];
+  })
+  
+  const [activeViewId, setActiveViewId] = useState<string>(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('rice_pos_active_view') || 'all';
+    }
+    return 'all';
+  })
+  
   const [showCreateViewModal, setShowCreateViewModal] = useState(false)
   const [newViewName, setNewViewName] = useState('')
   const [newViewFilter, setNewViewFilter] = useState<'Jing' | 'Pich' | 'Both' | 'All'>('All')
@@ -55,13 +86,34 @@ export default function CustomerDatabasePage() {
   // "Add New Customer" Form Modal States
   const [showAddModal, setShowAddModal] = useState(false)
   const [newCustomer, setNewCustomer] = useState({
-  name: '',
-  owner: 'Both',
-  type: 'ហូប', // <--- Matches the new DB default
-  phone: '',
-  location: '',
-  google_map: ''
-})
+    name: '',
+    owner: 'Both',
+    type: 'ហូប', // <--- Matches the new DB default
+    phone: '',
+    location: '',
+    google_map: ''
+  })
+
+  // Track state changes to save data directly back to local storage containers
+  useEffect(() => {
+    localStorage.setItem('rice_pos_views', JSON.stringify(views));
+  }, [views]);
+
+  useEffect(() => {
+    localStorage.setItem('rice_pos_active_view', activeViewId);
+  }, [activeViewId]);
+
+  useEffect(() => {
+    localStorage.setItem('rice_pos_type_filter', customerTypeFilter);
+  }, [customerTypeFilter]);
+
+  useEffect(() => {
+    if (sortConfig) {
+      localStorage.setItem('rice_pos_sort', JSON.stringify(sortConfig));
+    } else {
+      localStorage.removeItem('rice_pos_sort');
+    }
+  }, [sortConfig]);
 
   useEffect(() => {
     loadCustomers()
@@ -124,25 +176,35 @@ export default function CustomerDatabasePage() {
   // Determine current applied active filtering rules
   const currentActiveView = views.find(v => v.id === activeViewId)
   
-  const filteredCustomers = customers.filter(c => {
-    // 1. Filter by Account Owner Tab View
-    if (currentActiveView?.filterOwner && currentActiveView.filterOwner !== 'All') {
-      if (c.owner !== currentActiveView.filterOwner) return false
-    }
+  const filteredCustomers = customers
+    .filter(c => {
+      // 1. Filter by Account Owner Tab View
+      if (currentActiveView?.filterOwner && currentActiveView.filterOwner !== 'All') {
+        if (c.owner !== currentActiveView.filterOwner) return false
+      }
 
-    // 2. Filter by Customer Type Segment Badge
-    if (customerTypeFilter !== 'All') {
-      if (c.type !== customerTypeFilter) return false
-    }
+      // 2. Filter by Customer Type Segment Badge
+      if (customerTypeFilter !== 'All') {
+        if (c.type !== customerTypeFilter) return false
+      }
 
-    // 3. Filter by Search Text String Query
-    const searchString = searchQuery.toLowerCase()
-    return (
-      c.name?.toLowerCase().includes(searchString) ||
-      c.phone?.toLowerCase().includes(searchString) ||
-      c.location?.toLowerCase().includes(searchString)
-    )
-  })
+      // 3. Filter by Search Text String Query
+      const searchString = searchQuery.toLowerCase()
+      return (
+        c.name?.toLowerCase().includes(searchString) ||
+        c.phone?.toLowerCase().includes(searchString) ||
+        c.location?.toLowerCase().includes(searchString)
+      )
+    })
+    .sort((a, b) => {
+      if (!sortConfig) return 0;
+      const { key, direction } = sortConfig;
+      const aValue = a[key] || '';
+      const bValue = b[key] || '';
+      if (aValue < bValue) return direction === 'asc' ? -1 : 1;
+      if (aValue > bValue) return direction === 'asc' ? 1 : -1;
+      return 0;
+    });
 
   const currentT = t[lang];
 
@@ -250,42 +312,62 @@ export default function CustomerDatabasePage() {
         </div>
 
         {/* INTERACTIVE CUSTOMER TYPE SUB-FILTER CONTROLS BAR */}
-<div style={{ padding: '10px 20px', background: '#fcfbfa', borderBottom: '1px solid #eadeca', display: 'flex', gap: '8px', alignItems: 'center', flexShrink: 0 }}>
-  <span style={{ fontSize: '12px', color: '#8a7650', fontWeight: 'bold', marginRight: '8px' }}>Filter Segment:</span>
-  
-  <button
-    onClick={() => setCustomerTypeFilter('All')}
-    style={{ padding: '6px 12px', fontSize: '12px', borderRadius: '20px', border: '1px solid #eadeca', cursor: 'pointer', fontWeight: 'bold', background: customerTypeFilter === 'All' ? '#b58a3d' : '#fff', color: customerTypeFilter === 'All' ? '#fff' : '#6b582f' }}
-  >
-    All Types ({customers.length})
-  </button>
+        <div style={{ padding: '10px 20px', background: '#fcfbfa', borderBottom: '1px solid #eadeca', display: 'flex', gap: '8px', alignItems: 'center', flexShrink: 0 }}>
+          <span style={{ fontSize: '12px', color: '#8a7650', fontWeight: 'bold', marginRight: '8px' }}>Filter Segment:</span>
+          
+          <button
+            onClick={() => setCustomerTypeFilter('All')}
+            style={{ padding: '6px 12px', fontSize: '12px', borderRadius: '20px', border: '1px solid #eadeca', cursor: 'pointer', fontWeight: 'bold', background: customerTypeFilter === 'All' ? '#b58a3d' : '#fff', color: customerTypeFilter === 'All' ? '#fff' : '#6b582f' }}
+          >
+            All Types ({customers.length})
+          </button>
 
-  {/* --- REPLACE THE RETAIL/WHOLESALE BUTTONS WITH THIS --- */}
-  {(['ហូប', 'លក់បាយ', 'លក់ត', 'ធ្វើនំ', 'អំណោយ'] as const).map((typeItem) => (
-    <button
-      key={typeItem}
-      onClick={() => setCustomerTypeFilter(typeItem)}
-      style={{ padding: '6px 12px', fontSize: '12px', borderRadius: '20px', border: '1px solid #eadeca', cursor: 'pointer', fontWeight: 'bold', background: customerTypeFilter === typeItem ? '#b58a3d' : '#fff', color: customerTypeFilter === typeItem ? '#fff' : '#6b582f' }}
-    >
-      🏷️ {typeItem} ({customers.filter(c => c.type === typeItem).length})
-    </button>
-  ))}
-</div>
+          {(['ហូប', 'លក់បាយ', 'លក់ត', 'ធ្វើនំ', 'អំណោយ'] as const).map((typeItem) => (
+            <button
+              key={typeItem}
+              onClick={() => setCustomerTypeFilter(typeItem)}
+              style={{ padding: '6px 12px', fontSize: '12px', borderRadius: '20px', border: '1px solid #eadeca', cursor: 'pointer', fontWeight: 'bold', background: customerTypeFilter === typeItem ? '#b58a3d' : '#fff', color: customerTypeFilter === typeItem ? '#fff' : '#6b582f' }}
+            >
+              🏷️ {typeItem} ({customers.filter(c => c.type === typeItem).length})
+            </button>
+          ))}
+        </div>
 
         {/* GRID SPREADSHEET CANVAS VIEW */}
         <div style={{ flex: 1, overflow: 'auto', background: '#ffffff' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '13px', minWidth: '1100px' }}>
             <thead>
               <tr style={{ background: '#f9f8f6', borderBottom: '1px solid #eadeca', color: '#5c4d32' }}>
-                <th style={{ padding: '12px', borderRight: '1px solid #f4f1ea', width: '150px' }}>Date Added</th>
-                <th style={{ padding: '12px', borderRight: '1px solid #f4f1ea', width: '8px' }}>ID</th>
-                <th style={{ padding: '12px', borderRight: '1px solid #f4f1ea', width: '220px' }}>Customer Name</th>
-                <th style={{ padding: '12px', borderRight: '1px solid #f4f1ea', width: '110px' }}>Account Owner</th>
-                <th style={{ padding: '12px', borderRight: '1px solid #f4f1ea', width: '12px' }}>Customer Type</th>
-                <th style={{ padding: '12px', borderRight: '1px solid #f4f1ea', width: '140px' }}>Phone Number</th>
-                <th style={{ padding: '12px', borderRight: '1px solid #f4f1ea', width: '200px' }}>Location</th>
-                <th style={{ padding: '12px', borderRight: '1px solid #f4f1ea', width: '100px' }}>Google Map</th>
-                <th style={{ padding: '12px' }}>Last Purchase Date</th>
+                {[
+                  { label: 'Date Added', key: 'created_at', width: '150px' },
+                  { label: 'ID', key: 'id', width: '80px' },
+                  { label: 'Customer Name', key: 'name', width: '220px' },
+                  { label: 'Account Owner', key: 'owner', width: '140px' },
+                  { label: 'Customer Type', key: 'type', width: '130px' },
+                  { label: 'Phone Number', key: 'phone', width: '140px' },
+                  { label: 'Location', key: 'location', width: '200px' },
+                  { label: 'Google Map', key: '', width: '100px' }, 
+                  { label: 'Last Purchase Date', key: 'last_purchase_date', width: 'auto' }
+                ].map((col) => (
+                  <th 
+                    key={col.label} 
+                    onClick={() => col.key && setSortConfig({ key: col.key, direction: sortConfig?.key === col.key && sortConfig.direction === 'asc' ? 'desc' : 'asc' })}
+                    style={{ 
+                      padding: '12px', 
+                      borderRight: '1px solid #f4f1ea', 
+                      cursor: col.key ? 'pointer' : 'default',
+                      width: col.width,
+                      userSelect: 'none'
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'between', gap: '6px' }}>
+                      <span>{col.label}</span>
+                      <span style={{ fontSize: '11px', color: sortConfig?.key === col.key ? '#b58a3d' : '#bbb' }}>
+                        {sortConfig?.key === col.key ? (sortConfig.direction === 'asc' ? ' ▲' : ' ▼') : col.key ? ' ↕' : ''}
+                      </span>
+                    </div>
+                  </th>
+                ))}
               </tr>
             </thead>
             <tbody>
@@ -317,10 +399,10 @@ export default function CustomerDatabasePage() {
                       </span>
                     </td>
                     <td style={{ padding: '10px 12px', borderRight: '1px solid #f4f1ea', color: '#4a3b1b' }}>
-  <span style={{ fontWeight: 'bold', fontSize: '12px', background: '#f4f1ea', padding: '2px 6px', borderRadius: '4px' }}>
-    {c.type}
-  </span>
-</td>
+                      <span style={{ fontWeight: 'bold', fontSize: '12px', background: '#f4f1ea', padding: '2px 6px', borderRadius: '4px' }}>
+                        {c.type}
+                      </span>
+                    </td>
                     <td style={{ padding: '10px 12px', borderRight: '1px solid #f4f1ea', color: '#111827' }}>
                       {c.phone || '—'}
                     </td>
@@ -397,12 +479,12 @@ export default function CustomerDatabasePage() {
               <div style={{ flex: 1 }}>
                 <label style={{ display: 'block', fontSize: '12px', fontWeight: 'bold', color: '#8a7650', marginBottom: '4px' }}>Customer Type</label>
                 <select value={newCustomer.type} onChange={(e) => setNewCustomer({ ...newCustomer, type: e.target.value })} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #dcd7cc', background: '#fff' }}>
-  <option value="ហូប">ហូប</option>
-  <option value="លក់បាយ">លក់បាយ</option>
-  <option value="លក់ត">លក់ត</option>
-  <option value="ធ្វើនំ">ធ្វើនំ</option>
-  <option value="អំណោយ">អំណោយ</option>
-</select>
+                  <option value="ហូប">ហូប</option>
+                  <option value="លក់បាយ">លក់បាយ</option>
+                  <option value="លក់ត">លក់ត</option>
+                  <option value="ធ្វើនំ">ធ្វើនំ</option>
+                  <option value="អំណោយ">អំណោយ</option>
+                </select>
               </div>
             </div>
 
