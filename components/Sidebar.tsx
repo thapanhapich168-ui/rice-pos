@@ -67,6 +67,7 @@ export default function Sidebar() {
       <div
         style={{
           width: isOpen ? '240px' : '0px',
+          minWidth: isOpen ? '240px' : '0px', // Crucial fix: Prevents flex layout from compressing layout links
           opacity: isOpen ? 1 : 0,
           pointerEvents: isOpen ? 'auto' : 'none',
           background: '#111827',

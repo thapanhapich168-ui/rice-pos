@@ -288,10 +288,11 @@ export default function POSPage() {
       <Sidebar />
 
       {/* 2. MIDDLE GRID SELECTION ENGINE AREA */}
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', height: '100%', background: '#ffffff', paddingLeft: '60px' }}>
+      {/* Structural layout fix applied below: paddingLeft is managed by standard flex positioning */}
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', height: '100%', background: '#ffffff', minWidth: 0 }}>
         
         {/* TOP OPERATIONS ACTION BAR */}
-        <header style={{ display: 'flex', alignItems: 'center', padding: '12px 20px', borderBottom: '1px solid #f3f4f6', background: '#ffffff', justifyContent: 'space-between' }}>
+        <header style={{ display: 'flex', alignItems: 'center', padding: '12px 20px 12px 75px', borderBottom: '1px solid #f3f4f6', background: '#ffffff', justifyContent: 'space-between' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
             <h1 style={{ fontSize: '20px', fontWeight: 'bold', margin: 0, color: '#4a3b1b' }}>{currentT.title}</h1>
           </div>
@@ -313,7 +314,7 @@ export default function POSPage() {
         </header>
 
         {/* OPERATIONS MODE TAB SUBHEADERS */}
-        <div style={{ padding: '16px 20px', background: '#ffffff', borderBottom: '1px solid #f3f4f6' }}>
+        <div style={{ padding: '16px 20px 16px 75px', background: '#ffffff', borderBottom: '1px solid #f3f4f6' }}>
           <div style={{ display: 'flex', gap: '12px', marginBottom: '16px' }}>
             <button 
               onClick={() => { setActiveTab('retail'); if(activeTab !== 'retail') setSelectedCustomerId(''); }}
@@ -358,7 +359,7 @@ export default function POSPage() {
         </div>
 
         {/* TILES RENDER ELEMENT CONTAINER VIEWPORT */}
-        <div style={{ flex: 1, padding: '20px', overflowY: 'auto', background: '#ffffff' }}>
+        <div style={{ flex: 1, padding: '20px 20px 20px 75px', overflowY: 'auto', background: '#ffffff' }}>
           {filteredProducts.length === 0 ? (
             <div style={{ textAlign: 'center', padding: '40px', color: '#8a7650' }}>{currentT.noProducts}</div>
           ) : (
