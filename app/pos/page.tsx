@@ -106,10 +106,9 @@ export default function POSPage() {
     setCustomers(data || [])
   }
 
-  // Currency formatting utilizing the Riel sign without KHR characters
-  const formatRielSymbol = (amountInUsd: number) => {
-    const rielValue = Math.round(amountInUsd * EXCHANGE_RATE);
-    return `${new Intl.NumberFormat('en-US').format(rielValue)} ៛`;
+  // FIXED: Simply reads the raw database value because it is already in Riel
+  const formatRielSymbol = (amountInRiel: number) => {
+    return `${new Intl.NumberFormat('en-US').format(Math.round(amountInRiel))} ៛`;
   };
 
   const formatRielFromNative = (rielAmount: number) => {
@@ -126,7 +125,7 @@ export default function POSPage() {
     if (isMobile) {
       setSelectedMobileProduct(product);
       setMobileName(product.name);
-      setMobilePrice(Math.round(product.price * EXCHANGE_RATE)); // Convert to riel base for interface interaction
+      setMobilePrice(Number(product.price)); // FIXED: Directly pass native Riel price
       setMobileQty(1);
     } else {
       addToCartDirect(product);
@@ -135,7 +134,7 @@ export default function POSPage() {
 
   function addToCartDirect(product: any) {
     const existing = cart.find((item) => item.id === product.id)
-    const priceInRiel = Math.round(product.price * EXCHANGE_RATE);
+    const priceInRiel = Number(product.price); // FIXED: No multiplication needed
     if (existing) {
       setCart(cart.map((item) => item.id === product.id ? { ...item, quantity: item.quantity + 1 } : item))
     } else {
@@ -173,9 +172,9 @@ export default function POSPage() {
     setCart(cart.filter(item => item.id !== id))
   }
 
-  // Calculate totals natively from Riel back to standard conversions
+  // Calculate totals natively from Riel
   const totalRiel = cart.reduce((sum, item) => sum + (Number(item.custom_price_riel) * Number(item.quantity)), 0)
-  const totalUSD = totalRiel / EXCHANGE_RATE;
+  const totalUSD = totalRiel / EXCHANGE_RATE; // Divides correctly to display USD conversion 
 
   const filteredProducts = products.filter(p => {
     const matchesSearch = p.name?.toLowerCase().includes(searchQuery.toLowerCase())
@@ -220,7 +219,7 @@ export default function POSPage() {
           sale_id: sale.id,
           product_id: item.id,
           quantity: item.quantity,
-          selling_price: item.custom_price_riel / EXCHANGE_RATE,
+          selling_price: item.custom_price_riel / EXCHANGE_RATE, // Formats back to standard $ for schema storage
           cost_price: item.cost_price || 0
         }])
 
