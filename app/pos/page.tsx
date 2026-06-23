@@ -288,11 +288,10 @@ export default function POSPage() {
       <Sidebar />
 
       {/* 2. MIDDLE GRID SELECTION ENGINE AREA */}
-      {/* Added left padding of 60px so content safely clears the fixed toggle menu button */}
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', height: '100%', background: '#ffffff', paddingLeft: '60px' }}>
         
         {/* TOP OPERATIONS ACTION BAR */}
-        <header style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 20px', borderBottom: '1px solid #f3f4f6', background: '#ffffff', justifyContent: 'space-between' }}>
+        <header style={{ display: 'flex', alignItems: 'center', padding: '12px 20px', borderBottom: '1px solid #f3f4f6', background: '#ffffff', justifyContent: 'space-between' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
             <h1 style={{ fontSize: '20px', fontWeight: 'bold', margin: 0, color: '#4a3b1b' }}>{currentT.title}</h1>
           </div>
