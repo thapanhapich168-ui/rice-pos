@@ -11,31 +11,22 @@ export default function RootLayout({
         margin: 0, 
         padding: 0, 
         background: '#ffffff',
-        /* Global classic font stack */
-        fontFamily: '"Times New Roman", Times, "Baskerville", "Playfair Display", serif',
+        // Set Arial globally for every page
+        fontFamily: 'Arial, sans-serif',
         color: '#333',
-        overflow: 'hidden' // Prevents browser-level scrollbars
+        overflow: 'hidden' 
       }}>
         
-        {/* Main Application Flex Frame */}
-        <div style={{ 
-          display: 'flex', 
-          width: '100vw', 
-          height: '100vh', 
-          overflow: 'hidden' 
-        }}>
+        <div style={{ display: 'flex', width: '100vw', height: '100vh', overflow: 'hidden' }}>
           
-          {/* Your Shared Sidebar Component */}
           <Sidebar />
           
-          {/* Shared Dynamic Content Panel Area */}
           <main style={{ 
             flex: 1, 
             height: '100vh', 
-            overflow: 'hidden', // Changed from 'auto' to 'hidden' to let sub-pages handle their own scroll
+            overflow: 'hidden', 
             position: 'relative',
-            background: '#ffffff'
-            /* Removed global padding here to prevent layout overflow on POS/Dashboard */
+            background: '#ffffff' 
           }}>
             {children}
           </main>
