@@ -11,12 +11,19 @@ export default function RootLayout({
         margin: 0, 
         padding: 0, 
         background: '#ffffff',
+        /* Global classic font stack */
         fontFamily: '"Times New Roman", Times, "Baskerville", "Playfair Display", serif',
-        color: '#333'
+        color: '#333',
+        overflow: 'hidden' // Prevents browser-level scrollbars
       }}>
         
         {/* Main Application Flex Frame */}
-        <div style={{ display: 'flex', width: '100vw', height: '100vh', overflow: 'hidden' }}>
+        <div style={{ 
+          display: 'flex', 
+          width: '100vw', 
+          height: '100vh', 
+          overflow: 'hidden' 
+        }}>
           
           {/* Your Shared Sidebar Component */}
           <Sidebar />
@@ -25,10 +32,10 @@ export default function RootLayout({
           <main style={{ 
             flex: 1, 
             height: '100vh', 
-            overflow: 'auto', 
+            overflow: 'hidden', // Changed from 'auto' to 'hidden' to let sub-pages handle their own scroll
             position: 'relative',
-            background: '#ffffff',
-            padding: '20px' // Provides consistent breathing room across all pages
+            background: '#ffffff'
+            /* Removed global padding here to prevent layout overflow on POS/Dashboard */
           }}>
             {children}
           </main>

@@ -14,10 +14,8 @@ export default function Sidebar() {
   const menuItems = [
     { label: '📊 Dashboard', href: '/dashboard' },
     { label: '🛒 POS System', href: '/pos' },
-    { label: '📦 Products Admin', href: '/admin' },
-    { label: '📈 Detailed Reports', href: '/reports' },
     { label: '🌾 Rice Control', href: '/rice' },
-    { label: '👥 Customer Database', href: '/customer' },
+    { label: '👥 Customer Database', href: '/customerdatabase' },
     { label: '💵 Expenses & Ledger', href: '/expense' },
   ]
 
