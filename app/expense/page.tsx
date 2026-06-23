@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabaseClient'
 
 export default function ExpenseDashboard() {
-  // --- Active Tab State (Swapped default to personal) ---
+  // --- Active Tab State ---
   const [activeTab, setActiveTab] = useState<'personal' | 'business'>('personal')
 
   // --- Form States ---
@@ -40,12 +40,15 @@ export default function ExpenseDashboard() {
     const finalAmountUsd = amountUsd ? Number(amountUsd) : 0
     const finalAmountRiel = amountRiel ? Number(amountRiel) : 0
     
+    // FIXED: Now accurately maps values to your specific DB column configurations
     const { error } = await supabase.from('expenses').insert([
       {
-        description: `[${spender}][${activeTab.toUpperCase()}] ${remarks}`,
-        amount: finalAmountUsd, // Submits USD
-        amount_riel: finalAmountRiel, // Submits Riel if you track both
         expense_date: expenseDate,
+        expense_type: activeTab.toUpperCase(), // Maps 'PERSONAL' or 'BUSINESS'
+        spender: spender,                      // Maps 'Pich', 'Jing', or 'Both'
+        remarks: remarks,                      // Maps raw text notes
+        amount: finalAmountUsd, 
+        amount_riel: finalAmountRiel, 
       },
     ])
 
@@ -70,7 +73,7 @@ export default function ExpenseDashboard() {
           <p style={styles.subtitle}>Tracker & Ledger Dashboard</p>
         </div>
 
-        {/* TWO TAB HEADER (SWAPPED SIDES) */}
+        {/* TWO TAB HEADER */}
         <div style={styles.tabContainer}>
           <button
             onClick={() => setActiveTab('personal')}
@@ -107,7 +110,7 @@ export default function ExpenseDashboard() {
             />
           </div>
 
-          {/* SPENDER SELECTOR (3 MULTIPLE CHOICE) */}
+          {/* SPENDER SELECTOR */}
           <div style={styles.inputGroup}>
             <label style={styles.label}>Who Paid? / Purchaser</label>
             <div style={styles.radioGrid}>
