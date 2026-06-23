@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabaseClient'
 import Link from 'next/link'
+import Sidebar from '@/components/Sidebar'
 
 // Constants
 const EXCHANGE_RATE = 4000;
@@ -30,13 +31,6 @@ const t = {
     totalKhmer: "Total:",
     totalUsd: "Total in USD:",
     checkout: "Checkout",
-    dashboard: "📊 Dashboard",
-    posSystem: "🛒 POS System",
-    productsAdmin: "📦 Products Admin",
-    detailedReports: "📈 Detailed Reports",
-    riceControl: "🌾 Rice Control",
-    customerDatabase: "👥 Customer Database", // Added EN Translation
-    logout: "Logout",
     mobileModalTitle: "Adjust Item Properties",
     cancel: "Cancel",
     add: "Add to Cart"
@@ -58,13 +52,6 @@ const t = {
     totalKhmer: "សរុបរួម:",
     totalUsd: "សរុបជាដុល្លារ:",
     checkout: "ចាត់ចែងការទូទាត់",
-    dashboard: "📊 ផ្ទាំងគ្រប់គ្រង",
-    posSystem: "🛒 ប្រព័ន្ធលក់ POS",
-    productsAdmin: "📦 គ្រប់គ្រងទំនិញ",
-    detailedReports: "📈 របាយការណ៍លម្អិត",
-    riceControl: "🌾 គ្រប់គ្រងតម្លៃអង្ករ",
-    customerDatabase: "👥 ទិន្នន័យអតិថិជន", // Added KH Translation
-    logout: "ចាកចេញ",
     mobileModalTitle: "កែសម្រួលព័ត៌មានទំនិញ",
     cancel: "បោះបង់",
     add: "បញ្ចូលទៅកន្ត្រក"
@@ -81,7 +68,6 @@ export default function POSPage() {
   const [searchQuery, setSearchQuery] = useState('')
   const [activeTab, setActiveTab] = useState<'retail' | 'wholesale'>('retail')
   const [selectedCustomerId, setSelectedCustomerId] = useState('')
-  const [isSidebarOpen, setIsSidebarOpen] = useState(true) 
   const [isMobileCartOpen, setIsMobileCartOpen] = useState(false)
 
   // Mobile Product Setup Dialog Modal States
@@ -93,9 +79,6 @@ export default function POSPage() {
   useEffect(() => {
     loadProducts()
     loadCustomers()
-    if (typeof window !== 'undefined' && window.innerWidth < 1024) {
-      setIsSidebarOpen(false)
-    }
   }, [])
 
   async function loadProducts() {
@@ -200,7 +183,7 @@ export default function POSPage() {
       const { data: invoiceNo, error: invoiceError } = await supabase.rpc('generate_invoice_no')
       if (invoiceError) throw invoiceError
 
-      const { data: sale, error: saleError } = await supabase
+      const { data: sale, error: saleError = null } = await supabase
         .from('sales')
         .insert([{
           invoice_no: invoiceNo,
@@ -301,52 +284,17 @@ export default function POSPage() {
   return (
     <div style={{ display: 'flex', height: '100vh', width: '100vw', fontFamily: 'Arial, sans-serif', background: '#ffffff', overflow: 'hidden' }}>
       
-      {/* 1. APP CORE SIDEBAR SHELL PANEL */}
-      <div style={{
-        width: isSidebarOpen ? '240px' : '0px',
-        opacity: isSidebarOpen ? 1 : 0,
-        visibility: isSidebarOpen ? 'visible' : 'hidden',
-        background: '#111827',
-        color: 'white',
-        padding: isSidebarOpen ? '20px' : '0px',
-        display: 'flex',
-        flexDirection: 'column',
-        justifyContent: 'space-between',
-        transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
-        overflow: 'hidden',
-        zIndex: 100
-      }}>
-        <div>
-          <h2 style={{ marginBottom: 30, color: '#fff', fontSize: '20px', whiteSpace: 'nowrap' }}>🌾 Rice POS</h2>
-          <p style={{ marginBottom: 20 }}><Link href="/" style={{ color: '#9ca3af', textDecoration: 'none' }}>{currentT.dashboard}</Link></p>
-          <p style={{ marginBottom: 20, fontWeight: 'bold' }}><Link href="/pos" style={{ color: '#38bdf8', textDecoration: 'none' }}>{currentT.posSystem}</Link></p>
-          <p style={{ marginBottom: 20 }}><Link href="/admin" style={{ color: '#9ca3af', textDecoration: 'none' }}>{currentT.productsAdmin}</Link></p>
-          <p style={{ marginBottom: 20 }}><Link href="/dashboard" style={{ color: '#9ca3af', textDecoration: 'none' }}>{currentT.detailedReports}</Link></p>
-          <p style={{ marginBottom: 20 }}><Link href="/rice" style={{ color: '#9ca3af', textDecoration: 'none' }}>{currentT.riceControl}</Link></p>
-          {/* LINK INJECTED INTO SIDEBAR */}
-          <p style={{ marginBottom: 20 }}><Link href="/customerdatabase" style={{ color: '#9ca3af', textDecoration: 'none' }}>{currentT.customerDatabase}</Link></p>
-        </div>
-        <button 
-          onClick={() => supabase.auth.signOut()} 
-          style={{ background: 'transparent', color: 'red', border: 'none', cursor: 'pointer', textAlign: 'left', padding: 0 }}
-        >
-          🚪 {currentT.logout}
-        </button>
-      </div>
+      {/* 1. SHARED INTERACTIVE BURGER SIDEBAR */}
+      <Sidebar />
 
       {/* 2. MIDDLE GRID SELECTION ENGINE AREA */}
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', height: '100%', background: '#ffffff' }}>
+      {/* Added left padding of 60px so content safely clears the fixed toggle menu button */}
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', height: '100%', background: '#ffffff', paddingLeft: '60px' }}>
         
         {/* TOP OPERATIONS ACTION BAR */}
-        <header style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 20px', borderBottom: '1px solid #f3f4f6', background: '#ffffff' }}>
+        <header style={{ display: 'flex', alignItems: 'center', justifyBetween: 'space-between', padding: '12px 20px', borderBottom: '1px solid #f3f4f6', background: '#ffffff', justifyContent: 'space-between' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-            <button 
-              onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-              style={{ background: 'none', border: 'none', fontSize: '24px', cursor: 'pointer', padding: '4px', color: '#b58a3d', display: 'flex', alignItems: 'center' }}
-            >
-              ☰
-            </button>
-            <h1 style={{ fontSize: '20px', fontWeight: 'bold', margin: 0, color: '#4a3b1b' }}>Angkor Radiant Rice POS</h1>
+            <h1 style={{ fontSize: '20px', fontWeight: 'bold', margin: 0, color: '#4a3b1b' }}>{currentT.title}</h1>
           </div>
           
           <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
