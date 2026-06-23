@@ -40,29 +40,16 @@ export default function ExpenseDashboard() {
     const finalAmountUsd = amountUsd ? Number(amountUsd) : 0
     const finalAmountRiel = amountRiel ? Number(amountRiel) : 0
     
-    // Maps perfectly to the Supabase columns you listed
     const { error } = await supabase.from('expenses').insert([
       {
         expense_date: expenseDate,
         spender: spender,
-        remarks: remarks,                      // Pure text remarks
-        amount: finalAmountUsd,                // Maps to amount $
-        amount_riel: finalAmountRiel,          // Maps to amount riel
-        description: activeTab.toUpperCase(),  // Stores 'PERSONAL' or 'BUSINESS' cleanly here!
+        remarks: remarks,                     // Pure user note text
+        amount: finalAmountUsd,               // Maps to your amount $ column
+        amount_riel: finalAmountRiel,         // Maps to amount riel column
+        description: activeTab.toUpperCase(), // Keeps 'PERSONAL' or 'BUSINESS' distinct here
       },
     ])
-
-    setLoading(false)
-
-    if (error) {
-      alert(`Error saving entry: ${error.message}`)
-    } else {
-      alert('Expense recorded successfully!')
-      setRemarks('')
-      setAmountUsd('')
-      setAmountRiel('')
-    }
-  }
 
     setLoading(false)
 
@@ -88,6 +75,7 @@ export default function ExpenseDashboard() {
         {/* TWO TAB HEADER */}
         <div style={styles.tabContainer}>
           <button
+            type="button"
             onClick={() => setActiveTab('personal')}
             style={{
               ...styles.tabButton,
@@ -97,6 +85,7 @@ export default function ExpenseDashboard() {
             🏡 Personal Ledger
           </button>
           <button
+            type="button"
             onClick={() => setActiveTab('business')}
             style={{
               ...styles.tabButton,
