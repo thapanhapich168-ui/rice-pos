@@ -338,7 +338,7 @@ export default function POSPage() {
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', height: '100%', background: '#ffffff' }}>
         
         {/* TOP OPERATIONS ACTION BAR */}
-        <header style={{ display: 'flex', alignItems: 'center', justifycontent: 'space-between', padding: '12px 20px', borderBottom: '1px solid #f3f4f6', background: '#ffffff' }}>
+        <header style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 20px', borderBottom: '1px solid #f3f4f6', background: '#ffffff' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
             <button 
               onClick={() => setIsSidebarOpen(!isSidebarOpen)}
@@ -420,7 +420,7 @@ export default function POSPage() {
                 <div
                   key={p.id}
                   onClick={() => handleProductClick(p)}
-                  style={{ border: '1px solid #eadeca', borderRadius: '10px', padding: '14px', cursor: 'pointer', background: '#ffffff', display: 'flex', flexDirection: 'column', justifycontent: 'space-between', minHeight: '120px' }}
+                  style={{ border: '1px solid #eadeca', borderRadius: '10px', padding: '14px', cursor: 'pointer', background: '#ffffff', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', minHeight: '120px' }}
                 >
                   <div>
                     <div style={{ fontWeight: 'bold', fontSize: '14px', color: '#4a3b1b', marginBottom: '4px' }}>{p.name}</div>
@@ -461,9 +461,7 @@ export default function POSPage() {
                 
                 <div style={{ display: 'flex', gap: '8px' }}>
                   <div style={{ width: '60%' }}>
-                    {/* UNBOLDED PRICE LABEL */}
                     <span style={{ fontSize: '11px', fontWeight: 'normal', color: '#4a3b1b' }}>{currentT.unitPrice} (៛)</span>
-                    {/* UNBOLDED PRICE INPUT TEXT */}
                     <input
                       type="text"
                       value={item.custom_price_riel}
@@ -475,9 +473,7 @@ export default function POSPage() {
                     />
                   </div>
                   <div style={{ width: '40%' }}>
-                    {/* UNBOLDED QUANTITY LABEL */}
                     <span style={{ fontSize: '11px', fontWeight: 'normal', color: '#4a3b1b' }}>{currentT.quantity}</span>
-                    {/* UNBOLDED QUANTITY INPUT TEXT */}
                     <input
                       type="number"
                       value={item.quantity}
@@ -499,11 +495,11 @@ export default function POSPage() {
 
         {/* CHECKOUT CALCULATORS CONSOLE BLOCK */}
         <div style={{ padding: '16px 20px', borderTop: '1px solid #e5e7eb', background: '#fcfbfa' }}>
-          <div style={{ display: 'flex', justifycontent: 'space-between', alignItems: 'baseline', marginBottom: '4px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '4px' }}>
             <span style={{ fontSize: '14px', fontWeight: 'bold', color: '#4a3b1b' }}>{currentT.totalKhmer}</span>
             <span style={{ fontSize: '20px', fontWeight: 'bold', color: '#b58a3d' }}>{formatRielFromNative(totalRiel)}</span>
           </div>
-          <div style={{ display: 'flex', justifycontent: 'space-between', alignItems: 'baseline', marginBottom: '14px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '14px' }}>
             <span style={{ fontSize: '11px', color: '#8a7650' }}>{currentT.totalUsd}</span>
             <span style={{ fontSize: '14px', fontWeight: 'bold', color: '#4a3b1b' }}>{formatUSD(totalUSD)}</span>
           </div>
@@ -519,7 +515,7 @@ export default function POSPage() {
 
       {/* 4. SMARTPHONE OVERLAY MODAL: ADJUST ON CLICK QUANTITIES */}
       {selectedMobileProduct && (
-        <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', background: 'rgba(0,0,0,0.5)', zIndex: 9999, display: 'flex', justifycontent: 'center', alignItems: 'center', padding: '20px', boxSizing: 'border-box' }}>
+        <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', background: 'rgba(0,0,0,0.5)', zIndex: 9999, display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '20px', boxSizing: 'border-box' }}>
           <div style={{ background: '#ffffff', width: '100%', maxWidth: '400px', borderRadius: '12px', padding: '24px', boxShadow: '0 10px 25px rgba(0,0,0,0.15)' }}>
             <h3 style={{ margin: '0 0 16px 0', color: '#4a3b1b', borderBottom: '1px solid #f3f4f6', paddingBottom: '10px' }}>{currentT.mobileModalTitle}</h3>
             
@@ -539,7 +535,7 @@ export default function POSPage() {
               </div>
             </div>
 
-            <div style={{ display: 'flex', justifycontent: 'flex-end', gap: '12px' }}>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
               <button onClick={() => setSelectedMobileProduct(null)} style={{ padding: '10px 16px', background: '#f4f1ea', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', color: '#6b582f' }}>{currentT.cancel}</button>
               <button onClick={handleAddMobileProductToCart} style={{ padding: '10px 16px', background: '#b58a3d', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', color: '#fff' }}>{currentT.add}</button>
             </div>
@@ -549,9 +545,9 @@ export default function POSPage() {
 
       {/* 5. SMARTPHONE CORE OVERLAY DRAWER PANEL FOR INTERNAL VIEW LISTINGS */}
       {isMobileCartOpen && (
-        <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', background: 'rgba(0,0,0,0.4)', zIndex: 999, display: 'flex', justifycontent: 'flex-end' }}>
+        <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', background: 'rgba(0,0,0,0.4)', zIndex: 999, display: 'flex', justifyContent: 'flex-end' }}>
           <div style={{ width: '85%', maxWidth: '360px', height: '100%', background: '#ffffff', display: 'flex', flexDirection: 'column' }}>
-            <div style={{ padding: '16px', borderBottom: '1px solid #e5e7eb', display: 'flex', justifycontent: 'space-between', alignItems: 'center', background: '#fcfbfa' }}>
+            <div style={{ padding: '16px', borderBottom: '1px solid #e5e7eb', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#fcfbfa' }}>
               <h3 style={{ margin: 0, color: '#4a3b1b' }}>{currentT.cartTitle} ({cart.length})</h3>
               <button onClick={() => setIsMobileCartOpen(false)} style={{ background: 'none', border: 'none', fontSize: '20px' }}>✕</button>
             </div>
@@ -563,12 +559,12 @@ export default function POSPage() {
                     <input type="number" value={item.custom_price_riel} onChange={(e) => updateCartItem(item.id, 'custom_price_riel', parseFloat(e.target.value) || 0)} style={{ width: '50%', padding: '6px', fontSize: '12px', borderRadius: '4px', border: '1px solid #dcd7cc', color: '#000000', fontWeight: 'normal' }} />
                     <input type="number" value={item.quantity} onChange={(e) => updateCartItem(item.id, 'quantity', parseInt(e.target.value) || 1)} style={{ width: '50%', padding: '6px', fontSize: '12px', borderRadius: '4px', border: '1px solid #dcd7cc', color: '#000000', fontWeight: 'normal' }} />
                   </div>
-                  <div style={{ textalign: 'right', fontSize: '12px', fontWeight: 'bold', color: '#b58a3d' }}>{formatRielFromNative(item.custom_price_riel * item.quantity)}</div>
+                  <div style={{ textAlign: 'right', fontSize: '12px', fontWeight: 'bold', color: '#b58a3d' }}>{formatRielFromNative(item.custom_price_riel * item.quantity)}</div>
                 </div>
               ))}
             </div>
             <div style={{ padding: '16px', borderTop: '1px solid #e5e7eb', background: '#fcfbfa' }}>
-              <div style={{ display: 'flex', justifycontent: 'space-between', marginBottom: '12px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '12px' }}>
                 <span style={{ fontWeight: 'bold' }}>{currentT.totalKhmer}</span>
                 <span style={{ fontWeight: 'bold', color: '#b58a3d', fontSize: '18px' }}>{formatRielFromNative(totalRiel)}</span>
               </div>
