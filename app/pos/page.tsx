@@ -35,6 +35,7 @@ const t = {
     productsAdmin: "📦 Products Admin",
     detailedReports: "📈 Detailed Reports",
     riceControl: "🌾 Rice Control",
+    customerDatabase: "👥 Customer Database", // Added EN Translation
     logout: "Logout",
     mobileModalTitle: "Adjust Item Properties",
     cancel: "Cancel",
@@ -62,6 +63,7 @@ const t = {
     productsAdmin: "📦 គ្រប់គ្រងទំនិញ",
     detailedReports: "📈 របាយការណ៍លម្អិត",
     riceControl: "🌾 គ្រប់គ្រងតម្លៃអង្ករ",
+    customerDatabase: "👥 ទិន្នន័យអតិថិជន", // Added KH Translation
     logout: "ចាកចេញ",
     mobileModalTitle: "កែសម្រួលព័ត៌មានទំនិញ",
     cancel: "បោះបង់",
@@ -106,7 +108,6 @@ export default function POSPage() {
     setCustomers(data || [])
   }
 
-  // FIXED: Simply reads the raw database value because it is already in Riel
   const formatRielSymbol = (amountInRiel: number) => {
     return `${new Intl.NumberFormat('en-US').format(Math.round(amountInRiel))} ៛`;
   };
@@ -119,13 +120,12 @@ export default function POSPage() {
     return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(amount);
   };
 
-  // Click action intercept handler
   function handleProductClick(product: any) {
     const isMobile = typeof window !== 'undefined' && window.innerWidth < 1023;
     if (isMobile) {
       setSelectedMobileProduct(product);
       setMobileName(product.name);
-      setMobilePrice(Number(product.price)); // FIXED: Directly pass native Riel price
+      setMobilePrice(Number(product.price)); 
       setMobileQty(1);
     } else {
       addToCartDirect(product);
@@ -134,7 +134,7 @@ export default function POSPage() {
 
   function addToCartDirect(product: any) {
     const existing = cart.find((item) => item.id === product.id)
-    const priceInRiel = Number(product.price); // FIXED: No multiplication needed
+    const priceInRiel = Number(product.price); 
     if (existing) {
       setCart(cart.map((item) => item.id === product.id ? { ...item, quantity: item.quantity + 1 } : item))
     } else {
@@ -172,9 +172,8 @@ export default function POSPage() {
     setCart(cart.filter(item => item.id !== id))
   }
 
-  // Calculate totals natively from Riel
   const totalRiel = cart.reduce((sum, item) => sum + (Number(item.custom_price_riel) * Number(item.quantity)), 0)
-  const totalUSD = totalRiel / EXCHANGE_RATE; // Divides correctly to display USD conversion 
+  const totalUSD = totalRiel / EXCHANGE_RATE; 
 
   const filteredProducts = products.filter(p => {
     const matchesSearch = p.name?.toLowerCase().includes(searchQuery.toLowerCase())
@@ -219,7 +218,7 @@ export default function POSPage() {
           sale_id: sale.id,
           product_id: item.id,
           quantity: item.quantity,
-          selling_price: item.custom_price_riel / EXCHANGE_RATE, // Formats back to standard $ for schema storage
+          selling_price: item.custom_price_riel / EXCHANGE_RATE, 
           cost_price: item.cost_price || 0
         }])
 
@@ -324,6 +323,8 @@ export default function POSPage() {
           <p style={{ marginBottom: 20 }}><Link href="/admin" style={{ color: '#9ca3af', textDecoration: 'none' }}>{currentT.productsAdmin}</Link></p>
           <p style={{ marginBottom: 20 }}><Link href="/dashboard" style={{ color: '#9ca3af', textDecoration: 'none' }}>{currentT.detailedReports}</Link></p>
           <p style={{ marginBottom: 20 }}><Link href="/rice" style={{ color: '#9ca3af', textDecoration: 'none' }}>{currentT.riceControl}</Link></p>
+          {/* LINK INJECTED INTO SIDEBAR */}
+          <p style={{ marginBottom: 20 }}><Link href="/customerdatabase" style={{ color: '#9ca3af', textDecoration: 'none' }}>{currentT.customerDatabase}</Link></p>
         </div>
         <button 
           onClick={() => supabase.auth.signOut()} 
