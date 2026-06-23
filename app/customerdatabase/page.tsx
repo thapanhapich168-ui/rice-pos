@@ -38,6 +38,9 @@ export default function CustomerDatabasePage() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(true)
   const [searchQuery, setSearchQuery] = useState('')
 
+  // Customer Type Filter State: 'All' | 'Retail' | 'Wholesale'
+  const [customerTypeFilter, setCustomerTypeFilter] = useState<'All' | 'Retail' | 'Wholesale'>('All')
+
   // Airtable Views State Configuration
   const [views, setViews] = useState<CustomerView[]>([
     { id: 'all', name: 'All Customers', filterOwner: 'All' },
@@ -121,9 +124,17 @@ export default function CustomerDatabasePage() {
   const currentActiveView = views.find(v => v.id === activeViewId)
   
   const filteredCustomers = customers.filter(c => {
+    // 1. Filter by Account Owner Tab View
     if (currentActiveView?.filterOwner && currentActiveView.filterOwner !== 'All') {
       if (c.owner !== currentActiveView.filterOwner) return false
     }
+
+    // 2. Filter by Customer Type Segment Badge
+    if (customerTypeFilter !== 'All') {
+      if (c.type !== customerTypeFilter) return false
+    }
+
+    // 3. Filter by Search Text String Query
     const searchString = searchQuery.toLowerCase()
     return (
       c.name?.toLowerCase().includes(searchString) ||
@@ -159,7 +170,7 @@ export default function CustomerDatabasePage() {
           <p style={{ marginBottom: 20 }}><Link href="/admin" style={{ color: '#9ca3af', textDecoration: 'none' }}>{currentT.productsAdmin}</Link></p>
           <p style={{ marginBottom: 20 }}><Link href="/dashboard" style={{ color: '#9ca3af', textDecoration: 'none' }}>{currentT.detailedReports}</Link></p>
           <p style={{ marginBottom: 20 }}><Link href="/rice" style={{ color: '#9ca3af', textDecoration: 'none' }}>{currentT.riceControl}</Link></p>
-          <p style={{ marginBottom: 20, fontWeight: 'bold' }}><Link href="/customers" style={{ color: '#38bdf8', textDecoration: 'none' }}>👥 Customer Database</Link></p>
+          <p style={{ marginBottom: 20, fontWeight: 'bold' }}><Link href="/customerdatabase" style={{ color: '#38bdf8', textDecoration: 'none' }}>{currentT.customersDb}</Link></p>
         </div>
         <button 
           onClick={() => supabase.auth.signOut()} 
@@ -237,6 +248,29 @@ export default function CustomerDatabasePage() {
           </button>
         </div>
 
+        {/* INTERACTIVE CUSTOMER TYPE SUB-FILTER CONTROLS BAR */}
+        <div style={{ padding: '10px 20px', background: '#fcfbfa', borderBottom: '1px solid #eadeca', display: 'flex', gap: '8px', alignItems: 'center', flexShrink: 0 }}>
+          <span style={{ fontSize: '12px', color: '#8a7650', fontWeight: 'bold', marginRight: '8px' }}>Filter Segment:</span>
+          <button
+            onClick={() => setCustomerTypeFilter('All')}
+            style={{ padding: '6px 12px', fontSize: '12px', borderRadius: '20px', border: '1px solid #eadeca', cursor: 'pointer', fontWeight: 'bold', background: customerTypeFilter === 'All' ? '#b58a3d' : '#fff', color: customerTypeFilter === 'All' ? '#fff' : '#6b582f' }}
+          >
+            All Types ({customers.length})
+          </button>
+          <button
+            onClick={() => setCustomerTypeFilter('Retail')}
+            style={{ padding: '6px 12px', fontSize: '12px', borderRadius: '20px', border: '1px solid #eadeca', cursor: 'pointer', fontWeight: 'bold', background: customerTypeFilter === 'Retail' ? '#b58a3d' : '#fff', color: customerTypeFilter === 'Retail' ? '#fff' : '#6b582f' }}
+          >
+            🛍️ Retail (1kg) ({customers.filter(c => c.type === 'Retail').length})
+          </button>
+          <button
+            onClick={() => setCustomerTypeFilter('Wholesale')}
+            style={{ padding: '6px 12px', fontSize: '12px', borderRadius: '20px', border: '1px solid #eadeca', cursor: 'pointer', fontWeight: 'bold', background: customerTypeFilter === 'Wholesale' ? '#b58a3d' : '#fff', color: customerTypeFilter === 'Wholesale' ? '#fff' : '#6b582f' }}
+          >
+            🌾 Wholesale (50kg) ({customers.filter(c => c.type === 'Wholesale').length})
+          </button>
+        </div>
+
         {/* GRID SPREADSHEET CANVAS VIEW */}
         <div style={{ flex: 1, overflow: 'auto', background: '#ffffff' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '13px', minWidth: '1100px' }}>
@@ -262,7 +296,6 @@ export default function CustomerDatabasePage() {
                 </tr>
               ) : (
                 filteredCustomers.map((c) => (
-                  /* FIXED: Removed the unsupported hover subobject causing the Vercel TypeScript build crash */
                   <tr key={c.id} style={{ borderBottom: '1px solid #f4f1ea' }} className="table-row">
                     <td style={{ padding: '10px 12px', borderRight: '1px solid #f4f1ea', color: '#666' }}>
                       {c.created_at ? new Date(c.created_at).toLocaleDateString('en-GB') : 'N/A'}
@@ -283,7 +316,9 @@ export default function CustomerDatabasePage() {
                       </span>
                     </td>
                     <td style={{ padding: '10px 12px', borderRight: '1px solid #f4f1ea', color: '#4a3b1b' }}>
-                      {c.type || 'Retail'}
+                      <span style={{ fontWeight: 'bold', color: c.type === 'Wholesale' ? '#b58a3d' : '#4b5563' }}>
+                        {c.type === 'Wholesale' ? '🌾 Wholesale' : '🛍️ Retail'}
+                      </span>
                     </td>
                     <td style={{ padding: '10px 12px', borderRight: '1px solid #f4f1ea', color: '#111827' }}>
                       {c.phone || '—'}
