@@ -7,7 +7,7 @@ import { supabase } from '@/lib/supabaseClient'
 const EXCHANGE_RATE = 4000;
 const PDFMONKEY_API_KEY = 'mxP6zZCbyNJb1x5t4-ft';
 const PDFMONKEY_TEMPLATE_ID = '6CBCBF33-56C3-46E5-BCD2-D8B3EF6FFDD6';
-const TELEGRAM_BOT_TOKEN = 'YOUR_TELEGRAM_BOT_TOKEN_HERE'; // Replace with your bot token
+const TELEGRAM_BOT_TOKEN = '8202595979:AAGTXa2EBD9Sr6btcdCpOHs2loAc_JCFZ1g'; // Replace with your bot token
 const TELEGRAM_CHAT_ID = '-1001234567890';
 
 // Helper for currency formatting
@@ -29,14 +29,13 @@ export default function POSPage() {
   const [searchQuery, setSearchQuery] = useState('')
   const [activeTab, setActiveTab] = useState<'retail' | 'wholesale'>('retail')
   const [selectedCustomerId, setSelectedCustomerId] = useState('')
-  const [isSidebarOpen, setIsSidebarOpen] = useState(true) // Desktop default open
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true) 
   const [isMobileCartOpen, setIsMobileCartOpen] = useState(false)
 
   useEffect(() => {
     loadProducts()
     loadCustomers()
     
-    // Auto collapse sidebar layout on narrow screens
     if (typeof window !== 'undefined' && window.innerWidth < 1024) {
       setIsSidebarOpen(false)
     }
@@ -61,6 +60,7 @@ export default function POSPage() {
     }
   }
 
+  // Handle manual inline updates inside the cart array dynamically
   function updateCartItem(id: number, field: string, value: any) {
     setCart(cart.map((item) => item.id === id ? { ...item, [field]: value } : item))
   }
@@ -94,11 +94,9 @@ export default function POSPage() {
     }
 
     try {
-      // 1. Generate Invoice via internal logic/RPC
       const { data: invoiceNo, error: invoiceError } = await supabase.rpc('generate_invoice_no')
       if (invoiceError) throw invoiceError
 
-      // 2. Insert Sale Transaction Record
       const { data: sale, error: saleError } = await supabase
         .from('sales')
         .insert([{
@@ -112,7 +110,6 @@ export default function POSPage() {
 
       if (saleError) throw saleError
 
-      // 3. Complete Loop Transactions for Items & Stocks
       for (const item of cart) {
         await supabase.from('sale_items').insert([{
           sale_id: sale.id,
@@ -128,7 +125,6 @@ export default function POSPage() {
         })
       }
 
-      // 4. Generate & Sync Invoice Document to PDFMonkey External Layout Automation Engine
       const currentDate = new Date()
       const formattedDate = `${String(currentDate.getDate()).padStart(2, '0')}-${String(currentDate.getMonth() + 1).padStart(2, '0')}-${currentDate.getFullYear()}`
 
@@ -166,7 +162,6 @@ export default function POSPage() {
       const pdfData = await pdfResponse.json()
       const downloadUrl = pdfData?.document?.download_url
 
-      // 5. Trigger Webhook Forwarding Notification Alert Layer to Telegram Group Channels
       let telegramText = `🌾 *NEW SALE INVOICE OUTFLOW* 🌾\n\n` +
                          `🆔 *Invoice:* ${invoiceNo}\n` +
                          `📅 *Date:* ${formattedDate}\n` +
@@ -215,7 +210,6 @@ export default function POSPage() {
         {/* APP BRAND BAR AND TOP NAVIGATION ACTIONS CONTAINER */}
         <header style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 20px', borderBottom: '1px solid #f3f4f6', background: '#ffffff' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-            {/* BURGER NAVIGATION FLOW TOGGLE LINK BUTTON */}
             <button 
               onClick={() => setIsSidebarOpen(!isSidebarOpen)}
               style={{ background: 'none', border: 'none', fontSize: '24px', cursor: 'pointer', padding: '4px 8px', color: '#b58a3d', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
@@ -227,11 +221,10 @@ export default function POSPage() {
             <h1 style={{ fontSize: '18px', fontWeight: 'bold', margin: 0, color: '#4a3b1b', letterSpacing: '0.5px' }}>សហគមន៍កសិកម្ម Rice POS</h1>
           </div>
           
-          {/* MOBILE VIEW TOGGLE ACTION CART BADGE BUTTON */}
           <button
             onClick={() => setIsMobileCartOpen(true)}
             style={{
-              display: 'none', // Controlled dynamically via global responsive viewport overrides below
+              display: 'none',
               background: '#b58a3d',
               color: '#ffffff',
               border: 'none',
@@ -265,7 +258,6 @@ export default function POSPage() {
           </div>
 
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px', alignItems: 'center' }}>
-            {/* INTERACTIVE TEXT BOX INSTANT FILTERS */}
             <div style={{ flex: 1, minWidth: '240px', position: 'relative' }}>
               <input 
                 type="text"
@@ -276,7 +268,6 @@ export default function POSPage() {
               />
             </div>
 
-            {/* WHOLESALE ONLY DYNAMIC CUSTOMER ASSIGNMENT SUBHEAD DRAWER VIEW */}
             {activeTab === 'wholesale' && (
               <div style={{ flex: 1, minWidth: '240px' }}>
                 <select
@@ -371,10 +362,9 @@ export default function POSPage() {
           </button>
         </div>
 
-        {/* CONTAINER LOOP RENDER FOR LISTED PRODUCTS IN CART */}
         <div style={{ flex: 1, overflowY: 'auto', padding: '16px' }}>
           {cart.length === 0 ? (
-            <div style={{ textAlign: 'center', padding: '40px color', marginTop: '40px', color: '#9c8a6c' }}>មិនមានទំនិញក្នុងកន្ត្រកឡើយ</div>
+            <div style={{ textAlign: 'center', padding: '40px', marginTop: '40px', color: '#9c8a6c' }}>មិនមានទំនិញក្នុងកន្ត្រកឡើយ</div>
           ) : (
             cart.map((item) => (
               <div key={item.id} style={{ background: '#fcfbfa', borderRadius: '8px', padding: '12px', marginBottom: '12px', border: '1px solid #f4f1ea', position: 'relative' }}>
@@ -385,7 +375,6 @@ export default function POSPage() {
                   ✕
                 </button>
                 
-                {/* NAME INPUT FORM VALUE FIELD EDIT */}
                 <input
                   type="text"
                   value={item.custom_name}
@@ -396,7 +385,6 @@ export default function POSPage() {
                 />
 
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', marginTop: '4px' }}>
-                  {/* EDITABLE UNIT PRICE CONTROL FORM FIELD */}
                   <div style={{ display: 'flex', flexDirection: 'column', width: '45%' }}>
                     <span style={{ fontSize: '11px', color: '#8a7650', marginBottom: '2px' }}>តម្លៃឯកតា ($)</span>
                     <input
@@ -408,7 +396,6 @@ export default function POSPage() {
                     />
                   </div>
 
-                  {/* EDITABLE ITEM QUANTITY COMPONENT CONTROL FORM FIELD */}
                   <div style={{ display: 'flex', flexDirection: 'column', width: '45%' }}>
                     <span style={{ fontSize: '11px', color: '#8a7650', marginBottom: '2px' }}>បរិមាណ (Qty)</span>
                     <input
@@ -421,7 +408,8 @@ export default function POSPage() {
                   </div>
                 </div>
 
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '10px', pt: '6px', borderTop: '1px dashed #eadeca', fontSize: '12px' }}>
+                {/* ✅ FIXED: Changed shorthand 'pt' to valid standard react property 'paddingTop' */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '10px', paddingTop: '6px', borderTop: '1px dashed #eadeca', fontSize: '12px' }}>
                   <span style={{ color: '#8a7650' }}>តម្លៃសរុប:</span>
                   <span style={{ fontWeight: 'bold', color: '#b58a3d' }}>{formatRiel(item.custom_price * item.quantity)}</span>
                 </div>
@@ -430,7 +418,6 @@ export default function POSPage() {
           )}
         </div>
 
-        {/* BOTTOM TOTAL SUMMARY BOX MODULE CONTROL DISPLAY PANEL CONTAINER */}
         <div style={{ padding: '16px 20px', borderTop: '1px solid #e5e7eb', background: '#fcfbfa' }}>
           <div style={{ marginBottom: '6px', display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
             <span style={{ fontSize: '14px', fontWeight: 'bold', color: '#4a3b1b' }}>សរុបរួម (Khmer):</span>
@@ -463,7 +450,7 @@ export default function POSPage() {
         </div>
       </div>
 
-      {/* FULL RESPONSIVE OVERLAY COMPONENT DIALOG SLIDEOUT DRAWER FOR ACTIVE MOBILE SCREEN CART ONLY */}
+      {/* FULL RESPONSIVE OVERLAY DRAWER FOR ACTIVE MOBILE VIEW CARTS */}
       {isMobileCartOpen && (
         <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', background: 'rgba(0,0,0,0.4)', zIndex: 9999, display: 'flex', justifyContent: 'flex-end' }}>
           <div style={{ width: '85%', maxWidth: '360px', height: '100%', background: '#ffffff', display: 'flex', flexDirection: 'column' }}>
@@ -514,7 +501,6 @@ export default function POSPage() {
         </div>
       )}
 
-      {/* EMBEDDED DYNAMIC CONDITIONAL MEDIA QUERY STYLING LAYER OVERRIDES FOR RESPONSIVE SCALING VIEWPORTS */}
       <style jsx global>{`
         @media (max-width: 1023px) {
           .checkout-sidebar.open {
