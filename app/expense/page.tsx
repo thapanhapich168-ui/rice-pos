@@ -40,17 +40,29 @@ export default function ExpenseDashboard() {
     const finalAmountUsd = amountUsd ? Number(amountUsd) : 0
     const finalAmountRiel = amountRiel ? Number(amountRiel) : 0
     
-    // FIXED: Now accurately maps values to your specific DB column configurations
+    // Maps perfectly to the Supabase columns you listed
     const { error } = await supabase.from('expenses').insert([
       {
         expense_date: expenseDate,
-        expense_type: activeTab.toUpperCase(), // Maps 'PERSONAL' or 'BUSINESS'
-        spender: spender,                      // Maps 'Pich', 'Jing', or 'Both'
-        remarks: remarks,                      // Maps raw text notes
-        amount: finalAmountUsd, 
-        amount_riel: finalAmountRiel, 
+        spender: spender,
+        remarks: remarks,                      // Pure text remarks
+        amount: finalAmountUsd,                // Maps to amount $
+        amount_riel: finalAmountRiel,          // Maps to amount riel
+        description: activeTab.toUpperCase(),  // Stores 'PERSONAL' or 'BUSINESS' cleanly here!
       },
     ])
+
+    setLoading(false)
+
+    if (error) {
+      alert(`Error saving entry: ${error.message}`)
+    } else {
+      alert('Expense recorded successfully!')
+      setRemarks('')
+      setAmountUsd('')
+      setAmountRiel('')
+    }
+  }
 
     setLoading(false)
 
