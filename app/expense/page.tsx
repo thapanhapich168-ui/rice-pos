@@ -1,374 +1,308 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabaseClient'
 
-export default function ExpenseDashboard() {
-  // --- Active Tab State ---
-  const [activeTab, setActiveTab] = useState<'personal' | 'business'>('business')
+// ✅ TYPES
+type Product = {
+  id: number
+  name: string
+  price: number
+  stock: number
+  weight: number
+}
 
-  // --- Form States ---
-  const [expenseDate, setExpenseDate] = useState('')
-  const [spender, setSpender] = useState<'Pich' | 'Jing' | 'Both'>('Pich')
-  const [description, setDescription] = useState('')
-  const [category, setCategory] = useState('Stock')
-  const [amountUsd, setAmountUsd] = useState('')
-  const [amountRiel, setAmountRiel] = useState('')
-  const [loading, setLoading] = useState(false)
+type Customer = {
+  id: number
+  name: string
+  phone: string | null
+  email: string | null
+}
 
-  // Set default date to today on load
+type Expense = {
+  id: number
+  amount: number
+  description: string // Used for Remarks
+  expense_date: string
+}
+
+export default function Admin() {
+  // --- Products State ---
+  const [products, setProducts] = useState<Product[]>([])
+  const [name, setName] = useState('')
+  const [price, setPrice] = useState('')
+  const [stock, setStock] = useState('')
+  const [weight, setWeight] = useState('')
+
+  // --- Customers State ---
+  const [customers, setCustomers] = useState<Customer[]>([])
+  const [custName, setCustName] = useState('')
+  const [custPhone, setCustPhone] = useState('')
+  const [custEmail, setCustEmail] = useState('')
+
+  // --- Expenses State ---
+  const [expenses, setExpenses] = useState<Expense[]>([])
+  const [expenseAmount, setExpenseAmount] = useState('')
+  const [expenseRemarks, setExpenseRemarks] = useState('') // Replaces description
+
+  // -------------------------
+  // INITIAL INITIALIZATION
+  // -------------------------
   useEffect(() => {
-    const today = new Date().toISOString().split('T')[0]
-    setExpenseDate(today)
+    fetchProducts()
+    fetchCustomers()
+    fetchExpenses()
   }, [])
 
-  // --- Handle Form Submit ---
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault()
+  // -------------------------
+  // PRODUCT METHODS
+  // -------------------------
+  async function fetchProducts() {
+    const { data, error } = await supabase.from('products').select('*')
+    if (error) console.log(error)
+    else setProducts((data as Product[]) || [])
+  }
 
-    if (!description) {
-      alert('Please add a description/item detail')
+  async function addProduct() {
+    if (!name || !price || !stock || !weight) {
+      alert('Fill all fields')
       return
     }
-
-    if (!amountUsd && !amountRiel) {
-      alert('Please enter an amount in either USD ($) or Riel (៛)')
-      return
-    }
-
-    setLoading(true)
-
-    // Formulate values for submission
-    // (If you have different columns for USD/Riel in your database, pass them here)
-    const finalAmountUsd = amountUsd ? Number(amountUsd) : 0
-    
-    const { error } = await supabase.from('expenses').insert([
-      {
-        description: `[${spender}][${activeTab.toUpperCase()}] ${description}`,
-        category: category,
-        amount: finalAmountUsd, // Submits USD to standard total column
-        expense_date: expenseDate,
-      },
+    const { error } = await supabase.from('products').insert([
+      { name, price: Number(price), stock: Number(stock), weight: Number(weight), cost_price: 0 }
     ])
-
-    setLoading(false)
-
-    if (error) {
-      alert(`Error saving entry: ${error.message}`)
-    } else {
-      alert('Expense recorded successfully!')
-      setDescription('')
-      setAmountUsd('')
-      setAmountRiel('')
+    if (error) alert(error.message)
+    else {
+      alert('Product Added!')
+      setName(''); setPrice(''); setStock(''); setWeight('')
+      fetchProducts()
     }
   }
 
+  async function deleteProduct(id: number) {
+    await supabase.from('products').delete().eq('id', id)
+    fetchProducts()
+  }
+
+  async function updateStock(id: number, newStock: any) {
+    await supabase.from('products').update({ stock: Number(newStock) }).eq('id', id)
+    fetchProducts()
+  }
+
+  async function updatePrice(id: number, newPrice: any) {
+    await supabase.from('products').update({ price: Number(newPrice) }).eq('id', id)
+    fetchProducts()
+  }
+
+  async function updateWeight(id: number, newWeight: any) {
+    await supabase.from('products').update({ weight: Number(newWeight) }).eq('id', id)
+    fetchProducts()
+  }
+
+  // -------------------------
+  // CUSTOMER METHODS
+  // -------------------------
+  async function fetchCustomers() {
+    const { data, error } = await supabase.from('customers').select('*').order('created_at', { ascending: false })
+    if (error) console.log(error)
+    else setCustomers((data as Customer[]) || [])
+  }
+
+  async function addCustomer() {
+    if (!custName) {
+      alert('Customer Name is required')
+      return
+    }
+    const { error } = await supabase.from('customers').insert([
+      { name: custName, phone: custPhone || null, email: custEmail || null }
+    ])
+    if (error) alert(error.message)
+    else {
+      alert('Customer Added!')
+      setCustName(''); setCustPhone(''); setCustEmail('')
+      fetchCustomers()
+    }
+  }
+
+  async function deleteCustomer(id: number) {
+    if (confirm('Remove this customer?')) {
+      const { error } = await supabase.from('customers').delete().eq('id', id)
+      if (error) alert(error.message)
+      else fetchCustomers()
+    }
+  }
+
+  // -------------------------
+  // EXPENSE METHODS
+  // -------------------------
+  async function fetchExpenses() {
+    const { data, error } = await supabase.from('expenses').select('*').order('expense_date', { ascending: false })
+    if (error) console.log(error)
+    else setExpenses((data as Expense[]) || [])
+  }
+
+  async function addExpense() {
+    if (!expenseAmount) {
+      alert('Amount is required')
+      return
+    }
+    const { error } = await supabase.from('expenses').insert([
+      {
+        amount: Number(expenseAmount),
+        description: expenseRemarks || 'No remarks' // Saved into description column
+      }
+    ])
+    if (error) alert(error.message)
+    else {
+      alert('Expense Tracked!')
+      setExpenseAmount(''); setExpenseRemarks('')
+      fetchExpenses()
+    }
+  }
+
+  async function deleteExpense(id: number) {
+    if (confirm('Delete this expense entry?')) {
+      const { error } = await supabase.from('expenses').delete().eq('id', id)
+      if (error) alert(error.message)
+      else fetchExpenses()
+    }
+  }
+
+  // --- Common Input Style for Crisp White UI ---
+  const inputStyle = {
+    display: 'block',
+    width: '100%',
+    padding: '8px',
+    marginBottom: '12px',
+    border: '1px solid #ccc',
+    borderRadius: '4px',
+    boxSizing: 'border-box' as const,
+    backgroundColor: '#fff'
+  }
+
+  const sectionStyle = {
+    backgroundColor: '#fff',
+    border: '1px solid #e0e0e0',
+    padding: '20px',
+    borderRadius: '6px'
+  }
+
   return (
-    <div style={styles.pageContainer}>
-      <div style={styles.card}>
-        {/* HEADER BRANDING */}
-        <div style={styles.brandHeader}>
-          <h1 style={styles.mainTitle}>Daily Expenses</h1>
-          <p style={styles.subtitle}>Tracker & Ledger Dashboard</p>
-        </div>
-
-        {/* TWO TAB HEADER */}
-        <div style={styles.tabContainer}>
-          <button
-            onClick={() => setActiveTab('business')}
-            style={{
-              ...styles.tabButton,
-              ...(activeTab === 'business' ? styles.activeTab : {}),
-            }}
-          >
-            🏢 Business Expenses
-          </button>
-          <button
-            onClick={() => setActiveTab('personal')}
-            style={{
-              ...styles.tabButton,
-              ...(activeTab === 'personal' ? styles.activeTab : {}),
-            }}
-          >
-            🏡 Personal Ledger
-          </button>
-        </div>
-
-        {/* EXPENSE TRANSACTION FORM */}
-        <form onSubmit={handleSubmit} style={styles.form}>
+    <div style={{ padding: '30px', fontFamily: 'sans-serif', backgroundColor: '#fff', minHeight: '100vh', color: '#333' }}>
+      <h1 style={{ borderBottom: '2px solid #eaeaea', paddingBottom: '10px', marginTop: 0 }}>Admin Dashboard</h1>
+      
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '30px', marginTop: '20px' }}>
+        
+        {/* =========================================
+            COLUMN 1: PRODUCTS
+           ========================================= */}
+        <div style={sectionStyle}>
+          <h2 style={{ marginTop: 0 }}>📦 Products</h2>
           
-          {/* DATE PICKER */}
-          <div style={styles.inputGroup}>
-            <label style={styles.label}>Transaction Date</label>
-            <input
-              type="date"
-              value={expenseDate}
-              onChange={(e) => setExpenseDate(e.target.value)}
-              style={styles.inputField}
-              required
-            />
+          <div style={{ borderBottom: '1px solid #eee', paddingBottom: '15px', marginBottom: '15px' }}>
+            <h4 style={{ margin: '0 0 10px 0' }}>Add Product</h4>
+            <input placeholder="Product Name" value={name} onChange={e => setName(e.target.value)} style={inputStyle} />
+            <input placeholder="Price" value={price} onChange={e => setPrice(e.target.value)} style={inputStyle} />
+            <input placeholder="Stock" value={stock} onChange={e => setStock(e.target.value)} style={inputStyle} />
+            <input placeholder="Weight (kg)" value={weight} onChange={e => setWeight(e.target.value)} style={inputStyle} />
+            <button onClick={addProduct} style={{ width: '100%', padding: '8px', backgroundColor: '#333', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>Add Product</button>
           </div>
 
-          {/* SPENDER SELECTOR (3 MULTIPLE CHOICE) */}
-          <div style={styles.inputGroup}>
-            <label style={styles.label}>Who Paid? / Purchaser</label>
-            <div style={styles.radioGrid}>
-              {(['Pich', 'Jing', 'Both'] as const).map((person) => (
-                <label
-                  key={person}
-                  style={{
-                    ...styles.radioLabel,
-                    ...(spender === person ? styles.radioLabelActive : {}),
-                  }}
-                >
-                  <input
-                    type="radio"
-                    name="spender"
-                    value={person}
-                    checked={spender === person}
-                    onChange={() => setSpender(person)}
-                    style={styles.hiddenRadio}
-                  />
-                  <span style={styles.radioDot} />
-                  {person}
-                </label>
-              ))}
-            </div>
-          </div>
-
-          {/* CATEGORY & DETAILS */}
-          <div style={styles.inputGroup}>
-            <label style={styles.label}>Expense Category</label>
-            <select 
-              value={category} 
-              onChange={e => setCategory(e.target.value)} 
-              style={styles.inputField}
-            >
-              <option value="Stock">🌾 Stock / Goods Purchased</option>
-              <option value="Utilities">💡 Utilities (Water, Power, Internet)</option>
-              <option value="Rent">🏢 Rent & Space Lease</option>
-              <option value="Salary">💰 Staff Wages & Remunerations</option>
-              <option value="Marketing">📢 Marketing / Ads</option>
-              <option value="Other">📦 Other Operational Items</option>
-            </select>
-          </div>
-
-          <div style={styles.inputGroup}>
-            <label style={styles.label}>Item Description / Note</label>
-            <input
-              type="text"
-              placeholder="e.g., Bought 50 Premium Rice Sacks, Fuel run, Electricity bill"
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              style={styles.inputField}
-              required
-            />
-          </div>
-
-          {/* DUAL CURRENCY FIELDS */}
-          <div style={styles.currencyRow}>
-            <div style={styles.inputGroup}>
-              <label style={styles.label}>Amount in USD ($)</label>
-              <div style={styles.currencyWrapper}>
-                <span style={styles.currencyPrefix}>$</span>
-                <input
-                  type="number"
-                  step="0.01"
-                  placeholder="0.00"
-                  value={amountUsd}
-                  onChange={(e) => setAmountUsd(e.target.value)}
-                  style={{ ...styles.inputField, paddingLeft: '30px' }}
-                />
+          <h3>Product List</h3>
+          <div style={{ maxHeight: '500px', overflowY: 'auto' }}>
+            {products.map((p) => (
+              <div key={p.id} style={{ border: '1px solid #eee', margin: '10px 0', padding: '12px', borderRadius: '4px' }}>
+                <b style={{ fontSize: '1.1em' }}>{p.name}</b><br /><br />
+                
+                <div style={{ display: 'grid', gridTemplateColumns: '80px 1fr', gap: '5px', alignItems: 'center', marginBottom: '5px' }}>
+                  <span>Price:</span>
+                  <input defaultValue={p.price} onBlur={(e) => updatePrice(p.id, e.target.value)} style={{ padding: '4px', width: '80px' }} />
+                  
+                  <span>Stock:</span>
+                  <input defaultValue={p.stock} onBlur={(e) => updateStock(p.id, e.target.value)} style={{ padding: '4px', width: '60px' }} />
+                  
+                  <span>Weight:</span>
+                  <input defaultValue={p.weight} onBlur={(e) => updateWeight(p.id, e.target.value)} style={{ padding: '4px', width: '60px' }} />
+                </div>
+                
+                <button onClick={() => deleteProduct(p.id)} style={{ color: '#d32f2f', background: 'none', border: 'none', padding: 0, marginTop: '8px', cursor: 'pointer', textDecoration: 'underline' }}>Delete</button>
               </div>
-            </div>
-
-            <div style={styles.inputGroup}>
-              <label style={styles.label}>Amount in Khmer Riel (៛)</label>
-              <div style={styles.currencyWrapper}>
-                <span style={styles.currencyPrefix}>៛</span>
-                <input
-                  type="number"
-                  step="100"
-                  placeholder="0"
-                  value={amountRiel}
-                  onChange={(e) => setAmountRiel(e.target.value)}
-                  style={{ ...styles.inputField, paddingLeft: '30px' }}
-                />
-              </div>
-            </div>
+            ))}
           </div>
-          <span style={styles.helperText}>* You can enter an amount in either currency box and leave the other completely blank.</span>
+        </div>
 
-          {/* SUBMIT BUTTON */}
-          <button type="submit" disabled={loading} style={styles.submitButton}>
-            {loading ? 'Processing Entry...' : `Securely Log ${activeTab === 'business' ? 'Business' : 'Personal'} Expense`}
-          </button>
+        {/* =========================================
+            COLUMN 2: LIVE CUSTOMERS
+           ========================================= */}
+        <div style={sectionStyle}>
+          <h2 style={{ marginTop: 0 }}>👥 Customers</h2>
+          
+          <div style={{ borderBottom: '1px solid #eee', paddingBottom: '15px', marginBottom: '15px' }}>
+            <h4 style={{ margin: '0 0 10px 0' }}>Register Customer</h4>
+            <input placeholder="Customer Name *" value={custName} onChange={e => setCustName(e.target.value)} style={inputStyle} />
+            <input placeholder="Phone" value={custPhone} onChange={e => setCustPhone(e.target.value)} style={inputStyle} />
+            <input placeholder="Email" value={custEmail} onChange={e => setCustEmail(e.target.value)} style={inputStyle} />
+            <button onClick={addCustomer} style={{ width: '100%', padding: '8px', backgroundColor: '#333', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>Save Customer</button>
+          </div>
 
-        </form>
+          <h3>Customer Registry</h3>
+          <div style={{ maxHeight: '500px', overflowY: 'auto' }}>
+            {customers.length === 0 ? (
+              <p style={{ color: '#888', fontStyle: 'italic' }}>No registered profiles.</p>
+            ) : (
+              customers.map((c) => (
+                <div key={c.id} style={{ border: '1px solid #eee', margin: '10px 0', padding: '12px', borderRadius: '4px' }}>
+                  <b>{c.name}</b><br />
+                  <span style={{ fontSize: '0.9em', color: '#666', display: 'block', marginTop: '4px' }}>
+                    📞 {c.phone || 'N/A'} &nbsp;|&nbsp; ✉️ {c.email || 'N/A'}
+                  </span>
+                  <button onClick={() => deleteCustomer(c.id)} style={{ color: '#d32f2f', background: 'none', border: 'none', padding: 0, marginTop: '8px', cursor: 'pointer', textDecoration: 'underline' }}>Remove Profile</button>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+
+        {/* =========================================
+            COLUMN 3: EXPENSES
+           ========================================= */}
+        <div style={sectionStyle}>
+          <h2 style={{ marginTop: 0 }}>💸 Expenses</h2>
+          
+          <div style={{ borderBottom: '1px solid #eee', paddingBottom: '15px', marginBottom: '15px' }}>
+            <h4 style={{ margin: '0 0 10px 0' }}>Log Expense</h4>
+            
+            {/* Amount input sits on top */}
+            <input placeholder="Amount ($) *" value={expenseAmount} onChange={e => setExpenseAmount(e.target.value)} type="number" style={inputStyle} />
+            
+            {/* Remarks input moved directly below Amount */}
+            <input placeholder="Remarks / Details" value={expenseRemarks} onChange={e => setExpenseRemarks(e.target.value)} style={inputStyle} />
+            
+            <button onClick={addExpense} style={{ width: '100%', padding: '8px', backgroundColor: '#333', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>Record Expense</button>
+          </div>
+
+          <h3>Expense History</h3>
+          <div style={{ maxHeight: '500px', overflowY: 'auto' }}>
+            {expenses.length === 0 ? (
+              <p style={{ color: '#888', fontStyle: 'italic' }}>No logged expenses.</p>
+            ) : (
+              expenses.map((ex) => (
+                <div key={ex.id} style={{ border: '1px solid #eee', margin: '10px 0', padding: '12px', borderRadius: '4px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <b style={{ color: '#d32f2f', fontSize: '1.1em' }}>${Number(ex.amount).toFixed(2)}</b>
+                    <span style={{ fontSize: '0.85em', color: '#999' }}>{ex.expense_date}</span>
+                  </div>
+                  <p style={{ margin: '6px 0 0 0', fontSize: '0.95em', color: '#555' }}>
+                    <strong>Remarks:</strong> {ex.description}
+                  </p>
+                  <button onClick={() => deleteExpense(ex.id)} style={{ color: '#d32f2f', background: 'none', border: 'none', padding: 0, marginTop: '8px', cursor: 'pointer', textDecoration: 'underline' }}>Delete Entry</button>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+
       </div>
     </div>
   )
-}
-
-// --- CSS-IN-JS BRAND THEME STYLING ---
-const styles = {
-  pageContainer: {
-    backgroundColor: '#0f1715', // Sleek deep forest dark mode background
-    minHeight: '100vh',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: '20px',
-    fontFamily: '"SF Pro Display", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
-  },
-  card: {
-    backgroundColor: '#16221f', // Rich charcoal-green container background
-    maxWidth: '550px',
-    width: '100%',
-    borderRadius: '16px',
-    padding: '35px',
-    boxShadow: '0 20px 40px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.05)',
-    border: '1px solid #233631',
-  },
-  brandHeader: {
-    textAlign: 'center' as const,
-    marginBottom: '30px',
-  },
-  mainTitle: {
-    color: '#d4af37', // Luxurious matte gold text branding accent
-    fontSize: '28px',
-    fontWeight: '700',
-    letterSpacing: '-0.5px',
-    margin: '0 0 4px 0',
-  },
-  subtitle: {
-    color: '#8da69f', // Soft muted complementary secondary text color
-    fontSize: '14px',
-    margin: 0,
-  },
-  tabContainer: {
-    display: 'flex',
-    gap: '10px',
-    backgroundColor: '#0a100e',
-    padding: '6px',
-    borderRadius: '10px',
-    marginBottom: '30px',
-  },
-  tabButton: {
-    flex: 1,
-    padding: '12px',
-    background: 'none',
-    border: 'none',
-    color: '#8da69f',
-    fontSize: '14px',
-    fontWeight: '600',
-    borderRadius: '8px',
-    cursor: 'pointer',
-    transition: 'all 0.2s ease',
-  },
-  activeTab: {
-    backgroundColor: '#1b4d3e', // Deep vibrant corporate green
-    color: '#ffffff',
-    boxShadow: '0 4px 12px rgba(27,77,62,0.3)',
-  },
-  form: {
-    display: 'flex',
-    flexDirection: 'column' as const,
-    gap: '20px',
-  },
-  inputGroup: {
-    display: 'flex',
-    flexDirection: 'column' as const,
-    gap: '8px',
-  },
-  label: {
-    color: '#d4af37',
-    fontSize: '13px',
-    fontWeight: '600',
-    letterSpacing: '0.3px',
-    textTransform: 'uppercase' as const,
-  },
-  inputField: {
-    backgroundColor: '#0d1614',
-    border: '1px solid #2c423d',
-    borderRadius: '8px',
-    padding: '12px 14px',
-    color: '#ffffff',
-    fontSize: '15px',
-    outline: 'none',
-    transition: 'all 0.2s ease',
-    width: '100%',
-    boxSizing: 'border-box' as const,
-  },
-  radioGrid: {
-    display: 'grid',
-    gridTemplateColumns: '1fr 1fr 1fr',
-    gap: '10px',
-  },
-  radioLabel: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '10px',
-    backgroundColor: '#0d1614',
-    border: '1px solid #2c423d',
-    padding: '12px',
-    borderRadius: '8px',
-    color: '#8da69f',
-    cursor: 'pointer',
-    fontSize: '14px',
-    fontWeight: '500',
-    transition: 'all 0.2s ease',
-  },
-  radioLabelActive: {
-    borderColor: '#d4af37',
-    color: '#ffffff',
-    backgroundColor: '#1b2a26',
-  },
-  hiddenRadio: {
-    display: 'none',
-  },
-  radioDot: {
-    width: '8px',
-    height: '8px',
-    borderRadius: '50%',
-    backgroundColor: 'transparent',
-    border: '2px solid #8da69f',
-    display: 'inline-block',
-  },
-  currencyRow: {
-    display: 'grid',
-    gridTemplateColumns: '1fr 1fr',
-    gap: '15px',
-  },
-  currencyWrapper: {
-    position: 'relative' as const,
-    display: 'flex',
-    alignItems: 'center',
-  },
-  currencyPrefix: {
-    position: 'absolute' as const,
-    left: '12px',
-    color: '#d4af37',
-    fontWeight: '600',
-    fontSize: '16px',
-  },
-  helperText: {
-    color: '#718781',
-    fontSize: '12px',
-    fontStyle: 'italic',
-    marginTop: '-8px',
-  },
-  submitButton: {
-    backgroundColor: '#d4af37',
-    color: '#0a100e',
-    padding: '15px',
-    border: 'none',
-    borderRadius: '8px',
-    fontSize: '15px',
-    fontWeight: '700',
-    cursor: 'pointer',
-    transition: 'all 0.2s ease',
-    boxShadow: '0 6px 18px rgba(212,175,55,0.2)',
-    marginTop: '10px',
-  },
 }
