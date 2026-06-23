@@ -100,7 +100,7 @@ export default function CustomerDatabasePage() {
         .from('customers')
         .insert([{
           name: newCustomer.name,
-          owner: newCustomer.owner, // Assumed text column layout
+          owner: newCustomer.owner, 
           type: newCustomer.type,
           phone: newCustomer.phone,
           location: newCustomer.location,
@@ -111,7 +111,7 @@ export default function CustomerDatabasePage() {
 
       setShowAddModal(false)
       setNewCustomer({ name: '', owner: 'Both', type: 'Retail', phone: '', location: '', google_map: '' })
-      loadCustomers() // Hot re-fetch updates matrix 
+      loadCustomers() 
     } catch (err: any) {
       alert(`Supabase Sink Error: ${err.message}`)
     }
@@ -121,11 +121,9 @@ export default function CustomerDatabasePage() {
   const currentActiveView = views.find(v => v.id === activeViewId)
   
   const filteredCustomers = customers.filter(c => {
-    // 1. View filter layer
     if (currentActiveView?.filterOwner && currentActiveView.filterOwner !== 'All') {
       if (c.owner !== currentActiveView.filterOwner) return false
     }
-    // 2. Global Search text filter layer
     const searchString = searchQuery.toLowerCase()
     return (
       c.name?.toLowerCase().includes(searchString) ||
@@ -264,7 +262,8 @@ export default function CustomerDatabasePage() {
                 </tr>
               ) : (
                 filteredCustomers.map((c) => (
-                  <tr key={c.id} style={{ borderBottom: '1px solid #f4f1ea', hover: { background: '#fcfbfa' } }} className="table-row">
+                  /* FIXED: Removed the unsupported hover subobject causing the Vercel TypeScript build crash */
+                  <tr key={c.id} style={{ borderBottom: '1px solid #f4f1ea' }} className="table-row">
                     <td style={{ padding: '10px 12px', borderRight: '1px solid #f4f1ea', color: '#666' }}>
                       {c.created_at ? new Date(c.created_at).toLocaleDateString('en-GB') : 'N/A'}
                     </td>
@@ -299,7 +298,6 @@ export default function CustomerDatabasePage() {
                         <span style={{ color: '#ccc' }}>—</span>
                       )}
                     </td>
-                    {/* Placeholder for imported sales data linking */}
                     <td style={{ padding: '10px 12px', color: '#6b7280', fontStyle: 'italic' }}>
                       {c.last_purchase_date ? new Date(c.last_purchase_date).toLocaleDateString('en-GB') : 'Sync pending...'}
                     </td>
