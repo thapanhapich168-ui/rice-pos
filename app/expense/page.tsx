@@ -203,8 +203,12 @@ const styles = {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    padding: '20px',
+    padding: '20px 20px 20px 65px', // Left padding offset matches global floating burger layout framework safely
     fontFamily: '"SF Pro Display", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+    flex: 1,
+    overflowY: 'auto' as const,
+    width: '100%',
+    boxSizing: 'border-box' as const,
   },
   card: {
     backgroundColor: '#ffffff',

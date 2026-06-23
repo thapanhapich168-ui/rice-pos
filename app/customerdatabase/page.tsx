@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabaseClient'
-import Link from 'next/link'
 
 // Translations Dictionary (Matching POS style system)
 const t = {
@@ -35,7 +34,6 @@ interface CustomerView {
 export default function CustomerDatabasePage() {
   const [customers, setCustomers] = useState<any[]>([])
   const [lang, setLang] = useState<'en' | 'kh'>('en')
-  const [isSidebarOpen, setIsSidebarOpen] = useState(true)
   const [searchQuery, setSearchQuery] = useState('')
 
   // Customer Type Filter State: Persistent via localStorage
@@ -88,7 +86,7 @@ export default function CustomerDatabasePage() {
   const [newCustomer, setNewCustomer] = useState({
     name: '',
     owner: 'Both',
-    type: 'ហូប', // <--- Matches the new DB default
+    type: 'ហូប', 
     phone: '',
     location: '',
     google_map: ''
@@ -117,9 +115,6 @@ export default function CustomerDatabasePage() {
 
   useEffect(() => {
     loadCustomers()
-    if (typeof window !== 'undefined' && window.innerWidth < 1024) {
-      setIsSidebarOpen(false)
-    }
   }, [])
 
   async function loadCustomers() {
@@ -156,7 +151,7 @@ export default function CustomerDatabasePage() {
         .insert([{
           name: newCustomer.name,
           owner: newCustomer.owner, 
-          type: newCustomer.type, // This now correctly uses the type selected in the modal
+          type: newCustomer.type, 
           phone: newCustomer.phone,
           location: newCustomer.location,
           google_map: newCustomer.google_map
@@ -165,7 +160,6 @@ export default function CustomerDatabasePage() {
       if (error) throw error
 
       setShowAddModal(false)
-      // FIX: Reset to a valid category from your new list, not 'Retail'
       setNewCustomer({ name: '', owner: 'Both', type: 'ហូប', phone: '', location: '', google_map: '' })
       loadCustomers() 
     } catch (err: any) {
@@ -206,225 +200,181 @@ export default function CustomerDatabasePage() {
       return 0;
     });
 
-  const currentT = t[lang];
-
   return (
-    <div style={{ display: 'flex', height: '100vh', width: '100vw', fontFamily: 'Arial, sans-serif', background: '#ffffff', overflow: 'hidden' }}>
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', height: '100%', width: '100%', background: '#ffffff', overflow: 'hidden' }}>
       
-      {/* 1. SIDEBAR PANEL SHELL */}
-      <div style={{
-        width: isSidebarOpen ? '240px' : '0px',
-        opacity: isSidebarOpen ? 1 : 0,
-        visibility: isSidebarOpen ? 'visible' : 'hidden',
-        background: '#111827',
-        color: 'white',
-        padding: isSidebarOpen ? '20px' : '0px',
-        display: 'flex',
-        flexDirection: 'column',
-        justifyContent: 'space-between',
-        transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
-        overflow: 'hidden',
-        zIndex: 100
-      }}>
-        <div>
-          <h2 style={{ marginBottom: 30, color: '#fff', fontSize: '20px', whiteSpace: 'nowrap' }}>🌾 Rice POS</h2>
-          <p style={{ marginBottom: 20 }}><Link href="/" style={{ color: '#9ca3af', textDecoration: 'none' }}>{currentT.dashboard}</Link></p>
-          <p style={{ marginBottom: 20 }}><Link href="/pos" style={{ color: '#9ca3af', textDecoration: 'none' }}>{currentT.posSystem}</Link></p>
-          <p style={{ marginBottom: 20 }}><Link href="/admin" style={{ color: '#9ca3af', textDecoration: 'none' }}>{currentT.productsAdmin}</Link></p>
-          <p style={{ marginBottom: 20 }}><Link href="/dashboard" style={{ color: '#9ca3af', textDecoration: 'none' }}>{currentT.detailedReports}</Link></p>
-          <p style={{ marginBottom: 20 }}><Link href="/rice" style={{ color: '#9ca3af', textDecoration: 'none' }}>{currentT.riceControl}</Link></p>
-          <p style={{ marginBottom: 20, fontWeight: 'bold' }}><Link href="/customerdatabase" style={{ color: '#38bdf8', textDecoration: 'none' }}>{currentT.customersDb}</Link></p>
+      {/* HEADER TOP OPERATIONS BAR (Padded on the left to offset your layout layout's fixed burger button) */}
+      <header style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 20px 12px 65px', borderBottom: '1px solid #f3f4f6', background: '#ffffff', flexShrink: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <h1 style={{ fontSize: '20px', fontWeight: 'bold', margin: 0, color: '#4a3b1b' }}>Customer Database</h1>
         </div>
+        
+        <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+          <input 
+            type="text" 
+            placeholder="🔍 Search accounts..." 
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            style={{ padding: '6px 12px', borderRadius: '6px', border: '1px solid #dcd7cc', outline: 'none', fontSize: '14px', width: '220px' }}
+          />
+          <div style={{ background: '#f4f1ea', borderRadius: '20px', padding: '2px' }}>
+            <button onClick={() => setLang('en')} style={{ border: 'none', background: lang === 'en' ? '#b58a3d' : 'transparent', color: lang === 'en' ? '#fff' : '#6b582f', padding: '4px 10px', borderRadius: '18px', fontWeight: 'bold', cursor: 'pointer', fontSize: '11px' }}>EN</button>
+            <button onClick={() => setLang('kh')} style={{ border: 'none', background: lang === 'kh' ? '#b58a3d' : 'transparent', color: lang === 'kh' ? '#fff' : '#6b582f', padding: '4px 10px', borderRadius: '18px', fontWeight: 'bold', cursor: 'pointer', fontSize: '11px' }}>KH</button>
+          </div>
+          <button 
+            onClick={() => setShowAddModal(true)}
+            style={{ background: '#10b981', color: 'white', border: 'none', borderRadius: '6px', padding: '8px 14px', fontWeight: 'bold', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }}
+          >
+            ➕ Add Customer
+          </button>
+        </div>
+      </header>
+
+      {/* AIRTABLE-STYLE VIEW TABS BAR */}
+      <div style={{ background: '#fcfbfa', borderBottom: '1px solid #eadeca', padding: '8px 20px 0 65px', display: 'flex', alignItems: 'center', gap: '8px', overflowX: 'auto', flexShrink: 0 }}>
+        {views.map((v) => (
+          <button
+            key={v.id}
+            onClick={() => setActiveViewId(v.id)}
+            style={{
+              background: activeViewId === v.id ? '#ffffff' : 'transparent',
+              color: activeViewId === v.id ? '#b58a3d' : '#7c6a46',
+              border: '1px solid #eadeca',
+              borderBottom: activeViewId === v.id ? '1px solid #ffffff' : '1px solid #eadeca',
+              padding: '8px 16px',
+              borderRadius: '6px 6px 0 0',
+              fontSize: '13px',
+              fontWeight: activeViewId === v.id ? 'bold' : 'normal',
+              cursor: 'pointer',
+              whiteSpace: 'nowrap',
+              position: 'relative',
+              bottom: '-1px'
+            }}
+          >
+            📋 {v.name}
+          </button>
+        ))}
         <button 
-          onClick={() => supabase.auth.signOut()} 
-          style={{ background: 'transparent', color: 'red', border: 'none', cursor: 'pointer', textAlign: 'left', padding: 0 }}
+          onClick={() => setShowCreateViewModal(true)}
+          style={{ background: 'none', border: '1px dashed #b58a3d', color: '#b58a3d', padding: '4px 10px', borderRadius: '4px', fontSize: '12px', cursor: 'pointer', fontWeight: 'bold', marginBottom: '4px' }}
         >
-          🚪 {currentT.logout}
+          ⚡ Create New View
         </button>
       </div>
 
-      {/* 2. MAIN HUB DATA VIEW AREA */}
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', height: '100%', background: '#ffffff', overflow: 'hidden' }}>
+      {/* INTERACTIVE CUSTOMER TYPE SUB-FILTER CONTROLS BAR */}
+      <div style={{ padding: '10px 20px 10px 65px', background: '#fcfbfa', borderBottom: '1px solid #eadeca', display: 'flex', gap: '8px', alignItems: 'center', flexShrink: 0, overflowX: 'auto' }}>
+        <span style={{ fontSize: '12px', color: '#8a7650', fontWeight: 'bold', marginRight: '8px', whiteSpace: 'nowrap' }}>Filter Segment:</span>
         
-        {/* HEADER TOP OPERATIONS BAR */}
-        <header style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 20px', borderBottom: '1px solid #f3f4f6', background: '#ffffff', flexShrink: 0 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-            <button 
-              onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-              style={{ background: 'none', border: 'none', fontSize: '24px', cursor: 'pointer', padding: '4px', color: '#b58a3d', display: 'flex', alignItems: 'center' }}
-            >
-              ☰
-            </button>
-            <h1 style={{ fontSize: '20px', fontWeight: 'bold', margin: 0, color: '#4a3b1b' }}>Customer Database</h1>
-          </div>
-          
-          <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
-            <input 
-              type="text" 
-              placeholder="🔍 Search accounts..." 
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              style={{ padding: '6px 12px', borderRadius: '6px', border: '1px solid #dcd7cc', outline: 'none', fontSize: '14px', width: '220px' }}
-            />
-            <div style={{ background: '#f4f1ea', borderRadius: '20px', padding: '2px' }}>
-              <button onClick={() => setLang('en')} style={{ border: 'none', background: lang === 'en' ? '#b58a3d' : 'transparent', color: lang === 'en' ? '#fff' : '#6b582f', padding: '4px 10px', borderRadius: '18px', fontWeight: 'bold', cursor: 'pointer', fontSize: '11px' }}>EN</button>
-              <button onClick={() => setLang('kh')} style={{ border: 'none', background: lang === 'kh' ? '#b58a3d' : 'transparent', color: lang === 'kh' ? '#fff' : '#6b582f', padding: '4px 10px', borderRadius: '18px', fontWeight: 'bold', cursor: 'pointer', fontSize: '11px' }}>KH</button>
-            </div>
-            <button 
-              onClick={() => setShowAddModal(true)}
-              style={{ background: '#10b981', color: 'white', border: 'none', borderRadius: '6px', padding: '8px 14px', fontWeight: 'bold', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }}
-            >
-              ➕ Add Customer
-            </button>
-          </div>
-        </header>
+        <button
+          onClick={() => setCustomerTypeFilter('All')}
+          style={{ padding: '6px 12px', fontSize: '12px', borderRadius: '20px', border: '1px solid #eadeca', cursor: 'pointer', fontWeight: 'bold', background: customerTypeFilter === 'All' ? '#b58a3d' : '#fff', color: customerTypeFilter === 'All' ? '#fff' : '#6b582f', whiteSpace: 'nowrap' }}
+        >
+          All Types ({customers.length})
+        </button>
 
-        {/* AIRTABLE-STYLE VIEW TABS BAR */}
-        <div style={{ background: '#fcfbfa', borderBottom: '1px solid #eadeca', padding: '8px 20px 0 20px', display: 'flex', alignItems: 'center', gap: '8px', overflowX: 'auto', flexShrink: 0 }}>
-          {views.map((v) => (
-            <button
-              key={v.id}
-              onClick={() => setActiveViewId(v.id)}
-              style={{
-                background: activeViewId === v.id ? '#ffffff' : 'transparent',
-                color: activeViewId === v.id ? '#b58a3d' : '#7c6a46',
-                border: '1px solid #eadeca',
-                borderBottom: activeViewId === v.id ? '1px solid #ffffff' : '1px solid #eadeca',
-                padding: '8px 16px',
-                borderRadius: '6px 6px 0 0',
-                fontSize: '13px',
-                fontWeight: activeViewId === v.id ? 'bold' : 'normal',
-                cursor: 'pointer',
-                whiteSpace: 'nowrap',
-                position: 'relative',
-                bottom: '-1px'
-              }}
-            >
-              📋 {v.name}
-            </button>
-          ))}
-          <button 
-            onClick={() => setShowCreateViewModal(true)}
-            style={{ background: 'none', border: '1px dashed #b58a3d', color: '#b58a3d', padding: '4px 10px', borderRadius: '4px', fontSize: '12px', cursor: 'pointer', fontWeight: 'bold', marginBottom: '4px' }}
-          >
-            ⚡ Create New View
-          </button>
-        </div>
-
-        {/* INTERACTIVE CUSTOMER TYPE SUB-FILTER CONTROLS BAR */}
-        <div style={{ padding: '10px 20px', background: '#fcfbfa', borderBottom: '1px solid #eadeca', display: 'flex', gap: '8px', alignItems: 'center', flexShrink: 0 }}>
-          <span style={{ fontSize: '12px', color: '#8a7650', fontWeight: 'bold', marginRight: '8px' }}>Filter Segment:</span>
-          
+        {(['ហូប', 'លក់បាយ', 'លក់ត', 'ធ្វើនំ', 'អំណោយ'] as const).map((typeItem) => (
           <button
-            onClick={() => setCustomerTypeFilter('All')}
-            style={{ padding: '6px 12px', fontSize: '12px', borderRadius: '20px', border: '1px solid #eadeca', cursor: 'pointer', fontWeight: 'bold', background: customerTypeFilter === 'All' ? '#b58a3d' : '#fff', color: customerTypeFilter === 'All' ? '#fff' : '#6b582f' }}
+            key={typeItem}
+            onClick={() => setCustomerTypeFilter(typeItem)}
+            style={{ padding: '6px 12px', fontSize: '12px', borderRadius: '20px', border: '1px solid #eadeca', cursor: 'pointer', fontWeight: 'bold', background: customerTypeFilter === typeItem ? '#b58a3d' : '#fff', color: customerTypeFilter === typeItem ? '#fff' : '#6b582f', whiteSpace: 'nowrap' }}
           >
-            All Types ({customers.length})
+            🏷️ {typeItem} ({customers.filter(c => c.type === typeItem).length})
           </button>
+        ))}
+      </div>
 
-          {(['ហូប', 'លក់បាយ', 'លក់ត', 'ធ្វើនំ', 'អំណោយ'] as const).map((typeItem) => (
-            <button
-              key={typeItem}
-              onClick={() => setCustomerTypeFilter(typeItem)}
-              style={{ padding: '6px 12px', fontSize: '12px', borderRadius: '20px', border: '1px solid #eadeca', cursor: 'pointer', fontWeight: 'bold', background: customerTypeFilter === typeItem ? '#b58a3d' : '#fff', color: customerTypeFilter === typeItem ? '#fff' : '#6b582f' }}
-            >
-              🏷️ {typeItem} ({customers.filter(c => c.type === typeItem).length})
-            </button>
-          ))}
-        </div>
-
-        {/* GRID SPREADSHEET CANVAS VIEW */}
-        <div style={{ flex: 1, overflow: 'auto', background: '#ffffff' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '13px', minWidth: '1100px' }}>
-            <thead>
-              <tr style={{ background: '#f9f8f6', borderBottom: '1px solid #eadeca', color: '#5c4d32' }}>
-                {[
-                  { label: 'Date Added', key: 'created_at', width: '150px' },
-                  { label: 'ID', key: 'id', width: '80px' },
-                  { label: 'Customer Name', key: 'name', width: '220px' },
-                  { label: 'Account Owner', key: 'owner', width: '140px' },
-                  { label: 'Customer Type', key: 'type', width: '130px' },
-                  { label: 'Phone Number', key: 'phone', width: '140px' },
-                  { label: 'Location', key: 'location', width: '200px' },
-                  { label: 'Google Map', key: '', width: '100px' }, 
-                  { label: 'Last Purchase Date', key: 'last_purchase_date', width: 'auto' }
-                ].map((col) => (
-                  <th 
-                    key={col.label} 
-                    onClick={() => col.key && setSortConfig({ key: col.key, direction: sortConfig?.key === col.key && sortConfig.direction === 'asc' ? 'desc' : 'asc' })}
-                    style={{ 
-                      padding: '12px', 
-                      borderRight: '1px solid #f4f1ea', 
-                      cursor: col.key ? 'pointer' : 'default',
-                      width: col.width,
-                      userSelect: 'none'
-                    }}
-                  >
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'between', gap: '6px' }}>
-                      <span>{col.label}</span>
-                      <span style={{ fontSize: '11px', color: sortConfig?.key === col.key ? '#b58a3d' : '#bbb' }}>
-                        {sortConfig?.key === col.key ? (sortConfig.direction === 'asc' ? ' ▲' : ' ▼') : col.key ? ' ↕' : ''}
-                      </span>
-                    </div>
-                  </th>
-                ))}
+      {/* GRID SPREADSHEET CANVAS VIEW */}
+      <div style={{ flex: 1, overflow: 'auto', background: '#ffffff', paddingLeft: '15px' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '13px', minWidth: '1100px' }}>
+          <thead>
+            <tr style={{ background: '#f9f8f6', borderBottom: '1px solid #eadeca', color: '#5c4d32' }}>
+              {[
+                { label: 'Date Added', key: 'created_at', width: '150px' },
+                { label: 'ID', key: 'id', width: '80px' },
+                { label: 'Customer Name', key: 'name', width: '220px' },
+                { label: 'Account Owner', key: 'owner', width: '140px' },
+                { label: 'Customer Type', key: 'type', width: '130px' },
+                { label: 'Phone Number', key: 'phone', width: '140px' },
+                { label: 'Location', key: 'location', width: '200px' },
+                { label: 'Google Map', key: '', width: '100px' }, 
+                { label: 'Last Purchase Date', key: 'last_purchase_date', width: 'auto' }
+              ].map((col) => (
+                <th 
+                  key={col.label} 
+                  onClick={() => col.key && setSortConfig({ key: col.key, direction: sortConfig?.key === col.key && sortConfig.direction === 'asc' ? 'desc' : 'asc' })}
+                  style={{ 
+                    padding: '12px', 
+                    borderRight: '1px solid #f4f1ea', 
+                    cursor: col.key ? 'pointer' : 'default',
+                    width: col.width,
+                    userSelect: 'none'
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '6px' }}>
+                    <span>{col.label}</span>
+                    <span style={{ fontSize: '11px', color: sortConfig?.key === col.key ? '#b58a3d' : '#bbb' }}>
+                      {sortConfig?.key === col.key ? (sortConfig.direction === 'asc' ? ' ▲' : ' ▼') : col.key ? ' ↕' : ''}
+                    </span>
+                  </div>
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {filteredCustomers.length === 0 ? (
+              <tr>
+                <td colSpan={9} style={{ padding: '30px', textAlign: 'center', color: '#8a7650', background: '#ffffff' }}>
+                  No record items found inside this grid selection sheet view.
+                </td>
               </tr>
-            </thead>
-            <tbody>
-              {filteredCustomers.length === 0 ? (
-                <tr>
-                  <td colSpan={9} style={{ padding: '30px', textAlign: 'center', color: '#8a7650', background: '#ffffff' }}>
-                    No record items found inside this grid selection sheet view.
+            ) : (
+              filteredCustomers.map((c) => (
+                <tr key={c.id} style={{ borderBottom: '1px solid #f4f1ea' }} className="table-row">
+                  <td style={{ padding: '10px 12px', borderRight: '1px solid #f4f1ea', color: '#666' }}>
+                    {c.created_at ? new Date(c.created_at).toLocaleDateString('en-GB') : 'N/A'}
+                  </td>
+                  <td style={{ padding: '10px 12px', borderRight: '1px solid #f4f1ea', color: '#999', fontFamily: 'monospace' }}>
+                    {c.id}
+                  </td>
+                  <td style={{ padding: '10px 12px', borderRight: '1px solid #f4f1ea', fontWeight: 'bold', color: '#4a3b1b' }}>
+                    {c.name}
+                  </td>
+                  <td style={{ padding: '10px 12px', borderRight: '1px solid #f4f1ea' }}>
+                    <span style={{
+                      padding: '2px 8px', borderRadius: '12px', fontSize: '11px', fontWeight: 'bold',
+                      background: c.owner === 'Jing' ? '#fee2e2' : c.owner === 'Pich' ? '#dbeafe' : '#f3e8ff',
+                      color: c.owner === 'Jing' ? '#991b1b' : c.owner === 'Pich' ? '#1e40af' : '#6b21a8'
+                    }}>
+                      {c.owner || 'Both'}
+                    </span>
+                  </td>
+                  <td style={{ padding: '10px 12px', borderRight: '1px solid #f4f1ea', color: '#4a3b1b' }}>
+                    <span style={{ fontWeight: 'bold', fontSize: '12px', background: '#f4f1ea', padding: '2px 6px', borderRadius: '4px' }}>
+                      {c.type}
+                    </span>
+                  </td>
+                  <td style={{ padding: '10px 12px', borderRight: '1px solid #f4f1ea', color: '#111827' }}>
+                    {c.phone || '—'}
+                  </td>
+                  <td style={{ padding: '10px 12px', borderRight: '1px solid #f4f1ea', color: '#4b5563' }}>
+                    {c.location || '—'}
+                  </td>
+                  <td style={{ padding: '10px 12px', borderRight: '1px solid #f4f1ea', textAlign: 'center' }}>
+                    {c.google_map ? (
+                      <a href={c.google_map} target="_blank" rel="noreferrer" style={{ color: '#b58a3d', textDecoration: 'underline', fontWeight: 'bold' }}>🗺️ View Map</a>
+                    ) : (
+                      <span style={{ color: '#ccc' }}>—</span>
+                    )}
+                  </td>
+                  <td style={{ padding: '10px 12px', color: '#6b7280', fontStyle: 'italic' }}>
+                    {c.last_purchase_date ? new Date(c.last_purchase_date).toLocaleDateString('en-GB') : 'Sync pending...'}
                   </td>
                 </tr>
-              ) : (
-                filteredCustomers.map((c) => (
-                  <tr key={c.id} style={{ borderBottom: '1px solid #f4f1ea' }} className="table-row">
-                    <td style={{ padding: '10px 12px', borderRight: '1px solid #f4f1ea', color: '#666' }}>
-                      {c.created_at ? new Date(c.created_at).toLocaleDateString('en-GB') : 'N/A'}
-                    </td>
-                    <td style={{ padding: '10px 12px', borderRight: '1px solid #f4f1ea', color: '#999', fontFamily: 'monospace' }}>
-                      {c.id}
-                    </td>
-                    <td style={{ padding: '10px 12px', borderRight: '1px solid #f4f1ea', fontWeight: 'bold', color: '#4a3b1b' }}>
-                      {c.name}
-                    </td>
-                    <td style={{ padding: '10px 12px', borderRight: '1px solid #f4f1ea' }}>
-                      <span style={{
-                        padding: '2px 8px', borderRadius: '12px', fontSize: '11px', fontWeight: 'bold',
-                        background: c.owner === 'Jing' ? '#fee2e2' : c.owner === 'Pich' ? '#dbeafe' : '#f3e8ff',
-                        color: c.owner === 'Jing' ? '#991b1b' : c.owner === 'Pich' ? '#1e40af' : '#6b21a8'
-                      }}>
-                        {c.owner || 'Both'}
-                      </span>
-                    </td>
-                    <td style={{ padding: '10px 12px', borderRight: '1px solid #f4f1ea', color: '#4a3b1b' }}>
-                      <span style={{ fontWeight: 'bold', fontSize: '12px', background: '#f4f1ea', padding: '2px 6px', borderRadius: '4px' }}>
-                        {c.type}
-                      </span>
-                    </td>
-                    <td style={{ padding: '10px 12px', borderRight: '1px solid #f4f1ea', color: '#111827' }}>
-                      {c.phone || '—'}
-                    </td>
-                    <td style={{ padding: '10px 12px', borderRight: '1px solid #f4f1ea', color: '#4b5563' }}>
-                      {c.location || '—'}
-                    </td>
-                    <td style={{ padding: '10px 12px', borderRight: '1px solid #f4f1ea', textAlign: 'center' }}>
-                      {c.google_map ? (
-                        <a href={c.google_map} target="_blank" rel="noreferrer" style={{ color: '#b58a3d', textDecoration: 'underline', fontWeight: 'bold' }}>🗺️ View Map</a>
-                      ) : (
-                        <span style={{ color: '#ccc' }}>—</span>
-                      )}
-                    </td>
-                    <td style={{ padding: '10px 12px', color: '#6b7280', fontStyle: 'italic' }}>
-                      {c.last_purchase_date ? new Date(c.last_purchase_date).toLocaleDateString('en-GB') : 'Sync pending...'}
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
+              ))
+            )}
+          </tbody>
+        </table>
       </div>
 
       {/* MODAL WINDOW 1: DYNAMIC VIEWS CREATOR */}

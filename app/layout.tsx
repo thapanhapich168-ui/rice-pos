@@ -1,34 +1,34 @@
-import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
-import "./globals.css";
-
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
-});
-
-// ✅ Kept your custom app branding here
-export const metadata: Metadata = {
-  title: "Rice POS",
-  description: "Point of Sale management system",
-};
+// app/layout.tsx
+import Sidebar from '@/components/Sidebar'
 
 export default function RootLayout({
   children,
-}: Readonly<{
-  children: React.ReactNode;
-}>) {
+}: {
+  children: React.ReactNode
+}) {
   return (
-    <html
-      lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
-    >
-      <body className="min-h-full flex flex-col">{children}</body>
+    <html lang="en">
+      <body style={{ margin: 0, padding: 0, background: '#ffffff' }}>
+        
+        {/* Main Application Flex Frame */}
+        <div style={{ display: 'flex', width: '100vw', height: '100vh', overflow: 'hidden' }}>
+          
+          {/* Your Shared Sidebar Component */}
+          <Sidebar />
+          
+          {/* Shared Dynamic Content Panel Area */}
+          <main style={{ 
+            flex: 1, 
+            height: '100vh', 
+            overflow: 'auto', 
+            position: 'relative',
+            background: '#ffffff' 
+          }}>
+            {children}
+          </main>
+          
+        </div>
+      </body>
     </html>
-  );
+  )
 }

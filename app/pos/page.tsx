@@ -282,14 +282,10 @@ export default function POSPage() {
   const currentT = t[lang];
 
   return (
-    <div style={{ display: 'flex', height: '100vh', width: '100vw', fontFamily: 'Arial, sans-serif', background: '#ffffff', overflow: 'hidden' }}>
+    <div style={{ display: 'flex', minHeight: '100vh', width: '100%', fontFamily: 'Arial, sans-serif', background: '#ffffff', boxSizing: 'border-box', flex: 1 }}>
       
-      {/* 1. SHARED INTERACTIVE BURGER SIDEBAR */}
-      <Sidebar />
-
       {/* 2. MIDDLE GRID SELECTION ENGINE AREA */}
-      {/* Structural layout fix applied below: paddingLeft is managed by standard flex positioning */}
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', height: '100%', background: '#ffffff', minWidth: 0 }}>
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', background: '#ffffff', minWidth: 0 }}>
         
         {/* TOP OPERATIONS ACTION BAR */}
         <header style={{ display: 'flex', alignItems: 'center', padding: '12px 20px 12px 75px', borderBottom: '1px solid #f3f4f6', background: '#ffffff', justifyContent: 'space-between' }}>
@@ -392,7 +388,7 @@ export default function POSPage() {
       {/* 3. DESKTOP SYSTEM SIDEBAR SHOPPING CART */}
       <div 
         className="desktop-cart-panel"
-        style={{ width: '380px', background: '#ffffff', borderLeft: '1px solid #e5e7eb', display: 'flex', flexDirection: 'column', height: '100%' }}
+        style={{ width: '380px', background: '#ffffff', borderLeft: '1px solid #e5e7eb', display: 'flex', flexDirection: 'column' }}
       >
         <div style={{ padding: '16px 20px', borderBottom: '1px solid #f3f4f6', background: '#fcfbfa' }}>
           <h2 style={{ fontSize: '16px', margin: 0, fontWeight: 'bold', color: '#4a3b1b' }}>{currentT.cartTitle} ({cart.length})</h2>
@@ -417,7 +413,7 @@ export default function POSPage() {
                         const cleanVal = parseFloat(e.target.value.replace(/,/g, '')) || 0;
                         updateCartItem(item.id, 'custom_price_riel', cleanVal);
                       }}
-                      style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '2px solid #b58a3d', fontSize: '13px', background: '#ffffff', color: '#000000', fontWeight: 'normal', outline: 'none', marginTop: '2px' }}
+                      style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '2px solid #b58a3d', fontSize: '13px', background: '#ffffff', color: '#000000', fontWeight: 'normal', outline: 'none', marginTop: '2px', textDecoration: 'none' }}
                     />
                   </div>
                   <div style={{ width: '40%' }}>
@@ -427,7 +423,7 @@ export default function POSPage() {
                       value={item.quantity}
                       min="1"
                       onChange={(e) => updateCartItem(item.id, 'quantity', parseInt(e.target.value) || 1)}
-                      style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '2px solid #b58a3d', fontSize: '13px', background: '#ffffff', color: '#000000', fontWeight: 'normal', outline: 'none', marginTop: '2px' }}
+                      style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '2px solid #b58a3d', fontSize: '13px', background: '#ffffff', color: '#000000', fontWeight: 'normal', outline: 'none', marginTop: '2px', textDecoration: 'none' }}
                     />
                   </div>
                 </div>
@@ -475,11 +471,11 @@ export default function POSPage() {
             <div style={{ display: 'flex', gap: '12px', marginBottom: '20px' }}>
               <div style={{ flex: 1 }}>
                 <label style={{ display: 'block', fontSize: '12px', fontWeight: 'normal', color: '#8a7650', marginBottom: '4px' }}>Price (៛)</label>
-                <input type="number" value={mobilePrice} onChange={(e) => setMobilePrice(parseFloat(e.target.value) || 0)} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #dcd7cc', boxSizing: 'border-box', fontWeight: 'normal' }} />
+                <input type="number" value={mobilePrice} onChange={(e) => setMobilePrice(parseFloat(e.target.value) || 0)} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #dcd7cc', boxSizing: 'border-box', fontWeight: 'normal', color: '#000000', textDecoration: 'none' }} />
               </div>
               <div style={{ flex: 1 }}>
                 <label style={{ display: 'block', fontSize: '12px', fontWeight: 'normal', color: '#8a7650', marginBottom: '4px' }}>Quantity</label>
-                <input type="number" min="1" value={mobileQty} onChange={(e) => setMobileQty(parseInt(e.target.value) || 1)} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #dcd7cc', boxSizing: 'border-box', fontWeight: 'normal' }} />
+                <input type="number" min="1" value={mobileQty} onChange={(e) => setMobileQty(parseInt(e.target.value) || 1)} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #dcd7cc', boxSizing: 'border-box', fontWeight: 'normal', color: '#000000', textDecoration: 'none' }} />
               </div>
             </div>
 
@@ -504,8 +500,8 @@ export default function POSPage() {
                 <div key={item.id} style={{ padding: '12px', background: '#fcfbfa', border: '1px solid #f4f1ea', borderRadius: '8px', marginBottom: '12px' }}>
                   <div style={{ fontWeight: 'bold', fontSize: '14px', color: '#4a3b1b', marginBottom: '6px' }}>{item.custom_name}</div>
                   <div style={{ display: 'flex', gap: '8px', marginBottom: '6px' }}>
-                    <input type="number" value={item.custom_price_riel} onChange={(e) => updateCartItem(item.id, 'custom_price_riel', parseFloat(e.target.value) || 0)} style={{ width: '50%', padding: '6px', fontSize: '12px', borderRadius: '4px', border: '1px solid #dcd7cc', color: '#000000', fontWeight: 'normal' }} />
-                    <input type="number" value={item.quantity} onChange={(e) => updateCartItem(item.id, 'quantity', parseInt(e.target.value) || 1)} style={{ width: '50%', padding: '6px', fontSize: '12px', borderRadius: '4px', border: '1px solid #dcd7cc', color: '#000000', fontWeight: 'normal' }} />
+                    <input type="number" value={item.custom_price_riel} onChange={(e) => updateCartItem(item.id, 'custom_price_riel', parseFloat(e.target.value) || 0)} style={{ width: '50%', padding: '6px', fontSize: '12px', borderRadius: '4px', border: '1px solid #dcd7cc', color: '#000000', fontWeight: 'normal', textDecoration: 'none' }} />
+                    <input type="number" value={item.quantity} onChange={(e) => updateCartItem(item.id, 'quantity', parseInt(e.target.value) || 1)} style={{ width: '50%', padding: '6px', fontSize: '12px', borderRadius: '4px', border: '1px solid #dcd7cc', color: '#000000', fontWeight: 'normal', textDecoration: 'none' }} />
                   </div>
                   <div style={{ textAlign: 'right', fontSize: '12px', fontWeight: 'bold', color: '#b58a3d' }}>{formatRielFromNative(item.custom_price_riel * item.quantity)}</div>
                 </div>
