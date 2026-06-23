@@ -2,22 +2,71 @@
 
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabaseClient'
+import Link from 'next/link'
 
 // Constants
 const EXCHANGE_RATE = 4000;
 const PDFMONKEY_API_KEY = 'mxP6zZCbyNJb1x5t4-ft';
 const PDFMONKEY_TEMPLATE_ID = '6CBCBF33-56C3-46E5-BCD2-D8B3EF6FFDD6';
-const TELEGRAM_BOT_TOKEN = '8202595979:AAGTXa2EBD9Sr6btcdCpOHs2loAc_JCFZ1g'; // Replace with your bot token
+const TELEGRAM_BOT_TOKEN = '8202595979:AAGTXa2EBD9Sr6btcdCpOHs2loAc_JCFZ1g';
 const TELEGRAM_CHAT_ID = '-1001234567890';
 
-// Helper for currency formatting
-const formatRiel = (amountInUsd: number) => {
-  const riel = Math.round(amountInUsd * EXCHANGE_RATE);
-  return new Intl.NumberFormat('km-KH', { style: 'currency', currency: 'KHR', maximumFractionDigits: 0 }).format(riel);
-};
-
-const formatUSD = (amount: number) => {
-  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(amount);
+// Translations Dictionary
+const t = {
+  en: {
+    title: "Angkor Radiant Rice POS",
+    retail: "🛍️ Retail (< 50kg)",
+    wholesale: "🌾 Wholesale (≥ 50kg)",
+    searchPlaceholder: "🔍 Search products...",
+    selectCustomer: "👤 -- Select Wholesale Customer --",
+    noProducts: "No products match selection filter",
+    stock: "Stock",
+    weight: "Weight",
+    cartTitle: "🛒 Shopping Cart",
+    emptyCart: "Cart is empty",
+    unitPrice: "Unit Price ($)",
+    quantity: "Quantity",
+    subtotal: "Subtotal:",
+    totalKhmer: "Total (Khmer):",
+    totalUsd: "Total in USD:",
+    checkout: "Checkout",
+    dashboard: "📊 Dashboard",
+    posSystem: "🛒 POS System",
+    productsAdmin: "📦 Products Admin",
+    detailedReports: "📈 Detailed Reports",
+    riceControl: "🌾 Rice Control",
+    logout: "Logout",
+    mobileModalTitle: "Adjust Item Properties",
+    cancel: "Cancel",
+    add: "Add to Cart"
+  },
+  kh: {
+    title: "អង្គរ រេឌឌៀន រ៉ាយស៍ ភីអូអេស",
+    retail: "🛍️ លក់រាយ (< 50kg)",
+    wholesale: "🌾 លក់ដុំ (≥ 50kg)",
+    searchPlaceholder: "🔍 ស្វែងរកឈ្មោះអង្ករ...",
+    selectCustomer: "👤 -- ជ្រើសរើសអតិថិជនដុំ --",
+    noProducts: "មិនមានទំនិញស្វែងរកឡើយ",
+    stock: "ស្តុកសល់",
+    weight: "ទម្ងន់",
+    cartTitle: "🛒 កន្ត្រកទំនិញ",
+    emptyCart: "មិនមានទំនិញក្នុងកន្ត្រកឡើយ",
+    unitPrice: "តម្លៃឯកតា ($)",
+    quantity: "បរិមាណ",
+    subtotal: "តម្លៃសរុប:",
+    totalKhmer: "សរុបរួម (Khmer):",
+    totalUsd: "សរុបជាដុល្លារ:",
+    checkout: "ចាត់ចែងការទូទាត់",
+    dashboard: "📊 ផ្ទាំងគ្រប់គ្រង",
+    posSystem: "🛒 ប្រព័ន្ធលក់ POS",
+    productsAdmin: "📦 គ្រប់គ្រងទំនិញ",
+    detailedReports: "📈 របាយការណ៍លម្អិត",
+    riceControl: "🌾 គ្រប់គ្រងតម្លៃអង្ករ",
+    logout: "ចាកចេញ",
+    mobileModalTitle: "កែសម្រួលព័ត៌មានទំនិញ",
+    cancel: "បោះបង់",
+    add: "បញ្ចូលទៅកន្ត្រក"
+  }
 };
 
 export default function POSPage() {
@@ -26,16 +75,22 @@ export default function POSPage() {
   const [cart, setCart] = useState<any[]>([])
   
   // UI Control States
+  const [lang, setLang] = useState<'en' | 'kh'>('en')
   const [searchQuery, setSearchQuery] = useState('')
   const [activeTab, setActiveTab] = useState<'retail' | 'wholesale'>('retail')
   const [selectedCustomerId, setSelectedCustomerId] = useState('')
-  const [isSidebarOpen, setIsSidebarOpen] = useState(true) 
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true) // Controls main application sidebar
   const [isMobileCartOpen, setIsMobileCartOpen] = useState(false)
+
+  // Mobile Product Setup Dialog Modal States
+  const [selectedMobileProduct, setSelectedMobileProduct] = useState<any>(null)
+  const [mobilePrice, setMobilePrice] = useState<number>(0)
+  const [mobileQty, setMobileQty] = useState<number>(1)
+  const [mobileName, setMobileName] = useState<string>('')
 
   useEffect(() => {
     loadProducts()
     loadCustomers()
-    
     if (typeof window !== 'undefined' && window.innerWidth < 1024) {
       setIsSidebarOpen(false)
     }
@@ -51,7 +106,34 @@ export default function POSPage() {
     setCustomers(data || [])
   }
 
-  function addToCart(product: any) {
+  // Formatting helpers with thousand separators
+  const formatRiel = (amountInUsd: number) => {
+    const riel = Math.round(amountInUsd * EXCHANGE_RATE);
+    return new Intl.NumberFormat('km-KH', { style: 'currency', currency: 'KHR', maximumFractionDigits: 0 }).format(riel);
+  };
+
+  const formatUSD = (amount: number) => {
+    return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(amount);
+  };
+
+  const formatThousandSeparator = (num: number) => {
+    return new Intl.NumberFormat().format(num);
+  };
+
+  // Product Selection Core Routing Logic
+  function handleProductClick(product: any) {
+    const isMobile = typeof window !== 'undefined' && window.innerWidth < 1023;
+    if (isMobile) {
+      setSelectedMobileProduct(product);
+      setMobileName(product.name);
+      setMobilePrice(product.price);
+      setMobileQty(1);
+    } else {
+      addToCartDirect(product);
+    }
+  }
+
+  function addToCartDirect(product: any) {
     const existing = cart.find((item) => item.id === product.id)
     if (existing) {
       setCart(cart.map((item) => item.id === product.id ? { ...item, quantity: item.quantity + 1 } : item))
@@ -60,7 +142,28 @@ export default function POSPage() {
     }
   }
 
-  // Handle manual inline updates inside the cart array dynamically
+  function handleAddMobileProductToCart() {
+    if (!selectedMobileProduct) return;
+    const existing = cart.find((item) => item.id === selectedMobileProduct.id);
+    if (existing) {
+      setCart(cart.map((item) => item.id === selectedMobileProduct.id ? { 
+        ...item, 
+        custom_name: mobileName,
+        custom_price: mobilePrice,
+        quantity: item.quantity + mobileQty 
+      } : item));
+    } else {
+      setCart([...cart, { 
+        ...selectedMobileProduct, 
+        id: selectedMobileProduct.id,
+        custom_name: mobileName, 
+        custom_price: mobilePrice, 
+        quantity: mobileQty 
+      }]);
+    }
+    setSelectedMobileProduct(null);
+  }
+
   function updateCartItem(id: number, field: string, value: any) {
     setCart(cart.map((item) => item.id === id ? { ...item, [field]: value } : item))
   }
@@ -71,9 +174,8 @@ export default function POSPage() {
 
   const totalUSD = cart.reduce((sum, item) => sum + (Number(item.custom_price) * Number(item.quantity)), 0)
 
-  // Filter products based on Search and Tab criteria (Wholesale >= 50kg, Retail < 50kg)
   const filteredProducts = products.filter(p => {
-    const matchesSearch = p.name.toLowerCase().includes(searchQuery.toLowerCase())
+    const matchesSearch = p.name?.toLowerCase().includes(searchQuery.toLowerCase())
     const weightVal = parseFloat(p.weight || 0)
     if (activeTab === 'wholesale') {
       return matchesSearch && weightVal >= 50
@@ -85,11 +187,11 @@ export default function POSPage() {
 
   async function checkout() {
     if (cart.length === 0) {
-      alert('សូមជ្រើសរើសទំនិញក្នុងកន្ត្រក! (Cart is empty)')
+      alert(lang === 'kh' ? 'សូមជ្រើសរើសទំនិញក្នុងកន្ត្រក!' : 'Cart is empty')
       return
     }
     if (activeTab === 'wholesale' && !selectedCustomerId) {
-      alert('សូមជ្រើសរើសអតិថិជនសម្រាប់ដុំ! (Please select a customer for wholesale)')
+      alert(lang === 'kh' ? 'សូមជ្រើសរើសអតិថិជនសម្រាប់ដុំ!' : 'Please select a customer for wholesale')
       return
     }
 
@@ -183,85 +285,108 @@ export default function POSPage() {
         })
       })
 
-      alert(`ការលក់បានជោគជ័យ! Invoice Created: ${invoiceNo}`)
+      alert(lang === 'kh' ? `ការលក់បានជោគជ័យ! លេខវិក្កយបត្រ: ${invoiceNo}` : `Sale completed successfully! Invoice: ${invoiceNo}`)
       setCart([])
       setIsMobileCartOpen(false)
       loadProducts()
 
     } catch (err: any) {
-      alert(`Checkout system fault: ${err.message || err}`)
+      alert(`System Fault: ${err.message || err}`)
     }
   }
 
+  const currentT = t[lang];
+
   return (
-    <div style={{ display: 'flex', height: '100vh', width: '100vw', fontFamily: 'Arial, sans-serif', background: '#ffffff', overflow: 'hidden', position: 'relative' }}>
+    <div style={{ display: 'flex', height: '100vh', width: '100vw', fontFamily: 'Arial, sans-serif', background: '#ffffff', overflow: 'hidden' }}>
       
-      {/* LEFT CONTENT AREA: PRODUCTS MANAGEMENT AND SELECTION */}
+      {/* 1. APP CORE GLOBAL NAVIGATION SIDEBAR MENU PANEL */}
       <div style={{
-        flex: 1,
+        width: isSidebarOpen ? '240px' : '0px',
+        opacity: isSidebarOpen ? 1 : 0,
+        visibility: isSidebarOpen ? 'visible' : 'hidden',
+        background: '#111827',
+        color: 'white',
+        padding: isSidebarOpen ? '20px' : '0px',
         display: 'flex',
         flexDirection: 'column',
-        height: '100%',
-        background: '#ffffff',
-        borderRight: '1px solid #e5e7eb',
-        transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)'
+        justifyContent: 'space-between',
+        transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+        overflow: 'hidden',
+        zIndex: 100
       }}>
+        <div>
+          <h2 style={{ marginBottom: 30, color: '#fff', fontSize: '20px', whiteSpace: 'nowrap' }}>🌾 Rice POS</h2>
+          <p style={{ marginBottom: 20 }}><Link href="/" style={{ color: '#9ca3af', textDecoration: 'none' }}>{currentT.dashboard}</Link></p>
+          <p style={{ marginBottom: 20, fontWeight: 'bold' }}><Link href="/pos" style={{ color: '#38bdf8', textDecoration: 'none' }}>{currentT.posSystem}</Link></p>
+          <p style={{ marginBottom: 20 }}><Link href="/admin" style={{ color: '#9ca3af', textDecoration: 'none' }}>{currentT.productsAdmin}</Link></p>
+          <p style={{ marginBottom: 20 }}><Link href="/dashboard" style={{ color: '#9ca3af', textDecoration: 'none' }}>{currentT.detailedReports}</Link></p>
+          <p style={{ marginBottom: 20 }}><Link href="/rice" style={{ color: '#9ca3af', textDecoration: 'none' }}>{currentT.riceControl}</Link></p>
+        </div>
+        <button 
+          onClick={() => supabase.auth.signOut()} 
+          style={{ background: 'transparent', color: 'red', border: 'none', cursor: 'pointer', textAlign: 'left', padding: 0 }}
+        >
+          🚪 {currentT.logout}
+        </button>
+      </div>
+
+      {/* 2. MIDDLE AREA: TOP OPERATIONS HEADER, PRODUCT GRIDS, FILTERS */}
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', height: '100%', background: '#ffffff' }}>
         
-        {/* APP BRAND BAR AND TOP NAVIGATION ACTIONS CONTAINER */}
+        {/* HEADER BAR SCREEN ACTIONS CONTROL HUB */}
         <header style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 20px', borderBottom: '1px solid #f3f4f6', background: '#ffffff' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            {/* BURGER TO INTEGRATE EXCLUSIVE TOGGLE ACTION OVER APPLICATION SHELL PANEL */}
             <button 
               onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-              style={{ background: 'none', border: 'none', fontSize: '24px', cursor: 'pointer', padding: '4px 8px', color: '#b58a3d', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-              title="Toggle Checkout View"
+              style={{ background: 'none', border: 'none', fontSize: '24px', cursor: 'pointer', padding: '4px', color: '#b58a3d', display: 'flex', alignItems: 'center' }}
             >
               ☰
             </button>
-            <img src="https://imgur.com/s0hg3MQ.png" alt="Rice POS Logo" style={{ height: '40px', objectFit: 'contain' }} />
-            <h1 style={{ fontSize: '18px', fontWeight: 'bold', margin: 0, color: '#4a3b1b', letterSpacing: '0.5px' }}>សហគមន៍កសិកម្ម Rice POS</h1>
+            <h1 style={{ fontSize: '20px', fontWeight: 'bold', margin: 0, color: '#4a3b1b' }}>{currentT.title}</h1>
           </div>
           
-          <button
-            onClick={() => setIsMobileCartOpen(true)}
-            style={{
-              display: 'none',
-              background: '#b58a3d',
-              color: '#ffffff',
-              border: 'none',
-              borderRadius: '20px',
-              padding: '8px 16px',
-              fontWeight: 'bold',
-              cursor: 'pointer',
-              position: 'relative'
-            }}
-            className="mobile-cart-trigger"
-          >
-            🛒 កន្ត្រក ({cart.length})
-          </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+            {/* MULTI-LANGUAGE DECOUPLING CONTROL SYSTEM SWITCH */}
+            <div style={{ background: '#f4f1ea', borderRadius: '20px', padding: '2px' }}>
+              <button onClick={() => setLang('en')} style={{ border: 'none', background: lang === 'en' ? '#b58a3d' : 'transparent', color: lang === 'en' ? '#fff' : '#6b582f', padding: '6px 12px', borderRadius: '18px', fontWeight: 'bold', cursor: 'pointer', fontSize: '12px' }}>EN</button>
+              <button onClick={() => setLang('kh')} style={{ border: 'none', background: lang === 'kh' ? '#b58a3d' : 'transparent', color: lang === 'kh' ? '#fff' : '#6b582f', padding: '6px 12px', borderRadius: '18px', fontWeight: 'bold', cursor: 'pointer', fontSize: '12px' }}>KH</button>
+            </div>
+
+            {/* MOBILE INTERACTIVE ACTION TRIGGER OVERLAY FOR ACCESSING CARTS */}
+            <button
+              onClick={() => setIsMobileCartOpen(true)}
+              style={{ display: 'none', background: '#b58a3d', color: '#ffffff', border: 'none', borderRadius: '20px', padding: '8px 14px', fontWeight: 'bold', cursor: 'pointer' }}
+              className="mobile-cart-badge-trigger"
+            >
+              🛒 ({cart.length})
+            </button>
+          </div>
         </header>
 
-        {/* CONTROLS SUBHEAD FILTER BAR SECTION */}
+        {/* SUBHEADER: PRODUCT SEARCH STRINGS AND DUAL WHOLESALE/RETAIL OPERATIONS TAB SWITCHES */}
         <div style={{ padding: '16px 20px', background: '#ffffff', borderBottom: '1px solid #f3f4f6' }}>
           <div style={{ display: 'flex', gap: '12px', marginBottom: '16px' }}>
             <button 
               onClick={() => { setActiveTab('retail'); if(activeTab !== 'retail') setSelectedCustomerId(''); }}
-              style={{ flex: 1, padding: '12px', borderRadius: '8px', border: 'none', fontWeight: 'bold', cursor: 'pointer', background: activeTab === 'retail' ? '#b58a3d' : '#f4f1ea', color: activeTab === 'retail' ? '#ffffff' : '#6b582f', transition: 'all 0.2s' }}
+              style={{ flex: 1, padding: '12px', borderRadius: '8px', border: 'none', fontWeight: 'bold', cursor: 'pointer', background: activeTab === 'retail' ? '#b58a3d' : '#f4f1ea', color: activeTab === 'retail' ? '#ffffff' : '#6b582f' }}
             >
-              🛍️ លក់រាយ (Retail &lt; 50kg)
+              {currentT.retail}
             </button>
             <button 
               onClick={() => setActiveTab('wholesale')}
-              style={{ flex: 1, padding: '12px', borderRadius: '8px', border: 'none', fontWeight: 'bold', cursor: 'pointer', background: activeTab === 'wholesale' ? '#b58a3d' : '#f4f1ea', color: activeTab === 'wholesale' ? '#ffffff' : '#6b582f', transition: 'all 0.2s' }}
+              style={{ flex: 1, padding: '12px', borderRadius: '8px', border: 'none', fontWeight: 'bold', cursor: 'pointer', background: activeTab === 'wholesale' ? '#b58a3d' : '#f4f1ea', color: activeTab === 'wholesale' ? '#ffffff' : '#6b582f' }}
             >
-              🌾 លក់ដុំ (Wholesale ≥ 50kg)
+              {currentT.wholesale}
             </button>
           </div>
 
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px', alignItems: 'center' }}>
-            <div style={{ flex: 1, minWidth: '240px', position: 'relative' }}>
+            <div style={{ flex: 1, minWidth: '240px' }}>
               <input 
                 type="text"
-                placeholder="🔍 ស្វែងរកឈ្មោះអង្ករ... (Search products)"
+                placeholder={currentT.searchPlaceholder}
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 style={{ width: '100%', padding: '10px 14px', borderRadius: '6px', border: '1px solid #dcd7cc', outline: 'none', fontSize: '14px', color: '#4a3b1b', boxSizing: 'border-box' }}
@@ -275,9 +400,9 @@ export default function POSPage() {
                   onChange={(e) => setSelectedCustomerId(e.target.value)}
                   style={{ width: '100%', padding: '10px 12px', borderRadius: '6px', border: '1px solid #dcd7cc', background: '#fff', fontSize: '14px', color: '#4a3b1b', outline: 'none' }}
                 >
-                  <option value="">👤 -- ជ្រើសរើសអតិថិជនដុំ (Select Customer) --</option>
+                  <option value="">{currentT.selectCustomer}</option>
                   {customers.map(c => (
-                    <option key={c.id} value={c.id}>{c.name} - {c.phone} ({c.location})</option>
+                    <option key={c.id} value={c.id}>{c.name} - {c.phone}</option>
                   ))}
                 </select>
               </div>
@@ -285,45 +410,27 @@ export default function POSPage() {
           </div>
         </div>
 
-        {/* GRID DISPLAY LAYOUT GRID COMPONENT WINDOW */}
+        {/* CORE GRID: RESPONSIVE TILES RENDER */}
         <div style={{ flex: 1, padding: '20px', overflowY: 'auto', background: '#ffffff' }}>
           {filteredProducts.length === 0 ? (
-            <div style={{ textAlign: 'center', padding: '40px', color: '#8a7650' }}>មិនមានទំនិញស្វែងរកឡើយ (No items match selection filter)</div>
+            <div style={{ textAlign: 'center', padding: '40px', color: '#8a7650' }}>{currentT.noProducts}</div>
           ) : (
-            <div style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))',
-              gap: '16px'
-            }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: '16px' }}>
               {filteredProducts.map((p) => (
                 <div
                   key={p.id}
-                  onClick={() => addToCart(p)}
-                  style={{
-                    border: '1px solid #eadeca',
-                    borderRadius: '10px',
-                    padding: '14px',
-                    cursor: 'pointer',
-                    background: '#ffffff',
-                    boxShadow: '0 2px 4px rgba(181,138,61,0.04)',
-                    transition: 'transform 0.15s, box-shadow 0.15s',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    justifyContent: 'space-between',
-                    minHeight: '140px'
-                  }}
-                  onMouseEnter={(e) => { e.currentTarget.style.transform = 'translateY(-2px)'; e.currentTarget.style.boxShadow = '0 4px 8px rgba(181,138,61,0.1)' }}
-                  onMouseLeave={(e) => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = '0 2px 4px rgba(181,138,61,0.04)' }}
+                  onClick={() => handleProductClick(p)}
+                  style={{ border: '1px solid #eadeca', borderRadius: '10px', padding: '14px', cursor: 'pointer', background: '#ffffff', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', minHeight: '130px' }}
                 >
                   <div>
-                    <div style={{ fontWeight: 'bold', fontSize: '15px', color: '#4a3b1b', marginBottom: '6px', lineHeight: '1.3' }}>{p.name}</div>
-                    <div style={{ fontSize: '13px', color: '#8a7650', marginBottom: '8px' }}>⚖️ ទម្ងន់: {p.weight} kg</div>
+                    <div style={{ fontWeight: 'bold', fontSize: '14px', color: '#4a3b1b', marginBottom: '4px' }}>{p.name}</div>
+                    <div style={{ fontSize: '12px', color: '#8a7650' }}>⚖️ {currentT.weight}: {p.weight} kg</div>
                   </div>
                   <div style={{ borderTop: '1px dashed #f4f1ea', paddingTop: '8px', marginTop: '6px' }}>
-                    <div style={{ fontWeight: 'bold', fontSize: '15px', color: '#b58a3d' }}>{formatRiel(p.price)}</div>
-                    <div style={{ fontSize: '12px', color: '#9c8a6c' }}>{formatUSD(p.price)}</div>
+                    <div style={{ fontWeight: 'bold', fontSize: '14px', color: '#b58a3d' }}>{formatRiel(p.price)}</div>
+                    <div style={{ fontSize: '11px', color: '#9c8a6c' }}>{formatUSD(p.price)}</div>
                     <div style={{ fontSize: '11px', marginTop: '4px', color: Number(p.stock) < 5 ? '#dc2626' : '#10b981', fontWeight: 'bold' }}>
-                      📦 ស្តុកសល់: {p.stock}
+                      📦 {currentT.stock}: {p.stock}
                     </div>
                   </div>
                 </div>
@@ -333,84 +440,50 @@ export default function POSPage() {
         </div>
       </div>
 
-      {/* RIGHT SIDEBAR PANEL: COMPLETE CART SLIDEOUT DRAWER INTERFACE */}
+      {/* 3. DESKTOP PERMANENT VIEW: SHOPPING CART SLIDEOUT SPECIFICATIONS LAYOUT */}
       <div 
-        className={`checkout-sidebar ${isSidebarOpen ? 'open' : 'closed'}`}
-        style={{
-          width: isSidebarOpen ? '380px' : '0px',
-          opacity: isSidebarOpen ? 1 : 0,
-          visibility: isSidebarOpen ? 'visible' : 'hidden',
-          background: '#ffffff',
-          borderLeft: isSidebarOpen ? '1px solid #e5e7eb' : 'none',
-          display: 'flex',
-          flexDirection: 'column',
-          height: '100%',
-          transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
-          overflow: 'hidden'
-        }}
+        className="desktop-cart-panel"
+        style={{ width: '380px', background: '#ffffff', borderLeft: '1px solid #e5e7eb', display: 'flex', flexDirection: 'column', height: '100%' }}
       >
-        <div style={{ padding: '16px 20px', borderBottom: '1px solid #f3f4f6', background: '#fcfbfa', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <h2 style={{ fontSize: '18px', margin: 0, fontWeight: 'bold', color: '#4a3b1b', display: 'flex', alignItems: 'center', gap: '8px' }}>
-            🛒 កន្ត្រកទំនិញ <span style={{ background: '#b58a3d', color: '#fff', fontSize: '12px', padding: '2px 8px', borderRadius: '10px' }}>{cart.length}</span>
-          </h2>
-          <button 
-            onClick={() => setIsSidebarOpen(false)}
-            style={{ background: 'none', border: 'none', fontSize: '18px', cursor: 'pointer', color: '#9c8a6c' }}
-            className="desktop-sidebar-close"
-          >
-            ✕
-          </button>
+        <div style={{ padding: '16px 20px', borderBottom: '1px solid #f3f4f6', background: '#fcfbfa' }}>
+          <h2 style={{ fontSize: '16px', margin: 0, fontWeight: 'bold', color: '#4a3b1b' }}>{currentT.cartTitle} ({cart.length})</h2>
         </div>
 
         <div style={{ flex: 1, overflowY: 'auto', padding: '16px' }}>
           {cart.length === 0 ? (
-            <div style={{ textAlign: 'center', padding: '40px', marginTop: '40px', color: '#9c8a6c' }}>មិនមានទំនិញក្នុងកន្ត្រកឡើយ</div>
+            <div style={{ textAlign: 'center', marginTop: '40px', color: '#9c8a6c' }}>{currentT.emptyCart}</div>
           ) : (
             cart.map((item) => (
               <div key={item.id} style={{ background: '#fcfbfa', borderRadius: '8px', padding: '12px', marginBottom: '12px', border: '1px solid #f4f1ea', position: 'relative' }}>
-                <button 
-                  onClick={() => removeFromCart(item.id)}
-                  style={{ position: 'absolute', top: '8px', right: '8px', background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: '14px' }}
-                >
-                  ✕
-                </button>
+                <button onClick={() => removeFromCart(item.id)} style={{ position: 'absolute', top: '8px', right: '8px', background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer' }}>✕</button>
+                <div style={{ fontWeight: 'bold', fontSize: '14px', color: '#4a3b1b', marginBottom: '8px' }}>{item.custom_name}</div>
                 
-                <input
-                  type="text"
-                  value={item.custom_name}
-                  onChange={(e) => updateCartItem(item.id, 'custom_name', e.target.value)}
-                  style={{ width: '85%', background: 'transparent', border: 'none', borderBottom: '1px solid transparent', fontWeight: 'bold', fontSize: '14px', color: '#4a3b1b', padding: '2px 0', marginBottom: '8px', outline: 'none' }}
-                  onFocus={(e) => e.target.style.borderBottom = '1px solid #b58a3d'}
-                  onBlur={(e) => e.target.style.borderBottom = '1px solid transparent'}
-                />
-
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', marginTop: '4px' }}>
-                  <div style={{ display: 'flex', flexDirection: 'column', width: '45%' }}>
-                    <span style={{ fontSize: '11px', color: '#8a7650', marginBottom: '2px' }}>តម្លៃឯកតា ($)</span>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <div style={{ width: '50%' }}>
+                    <span style={{ fontSize: '10px', color: '#8a7650' }}>{currentT.unitPrice}</span>
                     <input
                       type="number"
                       step="0.01"
                       value={item.custom_price}
                       onChange={(e) => updateCartItem(item.id, 'custom_price', parseFloat(e.target.value) || 0)}
-                      style={{ width: '100%', padding: '6px', borderRadius: '4px', border: '1px solid #dcd7cc', fontSize: '13px', color: '#4a3b1b', boxSizing: 'border-box' }}
+                      style={{ width: '100%', padding: '6px', borderRadius: '4px', border: '1px solid #dcd7cc', fontSize: '12px' }}
                     />
                   </div>
-
-                  <div style={{ display: 'flex', flexDirection: 'column', width: '45%' }}>
-                    <span style={{ fontSize: '11px', color: '#8a7650', marginBottom: '2px' }}>បរិមាណ (Qty)</span>
+                  <div style={{ width: '50%' }}>
+                    <span style={{ fontSize: '10px', color: '#8a7650' }}>{currentT.quantity}</span>
                     <input
                       type="number"
                       value={item.quantity}
                       min="1"
                       onChange={(e) => updateCartItem(item.id, 'quantity', parseInt(e.target.value) || 1)}
-                      style={{ width: '100%', padding: '6px', borderRadius: '4px', border: '1px solid #dcd7cc', fontSize: '13px', color: '#4a3b1b', boxSizing: 'border-box' }}
+                      style={{ width: '100%', padding: '6px', borderRadius: '4px', border: '1px solid #dcd7cc', fontSize: '12px' }}
                     />
                   </div>
                 </div>
 
-                {/* ✅ FIXED: Changed shorthand 'pt' to valid standard react property 'paddingTop' */}
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '10px', paddingTop: '6px', borderTop: '1px dashed #eadeca', fontSize: '12px' }}>
-                  <span style={{ color: '#8a7650' }}>តម្លៃសរុប:</span>
+                <div style={{ marginTop: '10px', paddingTop: '6px', borderTop: '1px dashed #eadeca', display: 'flex', justifyContent: 'space-between', fontSize: '12px' }}>
+                  <span style={{ color: '#8a7650' }}>{currentT.subtotal}</span>
+                  {/* FIXED: Applied dynamic thousand formatting values over currency parameters */}
                   <span style={{ fontWeight: 'bold', color: '#b58a3d' }}>{formatRiel(item.custom_price * item.quantity)}</span>
                 </div>
               </div>
@@ -418,95 +491,94 @@ export default function POSPage() {
           )}
         </div>
 
+        {/* PRICE AGGREGATIONS CHECKOUT CONTROLS */}
         <div style={{ padding: '16px 20px', borderTop: '1px solid #e5e7eb', background: '#fcfbfa' }}>
-          <div style={{ marginBottom: '6px', display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-            <span style={{ fontSize: '14px', fontWeight: 'bold', color: '#4a3b1b' }}>សរុបរួម (Khmer):</span>
-            <span style={{ fontSize: '20px', fontWeight: 'bold', color: '#b58a3d' }}>{formatRiel(totalUSD)}</span>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '4px' }}>
+            <span style={{ fontSize: '13px', fontWeight: 'bold', color: '#4a3b1b' }}>{currentT.totalKhmer}</span>
+            <span style={{ fontSize: '18px', fontWeight: 'bold', color: '#b58a3d' }}>{formatRiel(totalUSD)}</span>
           </div>
-          <div style={{ marginBottom: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-            <span style={{ fontSize: '12px', color: '#8a7650' }}>Total in USD:</span>
-            <span style={{ fontSize: '14px', fontWeight: 'bold', color: '#4a3b1b' }}>{formatUSD(totalUSD)}</span>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '14px' }}>
+            <span style={{ fontSize: '11px', color: '#8a7650' }}>{currentT.totalUsd}</span>
+            <span style={{ fontSize: '13px', fontWeight: 'bold', color: '#4a3b1b' }}>{formatUSD(totalUSD)}</span>
           </div>
-
           <button
             onClick={checkout}
             disabled={cart.length === 0}
-            style={{
-              width: '100%',
-              padding: '14px',
-              background: cart.length === 0 ? '#dcd7cc' : '#10b981',
-              color: '#ffffff',
-              border: 'none',
-              borderRadius: '8px',
-              fontSize: '16px',
-              fontWeight: 'bold',
-              cursor: cart.length === 0 ? 'not-allowed' : 'pointer',
-              boxShadow: '0 4px 6px rgba(16,185,129,0.1)',
-              transition: 'background 0.2s'
-            }}
+            style={{ width: '100%', padding: '12px', background: cart.length === 0 ? '#dcd7cc' : '#10b981', color: 'white', border: 'none', borderRadius: '6px', fontWeight: 'bold', cursor: cart.length === 0 ? 'not-allowed' : 'pointer' }}
           >
-            ចាត់ចែងការទូទាត់ (Checkout)
+            {currentT.checkout}
           </button>
         </div>
       </div>
 
-      {/* FULL RESPONSIVE OVERLAY DRAWER FOR ACTIVE MOBILE VIEW CARTS */}
-      {isMobileCartOpen && (
-        <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', background: 'rgba(0,0,0,0.4)', zIndex: 9999, display: 'flex', justifyContent: 'flex-end' }}>
-          <div style={{ width: '85%', maxWidth: '360px', height: '100%', background: '#ffffff', display: 'flex', flexDirection: 'column' }}>
-            <div style={{ padding: '16px', borderBottom: '1px solid #e5e7eb', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#fcfbfa' }}>
-              <h3 style={{ margin: 0, color: '#4a3b1b' }}>🛒 ទំនិញក្នុងកន្ត្រក ({cart.length})</h3>
-              <button onClick={() => setIsMobileCartOpen(false)} style={{ background: 'none', border: 'none', fontSize: '20px', color: '#4a3b1b' }}>✕</button>
-            </div>
+      {/* 4. MOBILE-ONLY CLICK PRODUCT: INTERACTIVE INPUT MODAL SHEET */}
+      {selectedMobileProduct && (
+        <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', background: 'rgba(0,0,0,0.5)', zIndex: 9999, display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '20px', boxSizing: 'border-box' }}>
+          <div style={{ background: '#ffffff', width: '100%', maxWidth: '400px', borderRadius: '12px', padding: '24px', boxShadow: '0 10px 25px rgba(0,0,0,0.15)' }}>
+            <h3 style={{ margin: '0 0 16px 0', color: '#4a3b1b', borderBottom: '1px solid #f3f4f6', paddingBottom: '10px' }}>{currentT.mobileModalTitle}</h3>
             
-            <div style={{ flex: 1, overflowY: 'auto', padding: '16px' }}>
-              {cart.map(item => (
-                <div key={item.id} style={{ padding: '12px', background: '#fcfbfa', border: '1px solid #f4f1ea', borderRadius: '8px', marginBottom: '12px' }}>
-                  <div style={{ fontWeight: 'bold', fontSize: '14px', color: '#4a3b1b', marginBottom: '6px' }}>{item.custom_name}</div>
-                  <div style={{ display: 'flex', gap: '8px', marginBottom: '6px' }}>
-                    <input 
-                      type="number" 
-                      step="0.01" 
-                      value={item.custom_price} 
-                      onChange={(e) => updateCartItem(item.id, 'custom_price', parseFloat(e.target.value) || 0)}
-                      style={{ width: '50%', padding: '6px', fontSize: '12px', borderRadius: '4px', border: '1px solid #dcd7cc' }} 
-                    />
-                    <input 
-                      type="number" 
-                      value={item.quantity} 
-                      onChange={(e) => updateCartItem(item.id, 'quantity', parseInt(e.target.value) || 1)}
-                      style={{ width: '50%', padding: '6px', fontSize: '12px', borderRadius: '4px', border: '1px solid #dcd7cc' }} 
-                    />
-                  </div>
-                  <div style={{ textAlign: 'right', fontSize: '12px', fontWeight: 'bold', color: '#b58a3d' }}>
-                    {formatRiel(item.custom_price * item.quantity)}
-                  </div>
-                </div>
-              ))}
+            <div style={{ marginBottom: '16px' }}>
+              <label style={{ display: 'block', fontSize: '12px', fontWeight: 'bold', color: '#8a7650', marginBottom: '4px' }}>Product Identifier</label>
+              <input type="text" value={mobileName} onChange={(e) => setMobileName(e.target.value)} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #dcd7cc', boxSizing: 'border-box' }} />
             </div>
 
-            <div style={{ padding: '16px', borderTop: '1px solid #e5e7eb', background: '#fcfbfa' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '12px' }}>
-                <span style={{ fontWeight: 'bold', color: '#4a3b1b' }}>សរុប:</span>
-                <span style={{ fontWeight: 'bold', color: '#b58a3d', fontSize: '18px' }}>{formatRiel(totalUSD)}</span>
+            <div style={{ display: 'flex', gap: '12px', marginBottom: '20px' }}>
+              <div style={{ flex: 1 }}>
+                <label style={{ display: 'block', fontSize: '12px', fontWeight: 'bold', color: '#8a7650', marginBottom: '4px' }}>Price USD ($)</label>
+                <input type="number" step="0.01" value={mobilePrice} onChange={(e) => setMobilePrice(parseFloat(e.target.value) || 0)} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #dcd7cc', boxSizing: 'border-box' }} />
               </div>
-              <button 
-                onClick={checkout}
-                style={{ width: '100%', padding: '12px', background: '#10b981', color: '#fff', border: 'none', borderRadius: '6px', fontWeight: 'bold' }}
-              >
-                Checkout
-              </button>
+              <div style={{ flex: 1 }}>
+                <label style={{ display: 'block', fontSize: '12px', fontWeight: 'bold', color: '#8a7650', marginBottom: '4px' }}>Quantity</label>
+                <input type="number" min="1" value={mobileQty} onChange={(e) => setMobileQty(parseInt(e.target.value) || 1)} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #dcd7cc', boxSizing: 'border-box' }} />
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
+              <button onClick={() => setSelectedMobileProduct(null)} style={{ padding: '10px 16px', background: '#f4f1ea', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', color: '#6b582f' }}>{currentT.cancel}</button>
+              <button onClick={handleAddMobileProductToCart} style={{ padding: '10px 16px', background: '#b58a3d', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', color: '#fff' }}>{currentT.add}</button>
             </div>
           </div>
         </div>
       )}
 
+      {/* 5. MOBILE-ONLY COMPONENT: VIEW OVERLAY SHOPPING DRAWER MODAL */}
+      {isMobileCartOpen && (
+        <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', background: 'rgba(0,0,0,0.4)', zIndex: 999, display: 'flex', justifyContent: 'flex-end' }}>
+          <div style={{ width: '85%', maxWidth: '360px', height: '100%', background: '#ffffff', display: 'flex', flexDirection: 'column' }}>
+            <div style={{ padding: '16px', borderBottom: '1px solid #e5e7eb', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#fcfbfa' }}>
+              <h3 style={{ margin: 0, color: '#4a3b1b' }}>{currentT.cartTitle} ({cart.length})</h3>
+              <button onClick={() => setIsMobileCartOpen(false)} style={{ background: 'none', border: 'none', fontSize: '20px' }}>✕</button>
+            </div>
+            <div style={{ flex: 1, overflowY: 'auto', padding: '16px' }}>
+              {cart.map(item => (
+                <div key={item.id} style={{ padding: '12px', background: '#fcfbfa', border: '1px solid #f4f1ea', borderRadius: '8px', marginBottom: '12px' }}>
+                  <div style={{ fontWeight: 'bold', fontSize: '14px', color: '#4a3b1b', marginBottom: '6px' }}>{item.custom_name}</div>
+                  <div style={{ display: 'flex', gap: '8px', marginBottom: '6px' }}>
+                    <input type="number" step="0.01" value={item.custom_price} onChange={(e) => updateCartItem(item.id, 'custom_price', parseFloat(e.target.value) || 0)} style={{ width: '50%', padding: '6px', fontSize: '12px', borderRadius: '4px', border: '1px solid #dcd7cc' }} />
+                    <input type="number" value={item.quantity} onChange={(e) => updateCartItem(item.id, 'quantity', parseInt(e.target.value) || 1)} style={{ width: '50%', padding: '6px', fontSize: '12px', borderRadius: '4px', border: '1px solid #dcd7cc' }} />
+                  </div>
+                  <div style={{ textAlign: 'right', fontSize: '12px', fontWeight: 'bold', color: '#b58a3d' }}>{formatRiel(item.custom_price * item.quantity)}</div>
+                </div>
+              ))}
+            </div>
+            <div style={{ padding: '16px', borderTop: '1px solid #e5e7eb', background: '#fcfbfa' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '12px' }}>
+                <span style={{ fontWeight: 'bold' }}>{currentT.totalKhmer}</span>
+                <span style={{ fontWeight: 'bold', color: '#b58a3d', fontSize: '18px' }}>{formatRiel(totalUSD)}</span>
+              </div>
+              <button onClick={checkout} style={{ width: '100%', padding: '12px', background: '#10b981', color: '#fff', border: 'none', borderRadius: '6px', fontWeight: 'bold' }}>{currentT.checkout}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* RESPONSIVE LAYOUT DISPATCH LAYER */}
       <style jsx global>{`
         @media (max-width: 1023px) {
-          .checkout-sidebar.open {
+          .desktop-cart-panel {
             display: none !important;
           }
-          .mobile-cart-trigger {
+          .mobile-cart-badge-trigger {
             display: block !important;
           }
         }
