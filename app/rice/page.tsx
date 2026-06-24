@@ -36,16 +36,15 @@ interface FilterRule {
   value: string | number
 }
 
-// Default widths for the resizable columns
 const DEFAULT_WIDTHS: Record<string, number> = {
   checkbox: 50,
-  id: 70,
-  name: 200,
-  price: 120,
-  cost_price: 120,
-  stock: 100,
-  weight: 100,
-  actions: 160
+  id: 60,
+  name: 180,
+  price: 110,
+  cost_price: 110,
+  stock: 90,
+  weight: 90,
+  actions: 140
 }
 
 export default function RiceControl() {
@@ -64,7 +63,6 @@ export default function RiceControl() {
 
   // --- MODAL STATES ---
   const [isAddModalOpen, setIsAddModalOpen] = useState(false)
-  // Default numbers to empty strings so the form is completely blank initially
   const [newItem, setNewItem] = useState({ name: '', price: '' as any, cost_price: '' as any, weight: '' as any, stock: '' as any })
 
   const [isSortOpen, setIsSortOpen] = useState(false)
@@ -114,7 +112,6 @@ export default function RiceControl() {
   const addProduct = async () => {
     if (!newItem.name) return alert('Name is required')
     
-    // Convert string inputs back to numbers for database
     const payload = {
       name: newItem.name,
       price: Number(newItem.price) || 0,
@@ -139,7 +136,6 @@ export default function RiceControl() {
   // --- COLUMN RESIZE LOGIC ---
   const handleResizeStart = (e: React.MouseEvent | React.TouchEvent, columnKey: string) => {
     e.preventDefault()
-    // Support both mouse and touch events
     const startX = 'touches' in e ? e.touches[0].pageX : e.pageX
     const startWidth = widthsRef.current[columnKey]
 
@@ -218,51 +214,49 @@ export default function RiceControl() {
     <div
       onMouseDown={(e) => handleResizeStart(e, columnKey)}
       onTouchStart={(e) => handleResizeStart(e, columnKey)}
-      style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: '10px', cursor: 'col-resize', background: 'transparent', zIndex: 10, transform: 'translateX(50%)' }}
-      onMouseEnter={(e) => (e.currentTarget.style.background = '#cbd5e1')}
-      onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+      style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: '12px', cursor: 'col-resize', background: 'transparent', zIndex: 10, transform: 'translateX(50%)' }}
     />
   )
 
   return (
-    <div className="main-wrapper" style={{ background: '#f8fafc', minHeight: '100vh', fontFamily: 'Arial, sans-serif', color: '#333', boxSizing: 'border-box' }}>
+    <div className="main-wrapper">
       
       {/* HEADER */}
-      <div className="header-container" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px', flexWrap: 'wrap', gap: '16px' }}>
-        <h1 style={{ fontSize: '24px', fontWeight: 'bold', color: '#4a3b1b', margin: 0 }}>🌾 Rice Inventory</h1>
-        <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+      <div className="header-container">
+        <h1 className="page-title">Rice Inventory</h1>
+        <div className="header-actions">
           {selectedToDelete.size > 0 && (
-            <button onClick={handleDelete} style={{ padding: '10px 20px', background: '#ef4444', color: '#fff', border: 'none', borderRadius: '6px', fontWeight: 'bold', cursor: 'pointer', flex: 1 }}>
+            <button className="delete-btn" onClick={handleDelete}>
               Delete ({selectedToDelete.size})
             </button>
           )}
-          <button onClick={() => setIsAddModalOpen(true)} style={{ padding: '10px 20px', background: '#b58a3d', color: '#fff', border: 'none', borderRadius: '6px', fontWeight: 'bold', cursor: 'pointer', flex: 1, whiteSpace: 'nowrap' }}>
+          <button className="add-btn" onClick={() => setIsAddModalOpen(true)}>
             + Add Product
           </button>
         </div>
       </div>
 
       {/* TOOLBAR */}
-      <div style={{ display: 'flex', gap: '10px', marginBottom: '20px', background: '#fff', padding: '10px', borderRadius: '8px', border: '1px solid #e2e8f0', alignItems: 'center', flexWrap: 'wrap' }}>
-        <button onClick={() => setActiveTab('retail')} style={{ padding: '8px 16px', borderRadius: '4px', border: 'none', background: activeTab === 'retail' ? '#f1f5f9' : 'transparent', fontWeight: 'bold', color: activeTab === 'retail' ? '#b58a3d' : '#64748b', cursor: 'pointer' }}>Retail (1kg)</button>
-        <button onClick={() => setActiveTab('wholesale')} style={{ padding: '8px 16px', borderRadius: '4px', border: 'none', background: activeTab === 'wholesale' ? '#f1f5f9' : 'transparent', fontWeight: 'bold', color: activeTab === 'wholesale' ? '#b58a3d' : '#64748b', cursor: 'pointer' }}>Wholesale (50kg)</button>
+      <div className="toolbar-container">
+        <div className="toolbar-tabs">
+          <button className={activeTab === 'retail' ? 'tab active' : 'tab'} onClick={() => setActiveTab('retail')}>Retail (1kg)</button>
+          <button className={activeTab === 'wholesale' ? 'tab active' : 'tab'} onClick={() => setActiveTab('wholesale')}>Wholesale (50kg)</button>
+        </div>
         
-        <div className="mobile-hidden" style={{ width: '1px', height: '24px', background: '#e2e8f0', margin: '0 10px' }}></div>
+        <input className="toolbar-search" placeholder="🔍 Quick search..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} />
         
-        <input placeholder="🔍 Quick search..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} style={{ padding: '8px 12px', border: '1px solid #e2e8f0', borderRadius: '4px', flex: '1 1 200px', outline: 'none' }} />
-        
-        <div style={{ display: 'flex', gap: '10px', flex: '1 1 100%' }}>
-          <button onClick={() => setIsFilterOpen(true)} style={{ flex: 1, padding: '8px 16px', background: filterRules.length > 0 ? '#eff6ff' : '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', color: filterRules.length > 0 ? '#3b82f6' : '#4a3b1b' }}>
+        <div className="toolbar-filters">
+          <button className="filter-btn" onClick={() => setIsFilterOpen(true)} style={{ color: filterRules.length > 0 ? '#3b82f6' : '#4a3b1b' }}>
             Y Filter {filterRules.length > 0 && `(${filterRules.length})`}
           </button>
-          <button onClick={() => setIsSortOpen(true)} style={{ flex: 1, padding: '8px 16px', background: sortRules.length > 0 ? '#eff6ff' : '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', color: sortRules.length > 0 ? '#3b82f6' : '#4a3b1b' }}>
+          <button className="sort-btn" onClick={() => setIsSortOpen(true)} style={{ color: sortRules.length > 0 ? '#3b82f6' : '#4a3b1b' }}>
             ⇅ Sort {sortRules.length > 0 && `(${sortRules.length})`}
           </button>
         </div>
       </div>
 
       {/* MAIN SPREADSHEET */}
-      <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: '6px', overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
+      <div className="table-wrapper">
         <table style={{ borderCollapse: 'collapse', tableLayout: 'fixed', width: 'max-content', minWidth: '100%' }}>
           <thead>
             <tr style={{ background: '#f8fafc', borderBottom: '2px solid #e2e8f0' }}>
@@ -335,8 +329,8 @@ export default function RiceControl() {
 
       {/* 1. SORT MODAL */}
       {isSortOpen && (
-        <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', background: 'rgba(0,0,0,0.4)', zIndex: 1000, display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '16px', boxSizing: 'border-box' }}>
-          <div style={{ background: '#fff', padding: '24px', borderRadius: '8px', width: '100%', maxWidth: '500px', boxShadow: '0 10px 25px rgba(0,0,0,0.1)' }}>
+        <div className="modal-overlay">
+          <div className="modal-content">
             <h3 style={{ marginTop: 0, borderBottom: '1px solid #eee', paddingBottom: '10px' }}>Sort Records</h3>
             
             {sortRules.map((rule, index) => (
@@ -364,8 +358,8 @@ export default function RiceControl() {
 
       {/* 2. FILTER MODAL */}
       {isFilterOpen && (
-        <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', background: 'rgba(0,0,0,0.4)', zIndex: 1000, display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '16px', boxSizing: 'border-box' }}>
-          <div style={{ background: '#fff', padding: '24px', borderRadius: '8px', width: '100%', maxWidth: '600px', boxShadow: '0 10px 25px rgba(0,0,0,0.1)', maxHeight: '90vh', overflowY: 'auto' }}>
+        <div className="modal-overlay">
+          <div className="modal-content">
             <h3 style={{ marginTop: 0, borderBottom: '1px solid #eee', paddingBottom: '10px' }}>Filter Records</h3>
             
             {filterRules.map((rule, index) => (
@@ -397,8 +391,8 @@ export default function RiceControl() {
 
       {/* 3. PRICE HISTORY MODAL */}
       {historyModal.isOpen && historyModal.product && (
-        <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', background: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000, padding: '16px', boxSizing: 'border-box' }}>
-          <div style={{ background: '#fff', padding: '24px', borderRadius: '12px', width: '100%', maxWidth: '500px', maxHeight: '80vh', display: 'flex', flexDirection: 'column' }}>
+        <div className="modal-overlay">
+          <div className="modal-content">
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #e2e8f0', paddingBottom: '16px', marginBottom: '16px' }}>
               <div>
                 <h2 style={{ margin: 0, color: '#1b4d3e', fontSize: '18px' }}>Price Mutation History</h2>
@@ -407,7 +401,7 @@ export default function RiceControl() {
               <button onClick={() => setHistoryModal({ isOpen: false, product: null, data: [] })} style={{ background: 'none', border: 'none', fontSize: '24px', cursor: 'pointer', color: '#94a3b8' }}>✕</button>
             </div>
             
-            <div style={{ overflowY: 'auto', flex: 1, paddingRight: '8px' }}>
+            <div style={{ overflowY: 'auto', flex: 1, paddingRight: '8px', maxHeight: '50vh' }}>
               {historyModal.data.length === 0 ? (
                 <p style={{ textAlign: 'center', color: '#64748b', padding: '20px' }}>No price variations recorded yet.</p>
               ) : (
@@ -430,8 +424,8 @@ export default function RiceControl() {
 
       {/* 4. ADD PRODUCT MODAL */}
       {isAddModalOpen && (
-        <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', background: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000, padding: '16px', boxSizing: 'border-box' }}>
-          <div style={{ background: '#fff', padding: '24px', borderRadius: '12px', width: '100%', maxWidth: '400px', maxHeight: '90vh', overflowY: 'auto' }}>
+        <div className="modal-overlay">
+          <div className="modal-content">
             <h2 style={{ marginTop: 0, marginBottom: '20px' }}>Add New Product</h2>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
               <div>
@@ -471,7 +465,7 @@ export default function RiceControl() {
 
       {/* --- GLOBAL CSS FOR MOBILE & SPINNERS --- */}
       <style jsx global>{`
-        /* Remove Number Spinners globally for this component */
+        /* Remove Number Spinners globally */
         input[type="number"].no-spinners::-webkit-inner-spin-button,
         input[type="number"].no-spinners::-webkit-outer-spin-button {
           -webkit-appearance: none;
@@ -481,17 +475,164 @@ export default function RiceControl() {
           -moz-appearance: textfield;
         }
 
-        /* Mobile Adjustments */
+        /* Base Desktop Layout */
+        .main-wrapper {
+          padding: 24px 24px 24px 75px;
+          background: #f8fafc;
+          min-height: 100vh;
+          font-family: Arial, sans-serif;
+          color: #333;
+          box-sizing: border-box;
+        }
+        .header-container {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          margin-bottom: 24px;
+        }
+        .page-title {
+          font-size: 24px;
+          font-weight: bold;
+          color: #4a3b1b;
+          margin: 0;
+        }
+        .header-actions {
+          display: flex;
+          gap: 10px;
+        }
+        .delete-btn {
+          padding: 10px 20px;
+          background: #ef4444;
+          color: #fff;
+          border: none;
+          border-radius: 6px;
+          font-weight: bold;
+          cursor: pointer;
+        }
+        .add-btn {
+          padding: 10px 20px;
+          background: #b58a3d;
+          color: #fff;
+          border: none;
+          border-radius: 6px;
+          font-weight: bold;
+          cursor: pointer;
+        }
+        .toolbar-container {
+          display: flex;
+          gap: 10px;
+          margin-bottom: 20px;
+          background: #fff;
+          padding: 10px;
+          border-radius: 8px;
+          border: 1px solid #e2e8f0;
+          align-items: center;
+        }
+        .toolbar-tabs {
+          display: flex;
+          gap: 10px;
+        }
+        .tab {
+          padding: 8px 16px;
+          border-radius: 4px;
+          border: none;
+          background: transparent;
+          font-weight: bold;
+          color: #64748b;
+          cursor: pointer;
+        }
+        .tab.active {
+          background: #f1f5f9;
+          color: #b58a3d;
+        }
+        .toolbar-search {
+          padding: 8px 12px;
+          border: 1px solid #e2e8f0;
+          border-radius: 4px;
+          flex: 1;
+          outline: none;
+        }
+        .toolbar-filters {
+          display: flex;
+          gap: 10px;
+        }
+        .filter-btn, .sort-btn {
+          padding: 8px 16px;
+          background: #f8fafc;
+          border: 1px solid #e2e8f0;
+          border-radius: 4px;
+          cursor: pointer;
+          font-weight: bold;
+        }
+        .table-wrapper {
+          background: #fff;
+          border: 1px solid #e2e8f0;
+          border-radius: 6px;
+          overflow-x: auto;
+          -webkit-overflow-scrolling: touch;
+        }
+        .modal-overlay {
+          position: fixed;
+          top: 0;
+          left: 0;
+          width: 100vw;
+          height: 100vh;
+          background: rgba(0,0,0,0.5);
+          display: flex;
+          justify-content: center;
+          align-items: center;
+          z-index: 1000;
+          padding: 16px;
+          box-sizing: border-box;
+        }
+        .modal-content {
+          background: #fff;
+          padding: 24px;
+          border-radius: 12px;
+          width: 100%;
+          max-width: 600px;
+          max-height: 90vh;
+          overflow-y: auto;
+          box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+        }
+
+        /* Mobile Layout Adjustments */
         @media (max-width: 768px) {
           .main-wrapper {
-            padding: 16px !important;
-          }
-          .mobile-hidden {
-            display: none !important;
+            padding: 80px 16px 16px 16px; /* Top padding clears the floating sidebar burger */
           }
           .header-container {
             flex-direction: column;
-            align-items: stretch !important;
+            align-items: stretch;
+            gap: 16px;
+          }
+          .header-actions {
+            flex-direction: column;
+            width: 100%;
+          }
+          .delete-btn, .add-btn {
+            width: 100%;
+            padding: 14px;
+          }
+          .toolbar-container {
+            flex-direction: column;
+            align-items: stretch;
+          }
+          .toolbar-tabs {
+            width: 100%;
+          }
+          .tab {
+            flex: 1;
+          }
+          .toolbar-search {
+            width: 100%;
+            box-sizing: border-box;
+          }
+          .toolbar-filters {
+            width: 100%;
+          }
+          .filter-btn, .sort-btn {
+            flex: 1;
           }
         }
       `}</style>
