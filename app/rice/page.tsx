@@ -36,14 +36,21 @@ interface FilterRule {
   value: string | number
 }
 
+interface SavedView {
+  id: number
+  name: string
+  filters: FilterRule[]
+  sorts: SortRule[]
+}
+
 // Default widths and order
 const DEFAULT_WIDTHS: Record<string, number> = {
-  id: 50,
-  name: 200,
-  price: 120,
-  cost_price: 120,
-  stock: 100,
-  weight: 100,
+  id: 60,
+  name: 220,
+  price: 130,
+  cost_price: 130,
+  stock: 110,
+  weight: 110,
   actions: 140
 }
 
@@ -52,11 +59,18 @@ const DEFAULT_ORDER: Array<keyof Product> = ['id', 'name', 'price', 'cost_price'
 export default function RiceControl() {
   // --- CORE STATE ---
   const [products, setProducts] = useState<Product[]>([])
-  const [activeTab, setActiveTab] = useState<'retail' | 'wholesale'>('retail')
   const [searchQuery, setSearchQuery] = useState('')
   const [edits, setEdits] = useState<Record<number, Partial<Product>>>({})
   const [selectedToDelete, setSelectedToDelete] = useState<Set<number>>(new Set())
   const [hoveredId, setHoveredId] = useState<number | null>(null)
+
+  // --- CELL EDITING STATE ---
+  const [editingCell, setEditingCell] = useState<{id: number, col: string} | null>(null)
+
+  // --- VIEWS & TABS STATE ---
+  // activeView can be 'retail', 'wholesale', or a number (ID of a custom saved view)
+  const [activeView, setActiveView] = useState<string | number>('retail')
+  const [views, setViews] = useState<SavedView[]>([])
 
   // --- COLUMN PREFERENCE STATE ---
   const [columnWidths, setColumnWidths] = useState<Record<string, number>>(DEFAULT_WIDTHS)
@@ -82,6 +96,7 @@ export default function RiceControl() {
   useEffect(() => { 
     fetchProducts()
     fetchSettings()
+    fetchViews()
   }, [])
 
   // --- DATABASE OPERATIONS ---
@@ -101,7 +116,60 @@ export default function RiceControl() {
     setEdits({})
   }
 
-  const handleSave = async (id: number) => {
+  async function fetchViews() {
+    const { data } = await supabase.from('saved_views').select('*').order('created_at', { ascending: true })
+    if (data) setViews(data)
+  }
+
+  // --- VIEWS LOGIC ---
+  const applyView = (viewId: string | number) => {
+    setActiveView(viewId)
+    if (typeof viewId === 'string') {
+      // It's Retail or Wholesale - clear custom filters/sorts
+      setFilterRules([])
+      setSortRules([])
+    } else {
+      // It's a Custom View - load its filters/sorts
+      const view = views.find(v => v.id === viewId)
+      if (view) {
+        setFilterRules(view.filters || [])
+        setSortRules(view.sorts || [])
+      }
+    }
+  }
+
+  const createNewView = async () => {
+    const name = prompt('Enter a name for this view:')
+    if (!name) return
+    const { data, error } = await supabase.from('saved_views').insert([{ name, filters: filterRules, sorts: sortRules }]).select().single()
+    if (data) {
+      setViews([...views, data])
+      applyView(data.id)
+    } else alert(`Error saving view: ${error?.message}`)
+  }
+
+  const saveCurrentCustomView = async () => {
+    if (typeof activeView !== 'number') return
+    const { error } = await supabase.from('saved_views').update({ filters: filterRules, sorts: sortRules }).eq('id', activeView)
+    if (!error) {
+      setViews(prev => prev.map(v => v.id === activeView ? { ...v, filters: filterRules, sorts: sortRules } : v))
+      alert('View updated successfully!')
+    }
+  }
+
+  const deleteCurrentCustomView = async () => {
+    if (typeof activeView !== 'number') return
+    if (!confirm('Are you sure you want to delete this view?')) return
+    
+    const { error } = await supabase.from('saved_views').delete().eq('id', activeView)
+    if (!error) {
+      setViews(prev => prev.filter(v => v.id !== activeView))
+      applyView('retail')
+    }
+  }
+
+  // --- RECORD OPERATIONS ---
+  const handleSaveRecord = async (id: number) => {
     const { error } = await supabase.from('products').update(edits[id]).eq('id', id)
     if (!error) {
       setEdits(prev => { const n = { ...prev }; delete n[id]; return n })
@@ -117,7 +185,6 @@ export default function RiceControl() {
 
   const addProduct = async () => {
     if (!newItem.name) return alert('Name is required')
-    
     const payload = {
       name: newItem.name,
       price: Number(newItem.price) || 0,
@@ -125,7 +192,6 @@ export default function RiceControl() {
       weight: Number(newItem.weight) || 0,
       stock: Number(newItem.stock) || 0
     }
-
     const { error } = await supabase.from('products').insert([payload])
     if (!error) {
       setIsAddModalOpen(false)
@@ -146,7 +212,7 @@ export default function RiceControl() {
   }
 
   const handleDragOver = (e: React.DragEvent) => {
-    e.preventDefault() // Required to allow dropping
+    e.preventDefault() 
     e.dataTransfer.dropEffect = 'move'
   }
 
@@ -160,7 +226,6 @@ export default function RiceControl() {
       const targetIdx = newOrder.indexOf(targetCol as keyof Product)
       newOrder.splice(targetIdx, 0, sourceCol)
       
-      // Save order to Supabase silently
       supabase.from('app_settings').upsert({
         setting_key: 'column_order',
         setting_value: newOrder
@@ -173,13 +238,13 @@ export default function RiceControl() {
   // --- COLUMN RESIZE LOGIC ---
   const handleResizeStart = (e: React.MouseEvent | React.TouchEvent, columnKey: string) => {
     e.preventDefault()
-    e.stopPropagation() // Prevent triggering Drag & Drop when resizing
+    e.stopPropagation() 
     const startX = 'touches' in e ? e.touches[0].pageX : e.pageX
     const startWidth = widthsRef.current[columnKey]
 
     const handleMove = (moveEvent: MouseEvent | TouchEvent) => {
       const currentX = 'touches' in moveEvent ? moveEvent.touches[0].pageX : moveEvent.pageX
-      const newWidth = Math.max(30, startWidth + (currentX - startX)) // Reduced min-width to 30px
+      const newWidth = Math.max(40, startWidth + (currentX - startX))
       setColumnWidths(prev => ({ ...prev, [columnKey]: newWidth }))
     }
 
@@ -205,10 +270,14 @@ export default function RiceControl() {
   const processedProducts = products
     .map(p => ({ ...p, ...edits[p.id] }))
     .filter(p => {
-      const matchesSearch = p.name?.toLowerCase().includes(searchQuery.toLowerCase())
-      const matchesTab = activeTab === 'retail' ? p.weight < 50 : p.weight >= 50
-      if (!matchesSearch || !matchesTab) return false
+      // 1. Search Query Filter
+      if (searchQuery && !p.name?.toLowerCase().includes(searchQuery.toLowerCase())) return false
 
+      // 2. Base Tab Filter (If we are on the default Retail/Wholesale tabs)
+      if (activeView === 'retail' && p.weight >= 50) return false
+      if (activeView === 'wholesale' && p.weight < 50) return false
+
+      // 3. Custom Filters
       for (const rule of filterRules) {
         if (!rule.value && rule.value !== 0) continue
         const val = p[rule.column]
@@ -231,21 +300,13 @@ export default function RiceControl() {
       return 0
     })
 
-  // --- HELPERS ---
-  const formatRiel = (amount: number) => `${new Intl.NumberFormat('en-US').format(Math.round(amount))} ៛`
-
-  // --- REUSABLE COMPONENTS ---
-  const Cell = ({ id, field, value, type = "text", padLeft = "12px" }: { id: number, field: keyof Product, value: any, type?: string, padLeft?: string }) => (
-    <input
-      type={type}
-      value={value ?? ''}
-      onChange={(e) => setEdits(prev => ({ ...prev, [id]: { ...(prev[id] || {}), [field]: type === 'number' ? (e.target.value === '' ? '' : Number(e.target.value)) : e.target.value } }))}
-      className="no-spinners"
-      style={{ width: '100%', padding: `8px 8px 8px ${padLeft}`, border: 'none', background: 'transparent', outline: 'none', color: '#333', boxSizing: 'border-box', fontSize: '14px' }}
-      onFocus={(e) => e.target.style.background = '#f0f9ff'}
-      onBlur={(e) => e.target.style.background = 'transparent'}
-    />
-  )
+  // --- FORMATTERS ---
+  const formatDisplayValue = (col: string, val: any) => {
+    if (val === null || val === undefined) return '';
+    if (['price', 'cost_price'].includes(col)) return `${new Intl.NumberFormat('en-US').format(val)} ៛`;
+    if (['stock', 'weight', 'id'].includes(col)) return new Intl.NumberFormat('en-US').format(val);
+    return String(val);
+  }
 
   const Resizer = ({ columnKey }: { columnKey: string }) => (
     <div
@@ -273,16 +334,33 @@ export default function RiceControl() {
         </div>
       </div>
 
-      {/* TOOLBAR */}
+      {/* TOOLBAR & TABS */}
       <div className="toolbar-container">
         <div className="toolbar-tabs">
-          <button className={activeTab === 'retail' ? 'tab active' : 'tab'} onClick={() => setActiveTab('retail')}>Retail (1kg)</button>
-          <button className={activeTab === 'wholesale' ? 'tab active' : 'tab'} onClick={() => setActiveTab('wholesale')}>Wholesale (50kg)</button>
+          <button className={activeView === 'retail' ? 'tab active' : 'tab'} onClick={() => applyView('retail')}>Retail (1kg)</button>
+          <button className={activeView === 'wholesale' ? 'tab active' : 'tab'} onClick={() => applyView('wholesale')}>Wholesale (50kg)</button>
+          
+          {/* Custom Views */}
+          {views.map(v => (
+             <button key={v.id} className={activeView === v.id ? 'tab active' : 'tab'} onClick={() => applyView(v.id)}>
+               {v.name}
+             </button>
+          ))}
+          
+          <button className="tab create-view-btn" onClick={createNewView}>+ Create View</button>
         </div>
         
         <input className="toolbar-search" placeholder="🔍 Quick search..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} />
         
         <div className="toolbar-filters">
+          {/* Save/Delete View Actions (Only show if a custom view is selected) */}
+          {typeof activeView === 'number' && (
+            <>
+              <button className="filter-btn" onClick={saveCurrentCustomView} style={{ color: '#10b981' }}>💾 Save</button>
+              <button className="filter-btn" onClick={deleteCurrentCustomView} style={{ color: '#ef4444' }}>🗑️ Delete</button>
+            </>
+          )}
+
           <button className="filter-btn" onClick={() => setIsFilterOpen(true)} style={{ color: filterRules.length > 0 ? '#3b82f6' : '#4a3b1b' }}>
             Y Filter {filterRules.length > 0 && `(${filterRules.length})`}
           </button>
@@ -331,12 +409,15 @@ export default function RiceControl() {
                   {/* Dynamic Data Cells */}
                   {columnOrder.map(col => {
                     const isIdCol = col === 'id';
+                    const isEditing = editingCell?.id === p.id && editingCell?.col === col;
+                    const val = edits[p.id]?.[col] ?? p[col] ?? '';
+
                     return (
-                      <td key={col} style={{ borderRight: '1px solid #f1f5f9', overflow: 'hidden', position: 'relative' }}>
+                      <td key={col} className={isEditing ? 'cell-editing' : ''} style={{ borderRight: '1px solid #f1f5f9', overflow: 'hidden', position: 'relative', padding: 0 }}>
                         
-                        {/* If it's the ID column, embed the Checkbox overlay on Hover */}
+                        {/* Hover Checkbox */}
                         {isIdCol && (hoveredId === p.id || selectedToDelete.has(p.id)) && (
-                          <div style={{ position: 'absolute', left: '4px', top: '50%', transform: 'translateY(-50%)', zIndex: 5, background: edits[p.id] ? '#fefcf3' : '#fff', paddingRight: '4px' }}>
+                          <div style={{ position: 'absolute', left: '8px', top: '50%', transform: 'translateY(-50%)', zIndex: 25, background: edits[p.id] ? '#fefcf3' : '#fff', paddingRight: '4px' }}>
                             <input type="checkbox" checked={selectedToDelete.has(p.id)} onChange={() => {
                               const next = new Set(selectedToDelete)
                               next.has(p.id) ? next.delete(p.id) : next.add(p.id)
@@ -345,8 +426,31 @@ export default function RiceControl() {
                           </div>
                         )}
                         
-                        {/* Cell Input: add left padding to ID cell so text doesn't hide under checkbox */}
-                        <Cell id={p.id} field={col} value={p[col]} type={['name'].includes(col as string) ? 'text' : 'number'} padLeft={isIdCol ? '24px' : '8px'} />
+                        {/* Display vs Edit Transform */}
+                        {isEditing ? (
+                          <input 
+                            autoFocus
+                            type={['name'].includes(col as string) ? 'text' : 'number'}
+                            className="cell-input no-spinners"
+                            style={{ paddingLeft: isIdCol ? '32px' : '10px' }}
+                            value={val}
+                            onChange={(e) => {
+                              const newVal = e.target.type === 'number' ? (e.target.value === '' ? '' : Number(e.target.value)) : e.target.value;
+                              setEdits(prev => ({ ...prev, [p.id]: { ...(prev[p.id] || {}), [col]: newVal } }))
+                            }}
+                            onBlur={() => setEditingCell(null)}
+                            onKeyDown={(e) => { if (e.key === 'Enter') setEditingCell(null) }}
+                          />
+                        ) : (
+                          <div 
+                            className="cell-display"
+                            style={{ paddingLeft: isIdCol ? '32px' : '10px' }}
+                            onClick={() => setEditingCell({ id: p.id, col: col as string })}
+                          >
+                            {formatDisplayValue(col as string, val)}
+                          </div>
+                        )}
+
                       </td>
                     )
                   })}
@@ -356,8 +460,8 @@ export default function RiceControl() {
                     <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
                       {edits[p.id] ? (
                         <>
-                          <button onClick={() => handleSave(p.id)} style={{ color: '#fff', background: '#10b981', border: 'none', padding: '6px 10px', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}>Save</button>
-                          <button onClick={() => setEdits(prev => { const n = { ...prev }; delete n[p.id]; return n })} style={{ color: '#ef4444', background: '#fee2e2', border: 'none', padding: '6px 10px', borderRadius: '4px', cursor: 'pointer' }}>Undo</button>
+                          <button onMouseDown={() => handleSaveRecord(p.id)} style={{ color: '#fff', background: '#10b981', border: 'none', padding: '6px 10px', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}>Save</button>
+                          <button onMouseDown={() => setEdits(prev => { const n = { ...prev }; delete n[p.id]; return n })} style={{ color: '#ef4444', background: '#fee2e2', border: 'none', padding: '6px 10px', borderRadius: '4px', cursor: 'pointer' }}>Undo</button>
                         </>
                       ) : (
                         <button onClick={() => fetchHistory(p)} style={{ color: '#4a3b1b', background: '#f4f1ea', border: '1px solid #eadeca', padding: '6px 10px', borderRadius: '4px', cursor: 'pointer', fontSize: '12px', fontWeight: 'bold' }}>
@@ -378,8 +482,8 @@ export default function RiceControl() {
 
       {/* 1. SORT MODAL */}
       {isSortOpen && (
-        <div className="modal-overlay">
-          <div className="modal-content">
+        <div className="modal-overlay" onMouseDown={() => setIsSortOpen(false)}>
+          <div className="modal-content" onMouseDown={e => e.stopPropagation()}>
             <h3 style={{ marginTop: 0, borderBottom: '1px solid #eee', paddingBottom: '10px' }}>Sort Records</h3>
             
             {sortRules.map((rule, index) => (
@@ -407,8 +511,8 @@ export default function RiceControl() {
 
       {/* 2. FILTER MODAL */}
       {isFilterOpen && (
-        <div className="modal-overlay">
-          <div className="modal-content">
+        <div className="modal-overlay" onMouseDown={() => setIsFilterOpen(false)}>
+          <div className="modal-content" onMouseDown={e => e.stopPropagation()}>
             <h3 style={{ marginTop: 0, borderBottom: '1px solid #eee', paddingBottom: '10px' }}>Filter Records</h3>
             
             {filterRules.map((rule, index) => (
@@ -440,8 +544,8 @@ export default function RiceControl() {
 
       {/* 3. PRICE HISTORY MODAL */}
       {historyModal.isOpen && historyModal.product && (
-        <div className="modal-overlay">
-          <div className="modal-content">
+        <div className="modal-overlay" onMouseDown={() => setHistoryModal({ isOpen: false, product: null, data: [] })}>
+          <div className="modal-content" onMouseDown={e => e.stopPropagation()}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #e2e8f0', paddingBottom: '16px', marginBottom: '16px' }}>
               <div>
                 <h2 style={{ margin: 0, color: '#1b4d3e', fontSize: '18px' }}>Price Mutation History</h2>
@@ -473,8 +577,8 @@ export default function RiceControl() {
 
       {/* 4. ADD PRODUCT MODAL */}
       {isAddModalOpen && (
-        <div className="modal-overlay">
-          <div className="modal-content" style={{ maxWidth: '400px' }}>
+        <div className="modal-overlay" onMouseDown={() => setIsAddModalOpen(false)}>
+          <div className="modal-content" style={{ maxWidth: '400px' }} onMouseDown={e => e.stopPropagation()}>
             <h2 style={{ marginTop: 0, marginBottom: '20px' }}>Add New Product</h2>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
               <div>
@@ -512,9 +616,8 @@ export default function RiceControl() {
         </div>
       )}
 
-      {/* --- GLOBAL CSS FOR MOBILE & SPINNERS --- */}
+      {/* --- GLOBAL CSS --- */}
       <style jsx global>{`
-        /* Remove Number Spinners globally */
         input[type="number"].no-spinners::-webkit-inner-spin-button,
         input[type="number"].no-spinners::-webkit-outer-spin-button {
           -webkit-appearance: none;
@@ -524,7 +627,6 @@ export default function RiceControl() {
           -moz-appearance: textfield;
         }
 
-        /* Base Desktop Layout */
         .main-wrapper {
           padding: 24px 24px 24px 75px;
           background: #f8fafc;
@@ -576,10 +678,12 @@ export default function RiceControl() {
           border-radius: 8px;
           border: 1px solid #e2e8f0;
           align-items: center;
+          flex-wrap: wrap;
         }
         .toolbar-tabs {
           display: flex;
-          gap: 10px;
+          gap: 5px;
+          flex-wrap: wrap;
         }
         .tab {
           padding: 8px 16px;
@@ -594,12 +698,17 @@ export default function RiceControl() {
           background: #f1f5f9;
           color: #b58a3d;
         }
+        .create-view-btn {
+          color: #3b82f6;
+          border: 1px dashed #cbd5e1;
+        }
         .toolbar-search {
           padding: 8px 12px;
           border: 1px solid #e2e8f0;
           border-radius: 4px;
           flex: 1;
           outline: none;
+          min-width: 150px;
         }
         .toolbar-filters {
           display: flex;
@@ -613,6 +722,8 @@ export default function RiceControl() {
           cursor: pointer;
           font-weight: bold;
         }
+
+        /* Airtable Style Cell CSS */
         .table-wrapper {
           background: #fff;
           border: 1px solid #e2e8f0;
@@ -620,6 +731,39 @@ export default function RiceControl() {
           overflow-x: auto;
           -webkit-overflow-scrolling: touch;
         }
+        .cell-display {
+          padding: 12px 8px;
+          font-size: 14px;
+          min-height: 40px;
+          cursor: text;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          color: #333;
+          display: flex;
+          align-items: center;
+        }
+        .cell-input {
+          width: 100%;
+          height: 100%;
+          padding: 12px 8px;
+          font-size: 14px;
+          border: none;
+          outline: 2px solid #b58a3d;
+          box-shadow: 0 0 5px rgba(181, 138, 61, 0.3);
+          background: #fff;
+          position: absolute;
+          top: 0;
+          left: 0;
+          z-index: 20;
+          box-sizing: border-box;
+          color: #000;
+        }
+        .cell-editing {
+          z-index: 20;
+          position: relative;
+        }
+
         .modal-overlay {
           position: fixed;
           top: 0;
@@ -644,10 +788,9 @@ export default function RiceControl() {
           box-shadow: 0 10px 25px rgba(0,0,0,0.1);
         }
 
-        /* Mobile Layout Adjustments */
         @media (max-width: 768px) {
           .main-wrapper {
-            padding: 80px 16px 16px 16px; /* Top padding clears the floating sidebar burger */
+            padding: 80px 16px 16px 16px; 
           }
           .header-container {
             flex-direction: column;
@@ -671,6 +814,7 @@ export default function RiceControl() {
           }
           .tab {
             flex: 1;
+            text-align: center;
           }
           .toolbar-search {
             width: 100%;
