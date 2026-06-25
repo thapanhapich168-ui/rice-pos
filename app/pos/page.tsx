@@ -266,7 +266,7 @@ export default function POSPage() {
       const canvas = await html2canvas(invoiceRef.current, { scale: 3, useCORS: true, allowTaint: true, backgroundColor: '#ffffff' });
 
       // AUTO-UPLOAD TO SUPABASE GALLERY ONLY
-      const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/jpeg', 1.0)); // 1.0 Max Quality
+      const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/jpeg', 1.0)); 
       if (blob) {
         const fileName = `${completedSale.invoiceNo}-${Date.now()}.jpg`;
         const { error: uploadError } = await supabase.storage.from('invoices').upload(fileName, blob, { contentType: 'image/jpeg' });
@@ -597,14 +597,13 @@ export default function POSPage() {
       {/* SMARTPHONE CORE OVERLAY DRAWER PANEL */}
       {isMobileCartOpen && (
         <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', background: 'rgba(0,0,0,0.4)', zIndex: 999, display: 'flex', justifyContent: 'flex-end' }}>
-          {/* LOCK DRAWER HEIGHT AND MAKE IT RENDER INNER STICKY LAYOUTS */}
           <div style={{ width: '85%', maxWidth: '360px', height: '100%', background: '#ffffff', display: 'flex', flexDirection: 'column', position: 'relative' }}>
             <div style={{ padding: '16px', borderBottom: '1px solid #e5e7eb', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#fcfbfa', flexShrink: 0 }}>
               <h3 style={{ margin: 0, color: '#4a3b1b' }}>{currentT.cartTitle} ({cart.length})</h3>
               <button onClick={() => setIsMobileCartOpen(false)} style={{ background: 'none', border: 'none', fontSize: '20px' }}>✕</button>
             </div>
             
-            <div style={{ flex: 1, overflowY: 'auto', padding: '16px' }}>
+            <div style={{ flex: 1, overflowY: 'auto', padding: '16px', paddingBottom: '150px' }}>
               {cart.map(item => (
                 <div key={item.id} style={{ padding: '12px', background: '#fcfbfa', border: '1px solid #f4f1ea', borderRadius: '8px', marginBottom: '12px', position: 'relative' }}>
                   <button onClick={() => removeFromCart(item.id)} style={{ position: 'absolute', top: '8px', right: '8px', background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer' }}>✕</button>
@@ -620,13 +619,12 @@ export default function POSPage() {
                       <input type="number" value={item.quantity} onChange={(e) => updateCartItem(item.id, 'quantity', parseInt(e.target.value) || 1)} style={{ width: '100%', padding: '8px', fontSize: '13px', borderRadius: '6px', border: '1px solid #dcd7cc', boxSizing: 'border-box' }} />
                     </div>
                   </div>
-                  <div style={{ textAling: 'right', fontSize: '12px', fontWeight: 'bold', color: '#b58a3d', marginTop: '8px' }}>{formatRielFromNative(item.custom_price_riel * item.quantity)}</div>
+                  <div style={{ textAlign: 'right', fontSize: '12px', fontWeight: 'bold', color: '#b58a3d', marginTop: '8px' }}>{formatRielFromNative(item.custom_price_riel * item.quantity)}</div>
                 </div>
               ))}
             </div>
 
-            {/* FIXED FOR MOBILE PHONE: Forced absolute sticky bottom anchoring to lock view totals & checkout element */}
-            <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, padding: '16px', borderTop: '1px solid #e5e7eb', background: '#fcfbfa', flexShrink: 0, zIndex: 1010, boxSkyShadow: '0 -4px 10px rgba(0,0,0,0.05)' }}>
+            <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, padding: '16px', borderTop: '1px solid #e5e7eb', background: '#fcfbfa', flexShrink: 0, zIndex: 1010, boxShadow: '0 -4px 10px rgba(0,0,0,0.05)' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
                 <span style={{ fontWeight: 'bold', fontSize: '14px' }}>{currentT.totalKhmer}</span>
                 <span style={{ fontWeight: 'bold', color: '#b58a3d', fontSize: '18px' }}>{formatRielFromNative(totalRiel)}</span>
@@ -709,35 +707,25 @@ export default function POSPage() {
                 <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '4px', fontSize: '12.5px', tableLayout: 'fixed' }}>
                   <thead>
                     <tr>
-                      <th style={{ border: '1px solid #000', padding: 0, background: '#fffacd', width: '5%' }}>
-                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '6px 3px' }}>
-                          <span style={{ fontWeight: 'bold' }}>No.</span>
-                          <span style={{ fontWeight: 'bold' }}>ល.រ</span>
-                        </div>
+                      <th style={{ border: '1px solid #000', padding: '6px 3px', background: '#fffacd', width: '5%', textAlign: 'center', verticalAlign: 'middle' }}>
+                        <div style={{ display: 'block', lineHeight: '1.2' }}>No.</div>
+                        <div style={{ display: 'block', lineHeight: '1.2' }}>ល.រ</div>
                       </th>
-                      <th style={{ border: '1px solid #000', padding: 0, background: '#fffacd', width: '40%' }}>
-                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '6px 3px' }}>
-                          <span style={{ fontWeight: 'bold' }}>Item Descriptions</span>
-                          <span style={{ fontWeight: 'bold' }}>រាយឈ្មោះទំនិញ</span>
-                        </div>
+                      <th style={{ border: '1px solid #000', padding: '6px 3px', background: '#fffacd', width: '40%', textAlign: 'center', verticalAlign: 'middle' }}>
+                        <div style={{ display: 'block', lineHeight: '1.2' }}>Item Descriptions</div>
+                        <div style={{ display: 'block', lineHeight: '1.2' }}>រាយឈ្មោះទំនិញ</div>
                       </th>
-                      <th style={{ border: '1px solid #000', padding: 0, background: '#fffacd', width: '15%' }}>
-                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '6px 3px' }}>
-                          <span style={{ fontWeight: 'bold' }}>Quantity</span>
-                          <span style={{ fontWeight: 'bold' }}>ចំនួន</span>
-                        </div>
+                      <th style={{ border: '1px solid #000', padding: '6px 3px', background: '#fffacd', width: '15%', textAlign: 'center', verticalAlign: 'middle' }}>
+                        <div style={{ display: 'block', lineHeight: '1.2' }}>Quantity</div>
+                        <div style={{ display: 'block', lineHeight: '1.2' }}>ចំនួន</div>
                       </th>
-                      <th style={{ border: '1px solid #000', padding: 0, background: '#fffacd', width: '15%' }}>
-                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '6px 3px' }}>
-                          <span style={{ fontWeight: 'bold' }}>Unit Price</span>
-                          <span style={{ fontWeight: 'bold' }}>តម្លៃរាយ</span>
-                        </div>
+                      <th style={{ border: '1px solid #000', padding: '6px 3px', background: '#fffacd', width: '15%', textAlign: 'center', verticalAlign: 'middle' }}>
+                        <div style={{ display: 'block', lineHeight: '1.2' }}>Unit Price</div>
+                        <div style={{ display: 'block', lineHeight: '1.2' }}>តម្លៃរាយ</div>
                       </th>
-                      <th style={{ border: '1px solid #000', padding: 0, background: '#fffacd', width: '25%' }}>
-                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '6px 3px' }}>
-                          <span style={{ fontWeight: 'bold' }}>Subtotal</span>
-                          <span style={{ fontWeight: 'bold' }}>តម្លៃសរុប</span>
-                        </div>
+                      <th style={{ border: '1px solid #000', padding: '6px 3px', background: '#fffacd', width: '25%', textAlign: 'center', verticalAlign: 'middle' }}>
+                        <div style={{ display: 'block', lineHeight: '1.2' }}>Subtotal</div>
+                        <div style={{ display: 'block', lineHeight: '1.2' }}>តម្លៃសរុប</div>
                       </th>
                     </tr>
                   </thead>
@@ -755,22 +743,22 @@ export default function POSPage() {
                           grandTotal += item.total;
                           const isCenter = item.custom_name.includes('ដូរ') || item.custom_name.includes('បញ្ចុះតម្លៃ') || item.custom_name.includes('កក់') || item.custom_name.includes('សេវាឡាន (អតិថិជន)');
                           rows.push(
-                            <tr key={i} style={{ height: '26px' }}>
-                              <td style={{ border: '1px solid #000', padding: 0, height: '26px' }}><div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', padding: '0 3px' }}>{i + 1}</div></td>
-                              <td style={{ border: '1px solid #000', padding: 0, height: '26px' }}><div style={{ display: 'flex', alignItems: 'center', justifyContent: isCenter ? 'center' : 'flex-start', height: '100%', padding: '0 3px' }}>{item.custom_name}</div></td>
-                              <td style={{ border: '1px solid #000', padding: 0, height: '26px' }}><div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', padding: '0 3px' }}>{item.quantity.toLocaleString('en-US')}</div></td>
-                              <td style={{ border: '1px solid #000', padding: 0, height: '26px' }}><div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', padding: '0 3px' }}>{item.custom_price_riel.toLocaleString('en-US')}</div></td>
-                              <td style={{ border: '1px solid #000', padding: 0, height: '26px' }}><div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', padding: '0 3px', color: item.total < 0 ? 'red' : 'inherit' }}>{item.total.toLocaleString('en-US')}</div></td>
+                            <tr key={i} style={{ height: '28px' }}>
+                              <td style={{ border: '1px solid #000', padding: '4px 3px', textAlign: 'center', verticalAlign: 'middle' }}>{i + 1}</td>
+                              <td style={{ border: '1px solid #000', padding: '4px 3px', textAlign: isCenter ? 'center' : 'left', verticalAlign: 'middle' }}>{item.custom_name}</td>
+                              <td style={{ border: '1px solid #000', padding: '4px 3px', textAlign: 'center', verticalAlign: 'middle' }}>{item.quantity.toLocaleString('en-US')}</td>
+                              <td style={{ border: '1px solid #000', padding: '4px 3px', textAlign: 'center', verticalAlign: 'middle' }}>{item.custom_price_riel.toLocaleString('en-US')}</td>
+                              <td style={{ border: '1px solid #000', padding: '4px 3px', textAlign: 'center', verticalAlign: 'middle', color: item.total < 0 ? 'red' : 'inherit' }}>{item.total.toLocaleString('en-US')}</td>
                             </tr>
                           );
                         } else {
                           rows.push(
-                            <tr key={i} style={{ height: '26px' }}>
-                              <td style={{ border: '1px solid #000', padding: 0, height: '26px' }}>&nbsp;</td>
-                              <td style={{ border: '1px solid #000', padding: 0, height: '26px' }}>&nbsp;</td>
-                              <td style={{ border: '1px solid #000', padding: '0 3px', height: '26px' }}>&nbsp;</td>
-                              <td style={{ border: '1px solid #000', padding: '0 3px', height: '26px' }}>&nbsp;</td>
-                              <td style={{ border: '1px solid #000', padding: '0 3px', height: '26px' }}>&nbsp;</td>
+                            <tr key={i} style={{ height: '28px' }}>
+                              <td style={{ border: '1px solid #000', padding: '4px 3px', textAlign: 'center', verticalAlign: 'middle' }}>&nbsp;</td>
+                              <td style={{ border: '1px solid #000', padding: '4px 3px', textAlign: 'center', verticalAlign: 'middle' }}>&nbsp;</td>
+                              <td style={{ border: '1px solid #000', padding: '4px 3px', textAlign: 'center', verticalAlign: 'middle' }}>&nbsp;</td>
+                              <td style={{ border: '1px solid #000', padding: '4px 3px', textAlign: 'center', verticalAlign: 'middle' }}>&nbsp;</td>
+                              <td style={{ border: '1px solid #000', padding: '4px 3px', textAlign: 'center', verticalAlign: 'middle' }}>&nbsp;</td>
                             </tr>
                           );
                         }
@@ -778,13 +766,9 @@ export default function POSPage() {
                       return (
                         <>
                           {rows}
-                          <tr style={{ height: '26px' }}>
-                            <td colSpan={4} style={{ border: '1px solid #000', padding: 0, background: '#fffacd', height: '26px' }}>
-                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', height: '100%', padding: '0 3px', fontWeight: 'bold' }}>Total | សរុប</div>
-                            </td>
-                            <td style={{ border: '1px solid #000', padding: 0, background: '#fffacd', height: '26px' }}>
-                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', padding: '0 3px', fontWeight: 'bold' }}>{grandTotal.toLocaleString('en-US')}</div>
-                            </td>
+                          <tr style={{ height: '28px' }}>
+                            <td colSpan={4} style={{ border: '1px solid #000', padding: '4px 3px', background: '#fffacd', fontWeight: 'bold', textAlign: 'right', verticalAlign: 'middle' }}>Total | សរុប</td>
+                            <td style={{ border: '1px solid #000', padding: '4px 3px', background: '#fffacd', fontWeight: 'bold', textAlign: 'center', verticalAlign: 'middle' }}>{grandTotal.toLocaleString('en-US')}</td>
                           </tr>
                         </>
                       );
@@ -793,11 +777,11 @@ export default function POSPage() {
                 </table>
 
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginTop: '16px', fontSize: '12.5px' }}>
-                  <div style={{ textAling: 'center', width: '30%' }}>
+                  <div style={{ textAlign: 'center', width: '30%' }}>
                     <p style={{ margin: 0 }}>ហត្ថលេខាអ្នកទិញ</p>
                     <div style={{ marginTop: '30px' }}>...............................</div>
                   </div>
-                  <div style={{ textAling: 'center', width: '30%' }}>
+                  <div style={{ textAlign: 'center', width: '30%' }}>
                     <p style={{ margin: 0 }}>ហត្ថលេខាអ្នកលក់</p>
                     <div style={{ marginTop: '30px' }}>...............................</div>
                   </div>
