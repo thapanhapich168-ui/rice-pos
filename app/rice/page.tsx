@@ -36,16 +36,18 @@ interface FilterRule {
   value: string | number
 }
 
+// Default widths and order
 const DEFAULT_WIDTHS: Record<string, number> = {
-  checkbox: 50,
-  id: 60,
-  name: 180,
-  price: 110,
-  cost_price: 110,
-  stock: 90,
-  weight: 90,
+  id: 50,
+  name: 200,
+  price: 120,
+  cost_price: 120,
+  stock: 100,
+  weight: 100,
   actions: 140
 }
+
+const DEFAULT_ORDER: Array<keyof Product> = ['id', 'name', 'price', 'cost_price', 'stock', 'weight']
 
 export default function RiceControl() {
   // --- CORE STATE ---
@@ -56,8 +58,9 @@ export default function RiceControl() {
   const [selectedToDelete, setSelectedToDelete] = useState<Set<number>>(new Set())
   const [hoveredId, setHoveredId] = useState<number | null>(null)
 
-  // --- COLUMN RESIZE STATE ---
+  // --- COLUMN PREFERENCE STATE ---
   const [columnWidths, setColumnWidths] = useState<Record<string, number>>(DEFAULT_WIDTHS)
+  const [columnOrder, setColumnOrder] = useState<Array<keyof Product>>(DEFAULT_ORDER)
   const widthsRef = useRef(columnWidths)
   widthsRef.current = columnWidths
 
@@ -83,9 +86,12 @@ export default function RiceControl() {
 
   // --- DATABASE OPERATIONS ---
   async function fetchSettings() {
-    const { data } = await supabase.from('app_settings').select('setting_value').eq('setting_key', 'column_widths').single()
-    if (data && data.setting_value) {
-      setColumnWidths(data.setting_value)
+    const { data } = await supabase.from('app_settings').select('*').in('setting_key', ['column_widths', 'column_order'])
+    if (data) {
+      const widths = data.find(d => d.setting_key === 'column_widths')
+      const order = data.find(d => d.setting_key === 'column_order')
+      if (widths && widths.setting_value) setColumnWidths(widths.setting_value)
+      if (order && order.setting_value) setColumnOrder(order.setting_value)
     }
   }
 
@@ -133,15 +139,47 @@ export default function RiceControl() {
     setHistoryModal({ isOpen: true, product, data: data || [] })
   }
 
+  // --- COLUMN DRAG & DROP LOGIC ---
+  const handleDragStart = (e: React.DragEvent, col: string) => {
+    e.dataTransfer.setData('text/plain', col)
+    e.dataTransfer.effectAllowed = 'move'
+  }
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault() // Required to allow dropping
+    e.dataTransfer.dropEffect = 'move'
+  }
+
+  const handleDrop = async (e: React.DragEvent, targetCol: string) => {
+    e.preventDefault()
+    const sourceCol = e.dataTransfer.getData('text/plain') as keyof Product
+    if (!sourceCol || sourceCol === targetCol) return
+
+    setColumnOrder(prev => {
+      const newOrder = prev.filter(c => c !== sourceCol)
+      const targetIdx = newOrder.indexOf(targetCol as keyof Product)
+      newOrder.splice(targetIdx, 0, sourceCol)
+      
+      // Save order to Supabase silently
+      supabase.from('app_settings').upsert({
+        setting_key: 'column_order',
+        setting_value: newOrder
+      }, { onConflict: 'setting_key' }).then()
+      
+      return newOrder
+    })
+  }
+
   // --- COLUMN RESIZE LOGIC ---
   const handleResizeStart = (e: React.MouseEvent | React.TouchEvent, columnKey: string) => {
     e.preventDefault()
+    e.stopPropagation() // Prevent triggering Drag & Drop when resizing
     const startX = 'touches' in e ? e.touches[0].pageX : e.pageX
     const startWidth = widthsRef.current[columnKey]
 
     const handleMove = (moveEvent: MouseEvent | TouchEvent) => {
       const currentX = 'touches' in moveEvent ? moveEvent.touches[0].pageX : moveEvent.pageX
-      const newWidth = Math.max(50, startWidth + (currentX - startX))
+      const newWidth = Math.max(30, startWidth + (currentX - startX)) // Reduced min-width to 30px
       setColumnWidths(prev => ({ ...prev, [columnKey]: newWidth }))
     }
 
@@ -195,16 +233,15 @@ export default function RiceControl() {
 
   // --- HELPERS ---
   const formatRiel = (amount: number) => `${new Intl.NumberFormat('en-US').format(Math.round(amount))} ៛`
-  const columns: Array<keyof Product> = ['id', 'name', 'price', 'cost_price', 'stock', 'weight']
 
   // --- REUSABLE COMPONENTS ---
-  const Cell = ({ id, field, value, type = "text" }: { id: number, field: keyof Product, value: any, type?: string }) => (
+  const Cell = ({ id, field, value, type = "text", padLeft = "12px" }: { id: number, field: keyof Product, value: any, type?: string, padLeft?: string }) => (
     <input
       type={type}
       value={value ?? ''}
       onChange={(e) => setEdits(prev => ({ ...prev, [id]: { ...(prev[id] || {}), [field]: type === 'number' ? (e.target.value === '' ? '' : Number(e.target.value)) : e.target.value } }))}
       className="no-spinners"
-      style={{ width: '100%', padding: '12px', border: 'none', background: 'transparent', outline: 'none', color: '#333', boxSizing: 'border-box', fontSize: '14px' }}
+      style={{ width: '100%', padding: `8px 8px 8px ${padLeft}`, border: 'none', background: 'transparent', outline: 'none', color: '#333', boxSizing: 'border-box', fontSize: '14px' }}
       onFocus={(e) => e.target.style.background = '#f0f9ff'}
       onBlur={(e) => e.target.style.background = 'transparent'}
     />
@@ -214,7 +251,7 @@ export default function RiceControl() {
     <div
       onMouseDown={(e) => handleResizeStart(e, columnKey)}
       onTouchStart={(e) => handleResizeStart(e, columnKey)}
-      style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: '12px', cursor: 'col-resize', background: 'transparent', zIndex: 10, transform: 'translateX(50%)' }}
+      style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: '14px', cursor: 'col-resize', background: 'transparent', zIndex: 10, transform: 'translateX(50%)' }}
     />
   )
 
@@ -261,18 +298,23 @@ export default function RiceControl() {
           <thead>
             <tr style={{ background: '#f8fafc', borderBottom: '2px solid #e2e8f0' }}>
               
-              <th style={{ width: columnWidths.checkbox, position: 'relative', padding: '14px 12px' }}>
-                <Resizer columnKey="checkbox" />
-              </th>
-              
-              {['id', 'name', 'price', 'cost_price', 'stock', 'weight'].map(key => (
-                <th key={key} style={{ width: columnWidths[key], position: 'relative', padding: '14px 12px', textAlign: 'left', color: '#64748b', fontSize: '12px', textTransform: 'uppercase', fontWeight: 'bold', borderRight: '1px solid #f1f5f9' }}>
+              {/* Dynamic Draggable Headers */}
+              {columnOrder.map(key => (
+                <th 
+                  key={key} 
+                  draggable 
+                  onDragStart={(e) => handleDragStart(e, key)}
+                  onDragOver={handleDragOver}
+                  onDrop={(e) => handleDrop(e, key)}
+                  style={{ width: columnWidths[key], position: 'relative', padding: '12px 8px', textAlign: 'left', color: '#64748b', fontSize: '12px', textTransform: 'uppercase', fontWeight: 'bold', borderRight: '1px solid #f1f5f9', cursor: 'grab' }}
+                  title="Drag to reorder"
+                >
                   {key.replace('_', ' ')}
                   <Resizer columnKey={key} />
                 </th>
               ))}
               
-              <th style={{ width: columnWidths.actions, position: 'relative', padding: '14px 12px', textAlign: 'left', color: '#64748b', fontSize: '12px', textTransform: 'uppercase', fontWeight: 'bold' }}>
+              <th style={{ width: columnWidths.actions, position: 'relative', padding: '12px 8px', textAlign: 'left', color: '#64748b', fontSize: '12px', textTransform: 'uppercase', fontWeight: 'bold' }}>
                 Actions
                 <Resizer columnKey="actions" />
               </th>
@@ -281,29 +323,36 @@ export default function RiceControl() {
           </thead>
           <tbody>
             {processedProducts.length === 0 ? (
-              <tr><td colSpan={8} style={{ padding: '40px', textAlign: 'center', color: '#94a3b8' }}>No products found.</td></tr>
+              <tr><td colSpan={columnOrder.length + 1} style={{ padding: '40px', textAlign: 'center', color: '#94a3b8' }}>No products found.</td></tr>
             ) : (
               processedProducts.map(p => (
                 <tr key={p.id} onMouseEnter={() => setHoveredId(p.id)} onMouseLeave={() => setHoveredId(null)} style={{ borderBottom: '1px solid #f1f5f9', background: edits[p.id] ? '#fefcf3' : 'transparent' }}>
                   
-                  <td style={{ padding: '12px', textAlign: 'center', borderRight: '1px solid #f1f5f9' }}>
-                    {(hoveredId === p.id || selectedToDelete.has(p.id)) && (
-                      <input type="checkbox" checked={selectedToDelete.has(p.id)} onChange={() => {
-                        const next = new Set(selectedToDelete)
-                        next.has(p.id) ? next.delete(p.id) : next.add(p.id)
-                        setSelectedToDelete(next)
-                      }} style={{ cursor: 'pointer', width: '16px', height: '16px' }} />
-                    )}
-                  </td>
+                  {/* Dynamic Data Cells */}
+                  {columnOrder.map(col => {
+                    const isIdCol = col === 'id';
+                    return (
+                      <td key={col} style={{ borderRight: '1px solid #f1f5f9', overflow: 'hidden', position: 'relative' }}>
+                        
+                        {/* If it's the ID column, embed the Checkbox overlay on Hover */}
+                        {isIdCol && (hoveredId === p.id || selectedToDelete.has(p.id)) && (
+                          <div style={{ position: 'absolute', left: '4px', top: '50%', transform: 'translateY(-50%)', zIndex: 5, background: edits[p.id] ? '#fefcf3' : '#fff', paddingRight: '4px' }}>
+                            <input type="checkbox" checked={selectedToDelete.has(p.id)} onChange={() => {
+                              const next = new Set(selectedToDelete)
+                              next.has(p.id) ? next.delete(p.id) : next.add(p.id)
+                              setSelectedToDelete(next)
+                            }} style={{ cursor: 'pointer', width: '16px', height: '16px', margin: 0 }} />
+                          </div>
+                        )}
+                        
+                        {/* Cell Input: add left padding to ID cell so text doesn't hide under checkbox */}
+                        <Cell id={p.id} field={col} value={p[col]} type={['name'].includes(col as string) ? 'text' : 'number'} padLeft={isIdCol ? '24px' : '8px'} />
+                      </td>
+                    )
+                  })}
                   
-                  <td style={{ borderRight: '1px solid #f1f5f9', overflow: 'hidden' }}><Cell id={p.id} field="id" value={p.id} type="number" /></td>
-                  <td style={{ borderRight: '1px solid #f1f5f9', overflow: 'hidden' }}><Cell id={p.id} field="name" value={p.name} /></td>
-                  <td style={{ borderRight: '1px solid #f1f5f9', overflow: 'hidden' }}><Cell id={p.id} field="price" value={p.price} type="number" /></td>
-                  <td style={{ borderRight: '1px solid #f1f5f9', overflow: 'hidden' }}><Cell id={p.id} field="cost_price" value={p.cost_price} type="number" /></td>
-                  <td style={{ borderRight: '1px solid #f1f5f9', overflow: 'hidden' }}><Cell id={p.id} field="stock" value={p.stock} type="number" /></td>
-                  <td style={{ borderRight: '1px solid #f1f5f9', overflow: 'hidden' }}><Cell id={p.id} field="weight" value={p.weight} type="number" /></td>
-                  
-                  <td style={{ padding: '8px 12px', overflow: 'hidden' }}>
+                  {/* Actions Cell */}
+                  <td style={{ padding: '8px', overflow: 'hidden' }}>
                     <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
                       {edits[p.id] ? (
                         <>
@@ -337,7 +386,7 @@ export default function RiceControl() {
               <div key={rule.id} style={{ display: 'flex', gap: '10px', marginBottom: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
                 <span style={{ fontSize: '12px', color: '#666', width: '60px' }}>{index === 0 ? 'Sort by' : 'Then by'}</span>
                 <select value={rule.column} onChange={e => setSortRules(prev => prev.map(r => r.id === rule.id ? { ...r, column: e.target.value as keyof Product } : r))} style={{ flex: 1, minWidth: '100px', padding: '8px', border: '1px solid #ccc', borderRadius: '4px' }}>
-                  {columns.map(c => <option key={c} value={c}>{c.toUpperCase()}</option>)}
+                  {DEFAULT_ORDER.map(c => <option key={c} value={c}>{c.toUpperCase()}</option>)}
                 </select>
                 <select value={rule.direction} onChange={e => setSortRules(prev => prev.map(r => r.id === rule.id ? { ...r, direction: e.target.value as SortDirection } : r))} style={{ flex: 1, minWidth: '100px', padding: '8px', border: '1px solid #ccc', borderRadius: '4px' }}>
                   <option value="asc">A-Z / 1-10 (Asc)</option>
@@ -366,7 +415,7 @@ export default function RiceControl() {
               <div key={rule.id} style={{ display: 'flex', gap: '8px', marginBottom: '10px', alignItems: 'center', flexWrap: 'wrap', background: '#f8fafc', padding: '10px', borderRadius: '6px' }}>
                 <span style={{ fontSize: '12px', color: '#666', width: '40px' }}>{index === 0 ? 'Where' : 'And'}</span>
                 <select value={rule.column} onChange={e => setFilterRules(prev => prev.map(r => r.id === rule.id ? { ...r, column: e.target.value as keyof Product } : r))} style={{ flex: '1 1 100px', padding: '8px', border: '1px solid #ccc', borderRadius: '4px' }}>
-                  {columns.map(c => <option key={c} value={c}>{c.toUpperCase()}</option>)}
+                  {DEFAULT_ORDER.map(c => <option key={c} value={c}>{c.toUpperCase()}</option>)}
                 </select>
                 <select value={rule.operator} onChange={e => setFilterRules(prev => prev.map(r => r.id === rule.id ? { ...r, operator: e.target.value as FilterOperator } : r))} style={{ flex: '1 1 100px', padding: '8px', border: '1px solid #ccc', borderRadius: '4px' }}>
                   <option value="contains">Contains</option>
@@ -425,7 +474,7 @@ export default function RiceControl() {
       {/* 4. ADD PRODUCT MODAL */}
       {isAddModalOpen && (
         <div className="modal-overlay">
-          <div className="modal-content">
+          <div className="modal-content" style={{ maxWidth: '400px' }}>
             <h2 style={{ marginTop: 0, marginBottom: '20px' }}>Add New Product</h2>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
               <div>
@@ -590,7 +639,6 @@ export default function RiceControl() {
           padding: 24px;
           border-radius: 12px;
           width: 100%;
-          max-width: 600px;
           max-height: 90vh;
           overflow-y: auto;
           box-shadow: 0 10px 25px rgba(0,0,0,0.1);

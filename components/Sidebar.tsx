@@ -10,13 +10,15 @@ export default function Sidebar() {
   const pathname = usePathname()
   const router = useRouter()
 
-  // Define your 7 key navigation paths
+  // Define your key navigation paths - NOW INCLUDING BOTH PAGES!
   const menuItems = [
     { label: '📊 Dashboard', href: '/dashboard' },
     { label: '🛒 POS System', href: '/pos' },
     { label: '🌾 Rice Control', href: '/rice' },
     { label: '👥 Customer Database', href: '/customerdatabase' },
-    { label: '💵 Expenses & Ledger', href: '/expense' },
+    { label: '💵 Expense Ledger', href: '/expense' },
+    { label: '💼 Master Biz Database', href: '/bizdatabase' },
+    { label: '🧮 Mix Calculator', href: '/calculator' }, // <-- Added this!
   ]
 
   // Automatically secure screens: if user logs out, boot them back to root login page
@@ -36,7 +38,7 @@ export default function Sidebar() {
 
   return (
     <>
-      {/* FIXED BURGER BUTTON (Always available top-left) */}
+      {/* FIXED BURGER BUTTON (Always shows ☰) */}
       <button
         onClick={() => setIsOpen(!isOpen)}
         style={{
@@ -54,18 +56,18 @@ export default function Sidebar() {
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          boxShadow: '0 2px 8px rgba(0,0,0,0.2)'
+          boxShadow: isOpen ? 'none' : '0 2px 8px rgba(0,0,0,0.2)'
         }}
         aria-label="Toggle Navigation Sidebar"
       >
-        {isOpen ? '❌' : '☰'}
+        ☰
       </button>
 
       {/* SIDEBAR CONTAINER */}
       <div
         style={{
           width: isOpen ? '240px' : '0px',
-          minWidth: isOpen ? '240px' : '0px', // Crucial fix: Prevents flex layout from compressing layout links
+          minWidth: isOpen ? '240px' : '0px', 
           opacity: isOpen ? 1 : 0,
           pointerEvents: isOpen ? 'auto' : 'none',
           background: '#111827',
@@ -77,7 +79,7 @@ export default function Sidebar() {
           display: 'flex',
           flexDirection: 'column',
           justifyContent: 'space-between',
-          padding: isOpen ? '75px 20px 20px 20px' : '0px',
+          padding: isOpen ? '15px 20px 20px 20px' : '0px',
           boxSizing: 'border-box',
           transition: 'all 0.3s ease-in-out',
           overflowX: 'hidden',
@@ -87,7 +89,9 @@ export default function Sidebar() {
       >
         {/* TOP SECTION: BRAND & LINKS */}
         <div>
-          <h2 style={{ marginBottom: '30px', whiteSpace: 'nowrap', fontSize: '22px' }}>🌾 Rice POS</h2>
+          <div style={{ display: 'flex', alignItems: 'center', minHeight: '42px', marginBottom: '30px', paddingLeft: '45px' }}>
+            <h2 style={{ margin: 0, whiteSpace: 'nowrap', fontSize: '20px' }}>🌾 Rice POS</h2>
+          </div>
           
           <nav style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
             {menuItems.map((item) => {
@@ -96,6 +100,7 @@ export default function Sidebar() {
                 <Link 
                   key={item.href} 
                   href={item.href}
+                  onClick={() => setIsOpen(false)} 
                   style={{
                     color: 'white',
                     textDecoration: 'none',
