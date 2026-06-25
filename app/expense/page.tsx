@@ -44,10 +44,10 @@ export default function ExpenseDashboard() {
       {
         expense_date: expenseDate,
         spender: spender,
-        remarks: remarks,                     // Pure user note text
-        amount: finalAmountUsd,               // Maps to your amount $ column
-        amount_riel: finalAmountRiel,         // Maps to amount riel column
-        description: activeTab.toUpperCase(), // Keeps 'PERSONAL' or 'BUSINESS' distinct here
+        remarks: remarks,                     
+        amount: finalAmountUsd,               
+        amount_riel: finalAmountRiel,         
+        description: activeTab.toUpperCase(), 
       },
     ])
 
@@ -138,23 +138,8 @@ export default function ExpenseDashboard() {
             </div>
           </div>
 
-          {/* DUAL CURRENCY FIELDS */}
+          {/* DUAL CURRENCY FIELDS - RIEL MOVED TO LEFT */}
           <div style={styles.currencyRow}>
-            <div style={styles.inputGroup}>
-              <label style={styles.label}>Amount in USD ($)</label>
-              <div style={styles.currencyWrapper}>
-                <span style={styles.currencyPrefix}>$</span>
-                <input
-                  type="number"
-                  step="0.01"
-                  placeholder="0.00"
-                  value={amountUsd}
-                  onChange={(e) => setAmountUsd(e.target.value)}
-                  style={{ ...styles.inputField, paddingLeft: '30px' }}
-                />
-              </div>
-            </div>
-
             <div style={styles.inputGroup}>
               <label style={styles.label}>Amount in Khmer Riel (៛)</label>
               <div style={styles.currencyWrapper}>
@@ -169,14 +154,28 @@ export default function ExpenseDashboard() {
                 />
               </div>
             </div>
+
+            <div style={styles.inputGroup}>
+              <label style={styles.label}>Amount in USD ($)</label>
+              <div style={styles.currencyWrapper}>
+                <span style={styles.currencyPrefix}>$</span>
+                <input
+                  type="number"
+                  step="0.01"
+                  placeholder="0.00"
+                  value={amountUsd}
+                  onChange={(e) => setAmountUsd(e.target.value)}
+                  style={{ ...styles.inputField, paddingLeft: '30px' }}
+                />
+              </div>
+            </div>
           </div>
 
-          {/* REMARKS */}
+          {/* REMARKS - PLACEHOLDER REMOVED */}
           <div style={styles.inputGroup}>
             <label style={styles.label}>Remarks</label>
             <input
               type="text"
-              placeholder="e.g., Bought 50 Premium Rice Sacks, Fuel run, Electricity bill"
               value={remarks}
               onChange={(e) => setRemarks(e.target.value)}
               style={styles.inputField}
@@ -203,7 +202,7 @@ const styles = {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    padding: '20px 20px 20px 65px', // Left padding offset matches global floating burger layout framework safely
+    padding: '20px 20px 20px 65px', 
     fontFamily: '"SF Pro Display", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
     flex: 1,
     overflowY: 'auto' as const,
@@ -217,7 +216,9 @@ const styles = {
     borderRadius: '16px',
     padding: '35px',
     boxShadow: '0 10px 25px rgba(0, 0, 0, 0.05), 0 2px 4px rgba(0, 0, 0, 0.02)',
-    border: '1px solid #e2e8f0',
+    borderColor: '#e2e8f0',
+    borderWidth: '1px',
+    borderStyle: 'solid',
   },
   brandHeader: {
     textAlign: 'center' as const,
@@ -246,8 +247,8 @@ const styles = {
   tabButton: {
     flex: 1,
     padding: '12px',
-    background: 'none',
-    border: 'none',
+    backgroundColor: 'transparent', // Splitting shorthand to fix React error
+    borderWidth: '0px',             // Splitting shorthand to fix React error
     color: '#64748b',
     fontSize: '14px',
     fontWeight: '600',
@@ -279,7 +280,9 @@ const styles = {
   },
   inputField: {
     backgroundColor: '#ffffff',
-    border: '1px solid #cbd5e1',
+    borderColor: '#cbd5e1',         // Splitting shorthand
+    borderWidth: '1px',             // Splitting shorthand
+    borderStyle: 'solid',           // Splitting shorthand
     borderRadius: '8px',
     padding: '12px 14px',
     color: '#0f172a',
@@ -299,7 +302,9 @@ const styles = {
     alignItems: 'center',
     gap: '10px',
     backgroundColor: '#ffffff',
-    border: '1px solid #cbd5e1',
+    borderWidth: '1px',             // Splitting shorthand to fix React error
+    borderStyle: 'solid',           // Splitting shorthand to fix React error
+    borderColor: '#cbd5e1',         // Splitting shorthand to fix React error
     padding: '12px',
     borderRadius: '8px',
     color: '#64748b',
@@ -321,7 +326,9 @@ const styles = {
     height: '8px',
     borderRadius: '50%',
     backgroundColor: 'transparent',
-    border: '2px solid #cbd5e1',
+    borderColor: '#cbd5e1',
+    borderWidth: '2px',
+    borderStyle: 'solid',
     display: 'inline-block',
   },
   currencyRow: {
@@ -345,7 +352,7 @@ const styles = {
     backgroundColor: '#b59410',
     color: '#ffffff',
     padding: '15px',
-    border: 'none',
+    borderWidth: '0px',             // Splitting shorthand
     borderRadius: '8px',
     fontSize: '15px',
     fontWeight: '700',
