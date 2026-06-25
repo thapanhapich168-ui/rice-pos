@@ -8,6 +8,7 @@ import html2canvas from 'html2canvas'
 const EXCHANGE_RATE = 4000;
 const RICE_CATEGORIES = ['All', 'មិញ', 'ខុន', 'ខ្ញី', 'ម្លិះ', 'រំដួល', 'បីកំណាត់', 'ដំណើប', 'សម្រូប', 'ផ្សេងៗ'];
 const MAIN_KEYWORDS = ['មិញ', 'ខុន', 'ខ្ញី', 'ម្លិះ', 'រំដួល', 'បីកំណាត់', 'ដំណើប', 'សម្រូប'];
+const GROCERY_KEYWORDS = ['មី', 'លុយ', 'ប៊ីចេង', 'អំបិល', 'ទឹកត្រី', 'ទឹកស៊ីអ៊ីវ', 'ស្ករ'];
 
 // Translations Dictionary
 const t = {
@@ -27,6 +28,7 @@ const t = {
     totalKhmer: "Total:",
     totalUsd: "Total in USD:",
     checkout: "Checkout",
+    mobileModalTitle: "Adjust Item Properties",
     cancel: "Cancel",
     add: "Add to Cart"
   },
@@ -46,6 +48,7 @@ const t = {
     totalKhmer: "សរុបរួម:",
     totalUsd: "សរុបជាដុល្លារ:",
     checkout: "ចាត់ចែងការទូទាត់",
+    mobileModalTitle: "កែសម្រួលព័ត៌មានទំនិញ",
     cancel: "បោះបង់",
     add: "បញ្ចូលទៅកន្ត្រក"
   }
@@ -112,6 +115,11 @@ export default function POSPage() {
   const [editingCardId, setEditingCardId] = useState<number | null>(null)
   const [editCardForm, setEditCardForm] = useState({ name: '', price: '' })
 
+  const [selectedMobileProduct, setSelectedMobileProduct] = useState<any>(null)
+  const [mobilePrice, setMobilePrice] = useState<number>(0)
+  const [mobileQty, setMobileQty] = useState<number>(1)
+  const [mobileName, setMobileName] = useState<string>('')
+
   // INVOICE MODAL STATE
   const [completedSale, setCompletedSale] = useState<any>(null)
   const [isUploadingImage, setIsUploadingImage] = useState(false)
@@ -156,7 +164,13 @@ export default function POSPage() {
 
   function handleProductClick(product: any) {
     if (editingCardId === product.id) return;
-    addToCartDirect(product);
+    
+    const isMobile = typeof window !== 'undefined' && window.innerWidth < 1023;
+    if (isMobile) {
+      addToCartDirect(product); // Add directly without popup as requested
+    } else {
+      addToCartDirect(product);
+    }
   }
 
   function addToCartDirect(product: any) {
@@ -235,6 +249,9 @@ export default function POSPage() {
   const filteredProducts = orderedProducts.filter(p => {
     const matchesSearch = p.name?.toLowerCase().includes(searchQuery.toLowerCase())
     if (!matchesSearch) return false;
+
+    const isGrocery = GROCERY_KEYWORDS.some(kw => p.name?.includes(kw));
+    if (isGrocery) return false; 
 
     const weightVal = parseFloat(p.weight || 0)
     if (activeTab === 'wholesale' && weightVal < 50) return false;
@@ -338,14 +355,15 @@ export default function POSPage() {
     }
   }
 
-  // --- IMAGE EXPORT HELPERS ---
-  
+  // Background auto-capture strictly to save history to Supabase
   async function executeAutoSaveOnly() {
     if (!invoiceRef.current || !completedSale) return;
     setIsUploadingImage(true);
 
     try {
-      await document.fonts.ready; // Ensure fonts are loaded before capture
+      await document.fonts.ready;
+      await new Promise(resolve => setTimeout(resolve, 300)); // Layout settling delay
+
       const canvas = await html2canvas(invoiceRef.current, { 
         scale: 2, 
         useCORS: true, 
@@ -372,12 +390,21 @@ export default function POSPage() {
     }
   }
 
+  // --- EXPORT FUNCTIONS (PC Download vs Mobile Share) ---
   const handleDesktopDownloadPNG = async () => {
     if (!invoiceRef.current || !completedSale) return;
     setIsDownloading(true);
     try {
-      await document.fonts.ready; // Prevent misalignment
-      const canvas = await html2canvas(invoiceRef.current, { scale: 3, useCORS: true, backgroundColor: '#ffffff' });
+      await document.fonts.ready; 
+      await new Promise(resolve => setTimeout(resolve, 500)); // Crucial layout settling delay
+
+      const canvas = await html2canvas(invoiceRef.current, { 
+        scale: 3, 
+        useCORS: true, 
+        backgroundColor: '#ffffff',
+        windowWidth: 794,
+        windowHeight: 559
+      });
       const imgData = canvas.toDataURL('image/png');
       const link = document.createElement('a');
       link.download = `Invoice-${completedSale.invoiceNo}.png`;
@@ -394,8 +421,16 @@ export default function POSPage() {
     if (!invoiceRef.current || !completedSale) return;
     setIsDownloading(true);
     try {
-      await document.fonts.ready; // Prevent misalignment
-      const canvas = await html2canvas(invoiceRef.current, { scale: 3, useCORS: true, backgroundColor: '#ffffff' });
+      await document.fonts.ready; 
+      await new Promise(resolve => setTimeout(resolve, 500)); // Crucial layout settling delay
+
+      const canvas = await html2canvas(invoiceRef.current, { 
+        scale: 3, 
+        useCORS: true, 
+        backgroundColor: '#ffffff',
+        windowWidth: 794,
+        windowHeight: 559
+      });
       canvas.toBlob(async (blob) => {
         if (blob && navigator.share && navigator.canShare && navigator.canShare({ files: [new File([blob], 'invoice.png', {type: 'image/png'})] })) {
           const file = new File([blob], `Invoice-${completedSale.invoiceNo}.png`, { type: 'image/png' });
@@ -418,12 +453,13 @@ export default function POSPage() {
     }
   }
 
-  function handleNativePrint() {
+  const handleNativePrint = () => {
     window.print();
   }
 
   const currentT = t[lang];
 
+  // Helper for invoice template logic
   const getCategorizedItems = (cartItems: any[]) => {
     let normalItems: any[] = [], specialItems: any[] = [], negativeItems: any[] = [], serviceItems: any[] = [];
     cartItems.forEach(item => {
@@ -1006,7 +1042,7 @@ export default function POSPage() {
         </div>
       )}
 
-      {/* COMPLETED SALE MODAL + STRICT HTML2CANVAS INVOICE */}
+      {/* COMPLETED SALE MODAL + EXACT FIXED-WIDTH HTML2CANVAS INVOICE */}
       {completedSale && (
         <div className="invoice-modal-overlay" style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(0,0,0,0.85)', zIndex: 10000, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
           
@@ -1058,13 +1094,13 @@ export default function POSPage() {
 
           <div className="invoice-preview-container" style={{ overflowY: 'auto', maxHeight: '80vh', padding: '10px', backgroundColor: '#fff', borderRadius: '4px' }}>
             
-            {/* EXACT PDFMONKEY HTML/CSS REPLICA - BULLETPROOFED FOR HTML2CANVAS */}
-            <div id="invoice-capture-area" ref={invoiceRef} style={{ width: '794px', minHeight: '559px', backgroundColor: '#ffffff', position: 'relative', padding: '20px', boxSizing: 'border-box', fontFamily: "'Noto Sans Khmer', Arial, sans-serif", color: '#000', lineHeight: '1.5' }}>
+            {/* EXACT FIXED-WIDTH HTML/CSS FOR HTML2CANVAS ACCURACY */}
+            <div id="invoice-capture-area" ref={invoiceRef} style={{ width: '794px', height: '559px', backgroundColor: '#ffffff', position: 'relative', padding: '24px', boxSizing: 'border-box', fontFamily: "'Noto Sans Khmer', Arial, sans-serif", color: '#000000', fontSize: '13px', lineHeight: '20px' }}>
               <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Khmer&display=swap" rel="stylesheet" />
               
               <div className="invoice-watermark" style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', backgroundImage: "url('https://i.imgur.com/XUsrp9D.png')", backgroundRepeat: 'no-repeat', backgroundPosition: 'center center', backgroundSize: '40%', opacity: 0.14, zIndex: 0, pointerEvents: 'none' }}></div>
 
-              <div style={{ position: 'relative', zIndex: 1 }}>
+              <div style={{ position: 'relative', zIndex: 1, height: '100%' }}>
                 
                 <div style={{ position: 'absolute', top: 0, left: 0, width: '60px', height: '70px', zIndex: 2 }}>
                   <img src="https://i.imgur.com/s0hg3MQ.png" alt="Left Logo" style={{ width: '100%', height: '100%', display: 'block' }} crossOrigin="anonymous" />
@@ -1074,40 +1110,48 @@ export default function POSPage() {
                   <img src="https://i.imgur.com/Guk0hVe.png" alt="Right Logo" style={{ width: '95%', height: '100%', display: 'block', filter: 'brightness(0)' }} crossOrigin="anonymous" />
                 </div>
 
-                <header style={{ textAlign: 'center', marginBottom: '14px', lineHeight: '1.2' }}>
-                  <h1 style={{ fontSize: '23px', margin: '0 0 2px 0', fontWeight: 'bold', color: 'green' }}>ដេប៉ូអង្ករ រ៉េឌៀន</h1>
-                  <p style={{ margin: '1px 0', fontSize: '12.5px', color: 'green' }}>មានបោះដុំ លក់រាយអង្ករដែលមានគុណភាពខ្ពស់គ្រប់ប្រភេទ និងមានទទួលវិចខ្ចប់អំណោយក្នុងតម្លៃសមរម្យ</p>
-                  <p style={{ margin: '1px 0', fontSize: '12.5px' }}>📲 077 797 798 / 📞 081 797 798 / 📞 088 97 97 798</p>
-                  <p style={{ margin: '1px 0', fontSize: '12.5px' }}>📍 ផ្ទះលេខ 72 ផ្លូវលំ សង្កាត់ស្ទឹងមានជ័យ1 ខណ្ឌមានជ័យ រាជធានីភ្នំពេញ</p>
+                <header style={{ textAlign: 'center', marginBottom: '14px' }}>
+                  <h1 style={{ fontSize: '23px', lineHeight: '28px', margin: '0 0 2px 0', fontWeight: 'bold', color: 'green' }}>ដេប៉ូអង្ករ រ៉េឌៀន</h1>
+                  <p style={{ margin: '1px 0', color: 'green' }}>មានបោះដុំ លក់រាយអង្ករដែលមានគុណភាពខ្ពស់គ្រប់ប្រភេទ និងមានទទួលវិចខ្ចប់អំណោយក្នុងតម្លៃសមរម្យ</p>
+                  <p style={{ margin: '1px 0' }}>📲 077 797 798 / 📞 081 797 798 / 📞 088 97 97 798</p>
+                  <p style={{ margin: '1px 0' }}>📍 ផ្ទះលេខ 72 ផ្លូវលំ សង្កាត់ស្ទឹងមានជ័យ1 ខណ្ឌមានជ័យ រាជធានីភ្នំពេញ</p>
                 </header>
 
-                <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '6px' }}>
+                <table style={{ width: '746px', borderCollapse: 'collapse', marginBottom: '6px', boxSizing: 'border-box' }}>
                   <tbody>
                     <tr>
-                      <td style={{ fontSize: '12.5px', padding: '2px 3px', width: '33%', color: '#000' }}>ឈ្មោះអតិថិជន: <strong>{completedSale.customer?.name || 'Walk-in'}</strong></td>
-                      <td style={{ fontSize: '12.5px', padding: '2px 3px', width: '34%', color: '#000' }}>ទីតាំង: <strong>{completedSale.customer?.location || 'N/A'}</strong></td>
-                      <td style={{ fontSize: '12.5px', padding: '2px 3px', width: '33%', color: '#000' }}>លេខទូរសព្ទ: <strong>{completedSale.customer?.phone || 'N/A'}</strong></td>
+                      <td style={{ padding: '0 4px', width: '33%', color: '#000000' }}>ឈ្មោះអតិថិជន: <strong style={{fontWeight: 'bold'}}>{completedSale.customer?.name || 'Walk-in'}</strong></td>
+                      <td style={{ padding: '0 4px', width: '34%', color: '#000000' }}>ទីតាំង: <strong style={{fontWeight: 'bold'}}>{completedSale.customer?.location || 'N/A'}</strong></td>
+                      <td style={{ padding: '0 4px', width: '33%', color: '#000000' }}>លេខទូរសព្ទ: <strong style={{fontWeight: 'bold'}}>{completedSale.customer?.phone || 'N/A'}</strong></td>
                     </tr>
                   </tbody>
                 </table>
 
-                <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '4px', fontSize: '12.5px', tableLayout: 'fixed' }}>
+                {/* STRICT PIXEL-WIDTH TABLE TO PREVENT HTML2CANVAS JITTER */}
+                <table style={{ width: '746px', borderCollapse: 'collapse', marginBottom: '4px', tableLayout: 'fixed', boxSizing: 'border-box' }}>
+                  <colgroup>
+                    <col style={{ width: '45px' }} />
+                    <col style={{ width: '331px' }} />
+                    <col style={{ width: '100px' }} />
+                    <col style={{ width: '120px' }} />
+                    <col style={{ width: '150px' }} />
+                  </colgroup>
                   <thead>
-                    <tr style={{ backgroundColor: '#fffacd' }}>
-                      <th style={{ border: '1px solid #000', padding: '8px 4px', width: '5%', textAlign: 'center', fontWeight: 'bold', color: '#000', lineHeight: '1.2' }}>
-                        No.<br/>ល.រ
+                    <tr style={{ backgroundColor: '#fffacd', height: '36px' }}>
+                      <th style={{ border: '1px solid #000000', padding: '0', textAlign: 'center', fontWeight: 'bold', color: '#000000', verticalAlign: 'middle' }}>
+                        <div style={{ lineHeight: '14px' }}>No.<br/>ល.រ</div>
                       </th>
-                      <th style={{ border: '1px solid #000', padding: '8px 4px', width: '40%', textAlign: 'center', fontWeight: 'bold', color: '#000', lineHeight: '1.2' }}>
-                        Item Descriptions<br/>រាយឈ្មោះទំនិញ
+                      <th style={{ border: '1px solid #000000', padding: '0', textAlign: 'center', fontWeight: 'bold', color: '#000000', verticalAlign: 'middle' }}>
+                        <div style={{ lineHeight: '14px' }}>Item Descriptions<br/>រាយឈ្មោះទំនិញ</div>
                       </th>
-                      <th style={{ border: '1px solid #000', padding: '8px 4px', width: '15%', textAlign: 'center', fontWeight: 'bold', color: '#000', lineHeight: '1.2' }}>
-                        Quantity<br/>ចំនួន
+                      <th style={{ border: '1px solid #000000', padding: '0', textAlign: 'center', fontWeight: 'bold', color: '#000000', verticalAlign: 'middle' }}>
+                        <div style={{ lineHeight: '14px' }}>Quantity<br/>ចំនួន</div>
                       </th>
-                      <th style={{ border: '1px solid #000', padding: '8px 4px', width: '15%', textAlign: 'center', fontWeight: 'bold', color: '#000', lineHeight: '1.2' }}>
-                        Unit Price<br/>តម្លៃរាយ
+                      <th style={{ border: '1px solid #000000', padding: '0', textAlign: 'center', fontWeight: 'bold', color: '#000000', verticalAlign: 'middle' }}>
+                        <div style={{ lineHeight: '14px' }}>Unit Price<br/>តម្លៃរាយ</div>
                       </th>
-                      <th style={{ border: '1px solid #000', padding: '8px 4px', width: '25%', textAlign: 'center', fontWeight: 'bold', color: '#000', lineHeight: '1.2' }}>
-                        Subtotal<br/>តម្លៃសរុប
+                      <th style={{ border: '1px solid #000000', padding: '0', textAlign: 'center', fontWeight: 'bold', color: '#000000', verticalAlign: 'middle' }}>
+                        <div style={{ lineHeight: '14px' }}>Subtotal<br/>តម្លៃសរុប</div>
                       </th>
                     </tr>
                   </thead>
@@ -1134,22 +1178,22 @@ export default function POSPage() {
                           const isCenter = desc.includes('ដូរ') || desc.includes('បញ្ចុះតម្លៃ') || desc.includes('កក់') || desc.includes('សេវាឡាន (អតិថិជន)');
 
                           rows.push(
-                            <tr key={i}>
-                              <td style={{ border: '1px solid #000', padding: '6px 4px', textAlign: 'center', color: '#000', lineHeight: '1.2' }}>{itemIndex}</td>
-                              <td style={{ border: '1px solid #000', padding: '6px 4px', textAlign: isCenter ? 'center' : 'left', color: '#000', wordWrap: 'break-word', overflow: 'hidden', lineHeight: '1.2' }}>{desc}</td>
-                              <td style={{ border: '1px solid #000', padding: '6px 4px', textAlign: 'center', color: '#000', lineHeight: '1.2' }}>{item.quantity.toLocaleString('en-US', { maximumFractionDigits: 2 })}</td>
-                              <td style={{ border: '1px solid #000', padding: '6px 4px', textAlign: 'center', color: '#000', lineHeight: '1.2' }}>{item.custom_price_riel.toLocaleString('en-US', { maximumFractionDigits: 2 })}</td>
-                              <td style={{ border: '1px solid #000', padding: '6px 4px', textAlign: 'center', color: total < 0 ? 'red' : '#000', lineHeight: '1.2' }}>{total.toLocaleString('en-US')}</td>
+                            <tr key={i} style={{ height: '24px' }}>
+                              <td style={{ border: '1px solid #000000', padding: '0 4px', textAlign: 'center', verticalAlign: 'middle', color: '#000000' }}>{itemIndex}</td>
+                              <td style={{ border: '1px solid #000000', padding: '0 4px', textAlign: isCenter ? 'center' : 'left', verticalAlign: 'middle', color: '#000000', wordWrap: 'break-word', overflow: 'hidden' }}>{desc}</td>
+                              <td style={{ border: '1px solid #000000', padding: '0 4px', textAlign: 'center', verticalAlign: 'middle', color: '#000000' }}>{item.quantity.toLocaleString('en-US', { maximumFractionDigits: 2 })}</td>
+                              <td style={{ border: '1px solid #000000', padding: '0 4px', textAlign: 'center', verticalAlign: 'middle', color: '#000000' }}>{item.custom_price_riel.toLocaleString('en-US', { maximumFractionDigits: 2 })}</td>
+                              <td style={{ border: '1px solid #000000', padding: '0 4px', textAlign: 'center', verticalAlign: 'middle', color: total < 0 ? 'red' : '#000000' }}>{total.toLocaleString('en-US')}</td>
                             </tr>
                           );
                         } else {
                           rows.push(
-                            <tr key={i}>
-                              <td style={{ border: '1px solid #000', padding: '6px 4px', lineHeight: '1.2' }}>&nbsp;</td>
-                              <td style={{ border: '1px solid #000', padding: '6px 4px', lineHeight: '1.2' }}>&nbsp;</td>
-                              <td style={{ border: '1px solid #000', padding: '6px 4px', lineHeight: '1.2' }}>&nbsp;</td>
-                              <td style={{ border: '1px solid #000', padding: '6px 4px', lineHeight: '1.2' }}>&nbsp;</td>
-                              <td style={{ border: '1px solid #000', padding: '6px 4px', lineHeight: '1.2' }}>&nbsp;</td>
+                            <tr key={i} style={{ height: '24px' }}>
+                              <td style={{ border: '1px solid #000000', padding: '0' }}>&nbsp;</td>
+                              <td style={{ border: '1px solid #000000', padding: '0' }}>&nbsp;</td>
+                              <td style={{ border: '1px solid #000000', padding: '0' }}>&nbsp;</td>
+                              <td style={{ border: '1px solid #000000', padding: '0' }}>&nbsp;</td>
+                              <td style={{ border: '1px solid #000000', padding: '0' }}>&nbsp;</td>
                             </tr>
                           );
                         }
@@ -1157,9 +1201,9 @@ export default function POSPage() {
                       return (
                         <>
                           {rows}
-                          <tr>
-                            <td colSpan={4} style={{ border: '1px solid #000', padding: '6px 4px', backgroundColor: '#fffacd', textAlign: 'right', fontWeight: 'bold', color: '#000', lineHeight: '1.2' }}>Total | សរុប</td>
-                            <td style={{ border: '1px solid #000', padding: '6px 4px', backgroundColor: '#fffacd', textAlign: 'center', fontWeight: 'bold', color: '#000', lineHeight: '1.2' }}>{grandTotal.toLocaleString('en-US')}</td>
+                          <tr style={{ height: '26px' }}>
+                            <td colSpan={4} style={{ border: '1px solid #000000', padding: '0 6px', backgroundColor: '#fffacd', textAlign: 'right', verticalAlign: 'middle', fontWeight: 'bold', color: '#000000' }}>Total | សរុប</td>
+                            <td style={{ border: '1px solid #000000', padding: '0 4px', backgroundColor: '#fffacd', textAlign: 'center', verticalAlign: 'middle', fontWeight: 'bold', color: '#000000' }}>{grandTotal.toLocaleString('en-US')}</td>
                           </tr>
                         </>
                       );
@@ -1168,13 +1212,13 @@ export default function POSPage() {
                 </table>
 
                 {/* ABSOLUTE ALIGNMENT FOR HTML2CANVAS ACCURACY */}
-                <div style={{ position: 'relative', marginTop: '20px', fontSize: '12.5px', color: '#000', height: '80px' }}>
+                <div style={{ position: 'absolute', bottom: '24px', left: '24px', right: '24px' }}>
                    <div style={{ position: 'absolute', bottom: '0', left: '5%', textAlign: 'center', width: '150px' }}>
-                      <p style={{ margin: '0 0 35px 0' }}>ហត្ថលេខាអ្នកទិញ</p>
+                      <p style={{ margin: '0 0 45px 0' }}>ហត្ថលេខាអ្នកទិញ</p>
                       <div>...............................</div>
                    </div>
                    <div style={{ position: 'absolute', bottom: '0', left: '40%', textAlign: 'center', width: '150px' }}>
-                      <p style={{ margin: '0 0 35px 0' }}>ហត្ថលេខាអ្នកលក់</p>
+                      <p style={{ margin: '0 0 45px 0' }}>ហត្ថលេខាអ្នកលក់</p>
                       <div>...............................</div>
                    </div>
                    <div style={{ position: 'absolute', bottom: '0', right: '0', textAlign: 'right' }}>
