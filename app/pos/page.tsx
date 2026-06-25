@@ -323,7 +323,7 @@ export default function POSPage() {
   }
 
   return (
-    <div style={{ display: 'flex', height: '100vh', overflow: 'hidden', width: '100%', fontFamily: 'Arial, sans-serif', background: '#ffffff', boxSizing: 'border-box' }}>
+    <div style={{ display: 'flex', height: '100vh', overflow: 'hidden', width: '100%', fontFamily: 'Arial, sans-serif', background: '#ffffff', boxSizing: 'border-box', position: 'relative' }}>
       
       {/* MIDDLE GRID SELECTION ENGINE AREA */}
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', background: '#ffffff', minWidth: 0, height: '100%' }}>
@@ -413,6 +413,7 @@ export default function POSPage() {
                   </div>
                 )}
 
+                {/* CUSTOMER SEARCH TABLE DROPDOWN */}
                 {isCustomerDropdownOpen && (
                   <div style={{ position: 'absolute', top: '44px', left: 0, right: 0, background: '#fff', border: '1px solid #dcd7cc', borderRadius: '6px', maxHeight: '300px', overflowY: 'auto', zIndex: 100, boxShadow: '0 4px 12px rgba(0,0,0,0.15)' }}>
                     <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '13px' }}>
@@ -453,7 +454,7 @@ export default function POSPage() {
         </div>
 
         {/* TILES RENDER ELEMENT CONTAINER VIEWPORT */}
-        <div style={{ flex: 1, padding: '20px 20px 20px 75px', overflowY: 'auto', background: '#ffffff' }}>
+        <div style={{ flex: 1, padding: '20px 20px 20px 75px', overflowY: 'auto', background: '#ffffff', paddingBottom: '100px' }}>
           {filteredProducts.length === 0 ? (
             <div style={{ textAlign: 'center', padding: '40px', color: '#8a7650' }}>{currentT.noProducts}</div>
           ) : (
@@ -555,6 +556,14 @@ export default function POSPage() {
         </div>
       </div>
 
+      {/* MOBILE FLOATING CART BUTTON */}
+      {cart.length > 0 && !isMobileCartOpen && !completedSale && (
+        <div className="mobile-fab" onClick={() => setIsMobileCartOpen(true)}>
+          <div style={{ fontSize: '16px', fontWeight: 'bold' }}>🛒 View Cart ({cart.length})</div>
+          <div style={{ fontSize: '16px', fontWeight: 'bold' }}>{formatRielFromNative(totalRiel)} &nbsp; ➔</div>
+        </div>
+      )}
+
       {/* SMARTPHONE OVERLAY MODAL: ADJUST ON CLICK QUANTITIES */}
       {selectedMobileProduct && (
         <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', background: 'rgba(0,0,0,0.5)', zIndex: 9999, display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '20px', boxSizing: 'border-box' }}>
@@ -588,7 +597,8 @@ export default function POSPage() {
       {/* SMARTPHONE CORE OVERLAY DRAWER PANEL */}
       {isMobileCartOpen && (
         <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', background: 'rgba(0,0,0,0.4)', zIndex: 999, display: 'flex', justifyContent: 'flex-end' }}>
-          <div style={{ width: '85%', maxWidth: '360px', height: '100%', background: '#ffffff', display: 'flex', flexDirection: 'column' }}>
+          {/* LOCK DRAWER HEIGHT AND MAKE IT RENDER INNER STICKY LAYOUTS */}
+          <div style={{ width: '85%', maxWidth: '360px', height: '100%', background: '#ffffff', display: 'flex', flexDirection: 'column', position: 'relative' }}>
             <div style={{ padding: '16px', borderBottom: '1px solid #e5e7eb', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#fcfbfa', flexShrink: 0 }}>
               <h3 style={{ margin: 0, color: '#4a3b1b' }}>{currentT.cartTitle} ({cart.length})</h3>
               <button onClick={() => setIsMobileCartOpen(false)} style={{ background: 'none', border: 'none', fontSize: '20px' }}>✕</button>
@@ -610,20 +620,25 @@ export default function POSPage() {
                       <input type="number" value={item.quantity} onChange={(e) => updateCartItem(item.id, 'quantity', parseInt(e.target.value) || 1)} style={{ width: '100%', padding: '8px', fontSize: '13px', borderRadius: '6px', border: '1px solid #dcd7cc', boxSizing: 'border-box' }} />
                     </div>
                   </div>
-                  <div style={{ textAlign: 'right', fontSize: '12px', fontWeight: 'bold', color: '#b58a3d', marginTop: '8px' }}>{formatRielFromNative(item.custom_price_riel * item.quantity)}</div>
+                  <div style={{ textAling: 'right', fontSize: '12px', fontWeight: 'bold', color: '#b58a3d', marginTop: '8px' }}>{formatRielFromNative(item.custom_price_riel * item.quantity)}</div>
                 </div>
               ))}
             </div>
 
-            <div style={{ position: 'sticky', bottom: 0, padding: '16px', borderTop: '1px solid #e5e7eb', background: '#fcfbfa', flexShrink: 0, zIndex: 10 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '12px' }}>
-                <span style={{ fontWeight: 'bold' }}>{currentT.totalKhmer}</span>
+            {/* FIXED FOR MOBILE PHONE: Forced absolute sticky bottom anchoring to lock view totals & checkout element */}
+            <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, padding: '16px', borderTop: '1px solid #e5e7eb', background: '#fcfbfa', flexShrink: 0, zIndex: 1010, boxSkyShadow: '0 -4px 10px rgba(0,0,0,0.05)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                <span style={{ fontWeight: 'bold', fontSize: '14px' }}>{currentT.totalKhmer}</span>
                 <span style={{ fontWeight: 'bold', color: '#b58a3d', fontSize: '18px' }}>{formatRielFromNative(totalRiel)}</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '12px' }}>
+                <span style={{ fontSize: '11px', color: '#8a7650' }}>{currentT.totalUsd}</span>
+                <span style={{ fontWeight: 'bold', color: '#4a3b1b', fontSize: '13px' }}>{formatUSD(totalUSD)}</span>
               </div>
               <button 
                 onClick={checkout} 
                 disabled={cart.length === 0 || isProcessing}
-                style={{ width: '100%', padding: '12px', background: (cart.length === 0 || isProcessing) ? '#dcd7cc' : '#10b981', color: '#fff', border: 'none', borderRadius: '6px', fontWeight: 'bold' }}
+                style={{ width: '100%', padding: '14px', background: (cart.length === 0 || isProcessing) ? '#dcd7cc' : '#10b981', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 'bold', fontSize: '15px', cursor: 'pointer' }}
               >
                 {isProcessing ? 'Processing...' : currentT.checkout}
               </button>
@@ -694,20 +709,35 @@ export default function POSPage() {
                 <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '4px', fontSize: '12.5px', tableLayout: 'fixed' }}>
                   <thead>
                     <tr>
-                      <th style={{ border: '1px solid #000', padding: '6px 3px', background: '#fffacd', fontWeight: 'bold', width: '5%', textAlign: 'center', verticalAlign: 'middle' }}>
-                        No.<br/>ល.រ
+                      <th style={{ border: '1px solid #000', padding: 0, background: '#fffacd', width: '5%' }}>
+                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '6px 3px' }}>
+                          <span style={{ fontWeight: 'bold' }}>No.</span>
+                          <span style={{ fontWeight: 'bold' }}>ល.រ</span>
+                        </div>
                       </th>
-                      <th style={{ border: '1px solid #000', padding: '6px 3px', background: '#fffacd', fontWeight: 'bold', width: '40%', textAlign: 'center', verticalAlign: 'middle' }}>
-                        Item Descriptions<br/>រាយឈ្មោះទំនិញ
+                      <th style={{ border: '1px solid #000', padding: 0, background: '#fffacd', width: '40%' }}>
+                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '6px 3px' }}>
+                          <span style={{ fontWeight: 'bold' }}>Item Descriptions</span>
+                          <span style={{ fontWeight: 'bold' }}>រាយឈ្មោះទំនិញ</span>
+                        </div>
                       </th>
-                      <th style={{ border: '1px solid #000', padding: '6px 3px', background: '#fffacd', fontWeight: 'bold', width: '15%', textAlign: 'center', verticalAlign: 'middle' }}>
-                        Quantity<br/>ចំនួន
+                      <th style={{ border: '1px solid #000', padding: 0, background: '#fffacd', width: '15%' }}>
+                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '6px 3px' }}>
+                          <span style={{ fontWeight: 'bold' }}>Quantity</span>
+                          <span style={{ fontWeight: 'bold' }}>ចំនួន</span>
+                        </div>
                       </th>
-                      <th style={{ border: '1px solid #000', padding: '6px 3px', background: '#fffacd', fontWeight: 'bold', width: '15%', textAlign: 'center', verticalAlign: 'middle' }}>
-                        Unit Price<br/>តម្លៃរាយ
+                      <th style={{ border: '1px solid #000', padding: 0, background: '#fffacd', width: '15%' }}>
+                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '6px 3px' }}>
+                          <span style={{ fontWeight: 'bold' }}>Unit Price</span>
+                          <span style={{ fontWeight: 'bold' }}>តម្លៃរាយ</span>
+                        </div>
                       </th>
-                      <th style={{ border: '1px solid #000', padding: '6px 3px', background: '#fffacd', fontWeight: 'bold', width: '25%', textAlign: 'center', verticalAlign: 'middle' }}>
-                        Subtotal<br/>តម្លៃសរុប
+                      <th style={{ border: '1px solid #000', padding: 0, background: '#fffacd', width: '25%' }}>
+                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '6px 3px' }}>
+                          <span style={{ fontWeight: 'bold' }}>Subtotal</span>
+                          <span style={{ fontWeight: 'bold' }}>តម្លៃសរុប</span>
+                        </div>
                       </th>
                     </tr>
                   </thead>
@@ -725,22 +755,22 @@ export default function POSPage() {
                           grandTotal += item.total;
                           const isCenter = item.custom_name.includes('ដូរ') || item.custom_name.includes('បញ្ចុះតម្លៃ') || item.custom_name.includes('កក់') || item.custom_name.includes('សេវាឡាន (អតិថិជន)');
                           rows.push(
-                            <tr key={i} style={{ height: '16px' }}>
-                              <td style={{ border: '1px solid #000', padding: '6px 3px', textAlign: 'center', verticalAlign: 'middle', lineHeight: '1.5' }}>{i + 1}</td>
-                              <td style={{ border: '1px solid #000', padding: '6px 3px', textAlign: isCenter ? 'center' : 'left', verticalAlign: 'middle', lineHeight: '1.5' }}>{item.custom_name}</td>
-                              <td style={{ border: '1px solid #000', padding: '6px 3px', textAlign: 'center', verticalAlign: 'middle', lineHeight: '1.5' }}>{item.quantity.toLocaleString('en-US')}</td>
-                              <td style={{ border: '1px solid #000', padding: '6px 3px', textAlign: 'center', verticalAlign: 'middle', lineHeight: '1.5' }}>{item.custom_price_riel.toLocaleString('en-US')}</td>
-                              <td style={{ border: '1px solid #000', padding: '6px 3px', textAlign: 'center', verticalAlign: 'middle', color: item.total < 0 ? 'red' : 'inherit', lineHeight: '1.5' }}>{item.total.toLocaleString('en-US')}</td>
+                            <tr key={i} style={{ height: '26px' }}>
+                              <td style={{ border: '1px solid #000', padding: 0, height: '26px' }}><div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', padding: '0 3px' }}>{i + 1}</div></td>
+                              <td style={{ border: '1px solid #000', padding: 0, height: '26px' }}><div style={{ display: 'flex', alignItems: 'center', justifyContent: isCenter ? 'center' : 'flex-start', height: '100%', padding: '0 3px' }}>{item.custom_name}</div></td>
+                              <td style={{ border: '1px solid #000', padding: 0, height: '26px' }}><div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', padding: '0 3px' }}>{item.quantity.toLocaleString('en-US')}</div></td>
+                              <td style={{ border: '1px solid #000', padding: 0, height: '26px' }}><div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', padding: '0 3px' }}>{item.custom_price_riel.toLocaleString('en-US')}</div></td>
+                              <td style={{ border: '1px solid #000', padding: 0, height: '26px' }}><div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', padding: '0 3px', color: item.total < 0 ? 'red' : 'inherit' }}>{item.total.toLocaleString('en-US')}</div></td>
                             </tr>
                           );
                         } else {
                           rows.push(
-                            <tr key={i} style={{ height: '16px' }}>
-                              <td style={{ border: '1px solid #000', padding: '6px 3px', lineHeight: '1.5' }}>&nbsp;</td>
-                              <td style={{ border: '1px solid #000', padding: '6px 3px', lineHeight: '1.5' }}>&nbsp;</td>
-                              <td style={{ border: '1px solid #000', padding: '6px 3px', lineHeight: '1.5' }}>&nbsp;</td>
-                              <td style={{ border: '1px solid #000', padding: '6px 3px', lineHeight: '1.5' }}>&nbsp;</td>
-                              <td style={{ border: '1px solid #000', padding: '6px 3px', lineHeight: '1.5' }}>&nbsp;</td>
+                            <tr key={i} style={{ height: '26px' }}>
+                              <td style={{ border: '1px solid #000', padding: 0, height: '26px' }}>&nbsp;</td>
+                              <td style={{ border: '1px solid #000', padding: 0, height: '26px' }}>&nbsp;</td>
+                              <td style={{ border: '1px solid #000', padding: '0 3px', height: '26px' }}>&nbsp;</td>
+                              <td style={{ border: '1px solid #000', padding: '0 3px', height: '26px' }}>&nbsp;</td>
+                              <td style={{ border: '1px solid #000', padding: '0 3px', height: '26px' }}>&nbsp;</td>
                             </tr>
                           );
                         }
@@ -748,9 +778,13 @@ export default function POSPage() {
                       return (
                         <>
                           {rows}
-                          <tr>
-                            <td colSpan={4} style={{ border: '1px solid #000', padding: '6px 3px', background: '#fffacd', fontWeight: 'bold', textAlign: 'right', verticalAlign: 'middle', lineHeight: '1.5' }}>Total | សរុប</td>
-                            <td style={{ border: '1px solid #000', padding: '6px 3px', background: '#fffacd', fontWeight: 'bold', textAlign: 'center', verticalAlign: 'middle', lineHeight: '1.5' }}>{grandTotal.toLocaleString('en-US')}</td>
+                          <tr style={{ height: '26px' }}>
+                            <td colSpan={4} style={{ border: '1px solid #000', padding: 0, background: '#fffacd', height: '26px' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', height: '100%', padding: '0 3px', fontWeight: 'bold' }}>Total | សរុប</div>
+                            </td>
+                            <td style={{ border: '1px solid #000', padding: 0, background: '#fffacd', height: '26px' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', padding: '0 3px', fontWeight: 'bold' }}>{grandTotal.toLocaleString('en-US')}</div>
+                            </td>
                           </tr>
                         </>
                       );
@@ -759,11 +793,11 @@ export default function POSPage() {
                 </table>
 
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginTop: '16px', fontSize: '12.5px' }}>
-                  <div style={{ textAlign: 'center', width: '30%' }}>
+                  <div style={{ textAling: 'center', width: '30%' }}>
                     <p style={{ margin: 0 }}>ហត្ថលេខាអ្នកទិញ</p>
                     <div style={{ marginTop: '30px' }}>...............................</div>
                   </div>
-                  <div style={{ textAlign: 'center', width: '30%' }}>
+                  <div style={{ textAling: 'center', width: '30%' }}>
                     <p style={{ margin: 0 }}>ហត្ថលេខាអ្នកលក់</p>
                     <div style={{ marginTop: '30px' }}>...............................</div>
                   </div>
@@ -780,7 +814,30 @@ export default function POSPage() {
         </div>
       )}
 
-      <style jsx global>{`@media (max-width: 1023px) { .desktop-cart-panel { display: none !important; } }`}</style>
+      <style jsx global>{`
+        .mobile-fab {
+          display: none;
+        }
+        @media (max-width: 1023px) { 
+          .desktop-cart-panel { display: none !important; } 
+          .mobile-fab {
+            display: flex !important;
+            justify-content: space-between;
+            align-items: center;
+            position: fixed;
+            bottom: 20px;
+            left: 20px;
+            right: 20px;
+            background: #10b981;
+            color: white;
+            padding: 16px 20px;
+            border-radius: 12px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+            z-index: 998;
+            cursor: pointer;
+          }
+        }
+      `}</style>
     </div>
   )
 }
