@@ -1,13 +1,11 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { supabase } from '@/lib/supabaseClient'
-import Link from 'next/link'
+import html2canvas from 'html2canvas'
 
 // Constants
 const EXCHANGE_RATE = 4000;
-const PDFMONKEY_API_KEY = 'mxP6zZCbyNJb1x5t4-ft';
-const PDFMONKEY_TEMPLATE_ID = '6CBCBF33-56C3-46E5-BCD2-D8B3EF6FFDD6';
 
 // Translations Dictionary
 const t = {
@@ -76,10 +74,27 @@ export default function POSPage() {
   const [mobileQty, setMobileQty] = useState<number>(1)
   const [mobileName, setMobileName] = useState<string>('')
 
+  // INVOICE MODAL STATE
+  const [completedSale, setCompletedSale] = useState<any>(null)
+  const [isUploadingImage, setIsUploadingImage] = useState(false)
+  const [isDownloading, setIsDownloading] = useState(false) 
+  const [hasAutoSaved, setHasAutoSaved] = useState(false)
+  const invoiceRef = useRef<HTMLDivElement>(null)
+
   useEffect(() => {
     loadProducts()
     loadCustomers()
   }, [])
+
+  // AUTO-SAVE LISTENER
+  useEffect(() => {
+    if (completedSale && !hasAutoSaved && !isUploadingImage) {
+      const timer = setTimeout(() => {
+        executeAutoSaveOnly();
+      }, 800); 
+      return () => clearTimeout(timer);
+    }
+  }, [completedSale, hasAutoSaved, isUploadingImage])
 
   async function loadProducts() {
     const { data } = await supabase.from('products').select('*').order('id', { ascending: true })
@@ -167,15 +182,14 @@ export default function POSPage() {
     return matchesSearch && weightVal < 50
   })
 
-  // Customer Filtering logic
   const filteredCustomers = customers.filter(c => 
-    c.name.toLowerCase().includes(customerSearchTerm.toLowerCase()) || 
-    c.phone.includes(customerSearchTerm)
+    (c.name || '').toLowerCase().includes(customerSearchTerm.toLowerCase()) || 
+    (c.phone || '').includes(customerSearchTerm)
   )
 
-  const selectedCustomer = customers.find(c => c.id === selectedCustomerId)
+  const selectedCustomer = customers.find(c => c.id.toString() === selectedCustomerId.toString())
 
-  // --- SEAMLESS CHECKOUT LOGIC ---
+  // --- SEAMLESS CHECKOUT LOGIC WITH POPUP INVOICE ---
   async function checkout() {
     if (cart.length === 0) {
       alert(lang === 'kh' ? 'សូមជ្រើសរើសទំនិញក្នុងកន្ត្រក!' : 'Cart is empty')
@@ -187,15 +201,12 @@ export default function POSPage() {
     }
 
     setIsProcessing(true)
+    setHasAutoSaved(false)
 
     try {
-      const { data: invoiceNo, error: invoiceError } = await supabase.rpc('generate_invoice_no')
-      if (invoiceError) throw invoiceError
-
       const { data: sale, error: saleError } = await supabase
         .from('sales')
         .insert([{
-          invoice_no: invoiceNo,
           total_amount: totalUSD,
           payment_method: 'cash',
           payment_status: 'paid',
@@ -220,56 +231,20 @@ export default function POSPage() {
         })
       }
 
-      let downloadUrl = null;
-      try {
-        const currentDate = new Date()
-        const formattedDate = `${String(currentDate.getDate()).padStart(2, '0')}-${String(currentDate.getMonth() + 1).padStart(2, '0')}-${currentDate.getFullYear()}`
+      const currentDate = new Date()
+      const displayInvoiceNo = `INV-${sale.id.toString().padStart(6, '0')}`
 
-        const pdfMonkeyPayload = {
-          document: {
-            document_template_id: PDFMONKEY_TEMPLATE_ID,
-            payload: {
-              invoice_number: invoiceNo,
-              date: formattedDate,
-              customer_name: activeTab === 'wholesale' && selectedCustomer ? selectedCustomer.name : 'General Retail Customer',
-              customer_phone: activeTab === 'wholesale' && selectedCustomer ? selectedCustomer.phone : 'N/A',
-              customer_location: activeTab === 'wholesale' && selectedCustomer ? selectedCustomer.location : 'Store Walk-in',
-              total_usd: formatUSD(totalUSD),
-              total_riel: formatRielFromNative(totalRiel),
-              items: cart.map(item => ({
-                name: item.custom_name,
-                qty: item.quantity,
-                price_usd: formatUSD(item.custom_price_riel / EXCHANGE_RATE),
-                subtotal_usd: formatUSD((item.custom_price_riel * item.quantity) / EXCHANGE_RATE),
-                subtotal_riel: formatRielFromNative(item.custom_price_riel * item.quantity)
-              }))
-            },
-            status: 'pending'
-          }
+      setCompletedSale({
+        invoiceNo: displayInvoiceNo,
+        saleId: sale.id,
+        cartSnapshot: [...cart],
+        customer: selectedCustomer,
+        dateObj: { 
+          day: String(currentDate.getDate()).padStart(2, '0'), 
+          month: String(currentDate.getMonth() + 1).padStart(2, '0'), 
+          year: currentDate.getFullYear() 
         }
-
-        const pdfResponse = await fetch('https://api.pdfmonkey.io/api/v1/documents', {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${PDFMONKEY_API_KEY}`,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify(pdfMonkeyPayload)
-        })
-        
-        if (pdfResponse.ok) {
-          const pdfData = await pdfResponse.json()
-          downloadUrl = pdfData?.document?.download_url
-        }
-      } catch (pdfError) {
-        console.error("PDF generation failed, but sale was recorded:", pdfError)
-      }
-
-      alert(lang === 'kh' ? `ការលក់បានជោគជ័យ! លេខវិក្កយបត្រ: ${invoiceNo}` : `Sale completed successfully! Invoice: ${invoiceNo}`)
-      
-      if (downloadUrl) {
-        window.open(downloadUrl, '_blank')
-      }
+      })
 
       setCart([])
       setIsMobileCartOpen(false)
@@ -282,10 +257,72 @@ export default function POSPage() {
     }
   }
 
+  // --- AUTO SAVE TO GALLERY LOGIC ---
+  async function executeAutoSaveOnly() {
+    if (!invoiceRef.current || !completedSale) return;
+    setIsUploadingImage(true);
+
+    try {
+      const canvas = await html2canvas(invoiceRef.current, { scale: 3, useCORS: true, allowTaint: true, backgroundColor: '#ffffff' });
+
+      // AUTO-UPLOAD TO SUPABASE GALLERY ONLY
+      const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/jpeg', 1.0)); // 1.0 Max Quality
+      if (blob) {
+        const fileName = `${completedSale.invoiceNo}-${Date.now()}.jpg`;
+        const { error: uploadError } = await supabase.storage.from('invoices').upload(fileName, blob, { contentType: 'image/jpeg' });
+        
+        if (!uploadError) {
+          const { data: publicUrlData } = supabase.storage.from('invoices').getPublicUrl(fileName);
+          await supabase.from('sales').update({ invoice_url: publicUrlData.publicUrl }).eq('id', completedSale.saleId);
+        } else {
+          console.warn("Storage upload issue (check your RLS policies):", uploadError);
+        }
+      }
+    } catch (error: any) {
+      console.error("Auto-capture failed:", error);
+    } finally {
+      setIsUploadingImage(false);
+      setHasAutoSaved(true);
+    }
+  }
+
+  // MANUAL DOWNLOAD LOGIC
+  async function handleManualDownload() {
+    if (!invoiceRef.current || !completedSale) return;
+    setIsDownloading(true);
+
+    try {
+      const canvas = await html2canvas(invoiceRef.current, { scale: 3, useCORS: true, allowTaint: true, backgroundColor: '#ffffff' });
+      const dataUrl = canvas.toDataURL('image/jpeg', 1.0);
+
+      const link = document.createElement('a');
+      link.download = `${completedSale.invoiceNo}.jpg`;
+      link.href = dataUrl;
+      link.click();
+    } catch (error: any) {
+      console.error("Download failed:", error);
+    } finally {
+      setIsDownloading(false);
+    }
+  }
+
   const currentT = t[lang];
 
+  const getCategorizedItems = (cartItems: any[]) => {
+    let normalItems: any[] = [], specialItems: any[] = [], negativeItems: any[] = [], serviceItems: any[] = [];
+    cartItems.forEach(item => {
+      const desc = item.custom_name;
+      const total = item.custom_price_riel * item.quantity;
+      if (desc.includes('សេវាឡាន (អតិថិជន)')) serviceItems.push({ ...item, total: total });
+      else if (desc.includes('សេវាឡាន')) { /* skip hidden */ }
+      else if (desc.includes('ដូរ') || desc.includes('បញ្ចុះតម្លៃ') || desc.includes('កក់')) negativeItems.push({ ...item, total: -total });
+      else if (desc.includes('ថ្លៃបាវ')) specialItems.push({ ...item, total: total });
+      else normalItems.push({ ...item, total: total });
+    });
+    return [...normalItems, ...specialItems, ...negativeItems, ...serviceItems];
+  }
+
   return (
-    // Fixed layout height to exactly 100vh so scrolling stays locked to individual areas
     <div style={{ display: 'flex', height: '100vh', overflow: 'hidden', width: '100%', fontFamily: 'Arial, sans-serif', background: '#ffffff', boxSizing: 'border-box' }}>
       
       {/* MIDDLE GRID SELECTION ENGINE AREA */}
@@ -330,7 +367,7 @@ export default function POSPage() {
             </button>
           </div>
 
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px', alignItems: 'center' }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px', alignItems: 'flex-start' }}>
             <div style={{ flex: 1, minWidth: '240px' }}>
               <input 
                 type="text"
@@ -343,7 +380,7 @@ export default function POSPage() {
 
             {/* NEW SEARCHABLE CUSTOMER DROPDOWN */}
             {activeTab === 'wholesale' && (
-              <div style={{ flex: 1, minWidth: '240px', position: 'relative' }}>
+              <div style={{ flex: 1, minWidth: '300px', position: 'relative' }}>
                 <input
                   type="text"
                   placeholder={currentT.selectCustomer}
@@ -357,26 +394,57 @@ export default function POSPage() {
                   onBlur={() => setTimeout(() => setIsCustomerDropdownOpen(false), 200)}
                   style={{ width: '100%', padding: '10px 14px', borderRadius: '6px', border: '1px solid #dcd7cc', outline: 'none', fontSize: '14px', color: '#4a3b1b', boxSizing: 'border-box', background: '#fff' }}
                 />
+
+                {/* INVOICE DETAILS PREVIEW BOX + RED CROSS CLEAR BUTTON */}
+                {selectedCustomer && !isCustomerDropdownOpen && (
+                  <div style={{ width: '100%', marginTop: '10px', padding: '12px', background: '#fefcf3', border: '1px solid #eadeca', borderRadius: '6px', fontSize: '13px', color: '#4a3b1b', position: 'relative' }}>
+                    <button 
+                      onClick={() => { setSelectedCustomerId(''); setCustomerSearchTerm(''); }} 
+                      style={{ position: 'absolute', top: '6px', right: '6px', background: 'none', border: 'none', cursor: 'pointer', fontSize: '14px' }}
+                      title="Clear Customer"
+                    >
+                      ❌
+                    </button>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '10px', paddingRight: '20px' }}>
+                      <div><strong style={{ color: '#8a7650', fontSize: '11px', display: 'block', marginBottom: '2px' }}>👤 NAME</strong>{selectedCustomer.name}</div>
+                      <div><strong style={{ color: '#8a7650', fontSize: '11px', display: 'block', marginBottom: '2px' }}>📞 PHONE</strong>{selectedCustomer.phone || '-'}</div>
+                      <div><strong style={{ color: '#8a7650', fontSize: '11px', display: 'block', marginBottom: '2px' }}>📍 LOCATION</strong>{selectedCustomer.location || '-'}</div>
+                    </div>
+                  </div>
+                )}
+
                 {isCustomerDropdownOpen && (
-                  <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, marginTop: '4px', background: '#fff', border: '1px solid #dcd7cc', borderRadius: '6px', maxHeight: '250px', overflowY: 'auto', zIndex: 100, boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}>
-                    {filteredCustomers.map(c => (
-                      <div
-                        key={c.id}
-                        onClick={() => {
-                          setSelectedCustomerId(c.id)
-                          setCustomerSearchTerm(`${c.name} - ${c.phone}`)
-                          setIsCustomerDropdownOpen(false)
-                        }}
-                        style={{ padding: '10px 12px', cursor: 'pointer', borderBottom: '1px solid #f3f4f6', fontSize: '14px', color: '#4a3b1b' }}
-                        onMouseEnter={e => e.currentTarget.style.background = '#f4f1ea'}
-                        onMouseLeave={e => e.currentTarget.style.background = '#fff'}
-                      >
-                        {c.name} - {c.phone}
-                      </div>
-                    ))}
-                    {filteredCustomers.length === 0 && (
-                      <div style={{ padding: '10px 12px', fontSize: '14px', color: '#8a7650', fontStyle: 'italic' }}>No customers found</div>
-                    )}
+                  <div style={{ position: 'absolute', top: '44px', left: 0, right: 0, background: '#fff', border: '1px solid #dcd7cc', borderRadius: '6px', maxHeight: '300px', overflowY: 'auto', zIndex: 100, boxShadow: '0 4px 12px rgba(0,0,0,0.15)' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '13px' }}>
+                      <thead style={{ background: '#f8fafc', position: 'sticky', top: 0, zIndex: 2 }}>
+                        <tr>
+                          <th style={{ padding: '8px 12px', borderBottom: '1px solid #e2e8f0', color: '#64748b' }}>Name</th>
+                          <th style={{ padding: '8px 12px', borderBottom: '1px solid #e2e8f0', color: '#64748b' }}>Phone</th>
+                          <th style={{ padding: '8px 12px', borderBottom: '1px solid #e2e8f0', color: '#64748b' }}>Location</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filteredCustomers.map(c => (
+                          <tr 
+                            key={c.id} 
+                            onMouseDown={(e) => { 
+                              e.preventDefault(); 
+                              setSelectedCustomerId(c.id.toString()); 
+                              setCustomerSearchTerm(c.name); 
+                              setIsCustomerDropdownOpen(false); 
+                            }} 
+                            style={{ cursor: 'pointer', borderBottom: '1px solid #f3f4f6', color: '#4a3b1b' }}
+                            onMouseEnter={e => e.currentTarget.style.background = '#fefcf3'}
+                            onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                          >
+                            <td style={{ padding: '10px 12px', fontWeight: 'bold' }}>{c.name}</td>
+                            <td style={{ padding: '10px 12px' }}>{c.phone || '-'}</td>
+                            <td style={{ padding: '10px 12px', color: '#64748b' }}>{c.location || '-'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    {filteredCustomers.length === 0 && <div style={{ padding: '10px 12px', fontSize: '14px', color: '#8a7650', fontStyle: 'italic' }}>No customers found</div>}
                   </div>
                 )}
               </div>
@@ -418,7 +486,7 @@ export default function POSPage() {
       {/* DESKTOP SYSTEM SIDEBAR SHOPPING CART */}
       <div 
         className="desktop-cart-panel"
-        style={{ width: '380px', background: '#ffffff', borderLeft: '1px solid #e5e7eb', display: 'flex', flexDirection: 'column', height: '100%' }}
+        style={{ width: '380px', background: '#ffffff', borderLeft: '1px solid #e5e7eb', display: 'flex', flexDirection: 'column', height: '100vh', position: 'sticky', top: 0 }}
       >
         <div style={{ padding: '16px 20px', borderBottom: '1px solid #f3f4f6', background: '#fcfbfa', flexShrink: 0 }}>
           <h2 style={{ fontSize: '16px', margin: 0, fontWeight: 'bold', color: '#4a3b1b' }}>{currentT.cartTitle} ({cart.length})</h2>
@@ -468,8 +536,7 @@ export default function POSPage() {
           )}
         </div>
 
-        {/* ALWAYS-VISIBLE CHECKOUT ANCHOR */}
-        <div style={{ padding: '16px 20px', borderTop: '1px solid #e5e7eb', background: '#fcfbfa', flexShrink: 0, boxShadow: '0 -4px 10px rgba(0,0,0,0.02)' }}>
+        <div style={{ position: 'sticky', bottom: 0, padding: '16px 20px', borderTop: '1px solid #e5e7eb', background: '#fcfbfa', flexShrink: 0, zIndex: 10, boxShadow: '0 -4px 10px rgba(0,0,0,0.02)' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '4px' }}>
             <span style={{ fontSize: '14px', fontWeight: 'bold', color: '#4a3b1b' }}>{currentT.totalKhmer}</span>
             <span style={{ fontSize: '20px', fontWeight: 'bold', color: '#b58a3d' }}>{formatRielFromNative(totalRiel)}</span>
@@ -548,7 +615,7 @@ export default function POSPage() {
               ))}
             </div>
 
-            <div style={{ padding: '16px', borderTop: '1px solid #e5e7eb', background: '#fcfbfa', flexShrink: 0 }}>
+            <div style={{ position: 'sticky', bottom: 0, padding: '16px', borderTop: '1px solid #e5e7eb', background: '#fcfbfa', flexShrink: 0, zIndex: 10 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '12px' }}>
                 <span style={{ fontWeight: 'bold' }}>{currentT.totalKhmer}</span>
                 <span style={{ fontWeight: 'bold', color: '#b58a3d', fontSize: '18px' }}>{formatRielFromNative(totalRiel)}</span>
@@ -565,16 +632,155 @@ export default function POSPage() {
         </div>
       )}
 
-      <style jsx global>{`
-        @media (max-width: 1023px) {
-          .desktop-cart-panel {
-            display: none !important;
-          }
-          .mobile-cart-badge-trigger {
-            display: block !important;
-          }
-        }
-      `}</style>
+      {/* INVOICE CAPTURE OVERLAY MODAL */}
+      {completedSale && (
+        <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', background: 'rgba(0,0,0,0.85)', zIndex: 10000, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+          
+          <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%', maxWidth: '850px', marginBottom: '16px', padding: '0 20px' }}>
+            <button onClick={() => setCompletedSale(null)} style={{ background: '#dc2626', color: '#fff', border: 'none', padding: '10px 20px', borderRadius: '8px', fontSize: '16px', fontWeight: 'bold', cursor: 'pointer' }}>Close Window</button>
+            
+            <div style={{ display: 'flex', gap: '10px' }}>
+              <button 
+                onClick={handleManualDownload} 
+                disabled={isDownloading} 
+                style={{ background: '#3b82f6', color: '#fff', border: 'none', padding: '10px 20px', borderRadius: '8px', fontSize: '16px', fontWeight: 'bold', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px' }}
+              >
+                {isDownloading ? '⏳ Compiling...' : '⬇️ Download / Save to Photo'}
+              </button>
+              
+              <div style={{ background: '#10b981', color: '#fff', padding: '10px 24px', borderRadius: '8px', fontSize: '16px', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                {isUploadingImage ? '⏳ Auto-Saving...' : '✅ Saved to Gallery!'}
+              </div>
+            </div>
+          </div>
+
+          <div style={{ overflowY: 'auto', maxHeight: '80vh', padding: '10px' }}>
+            <div id="invoice-capture-area" ref={invoiceRef} style={{ 
+              width: '794px',
+              minHeight: '559px',
+              background: '#ffffff', 
+              position: 'relative',
+              padding: '20px',
+              boxSizing: 'border-box',
+              fontFamily: "'Noto Sans Khmer', Arial, sans-serif",
+              color: '#000',
+              lineHeight: '1.5'
+            }}>
+              <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Khmer&display=swap" rel="stylesheet" />
+              
+              <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', backgroundImage: "url('https://i.imgur.com/XUsrp9D.png')", backgroundRepeat: 'no-repeat', backgroundPosition: 'center center', backgroundSize: '40%', opacity: 0.14, zIndex: 0, pointerEvents: 'none' }}></div>
+
+              <div style={{ position: 'relative', zIndex: 1 }}>
+                <div style={{ position: 'absolute', top: 0, left: 0, width: '60px', height: '70px' }}><img src="https://i.imgur.com/s0hg3MQ.png" style={{ width: '100%', height: '100%', display: 'block' }} crossOrigin="anonymous" /></div>
+                <div style={{ position: 'absolute', top: 0, right: 0, width: '85px', height: '75px' }}><img src="https://i.imgur.com/Guk0hVe.png" style={{ width: '95%', height: '100%', display: 'block' }} crossOrigin="anonymous" /></div>
+
+                <header style={{ textAlign: 'center', marginBottom: '14px', lineHeight: '1.2' }}>
+                  <h1 style={{ fontSize: '23px', margin: '0 0 2px 0', fontWeight: 'bold', color: 'green' }}>ដេប៉ូអង្ករ រ៉េឌៀន</h1>
+                  <p style={{ margin: '1px 0', fontSize: '12.5px', color: 'green' }}>មានបោះដុំ លក់រាយអង្ករដែលមានគុណភាពខ្ពស់គ្រប់ប្រភេទ និងមានទទួលវិចខ្ចប់អំណោយក្នុងតម្លៃសមរម្យ</p>
+                  <p style={{ margin: '1px 0', fontSize: '12.5px' }}>📲 077 797 798 / 📞 081 797 798 / 📞 088 97 97 798</p>
+                  <p style={{ margin: '1px 0', fontSize: '12.5px' }}>📍 ផ្ទះលេខ 72 ផ្លូវលំ សង្កាត់ស្ទឹងមានជ័យ1 ខណ្ឌមានជ័យ រាជធានីភ្នំពេញ</p>
+                </header>
+
+                <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '6px' }}>
+                  <tbody>
+                    <tr>
+                      <td style={{ fontSize: '12.5px', padding: '2px 3px', width: '33%' }}>ឈ្មោះអតិថិជន: <strong>{completedSale.customer?.name || 'Walk-in'}</strong></td>
+                      <td style={{ fontSize: '12.5px', padding: '2px 3px', width: '34%' }}>ទីតាំង: <strong>{completedSale.customer?.location || 'N/A'}</strong></td>
+                      <td style={{ fontSize: '12.5px', padding: '2px 3px', width: '33%' }}>លេខទូរសព្ទ: <strong>{completedSale.customer?.phone || 'N/A'}</strong></td>
+                    </tr>
+                  </tbody>
+                </table>
+
+                <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '4px', fontSize: '12.5px', tableLayout: 'fixed' }}>
+                  <thead>
+                    <tr>
+                      <th style={{ border: '1px solid #000', padding: '6px 3px', background: '#fffacd', fontWeight: 'bold', width: '5%', textAlign: 'center', verticalAlign: 'middle' }}>
+                        No.<br/>ល.រ
+                      </th>
+                      <th style={{ border: '1px solid #000', padding: '6px 3px', background: '#fffacd', fontWeight: 'bold', width: '40%', textAlign: 'center', verticalAlign: 'middle' }}>
+                        Item Descriptions<br/>រាយឈ្មោះទំនិញ
+                      </th>
+                      <th style={{ border: '1px solid #000', padding: '6px 3px', background: '#fffacd', fontWeight: 'bold', width: '15%', textAlign: 'center', verticalAlign: 'middle' }}>
+                        Quantity<br/>ចំនួន
+                      </th>
+                      <th style={{ border: '1px solid #000', padding: '6px 3px', background: '#fffacd', fontWeight: 'bold', width: '15%', textAlign: 'center', verticalAlign: 'middle' }}>
+                        Unit Price<br/>តម្លៃរាយ
+                      </th>
+                      <th style={{ border: '1px solid #000', padding: '6px 3px', background: '#fffacd', fontWeight: 'bold', width: '25%', textAlign: 'center', verticalAlign: 'middle' }}>
+                        Subtotal<br/>តម្លៃសរុប
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(() => {
+                      const displayItems = getCategorizedItems(completedSale.cartSnapshot);
+                      const rows = [];
+                      let grandTotal = 0;
+                      
+                      const maxRows = Math.max(10, displayItems.length);
+                      
+                      for (let i = 0; i < maxRows; i++) {
+                        const item = displayItems[i];
+                        if (item) {
+                          grandTotal += item.total;
+                          const isCenter = item.custom_name.includes('ដូរ') || item.custom_name.includes('បញ្ចុះតម្លៃ') || item.custom_name.includes('កក់') || item.custom_name.includes('សេវាឡាន (អតិថិជន)');
+                          rows.push(
+                            <tr key={i} style={{ height: '16px' }}>
+                              <td style={{ border: '1px solid #000', padding: '6px 3px', textAlign: 'center', verticalAlign: 'middle', lineHeight: '1.5' }}>{i + 1}</td>
+                              <td style={{ border: '1px solid #000', padding: '6px 3px', textAlign: isCenter ? 'center' : 'left', verticalAlign: 'middle', lineHeight: '1.5' }}>{item.custom_name}</td>
+                              <td style={{ border: '1px solid #000', padding: '6px 3px', textAlign: 'center', verticalAlign: 'middle', lineHeight: '1.5' }}>{item.quantity.toLocaleString('en-US')}</td>
+                              <td style={{ border: '1px solid #000', padding: '6px 3px', textAlign: 'center', verticalAlign: 'middle', lineHeight: '1.5' }}>{item.custom_price_riel.toLocaleString('en-US')}</td>
+                              <td style={{ border: '1px solid #000', padding: '6px 3px', textAlign: 'center', verticalAlign: 'middle', color: item.total < 0 ? 'red' : 'inherit', lineHeight: '1.5' }}>{item.total.toLocaleString('en-US')}</td>
+                            </tr>
+                          );
+                        } else {
+                          rows.push(
+                            <tr key={i} style={{ height: '16px' }}>
+                              <td style={{ border: '1px solid #000', padding: '6px 3px', lineHeight: '1.5' }}>&nbsp;</td>
+                              <td style={{ border: '1px solid #000', padding: '6px 3px', lineHeight: '1.5' }}>&nbsp;</td>
+                              <td style={{ border: '1px solid #000', padding: '6px 3px', lineHeight: '1.5' }}>&nbsp;</td>
+                              <td style={{ border: '1px solid #000', padding: '6px 3px', lineHeight: '1.5' }}>&nbsp;</td>
+                              <td style={{ border: '1px solid #000', padding: '6px 3px', lineHeight: '1.5' }}>&nbsp;</td>
+                            </tr>
+                          );
+                        }
+                      }
+                      return (
+                        <>
+                          {rows}
+                          <tr>
+                            <td colSpan={4} style={{ border: '1px solid #000', padding: '6px 3px', background: '#fffacd', fontWeight: 'bold', textAlign: 'right', verticalAlign: 'middle', lineHeight: '1.5' }}>Total | សរុប</td>
+                            <td style={{ border: '1px solid #000', padding: '6px 3px', background: '#fffacd', fontWeight: 'bold', textAlign: 'center', verticalAlign: 'middle', lineHeight: '1.5' }}>{grandTotal.toLocaleString('en-US')}</td>
+                          </tr>
+                        </>
+                      );
+                    })()}
+                  </tbody>
+                </table>
+
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginTop: '16px', fontSize: '12.5px' }}>
+                  <div style={{ textAlign: 'center', width: '30%' }}>
+                    <p style={{ margin: 0 }}>ហត្ថលេខាអ្នកទិញ</p>
+                    <div style={{ marginTop: '30px' }}>...............................</div>
+                  </div>
+                  <div style={{ textAlign: 'center', width: '30%' }}>
+                    <p style={{ margin: 0 }}>ហត្ថលេខាអ្នកលក់</p>
+                    <div style={{ marginTop: '30px' }}>...............................</div>
+                  </div>
+                  <div style={{ width: '30%', position: 'relative', height: '60px' }}>
+                    <span style={{ position: 'absolute', bottom: 0, right: 0, fontWeight: 'normal', whiteSpace: 'nowrap' }}>
+                      ថ្ងៃទី {completedSale.dateObj.day} ខែ {completedSale.dateObj.month} ឆ្នាំ {completedSale.dateObj.year}
+                    </span>
+                  </div>
+                </div>
+
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <style jsx global>{`@media (max-width: 1023px) { .desktop-cart-panel { display: none !important; } }`}</style>
     </div>
   )
 }
