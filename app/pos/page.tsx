@@ -63,14 +63,19 @@ function CartInput({ value, onChange, isQty }: { value: number, onChange: (val: 
   const [temp, setTemp] = useState(String(value));
 
   useEffect(() => {
-    if (!focused) setTemp(String(value));
-  }, [value, focused]);
+    if (!focused) {
+      setTemp(value === 0 && !isQty ? '' : String(value));
+    }
+  }, [value, focused, isQty]);
 
   return (
     <input 
       type="text"
-      value={focused ? temp : new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 }).format(value)}
-      onFocus={() => { setFocused(true); setTemp(String(value)); }}
+      value={focused ? temp : (value === 0 && !isQty ? '' : new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 }).format(value))}
+      onFocus={() => { 
+        setFocused(true); 
+        setTemp(''); 
+      }}
       onBlur={() => {
         setFocused(false);
         let parsed = parseFloat(temp.replace(/,/g, ''));
@@ -552,7 +557,6 @@ export default function POSPage() {
               <div key={item.id} style={{ backgroundColor: '#fcfbfa', borderRadius: '8px', padding: '12px', marginBottom: '12px', border: '1px solid #f4f1ea', position: 'relative' }}>
                 <button onClick={() => removeFromCart(item.id)} style={{ position: 'absolute', top: '8px', right: '8px', background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: '16px', zIndex: 5 }}>✕</button>
 
-                {/* EDITABLE CART NAME WITH DOT LINE FIX */}
                 <input 
                   type="text" 
                   value={item.custom_name} 
@@ -600,13 +604,11 @@ export default function POSPage() {
             <span style={{ fontSize: '14px', fontWeight: 'bold', color: '#4a3b1b' }}>{currentT.totalKhmer}</span>
             <span style={{ fontSize: '20px', fontWeight: 'bold', color: '#b58a3d' }}>{formatRielFromNative(totalRiel)}</span>
           </div>
-          {/* RESTORED USD TOTAL */}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '14px' }}>
             <span style={{ fontSize: '11px', color: '#8a7650' }}>{currentT.totalUsd}</span>
             <span style={{ fontSize: '14px', fontWeight: 'bold', color: '#4a3b1b' }}>{formatUSD(totalUSD)}</span>
           </div>
           
-          {/* FIXED DISABLED BUTTON TEXT COLOR */}
           <button 
             onClick={checkout} 
             disabled={cart.length === 0 || isProcessing} 
@@ -646,7 +648,6 @@ export default function POSPage() {
                 <div key={item.id} style={{ padding: '12px', backgroundColor: '#fcfbfa', border: '1px solid #f4f1ea', borderRadius: '8px', marginBottom: '12px', position: 'relative' }}>
                   <button onClick={() => removeFromCart(item.id)} style={{ position: 'absolute', top: '8px', right: '8px', background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', zIndex: 5 }}>✕</button>
                   
-                  {/* EDITABLE CART NAME FOR MOBILE (WITH DOTTED LINE) */}
                   <input 
                     type="text" 
                     value={item.custom_name} 
@@ -692,6 +693,7 @@ export default function POSPage() {
                 <span style={{ fontSize: '11px', color: '#8a7650' }}>{currentT.totalUsd}</span>
                 <span style={{ fontWeight: 'bold', color: '#4a3b1b', fontSize: '13px' }}>{formatUSD(totalUSD)}</span>
               </div>
+              
               <button 
                 onClick={checkout} 
                 disabled={cart.length === 0 || isProcessing} 
@@ -738,12 +740,12 @@ export default function POSPage() {
 
           <div className="invoice-preview-container" style={{ overflowY: 'auto', maxHeight: '80vh', padding: '10px', backgroundColor: '#fff', borderRadius: '4px' }}>
             
-            <div id="invoice-capture-area" ref={invoiceRef} style={{ width: '794px', height: '559px', backgroundColor: '#ffffff', position: 'relative', padding: '24px', boxSizing: 'border-box', fontFamily: "'Noto Sans Khmer', Arial, sans-serif", color: '#000000', fontSize: '13px', lineHeight: '20px' }}>
+            <div id="invoice-capture-area" ref={invoiceRef} style={{ width: '794px', height: '559px', backgroundColor: '#ffffff', position: 'relative', padding: '24px', paddingBottom: '30px', boxSizing: 'border-box', fontFamily: "'Noto Sans Khmer', Arial, sans-serif", color: '#000000', fontSize: '13px', lineHeight: '20px' }}>
               <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Khmer&display=swap" rel="stylesheet" />
               
               <div className="invoice-watermark" style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', backgroundImage: "url('https://i.imgur.com/XUsrp9D.png')", backgroundRepeat: 'no-repeat', backgroundPosition: 'center center', backgroundSize: '40%', opacity: 0.14, zIndex: 0, pointerEvents: 'none' }}></div>
 
-              <div style={{ position: 'relative', zIndex: 1, height: '100%' }}>
+              <div style={{ position: 'relative', zIndex: 1, height: '100%', display: 'flex', flexDirection: 'column' }}>
                 <div style={{ position: 'absolute', top: 0, left: 0, width: '60px', height: '70px', zIndex: 2 }}><img src="https://i.imgur.com/s0hg3MQ.png" alt="Left Logo" style={{ width: '100%', height: '100%', display: 'block' }} crossOrigin="anonymous" /></div>
                 <div style={{ position: 'absolute', top: 0, right: 0, width: '85px', height: '75px', zIndex: 2 }}><img src="https://i.imgur.com/Guk0hVe.png" alt="Right Logo" style={{ width: '95%', height: '100%', display: 'block', filter: 'brightness(0)' }} crossOrigin="anonymous" /></div>
 
@@ -847,19 +849,20 @@ export default function POSPage() {
                   </tbody>
                 </table>
 
-                {/* FIXED ALIGNMENT SIGNATURE FOOTER */}
-                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0 30px', marginTop: '30px', fontSize: '13px', color: '#000000' }}>
-                   <div style={{ textAlign: 'center' }}>
+                {/* SIGNATURE BLOCK FIXED AT BOTTOM WITH PROPER PADDING */}
+                <div style={{ marginTop: 'auto', display: 'flex', justifyContent: 'space-between', padding: '0 30px', fontSize: '13px', color: '#000000' }}>
+                   <div style={{ textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
                       <div style={{ marginBottom: '35px' }}>ហត្ថលេខាអ្នកទិញ</div>
                       <div>..........................................</div>
                    </div>
-                   <div style={{ textAlign: 'center' }}>
+                   <div style={{ textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
                       <div style={{ marginBottom: '35px' }}>ហត្ថលេខាអ្នកលក់</div>
                       <div>..........................................</div>
                    </div>
-                   <div style={{ textAlign: 'right' }}>
-                      {/* Aligns text evenly with the 'ហត្ថលេខា' text layer */}
+                   <div style={{ textAlign: 'right', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', alignItems: 'flex-end' }}>
+                      {/* Align Date perfectly with ហត្ថលេខា */}
                       <div>ថ្ងៃទី {completedSale.dateObj.day} ខែ {completedSale.dateObj.month} ឆ្នាំ {completedSale.dateObj.year}</div>
+                      <div style={{ color: 'transparent', userSelect: 'none' }}>.</div>
                    </div>
                 </div>
 

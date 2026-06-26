@@ -3,6 +3,8 @@
 import { useState, useEffect, useRef } from 'react'
 import { supabase } from '@/lib/supabaseClient'
 
+const formatRiel = (amount: number) => `${new Intl.NumberFormat('en-US').format(Math.round(amount))} ៛`;
+
 // --- TYPES ---
 interface Product {
   id: number
