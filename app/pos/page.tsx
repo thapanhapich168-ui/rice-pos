@@ -661,7 +661,10 @@ export default function POSPage() {
                         >✏️</button>
                       </div>
                       <div style={{ borderTop: '1px dashed #f4f1ea', paddingTop: '8px', marginTop: 'auto' }}>
-                        <div style={{ fontWeight: 'bold', fontSize: '14px', color: '#b58a3d' }}>{formatRielSymbol(p.cost_price || 0)}</div>
+                        {/* CONDITIONAL RENDER: Retail shows Price, Wholesale shows COGS */}
+                        <div style={{ fontWeight: 'bold', fontSize: '14px', color: '#b58a3d' }}>
+                          {formatRielSymbol(activeTab === 'retail' ? (p.price || 0) : (p.cost_price || 0))}
+                        </div>
                         {(activeTab === 'wholesale') && <div style={{ fontSize: '11px', marginTop: '4px', color: Number(p.stock) < 5 ? '#dc2626' : '#10b981', fontWeight: 'bold' }}>📦 {currentT.stock}: {p.stock}</div>}
                       </div>
                     </>

@@ -19,7 +19,7 @@ export default function Sidebar() {
     { label: '💵 Expense Ledger', href: '/expense' },
     { label: '💼 Master Biz Database', href: '/bizdatabase' },
     { label: '🧮 Mix Calculator', href: '/calculator' }, // <-- Added this!
-    { label: '🖼️ Invoice Gallery', href: '/invoices' },
+    
   ]
 
   // Automatically secure screens: if user logs out, boot them back to root login page
