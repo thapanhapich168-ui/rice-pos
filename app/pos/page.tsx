@@ -124,7 +124,6 @@ export default function POSPage() {
   const [customerSearchTerm, setCustomerSearchTerm] = useState('')
   const [isCustomerDropdownOpen, setIsCustomerDropdownOpen] = useState(false)
 
-  // NEW CUSTOMER MODAL STATE
   const [isCreateCustomerModalOpen, setIsCreateCustomerModalOpen] = useState(false)
   const [newCustomerForm, setNewCustomerForm] = useState({ name: '', phone: '', location: '', owner: '', type: '' })
 
@@ -137,7 +136,10 @@ export default function POSPage() {
   const [mobileQty, setMobileQty] = useState<number | string>('')
   const [mobileName, setMobileName] = useState<string>('')
 
-  // INVOICE & EDIT STATE
+  // CHECKOUT STATE
+  const [amountReceived, setAmountReceived] = useState<number | ''>('')
+  const [saleSummary, setSaleSummary] = useState<{ total: number, received: number, change: number, type?: 'retail' | 'wholesale', isCashless?: boolean, items?: any[] } | null>(null)
+  const [showInvoicePreview, setShowInvoicePreview] = useState(false)
   const [completedSale, setCompletedSale] = useState<any>(null)
   const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null)
   const [isGeneratingPreview, setIsGeneratingPreview] = useState(false)
@@ -160,20 +162,16 @@ export default function POSPage() {
         await loadProductsAndSettings()
         await loadCustomers()
 
-        // Check if we are in EDIT mode via URL parameters
         const urlParams = new URLSearchParams(window.location.search);
         const editId = urlParams.get('edit');
         if (editId) {
           setEditingInvoiceId(editId);
-          setActiveTab('wholesale'); // Default to wholesale for edits typically
+          setActiveTab('wholesale'); 
           
-          // Fetch old invoice data
           const { data: saleRows } = await supabase.from('sales').select('*').eq('invoice_id', editId);
           if (saleRows && saleRows.length > 0) {
-            
-            // Reconstruct the cart
             const rebuiltCart = saleRows.map(row => ({
-              id: Math.random(), // Temporary ID just for cart manipulation
+              id: Math.random(), 
               custom_name: row.rice_type,
               custom_price_riel: row.price_per_bag,
               quantity: row.qty,
@@ -181,7 +179,6 @@ export default function POSPage() {
             }));
             setCart(rebuiltCart);
 
-            // Re-select customer if they aren't walk-in
             const cName = saleRows[0].customer_name;
             if (cName && cName !== 'Walk-in') {
               const { data: custData } = await supabase.from('customers').select('id').eq('name', cName).single();
@@ -201,9 +198,9 @@ export default function POSPage() {
     return () => window.removeEventListener('resize', checkDeviceType);
   }, [])
 
-  // MAGIC INVOICE GENERATOR
+  // MAGIC INVOICE GENERATOR (Runs Invisibly when completedSale is set)
   useEffect(() => {
-    if (completedSale && invoiceRef.current && !previewImageUrl) {
+    if (completedSale && invoiceRef.current && !previewImageUrl && showInvoicePreview) {
       const timer = setTimeout(async () => {
         try {
           await document.fonts.ready;
@@ -222,7 +219,7 @@ export default function POSPage() {
       }, 400);
       return () => clearTimeout(timer);
     }
-  }, [completedSale, previewImageUrl])
+  }, [completedSale, previewImageUrl, showInvoicePreview])
 
   async function loadProductsAndSettings() {
     const { data: prodData } = await supabase.from('products').select('*').order('id', { ascending: true })
@@ -339,7 +336,6 @@ export default function POSPage() {
     }
   }
 
-  // CREATE CUSTOMER IN DB
   async function handleCreateCustomer() {
     const finalName = newCustomerForm.name.trim() || 'Walk-in';
     const finalPhone = newCustomerForm.phone.trim();
@@ -417,19 +413,22 @@ export default function POSPage() {
     return [...normalItems, ...specialItems, ...negativeItems, ...serviceItems];
   }
 
-  async function checkout() {
+  // CHECKOUT FUNCTION - Routing logic for Cash Summary vs Invoice
+  async function confirmCheckout() {
     if (cart.length === 0) return alert(lang === 'kh' ? 'សូមជ្រើសរើសទំនិញក្នុងកន្ត្រក!' : 'Cart is empty');
+    if (activeTab === 'wholesale' && !selectedCustomerId) return alert(lang === 'kh' ? 'សូមជ្រើសរើសអតិថិជនសម្រាប់ដុំ!' : 'Please select a customer for wholesale');
 
     setIsProcessing(true);
-    setIsGeneratingPreview(true);
 
     try {
-      // If editing, use the old invoice ID to overwrite. Otherwise create a new one.
+      const currentCart = [...cart];
+      const currentTotalRiel = totalRiel;
+
       const displayInvoiceNo = editingInvoiceId ? editingInvoiceId : `INV-${Date.now().toString().slice(-6)}`;
       const cName = selectedCustomer ? selectedCustomer.name : 'Walk-in';
       const finalOwner = activeTab === 'wholesale' ? (selectedCustomer?.owner || null) : null;
 
-      const saleRows = cart.map(item => ({
+      const saleRows = currentCart.map(item => ({
         invoice_id: displayInvoiceNo,
         customer_name: cName,
         rice_type: item.custom_name,
@@ -439,9 +438,9 @@ export default function POSPage() {
         owner: finalOwner
       }));
 
-      const combinedRiceTypes = cart.map(item => `${item.custom_name} (x${item.quantity})`).join(', ');
-      const invoiceTotalSales = cart.reduce((sum, item) => sum + (Number(item.custom_price_riel) * Number(item.quantity)), 0);
-      const invoiceTotalCogs = cart.reduce((sum, item) => sum + (Number(item.cost_price || 0) * Number(item.quantity)), 0);
+      const combinedRiceTypes = currentCart.map(item => `${item.custom_name} (x${item.quantity})`).join(', ');
+      const invoiceTotalSales = currentCart.reduce((sum, item) => sum + (Number(item.custom_price_riel) * Number(item.quantity)), 0);
+      const invoiceTotalCogs = currentCart.reduce((sum, item) => sum + (Number(item.cost_price || 0) * Number(item.quantity)), 0);
       const invoiceTotalProfit = invoiceTotalSales - invoiceTotalCogs;
 
       const summaryRow = {
@@ -454,7 +453,6 @@ export default function POSPage() {
         total_profit: invoiceTotalProfit
       };
 
-      // If we are editing, delete the old database records before inserting the updated ones
       if (editingInvoiceId) {
         await supabase.from('sales').delete().eq('invoice_id', editingInvoiceId);
         await supabase.from('invoice_summaries').delete().eq('invoice_id', editingInvoiceId);
@@ -463,36 +461,61 @@ export default function POSPage() {
       await supabase.from('sales').insert(saleRows);
       await supabase.from('invoice_summaries').insert([summaryRow]);
 
-      for (const item of cart) {
+      for (const item of currentCart) {
         await supabase.rpc('decrease_stock', { product_id_input: item.id, qty: item.quantity });
       }
 
-      const currentDate = new Date();
-      setCompletedSale({
-        invoiceNo: displayInvoiceNo,
-        cartSnapshot: [...cart],
-        customer: selectedCustomer,
-        dateObj: { 
-          day: String(currentDate.getDate()).padStart(2, '0'), 
-          month: String(currentDate.getMonth() + 1).padStart(2, '0'), 
-          year: currentDate.getFullYear() 
-        }
-      });
+      // Check amount logic
+      const received = Number(amountReceived) || 0;
+      const change = received - currentTotalRiel;
 
+      // Clean up UI instantly
       setCart([]);
       setIsMobileCartOpen(false);
       setEditingInvoiceId(null);
-      
-      // Clean up URL to prevent staying in edit mode indefinitely
       window.history.replaceState({}, document.title, window.location.pathname);
-      
       loadProductsAndSettings();
+
+      // UI Routing Logic
+      if (activeTab === 'retail') {
+        if (received > 0) {
+          // Retail + Cash: Show Change Summary
+          setSaleSummary({ total: currentTotalRiel, received, change: change > 0 ? change : 0, type: 'retail', isCashless: false });
+        } else {
+          // Retail + No Cash: Show Successful Item Summary
+          setSaleSummary({ total: currentTotalRiel, received: 0, change: 0, type: 'retail', isCashless: true, items: currentCart });
+        }
+      } else {
+        // Wholesale triggers invoice generation invisibly
+        const currentDate = new Date();
+        setCompletedSale({
+          invoiceNo: displayInvoiceNo,
+          cartSnapshot: currentCart,
+          customer: selectedCustomer,
+          dateObj: { 
+            day: String(currentDate.getDate()).padStart(2, '0'), 
+            month: String(currentDate.getMonth() + 1).padStart(2, '0'), 
+            year: currentDate.getFullYear() 
+          }
+        });
+
+        if (received > 0) {
+          // Wholesale + Cash: Show Change Summary with Invoice options
+          setIsGeneratingPreview(true);
+          setShowInvoicePreview(true); // Generates in background
+          setSaleSummary({ total: currentTotalRiel, received, change: change > 0 ? change : 0, type: 'wholesale', isCashless: false });
+        } else {
+          // Wholesale + No Cash: Show standard full-screen Invoice Preview
+          setIsGeneratingPreview(true);
+          setShowInvoicePreview(true);
+        }
+      }
 
     } catch (err: any) {
       alert(`System Error: ${err.message || err}`);
-      setIsGeneratingPreview(false);
     } finally {
       setIsProcessing(false);
+      setAmountReceived('');
     }
   }
 
@@ -552,17 +575,21 @@ export default function POSPage() {
       
       {/* SELECTION ENGINE VIEW GRID PANEL */}
       <div className="pos-main-engine" style={{ flex: 1, display: 'flex', flexDirection: 'column', backgroundColor: '#ffffff', minWidth: 0, height: '100%' }}>
-        <header className="pos-header" style={{ display: 'flex', alignItems: 'center', borderBottom: '1px solid #f3f4f6', backgroundColor: '#ffffff', justifyContent: 'space-between', flexShrink: 0 }}>
-          <h1 style={{ fontSize: '20px', fontWeight: 'bold', margin: 0, color: '#4a3b1b' }}>
-            {editingInvoiceId ? `✏️ Editing: ${editingInvoiceId}` : currentT.title}
-          </h1>
+        
+        {/* Adjusted paddingLeft to 70px to avoid overlapping with fixed Hamburger Icon */}
+        <header className="pos-header" style={{ display: 'flex', alignItems: 'center', borderBottom: '1px solid #f3f4f6', backgroundColor: '#ffffff', justifyContent: 'space-between', flexShrink: 0, paddingTop: '12px', paddingRight: '20px', paddingBottom: '12px', paddingLeft: '70px', minHeight: '60px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+            <h1 style={{ fontSize: '20px', fontWeight: 'bold', margin: 0, color: '#4a3b1b' }}>
+              {editingInvoiceId ? `✏️ Editing: ${editingInvoiceId}` : currentT.title}
+            </h1>
+          </div>
           <div style={{ backgroundColor: '#f4f1ea', borderRadius: '20px', padding: '2px' }}>
             <button onClick={() => setLang('en')} style={{ border: 'none', backgroundColor: lang === 'en' ? '#b58a3d' : 'transparent', color: lang === 'en' ? '#fff' : '#6b582f', padding: '6px 12px', borderRadius: '18px', fontWeight: 'bold', cursor: 'pointer', fontSize: '12px' }}>EN</button>
             <button onClick={() => setLang('kh')} style={{ border: 'none', backgroundColor: lang === 'kh' ? '#b58a3d' : 'transparent', color: lang === 'kh' ? '#fff' : '#6b582f', padding: '6px 12px', borderRadius: '18px', fontWeight: 'bold', cursor: 'pointer', fontSize: '12px' }}>KH</button>
           </div>
         </header>
 
-        <div className="pos-tools-area" style={{ padding: '16px 20px 16px 75px', backgroundColor: '#ffffff', borderBottom: '1px solid #f3f4f6', flexShrink: 0 }}>
+        <div className="pos-tools-area" style={{ padding: '16px 20px 16px 70px', backgroundColor: '#ffffff', borderBottom: '1px solid #f3f4f6', flexShrink: 0 }}>
           <div style={{ display: 'flex', gap: '12px', marginBottom: '16px', flexWrap: 'wrap' }}>
             <button onClick={() => { setActiveTab('retail'); setSelectedCustomerId(''); setCustomerSearchTerm(''); }} style={{ flex: 1, padding: '12px', borderRadius: '8px', border: 'none', fontWeight: 'bold', cursor: 'pointer', backgroundColor: activeTab === 'retail' ? '#b58a3d' : '#f4f1ea', color: activeTab === 'retail' ? '#ffffff' : '#6b582f', minWidth: '120px' }}>{currentT.retail}</button>
             <button onClick={() => setActiveTab('wholesale')} style={{ flex: 1, padding: '12px', borderRadius: '8px', border: 'none', fontWeight: 'bold', cursor: 'pointer', backgroundColor: activeTab === 'wholesale' ? '#b58a3d' : '#f4f1ea', color: activeTab === 'wholesale' ? '#ffffff' : '#6b582f', minWidth: '120px' }}>{currentT.wholesale}</button>
@@ -632,7 +659,7 @@ export default function POSPage() {
           )}
         </div>
 
-        <div className="pos-grid-area" style={{ flex: 1, padding: '20px 20px 20px 75px', overflowY: 'auto', backgroundColor: '#ffffff', paddingBottom: '100px' }}>
+        <div className="pos-grid-area" style={{ flex: 1, paddingTop: '20px', paddingRight: '20px', paddingBottom: '100px', paddingLeft: '70px', overflowY: 'auto', backgroundColor: '#ffffff' }}>
           {filteredProducts.length === 0 ? (
             <div style={{ textAlign: 'center', padding: '40px', color: '#8a7650' }}>{currentT.noProducts}</div>
           ) : (
@@ -661,7 +688,6 @@ export default function POSPage() {
                         >✏️</button>
                       </div>
                       <div style={{ borderTop: '1px dashed #f4f1ea', paddingTop: '8px', marginTop: 'auto' }}>
-                        {/* CONDITIONAL RENDER: Retail shows Price, Wholesale shows COGS */}
                         <div style={{ fontWeight: 'bold', fontSize: '14px', color: '#b58a3d' }}>
                           {formatRielSymbol(activeTab === 'retail' ? (p.price || 0) : (p.cost_price || 0))}
                         </div>
@@ -678,11 +704,11 @@ export default function POSPage() {
 
       {/* DESKTOP SIDEBAR CART */}
       <div className="desktop-cart-panel" style={{ width: '380px', backgroundColor: '#ffffff', borderLeft: '1px solid #e5e7eb', display: 'flex', flexDirection: 'column', height: '100vh', position: 'sticky', top: 0 }}>
-        <div style={{ padding: '16px 20px', borderBottom: '1px solid #f3f4f6', backgroundColor: '#fcfbfa', flexShrink: 0 }}>
+        <div style={{ paddingTop: '16px', paddingRight: '20px', paddingBottom: '16px', paddingLeft: '20px', borderBottom: '1px solid #f3f4f6', backgroundColor: '#fcfbfa', flexShrink: 0 }}>
           <h2 style={{ fontSize: '16px', margin: 0, fontWeight: 'bold', color: '#4a3b1b' }}>{currentT.cartTitle} ({cart.length})</h2>
         </div>
         
-        <div style={{ flex: 1, overflowY: 'auto', padding: '16px' }}>
+        <div style={{ flex: 1, overflowY: 'auto', paddingTop: '16px', paddingRight: '16px', paddingBottom: '16px', paddingLeft: '16px' }}>
           {cart.length === 0 ? (
             <div style={{ textAlign: 'center', marginTop: '40px', color: '#9c8a6c' }}>{currentT.emptyCart}</div>
           ) : (
@@ -732,7 +758,7 @@ export default function POSPage() {
           )}
         </div>
         
-        <div style={{ position: 'sticky', bottom: 0, padding: '16px 20px', borderTop: '1px solid #e5e7eb', backgroundColor: '#fcfbfa', flexShrink: 0, zIndex: 10, boxShadow: '0 -4px 10px rgba(0,0,0,0.02)' }}>
+        <div style={{ position: 'sticky', bottom: 0, paddingTop: '16px', paddingRight: '20px', paddingBottom: '16px', paddingLeft: '20px', borderTop: '1px solid #e5e7eb', backgroundColor: '#fcfbfa', flexShrink: 0, zIndex: 10, boxShadow: '0 -4px 10px rgba(0,0,0,0.02)' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '4px' }}>
             <span style={{ fontSize: '14px', fontWeight: 'bold', color: '#4a3b1b' }}>{currentT.totalKhmer}</span>
             <span style={{ fontSize: '20px', fontWeight: 'bold', color: '#b58a3d' }}>{formatRielFromNative(totalRiel)}</span>
@@ -741,9 +767,23 @@ export default function POSPage() {
             <span style={{ fontSize: '11px', color: '#8a7650' }}>{currentT.totalUsd}</span>
             <span style={{ fontSize: '14px', fontWeight: 'bold', color: '#4a3b1b' }}>{formatUSD(totalUSD)}</span>
           </div>
+
+          <div style={{ marginBottom: '14px' }}>
+            <label style={{ display: 'block', fontSize: '11px', color: '#64748b', fontWeight: 'bold', textTransform: 'uppercase', marginBottom: '4px' }}>Amount Received (៛) - Optional</label>
+            <input 
+              type="number" 
+              className="no-spinners"
+              placeholder="0 ៛" 
+              value={amountReceived} 
+              onChange={(e) => setAmountReceived(e.target.value === '' ? '' : Number(e.target.value))} 
+              style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', fontSize: '14px', fontWeight: 'bold', outline: 'none', color: '#0f172a', backgroundColor: '#ffffff' }}
+              onFocus={e => e.target.style.borderColor = '#10b981'}
+              onBlur={e => e.target.style.borderColor = '#cbd5e1'}
+            />
+          </div>
           
           <button 
-            onClick={checkout} 
+            onClick={confirmCheckout} 
             disabled={cart.length === 0 || isProcessing} 
             style={{ 
               width: '100%', 
@@ -839,7 +879,7 @@ export default function POSPage() {
       )}
 
       {/* MOBILE UI CART TRAY OVERLAY */}
-      {cart.length > 0 && !isMobileCartOpen && !completedSale && (
+      {cart.length > 0 && !isMobileCartOpen && !completedSale && !saleSummary && (
         <div className="mobile-fab" onClick={() => setIsMobileCartOpen(true)}>
           <div style={{ fontSize: '16px', fontWeight: 'bold' }}>🛒 View Cart ({cart.length})</div>
           <div style={{ fontSize: '16px', fontWeight: 'bold' }}>{formatRielFromNative(totalRiel)} &nbsp; ➔</div>
@@ -849,12 +889,12 @@ export default function POSPage() {
       {isMobileCartOpen && (
         <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(0,0,0,0.4)', zIndex: 999, display: 'flex', justifyContent: 'flex-end' }}>
           <div style={{ width: '85%', maxWidth: '360px', height: '100%', backgroundColor: '#ffffff', display: 'flex', flexDirection: 'column', position: 'relative' }}>
-            <div style={{ padding: '16px', borderBottom: '1px solid #e5e7eb', display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#fcfbfa', flexShrink: 0 }}>
+            <div style={{ paddingTop: '16px', paddingRight: '16px', paddingBottom: '16px', paddingLeft: '16px', borderBottom: '1px solid #e5e7eb', display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#fcfbfa', flexShrink: 0 }}>
               <h3 style={{ margin: 0, color: '#4a3b1b' }}>{currentT.cartTitle} ({cart.length})</h3>
               <button onClick={() => setIsMobileCartOpen(false)} style={{ background: 'none', border: 'none', fontSize: '20px' }}>✕</button>
             </div>
             
-            <div style={{ flex: 1, overflowY: 'auto', padding: '16px', paddingBottom: '220px' }}>
+            <div style={{ flex: 1, overflowY: 'auto', paddingTop: '16px', paddingRight: '16px', paddingBottom: '220px', paddingLeft: '16px' }}>
               {cart.map(item => (
                 <div key={item.id} style={{ padding: '12px', backgroundColor: '#fcfbfa', border: '1px solid #f4f1ea', borderRadius: '8px', marginBottom: '12px', position: 'relative' }}>
                   <button onClick={() => removeFromCart(item.id)} style={{ position: 'absolute', top: '8px', right: '8px', background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', zIndex: 5 }}>✕</button>
@@ -895,7 +935,7 @@ export default function POSPage() {
                 </div>
               ))}
             </div>
-            <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, padding: '16px', paddingBottom: 'max(40px, env(safe-area-inset-bottom, 40px))', borderTop: '1px solid #e5e7eb', backgroundColor: '#fcfbfa', flexShrink: 0, zIndex: 1010, boxShadow: '0 -4px 10px rgba(0,0,0,0.05)' }}>
+            <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, paddingTop: '16px', paddingRight: '16px', paddingBottom: 'max(40px, env(safe-area-inset-bottom, 40px))', paddingLeft: '16px', borderTop: '1px solid #e5e7eb', backgroundColor: '#fcfbfa', flexShrink: 0, zIndex: 1010, boxShadow: '0 -4px 10px rgba(0,0,0,0.05)' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
                 <span style={{ fontWeight: 'bold', fontSize: '14px' }}>{currentT.totalKhmer}</span>
                 <span style={{ fontWeight: 'bold', color: '#b58a3d', fontSize: '18px' }}>{formatRielFromNative(totalRiel)}</span>
@@ -904,9 +944,23 @@ export default function POSPage() {
                 <span style={{ fontSize: '11px', color: '#8a7650' }}>{currentT.totalUsd}</span>
                 <span style={{ fontWeight: 'bold', color: '#4a3b1b', fontSize: '13px' }}>{formatUSD(totalUSD)}</span>
               </div>
+
+              <div style={{ marginBottom: '14px' }}>
+                <label style={{ display: 'block', fontSize: '11px', color: '#64748b', fontWeight: 'bold', textTransform: 'uppercase', marginBottom: '4px' }}>Amount Received (៛) - Optional</label>
+                <input 
+                  type="number" 
+                  className="no-spinners"
+                  placeholder="0 ៛" 
+                  value={amountReceived} 
+                  onChange={(e) => setAmountReceived(e.target.value === '' ? '' : Number(e.target.value))} 
+                  style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', fontSize: '14px', fontWeight: 'bold', outline: 'none', color: '#0f172a', backgroundColor: '#ffffff' }}
+                  onFocus={e => e.target.style.borderColor = '#10b981'}
+                  onBlur={e => e.target.style.borderColor = '#cbd5e1'}
+                />
+              </div>
               
               <button 
-                onClick={checkout} 
+                onClick={confirmCheckout} 
                 disabled={cart.length === 0 || isProcessing} 
                 style={{ 
                   width: '100%', 
@@ -927,8 +981,75 @@ export default function POSPage() {
         </div>
       )}
 
+      {/* SALE SUMMARY MODAL (Shows Change Due - No Invoice) */}
+      {saleSummary && (
+        <div className="modal-overlay" style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(0,0,0,0.85)', zIndex: 10001, display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '20px', boxSizing: 'border-box' }}>
+          <div className="modal-content" style={{ backgroundColor: '#ffffff', width: '100%', maxWidth: '400px', borderRadius: '16px', padding: '30px', boxShadow: '0 10px 25px rgba(0,0,0,0.2)', textAlign: 'center' }}>
+            <h2 style={{ marginTop: 0, color: '#10b981', fontSize: '24px', marginBottom: '8px', textAlign: 'center' }}>
+              {saleSummary.isCashless ? 'Sale Recorded! ✅' : 'Sale Complete!'}
+            </h2>
+             
+            <div style={{ background: '#f8fafc', padding: '24px', borderRadius: '12px', margin: '20px 0', border: '1px solid #e2e8f0' }}>
+              {saleSummary.isCashless ? (
+                <>
+                  <div style={{ fontSize: '13px', color: '#64748b', marginBottom: '12px', textTransform: 'uppercase', fontWeight: 'bold' }}>Items Sold</div>
+                  <div style={{ maxHeight: '150px', overflowY: 'auto', marginBottom: '12px' }}>
+                    {saleSummary.items?.map((item: any, idx: number) => (
+                      <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px', fontSize: '15px', color: '#0f172a', fontWeight: 'bold' }}>
+                        <span>{item.custom_name}</span>
+                        <span>x{item.quantity}</span>
+                      </div>
+                    ))}
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px dashed #cbd5e1', paddingTop: '16px', marginTop: '16px', fontSize: '16px' }}>
+                    <span style={{ color: '#64748b', fontWeight: 'bold' }}>Total Sale:</span>
+                    <span style={{ color: '#10b981', fontWeight: 'bold' }}>{formatRielFromNative(saleSummary.total)}</span>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div style={{ fontSize: '14px', color: '#64748b', marginBottom: '4px', textTransform: 'uppercase', fontWeight: 'bold', textAlign: 'center' }}>Change Due</div>
+                  <div style={{ fontSize: '36px', fontWeight: 'bold', color: '#ef4444', marginBottom: '16px', textAlign: 'center' }}>{formatRielFromNative(saleSummary.change)}</div>
+                    
+                  <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px dashed #cbd5e1', paddingTop: '16px', fontSize: '14px' }}>
+                    <span style={{ color: '#64748b', fontWeight: 'bold' }}>Total Due:</span>
+                    <span style={{ color: '#0f172a', fontWeight: 'bold' }}>{formatRielFromNative(saleSummary.total)}</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '8px', fontSize: '14px' }}>
+                    <span style={{ color: '#64748b', fontWeight: 'bold' }}>Amount Received:</span>
+                    <span style={{ color: '#0f172a', fontWeight: 'bold' }}>{formatRielFromNative(saleSummary.received)}</span>
+                  </div>
+                </>
+              )}
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              {saleSummary.type === 'wholesale' && !saleSummary.isCashless && (
+                <div style={{ display: 'flex', gap: '10px' }}>
+                  {isDeviceMobile ? (
+                    <button onClick={handleMobileShare} disabled={!previewImageUrl || isGeneratingPreview} style={{ flex: 1, padding: '14px', background: '#3b82f6', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', fontSize: '14px' }}>
+                       {isGeneratingPreview ? '⏳ Generating...' : '📤 Share Invoice'}
+                    </button>
+                  ) : (
+                    <button onClick={handleDesktopDownloadPNG} disabled={!previewImageUrl || isGeneratingPreview} style={{ flex: 1, padding: '14px', background: '#b58a3d', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', fontSize: '14px' }}>
+                       {isGeneratingPreview ? '⏳ Generating...' : '⬇️ Download Invoice'}
+                    </button>
+                  )}
+                  <button onClick={handleNativePrint} disabled={!previewImageUrl || isGeneratingPreview} style={{ flex: 1, padding: '14px', background: '#10b981', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', fontSize: '14px' }}>
+                     🖨️ Print
+                  </button>
+                </div>
+              )}
+              <button onClick={() => { setSaleSummary(null); setCompletedSale(null); setPreviewImageUrl(null); }} style={{ width: '100%', padding: '14px', background: '#ef4444', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', fontSize: '15px' }}>
+                 ❌ Close & Next Sale
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* FINAL INVISIBLE DOM CAPTURE AREA */}
-      {completedSale && (
+      {completedSale && showInvoicePreview && (
         <div style={{ position: 'absolute', top: '-10000px', left: '-10000px', zIndex: -1 }}>
           <div id="invoice-capture-area" ref={invoiceRef} style={{ width: '794px', height: '559px', backgroundColor: '#ffffff', position: 'relative', margin: 0, padding: '19px', boxSizing: 'border-box', fontFamily: "'Noto Sans Khmer', Arial, sans-serif", fontSize: '12.8px', color: '#000000', overflow: 'hidden' }}>
             <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Khmer&display=swap" rel="stylesheet" crossOrigin="anonymous" />
@@ -1057,12 +1178,12 @@ export default function POSPage() {
         </div>
       )}
 
-      {/* RENDERED IMAGE PREVIEW MODAL */}
-      {completedSale && (
+      {/* RENDERED INVOICE PREVIEW MODAL (Shows only if showInvoicePreview is true) */}
+      {showInvoicePreview && completedSale && (
         <div className="invoice-modal-overlay" style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(0,0,0,0.85)', zIndex: 10000, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
           
           <div className="invoice-controls" style={{ display: 'flex', justifyContent: 'space-between', width: '100%', maxWidth: '850px', marginBottom: '16px', padding: '0 20px' }}>
-            <button onClick={() => { setCompletedSale(null); setPreviewImageUrl(null); }} style={{ backgroundColor: '#dc2626', color: '#fff', border: 'none', padding: '10px 20px', borderRadius: '8px', fontSize: '16px', fontWeight: 'bold', cursor: 'pointer' }}>{currentT.close}</button>
+            <button onClick={() => { setShowInvoicePreview(false); setCompletedSale(null); setPreviewImageUrl(null); }} style={{ backgroundColor: '#dc2626', color: '#fff', border: 'none', padding: '10px 20px', borderRadius: '8px', fontSize: '16px', fontWeight: 'bold', cursor: 'pointer' }}>{currentT.close}</button>
             
             <div className="desktop-controls" style={{ display: 'none', gap: '10px' }}>
               <button onClick={handleDesktopDownloadPNG} disabled={!previewImageUrl} style={{ backgroundColor: '#f59e0b', color: '#fff', border: 'none', padding: '10px 20px', borderRadius: '8px', fontSize: '16px', fontWeight: 'bold', cursor: 'pointer' }}>{currentT.openInvoice}</button>
@@ -1088,6 +1209,12 @@ export default function POSPage() {
       )}
 
       <style jsx global>{`
+        input[type="number"].no-spinners::-webkit-inner-spin-button,
+        input[type="number"].no-spinners::-webkit-outer-spin-button {
+          -webkit-appearance: none; margin: 0;
+        }
+        input[type="number"].no-spinners { -moz-appearance: textfield; }
+
         @media print {
           body * { visibility: hidden; }
           #invoice-capture-area, #invoice-capture-area * { visibility: visible; }
@@ -1113,15 +1240,14 @@ export default function POSPage() {
         @media (min-width: 1024px) {
           .mobile-controls { display: none !important; }
           .desktop-controls { display: flex !important; }
-          .pos-main-engine .pos-header { padding-left: 100px !important; }
         }
         
         @media (max-width: 1023px) { 
           .desktop-controls { display: none !important; }
           .desktop-cart-panel { display: none !important; }
-          .pos-main-engine .pos-header { padding: max(80px, env(safe-area-inset-top, 80px)) 16px 12px 16px !important; }
-          .pos-tools-area { padding: 16px 16px 16px 16px !important; }
-          .pos-grid-area { padding: 16px 16px 16px 16px !important; }
+          .pos-main-engine .pos-header { paddingTop: max(80px, env(safe-area-inset-top, 80px)) !important; }
+          .pos-tools-area { paddingTop: 16px !important; paddingRight: 16px !important; paddingBottom: 16px !important; paddingLeft: 16px !important; }
+          .pos-grid-area { paddingTop: 16px !important; paddingRight: 16px !important; paddingBottom: 16px !important; paddingLeft: 16px !important; }
           .mobile-fab {
             display: flex !important; 
             justify-content: space-between; 

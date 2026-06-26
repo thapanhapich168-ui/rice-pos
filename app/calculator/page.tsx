@@ -606,7 +606,7 @@ export default function RiceMixCalculator() {
 
         @media (max-width: 768px) {
           .main-wrapper {
-            padding: 80px 16px 16px 16px;
+            padding: max(80px, env(safe-area-inset-top, 80px)) 16px 16px 16px !important;
           }
           .calculator-grid {
             flex-direction: column;

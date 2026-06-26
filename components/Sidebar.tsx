@@ -6,20 +6,22 @@ import { usePathname, useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabaseClient'
 
 export default function Sidebar() {
-  const [isOpen, setIsOpen] = useState(true)
+  // Changed to false: The panel is hidden on refresh/login, but the ☰ button remains!
+  const [isOpen, setIsOpen] = useState(false)
   const pathname = usePathname()
   const router = useRouter()
 
-  // Define your key navigation paths - NOW INCLUDING BOTH PAGES!
+  // Define your key navigation paths with the exact requested order
   const menuItems = [
     { label: '📊 Dashboard', href: '/dashboard' },
     { label: '🛒 POS System', href: '/pos' },
-    { label: '🌾 Rice Control', href: '/rice' },
-    { label: '👥 Customer Database', href: '/customerdatabase' },
     { label: '💵 Expense Ledger', href: '/expense' },
+    { label: '🌾 Rice Control', href: '/rice' },
     { label: '💼 Master Biz Database', href: '/bizdatabase' },
-    { label: '🧮 Mix Calculator', href: '/calculator' }, // <-- Added this!
-    
+    { label: '👥 Customer Database', href: '/customerdatabase' },
+    { label: '🧮 Mix Calculator', href: '/calculator' },
+    { label: '🖼️ Invoice Gallery', href: '/invoice-gallery' },
+    { label: '⚙️ Settings', href: '/settings' }
   ]
 
   // Automatically secure screens: if user logs out, boot them back to root login page
@@ -36,6 +38,9 @@ export default function Sidebar() {
     await supabase.auth.signOut()
     router.push('/')
   }
+
+  // Prevents the hamburger from showing up on the login screen
+  if (pathname === '/') return null;
 
   return (
     <>
