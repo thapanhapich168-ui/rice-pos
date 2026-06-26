@@ -140,7 +140,18 @@ export default function POSPage() {
   
   const invoiceRef = useRef<HTMLDivElement>(null)
 
+  // 1. STRICT DEVICE AND SCREEN DETECTION
   useEffect(() => {
+    const checkDeviceType = () => {
+      const isMobileBrowser = /iPhone|iPad|iPod|Android|webOS|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+      const isSmallScreen = window.innerWidth < 1024;
+      // If either the screen is physically small OR the browser says it's mobile, treat as mobile.
+      setIsDeviceMobile(isMobileBrowser || isSmallScreen);
+    };
+
+    checkDeviceType();
+    window.addEventListener('resize', checkDeviceType);
+
     const stabilizeConnection = async () => {
       try {
         await loadProductsAndSettings()
@@ -152,9 +163,7 @@ export default function POSPage() {
     
     stabilizeConnection()
 
-    if (typeof navigator !== 'undefined' && /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)) {
-      setIsDeviceMobile(true);
-    }
+    return () => window.removeEventListener('resize', checkDeviceType);
   }, [])
 
   useEffect(() => {
@@ -186,7 +195,8 @@ export default function POSPage() {
   function handleProductClick(product: any) {
     if (editingCardId === product.id) return;
     
-    const isMobile = typeof window !== 'undefined' && window.innerWidth < 1023;
+    // Using actual browser width checking for accurate mobile popup behavior
+    const isMobile = typeof window !== 'undefined' && window.innerWidth < 1024;
     if (isMobile) {
       setSelectedMobileProduct(product);
       setMobileName(product.name);
@@ -391,7 +401,7 @@ export default function POSPage() {
     }
   }
 
-  // --- AUTOMATIC BACKGROUND SUPABASE SYNC ---
+  // --- AUTOMATIC BACKGROUND SUPABASE SYNC (using html-to-image) ---
   async function executeAutoSaveOnly() {
     if (!invoiceRef.current || !completedSale) return;
     setIsUploadingImage(true);
@@ -458,6 +468,7 @@ export default function POSPage() {
         if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
           await navigator.share({ files: [file], title: `Invoice ${completedSale.invoiceNo}` });
         } else {
+          // Fallback if the share API is somehow blocked or unsupported on an older iPhone
           const link = document.createElement('a');
           link.download = `Invoice-${completedSale.invoiceNo}.png`;
           link.href = dataUrl;
@@ -754,8 +765,7 @@ export default function POSPage() {
                 </div>
               ))}
             </div>
-            
-            <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, padding: '16px', paddingBottom: 'calc(16px + env(safe-area-inset-bottom, 20px))', borderTop: '1px solid #e5e7eb', backgroundColor: '#fcfbfa', zIndex: 1010, boxShadow: '0 -4px 10px rgba(0,0,0,0.05)' }}>
+            <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, padding: '16px', paddingBottom: 'calc(16px + env(safe-area-inset-bottom, 20px))', borderTop: '1px solid #e5e7eb', backgroundColor: '#fcfbfa', flexShrink: 0, zIndex: 1010, boxShadow: '0 -4px 10px rgba(0,0,0,0.05)' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
                 <span style={{ fontWeight: 'bold', fontSize: '14px' }}>{currentT.totalKhmer}</span>
                 <span style={{ fontWeight: 'bold', color: '#b58a3d', fontSize: '18px' }}>{formatRielFromNative(totalRiel)}</span>
@@ -811,14 +821,12 @@ export default function POSPage() {
 
           <div className="invoice-preview-container" style={{ overflowY: 'auto', maxHeight: '80vh', padding: '10px', backgroundColor: '#fff', borderRadius: '4px' }}>
             
-            {/* Added Extra Bottom Padding (60px) to prevent dots from hitting page edge */}
-            <div id="invoice-capture-area" ref={invoiceRef} style={{ width: '794px', minHeight: '559px', backgroundColor: '#ffffff', position: 'relative', padding: '24px', paddingBottom: '60px', boxSizing: 'border-box', fontFamily: "'Noto Sans Khmer', Arial, sans-serif", color: '#000000', fontSize: '13px', lineHeight: '20px' }}>
-              {/* Added crossOrigin="anonymous" to solve the SecurityError CSS crash */}
+            <div id="invoice-capture-area" ref={invoiceRef} style={{ width: '794px', height: '559px', backgroundColor: '#ffffff', position: 'relative', padding: '24px', boxSizing: 'border-box', fontFamily: "'Noto Sans Khmer', Arial, sans-serif", color: '#000000', fontSize: '13px', lineHeight: '20px', display: 'flex', flexDirection: 'column' }}>
               <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Khmer&display=swap" rel="stylesheet" crossOrigin="anonymous" />
               
               <div className="invoice-watermark" style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', backgroundImage: "url('https://i.imgur.com/XUsrp9D.png')", backgroundRepeat: 'no-repeat', backgroundPosition: 'center center', backgroundSize: '40%', opacity: 0.14, zIndex: 0, pointerEvents: 'none' }}></div>
 
-              <div style={{ position: 'relative', zIndex: 1, height: '100%', display: 'flex', flexDirection: 'column' }}>
+              <div style={{ position: 'relative', zIndex: 1 }}>
                 <div style={{ position: 'absolute', top: 0, left: 0, width: '60px', height: '70px', zIndex: 2 }}><img src="https://i.imgur.com/s0hg3MQ.png" alt="Left Logo" style={{ width: '100%', height: '100%', display: 'block' }} crossOrigin="anonymous" /></div>
                 <div style={{ position: 'absolute', top: 0, right: 0, width: '85px', height: '75px', zIndex: 2 }}><img src="https://i.imgur.com/Guk0hVe.png" alt="Right Logo" style={{ width: '95%', height: '100%', display: 'block' }} crossOrigin="anonymous" /></div>
 
@@ -921,24 +929,23 @@ export default function POSPage() {
                     })()}
                   </tbody>
                 </table>
-
-                {/* SIGNATURE BLOCK FIXED AT BOTTOM WITH PERFECT ALIGNMENT & EXTRA TOP SPACING */}
-                <div style={{ marginTop: '80px', width: '746px', display: 'flex', justifyContent: 'space-between', fontSize: '13px', color: '#000000' }}>
-                   <div style={{ textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                      <div style={{ marginBottom: '35px' }}>ហត្ថលេខាអ្នកទិញ</div>
-                      <div>..........................................</div>
-                   </div>
-                   <div style={{ textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                      <div style={{ marginBottom: '35px' }}>ហត្ថលេខាអ្នកលក់</div>
-                      <div>..........................................</div>
-                   </div>
-                   <div style={{ textAlign: 'right', display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
-                      {/* Date now aligns perfectly horizontally with ហត្ថលេខា text without floating up */}
-                      <div>ថ្ងៃទី {completedSale.dateObj.day} ខែ {completedSale.dateObj.month} ឆ្នាំ {completedSale.dateObj.year}</div>
-                   </div>
-                </div>
-
               </div>
+              
+              {/* Perfectly centered vertically in the remaining space */}
+              <div style={{ margin: 'auto 0', width: '746px', display: 'flex', justifyContent: 'space-between', fontSize: '13px', color: '#000000', position: 'relative', zIndex: 1 }}>
+                 <div style={{ textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                    <div style={{ marginBottom: '35px' }}>ហត្ថលេខាអ្នកទិញ</div>
+                    <div>..........................................</div>
+                 </div>
+                 <div style={{ textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                    <div style={{ marginBottom: '35px' }}>ហត្ថលេខាអ្នកលក់</div>
+                    <div>..........................................</div>
+                 </div>
+                 <div style={{ textAlign: 'right', display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
+                    <div>ថ្ងៃទី {completedSale.dateObj.day} ខែ {completedSale.dateObj.month} ឆ្នាំ {completedSale.dateObj.year}</div>
+                 </div>
+              </div>
+
             </div>
           </div>
         </div>
