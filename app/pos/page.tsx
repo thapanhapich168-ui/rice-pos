@@ -33,7 +33,10 @@ const t = {
     successTitle: "Invoice Ready",
     openInvoice: "💾 Download / Print Image",
     shareInvoice: "📤 Share / Save Photo",
-    close: "Next Sale"
+    close: "Next Sale",
+    mobileModalTitle: "Adjust Item Properties",
+    cancel: "Cancel",
+    add: "Add to Cart"
   },
   kh: {
     title: "អង្គរ រេឌឌៀន រ៉ាយស៍ ភីអូអេស",
@@ -54,7 +57,10 @@ const t = {
     successTitle: "វិក្កយបត្រត្រូវបានបង្កើតជោគជ័យ!",
     openInvoice: "💾 ទាញយក / បោះពុម្ភវិក្កយបត្រ",
     shareInvoice: "📤 ចែករំលែកទៅកាន់រូបភាព",
-    close: "លក់បន្ត"
+    close: "លក់បន្ត",
+    mobileModalTitle: "កែសម្រួលព័ត៌មានទំនិញ",
+    cancel: "បោះបង់",
+    add: "បញ្ចូលទៅកន្ត្រក"
   }
 };
 
@@ -122,6 +128,11 @@ export default function POSPage() {
   const [editingCardId, setEditingCardId] = useState<number | null>(null)
   const [editCardForm, setEditCardForm] = useState({ name: '', price: '' })
 
+  const [selectedMobileProduct, setSelectedMobileProduct] = useState<any>(null)
+  const [mobilePrice, setMobilePrice] = useState<number>(0)
+  const [mobileQty, setMobileQty] = useState<number>(1)
+  const [mobileName, setMobileName] = useState<string>('')
+
   const [completedSale, setCompletedSale] = useState<any>(null)
   const [isDownloading, setIsDownloading] = useState(false)
   const [isUploadingImage, setIsUploadingImage] = useState(false)
@@ -174,7 +185,16 @@ export default function POSPage() {
 
   function handleProductClick(product: any) {
     if (editingCardId === product.id) return;
-    addToCartDirect(product);
+    
+    const isMobile = typeof window !== 'undefined' && window.innerWidth < 1023;
+    if (isMobile) {
+      setSelectedMobileProduct(product);
+      setMobileName(product.name);
+      setMobilePrice(Number(product.price));
+      setMobileQty(1);
+    } else {
+      addToCartDirect(product);
+    }
   }
 
   function addToCartDirect(product: any) {
@@ -185,6 +205,28 @@ export default function POSPage() {
     } else {
       setCart([...cart, { ...product, quantity: 1, custom_name: product.name, custom_price_riel: priceInRiel }])
     }
+  }
+
+  function handleAddMobileProductToCart() {
+    if (!selectedMobileProduct) return;
+    const existing = cart.find((item) => item.id === selectedMobileProduct.id);
+    if (existing) {
+      setCart(cart.map((item) => item.id === selectedMobileProduct.id ? { 
+        ...item, 
+        custom_name: mobileName, 
+        custom_price_riel: mobilePrice, 
+        quantity: item.quantity + mobileQty 
+      } : item));
+    } else {
+      setCart([...cart, { 
+        ...selectedMobileProduct, 
+        id: selectedMobileProduct.id, 
+        custom_name: mobileName, 
+        custom_price_riel: mobilePrice, 
+        quantity: mobileQty 
+      }]);
+    }
+    setSelectedMobileProduct(null);
   }
 
   function updateCartItem(id: number, field: string, value: any) {
@@ -349,7 +391,7 @@ export default function POSPage() {
     }
   }
 
-  // --- AUTOMATIC BACKGROUND SUPABASE SYNC (using html-to-image) ---
+  // --- AUTOMATIC BACKGROUND SUPABASE SYNC ---
   async function executeAutoSaveOnly() {
     if (!invoiceRef.current || !completedSale) return;
     setIsUploadingImage(true);
@@ -628,6 +670,33 @@ export default function POSPage() {
         </div>
       </div>
 
+      {/* MOBILE PRODUCT ADD POPUP */}
+      {selectedMobileProduct && (
+        <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 9999, display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '20px', boxSizing: 'border-box' }}>
+          <div style={{ backgroundColor: '#ffffff', width: '100%', maxWidth: '400px', borderRadius: '12px', padding: '24px', boxShadow: '0 10px 25px rgba(0,0,0,0.15)' }}>
+            <h3 style={{ margin: '0 0 16px 0', color: '#4a3b1b', borderBottom: '1px solid #f3f4f6', paddingBottom: '10px' }}>{currentT.mobileModalTitle}</h3>
+            <div style={{ marginBottom: '16px' }}>
+              <label style={{ display: 'block', fontSize: '12px', fontWeight: 'bold', color: '#8a7650', marginBottom: '4px' }}>Product Identifier</label>
+              <input type="text" value={mobileName} onChange={(e) => setMobileName(e.target.value)} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #dcd7cc', boxSizing: 'border-box', color: '#333333', backgroundColor: '#ffffff' }} />
+            </div>
+            <div style={{ display: 'flex', gap: '12px', marginBottom: '20px' }}>
+              <div style={{ flex: 1 }}>
+                <label style={{ display: 'block', fontSize: '12px', fontWeight: 'normal', color: '#8a7650', marginBottom: '4px' }}>Price (៛)</label>
+                <input type="number" value={mobilePrice === 0 ? '' : mobilePrice} onChange={(e) => setMobilePrice(parseFloat(e.target.value) || 0)} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #dcd7cc', boxSizing: 'border-box', color: '#333333', backgroundColor: '#ffffff' }} />
+              </div>
+              <div style={{ flex: 1 }}>
+                <label style={{ display: 'block', fontSize: '12px', fontWeight: 'normal', color: '#8a7650', marginBottom: '4px' }}>Quantity</label>
+                <input type="number" min="1" value={mobileQty} onChange={(e) => setMobileQty(parseInt(e.target.value) || 1)} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #dcd7cc', boxSizing: 'border-box', color: '#333333', backgroundColor: '#ffffff' }} />
+              </div>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
+              <button onClick={() => setSelectedMobileProduct(null)} style={{ padding: '10px 16px', backgroundColor: '#f4f1ea', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', color: '#6b582f' }}>{currentT.cancel}</button>
+              <button onClick={handleAddMobileProductToCart} style={{ padding: '10px 16px', backgroundColor: '#b58a3d', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', color: '#fff' }}>{currentT.add}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* MOBILE UI CART TRAY OVERLAY */}
       {cart.length > 0 && !isMobileCartOpen && !completedSale && (
         <div className="mobile-fab" onClick={() => setIsMobileCartOpen(true)}>
@@ -643,7 +712,8 @@ export default function POSPage() {
               <h3 style={{ margin: 0, color: '#4a3b1b' }}>{currentT.cartTitle} ({cart.length})</h3>
               <button onClick={() => setIsMobileCartOpen(false)} style={{ background: 'none', border: 'none', fontSize: '20px' }}>✕</button>
             </div>
-            <div style={{ flex: 1, overflowY: 'auto', padding: '16px', paddingBottom: '150px' }}>
+            
+            <div style={{ flex: 1, overflowY: 'auto', padding: '16px', paddingBottom: '180px' }}>
               {cart.map(item => (
                 <div key={item.id} style={{ padding: '12px', backgroundColor: '#fcfbfa', border: '1px solid #f4f1ea', borderRadius: '8px', marginBottom: '12px', position: 'relative' }}>
                   <button onClick={() => removeFromCart(item.id)} style={{ position: 'absolute', top: '8px', right: '8px', background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', zIndex: 5 }}>✕</button>
@@ -684,7 +754,8 @@ export default function POSPage() {
                 </div>
               ))}
             </div>
-            <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, padding: '16px', borderTop: '1px solid #e5e7eb', backgroundColor: '#fcfbfa', flexShrink: 0, zIndex: 1010, boxShadow: '0 -4px 10px rgba(0,0,0,0.05)' }}>
+            
+            <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, padding: '16px', paddingBottom: 'calc(16px + env(safe-area-inset-bottom, 20px))', borderTop: '1px solid #e5e7eb', backgroundColor: '#fcfbfa', zIndex: 1010, boxShadow: '0 -4px 10px rgba(0,0,0,0.05)' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
                 <span style={{ fontWeight: 'bold', fontSize: '14px' }}>{currentT.totalKhmer}</span>
                 <span style={{ fontWeight: 'bold', color: '#b58a3d', fontSize: '18px' }}>{formatRielFromNative(totalRiel)}</span>
@@ -726,8 +797,8 @@ export default function POSPage() {
             <div style={{ display: 'flex', gap: '10px' }}>
               {isDeviceMobile ? (
                 <>
-                  <button onClick={handleDesktopDownloadPNG} disabled={isDownloading} style={{ backgroundColor: '#f59e0b', color: '#fff', border: 'none', padding: '10px 16px', borderRadius: '8px', fontSize: '14px', fontWeight: 'bold', cursor: 'pointer' }}>{isDownloading ? '⏳...' : '⬇️ Save Photo'}</button>
                   <button onClick={handleMobileShare} disabled={isDownloading} style={{ backgroundColor: '#3b82f6', color: '#fff', border: 'none', padding: '10px 16px', borderRadius: '8px', fontSize: '14px', fontWeight: 'bold', cursor: 'pointer' }}>{isDownloading ? '⏳...' : '📤 Share'}</button>
+                  <button onClick={handleNativePrint} style={{ backgroundColor: '#10b981', color: '#fff', border: 'none', padding: '10px 16px', borderRadius: '8px', fontSize: '14px', fontWeight: 'bold', cursor: 'pointer' }}>🖨️ Print</button>
                 </>
               ) : (
                 <>
@@ -740,14 +811,16 @@ export default function POSPage() {
 
           <div className="invoice-preview-container" style={{ overflowY: 'auto', maxHeight: '80vh', padding: '10px', backgroundColor: '#fff', borderRadius: '4px' }}>
             
-            <div id="invoice-capture-area" ref={invoiceRef} style={{ width: '794px', height: '559px', backgroundColor: '#ffffff', position: 'relative', padding: '24px', paddingBottom: '30px', boxSizing: 'border-box', fontFamily: "'Noto Sans Khmer', Arial, sans-serif", color: '#000000', fontSize: '13px', lineHeight: '20px' }}>
-              <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Khmer&display=swap" rel="stylesheet" />
+            {/* Added Extra Bottom Padding (60px) to prevent dots from hitting page edge */}
+            <div id="invoice-capture-area" ref={invoiceRef} style={{ width: '794px', minHeight: '559px', backgroundColor: '#ffffff', position: 'relative', padding: '24px', paddingBottom: '60px', boxSizing: 'border-box', fontFamily: "'Noto Sans Khmer', Arial, sans-serif", color: '#000000', fontSize: '13px', lineHeight: '20px' }}>
+              {/* Added crossOrigin="anonymous" to solve the SecurityError CSS crash */}
+              <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Khmer&display=swap" rel="stylesheet" crossOrigin="anonymous" />
               
               <div className="invoice-watermark" style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', backgroundImage: "url('https://i.imgur.com/XUsrp9D.png')", backgroundRepeat: 'no-repeat', backgroundPosition: 'center center', backgroundSize: '40%', opacity: 0.14, zIndex: 0, pointerEvents: 'none' }}></div>
 
               <div style={{ position: 'relative', zIndex: 1, height: '100%', display: 'flex', flexDirection: 'column' }}>
                 <div style={{ position: 'absolute', top: 0, left: 0, width: '60px', height: '70px', zIndex: 2 }}><img src="https://i.imgur.com/s0hg3MQ.png" alt="Left Logo" style={{ width: '100%', height: '100%', display: 'block' }} crossOrigin="anonymous" /></div>
-                <div style={{ position: 'absolute', top: 0, right: 0, width: '85px', height: '75px', zIndex: 2 }}><img src="https://i.imgur.com/Guk0hVe.png" alt="Right Logo" style={{ width: '95%', height: '100%', display: 'block', filter: 'brightness(0)' }} crossOrigin="anonymous" /></div>
+                <div style={{ position: 'absolute', top: 0, right: 0, width: '85px', height: '75px', zIndex: 2 }}><img src="https://i.imgur.com/Guk0hVe.png" alt="Right Logo" style={{ width: '95%', height: '100%', display: 'block' }} crossOrigin="anonymous" /></div>
 
                 <header style={{ textAlign: 'center', marginBottom: '14px' }}>
                   <h1 style={{ fontSize: '23px', lineHeight: '28px', margin: '0 0 2px 0', fontWeight: 'bold', color: 'green' }}>ដេប៉ូអង្ករ រ៉េឌៀន</h1>
@@ -849,8 +922,8 @@ export default function POSPage() {
                   </tbody>
                 </table>
 
-                {/* SIGNATURE BLOCK FIXED AT BOTTOM WITH PROPER PADDING */}
-                <div style={{ marginTop: 'auto', display: 'flex', justifyContent: 'space-between', padding: '0 30px', fontSize: '13px', color: '#000000' }}>
+                {/* SIGNATURE BLOCK FIXED AT BOTTOM WITH PERFECT ALIGNMENT & EXTRA TOP SPACING */}
+                <div style={{ marginTop: '80px', width: '746px', display: 'flex', justifyContent: 'space-between', fontSize: '13px', color: '#000000' }}>
                    <div style={{ textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
                       <div style={{ marginBottom: '35px' }}>ហត្ថលេខាអ្នកទិញ</div>
                       <div>..........................................</div>
@@ -859,10 +932,9 @@ export default function POSPage() {
                       <div style={{ marginBottom: '35px' }}>ហត្ថលេខាអ្នកលក់</div>
                       <div>..........................................</div>
                    </div>
-                   <div style={{ textAlign: 'right', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', alignItems: 'flex-end' }}>
-                      {/* Align Date perfectly with ហត្ថលេខា */}
+                   <div style={{ textAlign: 'right', display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
+                      {/* Date now aligns perfectly horizontally with ហត្ថលេខា text without floating up */}
                       <div>ថ្ងៃទី {completedSale.dateObj.day} ខែ {completedSale.dateObj.month} ឆ្នាំ {completedSale.dateObj.year}</div>
-                      <div style={{ color: 'transparent', userSelect: 'none' }}>.</div>
                    </div>
                 </div>
 
