@@ -31,9 +31,9 @@ const t = {
     totalUsd: "Total in USD:",
     checkout: "Checkout",
     successTitle: "Invoice Ready",
-    openInvoice: "💾 Download / Print Image",
-    shareInvoice: "📤 Share / Save Photo",
-    close: "Next Sale",
+    openInvoice: "💾 Download Image",
+    shareInvoice: "📤 Share / Save",
+    close: "Close Window",
     mobileModalTitle: "Adjust Item Properties",
     cancel: "Cancel",
     add: "Add to Cart"
@@ -55,9 +55,9 @@ const t = {
     totalUsd: "សរុបជាដុល្លារ:",
     checkout: "ចាត់ចែងការទូទាត់",
     successTitle: "វិក្កយបត្រត្រូវបានបង្កើតជោគជ័យ!",
-    openInvoice: "💾 ទាញយក / បោះពុម្ភវិក្កយបត្រ",
-    shareInvoice: "📤 ចែករំលែកទៅកាន់រូបភាព",
-    close: "លក់បន្ត",
+    openInvoice: "💾 ទាញយកវិក្កយបត្រ",
+    shareInvoice: "📤 ចែករំលែក / រក្សាទុក",
+    close: "បិទផ្ទាំង",
     mobileModalTitle: "កែសម្រួលព័ត៌មានទំនិញ",
     cancel: "បោះបង់",
     add: "បញ្ចូលទៅកន្ត្រក"
@@ -70,14 +70,14 @@ function CartInput({ value, onChange, isQty }: { value: number, onChange: (val: 
 
   useEffect(() => {
     if (!focused) {
-      setTemp(value === 0 && !isQty ? '' : String(value));
+      setTemp(value === 0 ? '' : String(value));
     }
-  }, [value, focused, isQty]);
+  }, [value, focused]);
 
   return (
     <input 
       type="text"
-      value={focused ? temp : (value === 0 && !isQty ? '' : new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 }).format(value))}
+      value={focused ? temp : (value === 0 ? '' : new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 }).format(value))}
       onFocus={() => { 
         setFocused(true); 
         setTemp(''); 
@@ -85,7 +85,7 @@ function CartInput({ value, onChange, isQty }: { value: number, onChange: (val: 
       onBlur={() => {
         setFocused(false);
         let parsed = parseFloat(temp.replace(/,/g, ''));
-        if (isNaN(parsed)) parsed = isQty ? 1 : 0; 
+        if (isNaN(parsed)) parsed = 0; 
         onChange(parsed);
       }}
       onChange={(e) => setTemp(e.target.value)}
@@ -130,22 +130,20 @@ export default function POSPage() {
 
   const [selectedMobileProduct, setSelectedMobileProduct] = useState<any>(null)
   const [mobilePrice, setMobilePrice] = useState<number>(0)
-  const [mobileQty, setMobileQty] = useState<number>(1)
+  const [mobileQty, setMobileQty] = useState<number>(0)
   const [mobileName, setMobileName] = useState<string>('')
 
+  // INVOICE STATE
   const [completedSale, setCompletedSale] = useState<any>(null)
-  const [isDownloading, setIsDownloading] = useState(false)
-  const [isUploadingImage, setIsUploadingImage] = useState(false)
-  const [hasAutoSaved, setHasAutoSaved] = useState(false)
+  const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null)
+  const [isGeneratingPreview, setIsGeneratingPreview] = useState(false)
   
   const invoiceRef = useRef<HTMLDivElement>(null)
 
-  // 1. STRICT DEVICE AND SCREEN DETECTION
   useEffect(() => {
     const checkDeviceType = () => {
       const isMobileBrowser = /iPhone|iPad|iPod|Android|webOS|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
       const isSmallScreen = window.innerWidth < 1024;
-      // If either the screen is physically small OR the browser says it's mobile, treat as mobile.
       setIsDeviceMobile(isMobileBrowser || isSmallScreen);
     };
 
@@ -166,12 +164,28 @@ export default function POSPage() {
     return () => window.removeEventListener('resize', checkDeviceType);
   }, [])
 
+  // MAGIC INVOICE GENERATOR: Triggers immediately when checkout succeeds
   useEffect(() => {
-    if (completedSale && !hasAutoSaved && !isUploadingImage) {
-      const timer = setTimeout(() => { executeAutoSaveOnly(); }, 800); 
+    if (completedSale && invoiceRef.current && !previewImageUrl) {
+      const timer = setTimeout(async () => {
+        try {
+          await document.fonts.ready;
+          const dataUrl = await htmlToImage.toPng(invoiceRef.current!, { 
+            pixelRatio: 3, 
+            backgroundColor: '#ffffff' 
+          });
+          setPreviewImageUrl(dataUrl);
+          setIsGeneratingPreview(false);
+          
+          executeAutoSaveOnly(dataUrl, completedSale.invoiceNo);
+        } catch (error) {
+          console.error("Preview generation failed:", error);
+          setIsGeneratingPreview(false);
+        }
+      }, 400);
       return () => clearTimeout(timer);
     }
-  }, [completedSale, hasAutoSaved, isUploadingImage])
+  }, [completedSale, previewImageUrl])
 
   async function loadProductsAndSettings() {
     const { data: prodData } = await supabase.from('products').select('*').order('id', { ascending: true })
@@ -195,25 +209,26 @@ export default function POSPage() {
   function handleProductClick(product: any) {
     if (editingCardId === product.id) return;
     
-    // Using actual browser width checking for accurate mobile popup behavior
     const isMobile = typeof window !== 'undefined' && window.innerWidth < 1024;
+    const defaultQty = activeTab === 'wholesale' ? 0 : 1;
+
     if (isMobile) {
       setSelectedMobileProduct(product);
       setMobileName(product.name);
       setMobilePrice(Number(product.price));
-      setMobileQty(1);
+      setMobileQty(defaultQty);
     } else {
-      addToCartDirect(product);
+      addToCartDirect(product, defaultQty);
     }
   }
 
-  function addToCartDirect(product: any) {
+  function addToCartDirect(product: any, qtyToAdd: number = 1) {
     const existing = cart.find((item) => item.id === product.id)
     const priceInRiel = Number(product.price); 
     if (existing) {
-      setCart(cart.map((item) => item.id === product.id ? { ...item, quantity: item.quantity + 1 } : item))
+      setCart(cart.map((item) => item.id === product.id ? { ...item, quantity: item.quantity + qtyToAdd } : item))
     } else {
-      setCart([...cart, { ...product, quantity: 1, custom_name: product.name, custom_price_riel: priceInRiel }])
+      setCart([...cart, { ...product, quantity: qtyToAdd, custom_name: product.name, custom_price_riel: priceInRiel }])
     }
   }
 
@@ -252,6 +267,7 @@ export default function POSPage() {
     e.dataTransfer.effectAllowed = 'move';
   }
 
+  // FIXED: Added missing onDragOver handler
   const handleProductDragOver = (e: React.DragEvent) => {
     e.preventDefault();
   }
@@ -339,7 +355,7 @@ export default function POSPage() {
     if (activeTab === 'wholesale' && !selectedCustomerId) return alert(lang === 'kh' ? 'សូមជ្រើសរើសអតិថិជនសម្រាប់ដុំ!' : 'Please select a customer for wholesale');
 
     setIsProcessing(true);
-    setHasAutoSaved(false);
+    setIsGeneratingPreview(true);
 
     try {
       const displayInvoiceNo = `INV-${Date.now().toString().slice(-6)}`;
@@ -396,89 +412,54 @@ export default function POSPage() {
 
     } catch (err: any) {
       alert(`System Error: ${err.message || err}`);
+      setIsGeneratingPreview(false);
     } finally {
       setIsProcessing(false);
     }
   }
 
-  // --- AUTOMATIC BACKGROUND SUPABASE SYNC (using html-to-image) ---
-  async function executeAutoSaveOnly() {
-    if (!invoiceRef.current || !completedSale) return;
-    setIsUploadingImage(true);
-
+  async function executeAutoSaveOnly(dataUrl: string, invoiceId: string) {
     try {
-      await document.fonts.ready;
-      await new Promise(resolve => setTimeout(resolve, 300));
-
-      const dataUrl = await htmlToImage.toJpeg(invoiceRef.current, { quality: 0.8, pixelRatio: 2, backgroundColor: '#ffffff' });
       const res = await fetch(dataUrl);
       const blob = await res.blob();
+      const fileName = `${invoiceId}-${Date.now()}.jpg`;
+      const { error: uploadError } = await supabase.storage.from('invoices').upload(fileName, blob, { contentType: 'image/jpeg' });
       
-      if (blob) {
-        const fileName = `${completedSale.invoiceNo}-${Date.now()}.jpg`;
-        const { error: uploadError } = await supabase.storage.from('invoices').upload(fileName, blob, { contentType: 'image/jpeg' });
-        
-        if (!uploadError) {
-          const { data: publicUrlData } = supabase.storage.from('invoices').getPublicUrl(fileName);
-          await supabase.from('sales').update({ invoice_url: publicUrlData.publicUrl }).eq('invoice_id', completedSale.invoiceNo);
-          await supabase.from('invoice_summaries').update({ invoice_url: publicUrlData.publicUrl }).eq('invoice_id', completedSale.invoiceNo);
-        }
+      if (!uploadError) {
+        const { data: publicUrlData } = supabase.storage.from('invoices').getPublicUrl(fileName);
+        await supabase.from('sales').update({ invoice_url: publicUrlData.publicUrl }).eq('invoice_id', invoiceId);
+        await supabase.from('invoice_summaries').update({ invoice_url: publicUrlData.publicUrl }).eq('invoice_id', invoiceId);
       }
     } catch (error: any) {
-      console.error("Auto-capture failed:", error);
-    } finally {
-      setIsUploadingImage(false);
-      setHasAutoSaved(true);
+      console.error("Auto-capture cloud upload failed:", error);
     }
   }
 
-  // --- HTML-TO-IMAGE EXPORTS (100% Crisp & Straight Lines) ---
-  const handleDesktopDownloadPNG = async () => {
-    if (!invoiceRef.current || !completedSale) return;
-    setIsDownloading(true);
-    try {
-      await document.fonts.ready;
-      await new Promise(resolve => setTimeout(resolve, 300));
-      
-      const dataUrl = await htmlToImage.toPng(invoiceRef.current, { pixelRatio: 3, backgroundColor: '#ffffff' });
-      const link = document.createElement('a');
-      link.download = `Invoice-${completedSale.invoiceNo}.png`;
-      link.href = dataUrl;
-      link.click();
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setIsDownloading(false);
-    }
+  const handleDesktopDownloadPNG = () => {
+    if (!previewImageUrl || !completedSale) return;
+    const link = document.createElement('a');
+    link.download = `Invoice-${completedSale.invoiceNo}.png`;
+    link.href = previewImageUrl;
+    link.click();
   }
 
   const handleMobileShare = async () => {
-    if (!invoiceRef.current || !completedSale) return;
-    setIsDownloading(true);
+    if (!previewImageUrl || !completedSale) return;
     try {
-      await document.fonts.ready;
-      await new Promise(resolve => setTimeout(resolve, 300));
-
-      const dataUrl = await htmlToImage.toPng(invoiceRef.current, { pixelRatio: 3, backgroundColor: '#ffffff' });
-      const res = await fetch(dataUrl);
+      const res = await fetch(previewImageUrl);
       const blob = await res.blob();
+      const file = new File([blob], `Invoice-${completedSale.invoiceNo}.png`, { type: 'image/png' });
       
-      if (blob) {
-        const file = new File([blob], `Invoice-${completedSale.invoiceNo}.png`, { type: 'image/png' });
-        if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
-          await navigator.share({ files: [file], title: `Invoice ${completedSale.invoiceNo}` });
-        } else {
-          // Fallback if the share API is somehow blocked or unsupported on an older iPhone
-          const link = document.createElement('a');
-          link.download = `Invoice-${completedSale.invoiceNo}.png`;
-          link.href = dataUrl;
-          link.click();
-        }
+      if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
+        await navigator.share({ files: [file], title: `Invoice ${completedSale.invoiceNo}` });
+      } else {
+        const link = document.createElement('a');
+        link.download = `Invoice-${completedSale.invoiceNo}.png`;
+        link.href = previewImageUrl;
+        link.click();
       }
     } catch (err) {
       console.error(err);
-    } finally {
-      setIsDownloading(false);
     }
   }
 
@@ -493,7 +474,7 @@ export default function POSPage() {
       
       {/* SELECTION ENGINE VIEW GRID PANEL */}
       <div className="pos-main-engine" style={{ flex: 1, display: 'flex', flexDirection: 'column', backgroundColor: '#ffffff', minWidth: 0, height: '100%' }}>
-        <header className="pos-header" style={{ display: 'flex', alignItems: 'center', padding: '12px 20px 12px 75px', borderBottom: '1px solid #f3f4f6', backgroundColor: '#ffffff', justifyContent: 'space-between', flexShrink: 0 }}>
+        <header className="pos-header" style={{ display: 'flex', alignItems: 'center', borderBottom: '1px solid #f3f4f6', backgroundColor: '#ffffff', justifyContent: 'space-between', flexShrink: 0 }}>
           <h1 style={{ fontSize: '20px', fontWeight: 'bold', margin: 0, color: '#4a3b1b' }}>{currentT.title}</h1>
           <div style={{ backgroundColor: '#f4f1ea', borderRadius: '20px', padding: '2px' }}>
             <button onClick={() => setLang('en')} style={{ border: 'none', backgroundColor: lang === 'en' ? '#b58a3d' : 'transparent', color: lang === 'en' ? '#fff' : '#6b582f', padding: '6px 12px', borderRadius: '18px', fontWeight: 'bold', cursor: 'pointer', fontSize: '12px' }}>EN</button>
@@ -697,7 +678,7 @@ export default function POSPage() {
               </div>
               <div style={{ flex: 1 }}>
                 <label style={{ display: 'block', fontSize: '12px', fontWeight: 'normal', color: '#8a7650', marginBottom: '4px' }}>Quantity</label>
-                <input type="number" min="1" value={mobileQty} onChange={(e) => setMobileQty(parseInt(e.target.value) || 1)} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #dcd7cc', boxSizing: 'border-box', color: '#333333', backgroundColor: '#ffffff' }} />
+                <input type="number" min="1" value={mobileQty === 0 ? '' : mobileQty} onChange={(e) => setMobileQty(parseInt(e.target.value) || 0)} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #dcd7cc', boxSizing: 'border-box', color: '#333333', backgroundColor: '#ffffff' }} />
               </div>
             </div>
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
@@ -724,7 +705,7 @@ export default function POSPage() {
               <button onClick={() => setIsMobileCartOpen(false)} style={{ background: 'none', border: 'none', fontSize: '20px' }}>✕</button>
             </div>
             
-            <div style={{ flex: 1, overflowY: 'auto', padding: '16px', paddingBottom: '180px' }}>
+            <div style={{ flex: 1, overflowY: 'auto', padding: '16px', paddingBottom: '220px' }}>
               {cart.map(item => (
                 <div key={item.id} style={{ padding: '12px', backgroundColor: '#fcfbfa', border: '1px solid #f4f1ea', borderRadius: '8px', marginBottom: '12px', position: 'relative' }}>
                   <button onClick={() => removeFromCart(item.id)} style={{ position: 'absolute', top: '8px', right: '8px', background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', zIndex: 5 }}>✕</button>
@@ -765,7 +746,7 @@ export default function POSPage() {
                 </div>
               ))}
             </div>
-            <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, padding: '16px', paddingBottom: 'calc(16px + env(safe-area-inset-bottom, 20px))', borderTop: '1px solid #e5e7eb', backgroundColor: '#fcfbfa', flexShrink: 0, zIndex: 1010, boxShadow: '0 -4px 10px rgba(0,0,0,0.05)' }}>
+            <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, padding: '16px', paddingBottom: 'max(40px, env(safe-area-inset-bottom, 40px))', borderTop: '1px solid #e5e7eb', backgroundColor: '#fcfbfa', flexShrink: 0, zIndex: 1010, boxShadow: '0 -4px 10px rgba(0,0,0,0.05)' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
                 <span style={{ fontWeight: 'bold', fontSize: '14px' }}>{currentT.totalKhmer}</span>
                 <span style={{ fontWeight: 'bold', color: '#b58a3d', fontSize: '18px' }}>{formatRielFromNative(totalRiel)}</span>
@@ -797,142 +778,119 @@ export default function POSPage() {
         </div>
       )}
 
-      {/* HTML INVOICE LAYOUT TO BE CAPTURED */}
+      {/* FINAL INVISIBLE DOM CAPTURE AREA */}
       {completedSale && (
-        <div className="invoice-modal-overlay" style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(0,0,0,0.85)', zIndex: 10000, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
-          
-          <div className="invoice-controls" style={{ display: 'flex', justifyContent: 'space-between', width: '100%', maxWidth: '850px', marginBottom: '16px', padding: '0 20px' }}>
-            <button onClick={() => setCompletedSale(null)} style={{ backgroundColor: '#dc2626', color: '#fff', border: 'none', padding: '10px 20px', borderRadius: '8px', fontSize: '16px', fontWeight: 'bold', cursor: 'pointer' }}>Close Window</button>
+        <div style={{ position: 'absolute', top: '-10000px', left: '-10000px', zIndex: -1 }}>
+          <div id="invoice-capture-area" ref={invoiceRef} style={{ width: '794px', height: '559px', backgroundColor: '#ffffff', position: 'relative', padding: '24px', boxSizing: 'border-box', fontFamily: "'Noto Sans Khmer', Arial, sans-serif", color: '#000000', fontSize: '13px', lineHeight: '20px', display: 'flex', flexDirection: 'column' }}>
+            <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Khmer&display=swap" rel="stylesheet" crossOrigin="anonymous" />
             
-            <div style={{ display: 'flex', gap: '10px' }}>
-              {isDeviceMobile ? (
-                <>
-                  <button onClick={handleMobileShare} disabled={isDownloading} style={{ backgroundColor: '#3b82f6', color: '#fff', border: 'none', padding: '10px 16px', borderRadius: '8px', fontSize: '14px', fontWeight: 'bold', cursor: 'pointer' }}>{isDownloading ? '⏳...' : '📤 Share'}</button>
-                  <button onClick={handleNativePrint} style={{ backgroundColor: '#10b981', color: '#fff', border: 'none', padding: '10px 16px', borderRadius: '8px', fontSize: '14px', fontWeight: 'bold', cursor: 'pointer' }}>🖨️ Print</button>
-                </>
-              ) : (
-                <>
-                  <button onClick={handleDesktopDownloadPNG} disabled={isDownloading} style={{ backgroundColor: '#f59e0b', color: '#fff', border: 'none', padding: '10px 20px', borderRadius: '8px', fontSize: '16px', fontWeight: 'bold', cursor: 'pointer' }}>{isDownloading ? '⏳...' : '⬇️ Download Image'}</button>
-                  <button onClick={handleNativePrint} style={{ backgroundColor: '#3b82f6', color: '#fff', border: 'none', padding: '10px 20px', borderRadius: '8px', fontSize: '16px', fontWeight: 'bold', cursor: 'pointer' }}>🖨️ Print / PDF</button>
-                </>
-              )}
-            </div>
-          </div>
+            <div className="invoice-watermark" style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', backgroundImage: "url('https://i.imgur.com/XUsrp9D.png')", backgroundRepeat: 'no-repeat', backgroundPosition: 'center center', backgroundSize: '40%', opacity: 0.25, zIndex: 0, pointerEvents: 'none' }}></div>
 
-          <div className="invoice-preview-container" style={{ overflowY: 'auto', maxHeight: '80vh', padding: '10px', backgroundColor: '#fff', borderRadius: '4px' }}>
-            
-            <div id="invoice-capture-area" ref={invoiceRef} style={{ width: '794px', height: '559px', backgroundColor: '#ffffff', position: 'relative', padding: '24px', boxSizing: 'border-box', fontFamily: "'Noto Sans Khmer', Arial, sans-serif", color: '#000000', fontSize: '13px', lineHeight: '20px', display: 'flex', flexDirection: 'column' }}>
-              <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Khmer&display=swap" rel="stylesheet" crossOrigin="anonymous" />
-              
-              <div className="invoice-watermark" style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', backgroundImage: "url('https://i.imgur.com/XUsrp9D.png')", backgroundRepeat: 'no-repeat', backgroundPosition: 'center center', backgroundSize: '40%', opacity: 0.14, zIndex: 0, pointerEvents: 'none' }}></div>
+            <div style={{ position: 'relative', zIndex: 1, height: '100%', display: 'flex', flexDirection: 'column' }}>
+              <div style={{ position: 'absolute', top: 0, left: 0, width: '60px', height: '70px', zIndex: 2 }}><img src="https://i.imgur.com/s0hg3MQ.png" alt="Left Logo" style={{ width: '100%', height: '100%', display: 'block' }} crossOrigin="anonymous" /></div>
+              <div style={{ position: 'absolute', top: 0, right: 0, width: '85px', height: '75px', zIndex: 2 }}><img src="https://i.imgur.com/Guk0hVe.png" alt="Right Logo" style={{ width: '95%', height: '100%', display: 'block' }} crossOrigin="anonymous" /></div>
 
-              <div style={{ position: 'relative', zIndex: 1 }}>
-                <div style={{ position: 'absolute', top: 0, left: 0, width: '60px', height: '70px', zIndex: 2 }}><img src="https://i.imgur.com/s0hg3MQ.png" alt="Left Logo" style={{ width: '100%', height: '100%', display: 'block' }} crossOrigin="anonymous" /></div>
-                <div style={{ position: 'absolute', top: 0, right: 0, width: '85px', height: '75px', zIndex: 2 }}><img src="https://i.imgur.com/Guk0hVe.png" alt="Right Logo" style={{ width: '95%', height: '100%', display: 'block' }} crossOrigin="anonymous" /></div>
+              <header style={{ textAlign: 'center', marginBottom: '14px' }}>
+                <h1 style={{ fontSize: '23px', lineHeight: '28px', margin: '0 0 2px 0', fontWeight: 'bold', color: '#166534' }}>ដេប៉ូអង្ករ រ៉េឌៀន</h1>
+                <p style={{ margin: '1px 0', color: '#166534' }}>មានបោះដុំ លក់រាយអង្ករដែលមានគុណភាពខ្ពស់គ្រប់ប្រភេទ និងមានទទួលវិចខ្ចប់អំណោយក្នុងតម្លៃសមរម្យ</p>
+                <p style={{ margin: '1px 0' }}>📲 077 797 798 / 📞 081 797 798 / 📞 088 97 97 798</p>
+                <p style={{ margin: '1px 0' }}>📍 ផ្ទះលេខ 72 ផ្លូវលំ សង្កាត់ស្ទឹងមានជ័យ1 ខណ្ឌមានជ័យ រាជធានីភ្នំពេញ</p>
+              </header>
 
-                <header style={{ textAlign: 'center', marginBottom: '14px' }}>
-                  <h1 style={{ fontSize: '23px', lineHeight: '28px', margin: '0 0 2px 0', fontWeight: 'bold', color: 'green' }}>ដេប៉ូអង្ករ រ៉េឌៀន</h1>
-                  <p style={{ margin: '1px 0', color: 'green' }}>មានបោះដុំ លក់រាយអង្ករដែលមានគុណភាពខ្ពស់គ្រប់ប្រភេទ និងមានទទួលវិចខ្ចប់អំណោយក្នុងតម្លៃសមរម្យ</p>
-                  <p style={{ margin: '1px 0' }}>📲 077 797 798 / 📞 081 797 798 / 📞 088 97 97 798</p>
-                  <p style={{ margin: '1px 0' }}>📍 ផ្ទះលេខ 72 ផ្លូវលំ សង្កាត់ស្ទឹងមានជ័យ1 ខណ្ឌមានជ័យ រាជធានីភ្នំពេញ</p>
-                </header>
+              <table style={{ width: '746px', borderCollapse: 'collapse', marginBottom: '6px', boxSizing: 'border-box' }}>
+                <tbody>
+                  <tr>
+                    <td style={{ padding: '0 4px', width: '33%', color: '#000000' }}>ឈ្មោះអតិថិជន: <strong style={{fontWeight: 'bold'}}>{completedSale.customer?.name || 'Walk-in'}</strong></td>
+                    <td style={{ padding: '0 4px', width: '34%', color: '#000000' }}>ទីតាំង: <strong style={{fontWeight: 'bold'}}>{completedSale.customer?.location || 'N/A'}</strong></td>
+                    <td style={{ padding: '0 4px', width: '33%', color: '#000000' }}>លេខទូរសព្ទ: <strong style={{fontWeight: 'bold'}}>{completedSale.customer?.phone || 'N/A'}</strong></td>
+                  </tr>
+                </tbody>
+              </table>
 
-                <table style={{ width: '746px', borderCollapse: 'collapse', marginBottom: '6px', boxSizing: 'border-box' }}>
-                  <tbody>
-                    <tr>
-                      <td style={{ padding: '0 4px', width: '33%', color: '#000000' }}>ឈ្មោះអតិថិជន: <strong style={{fontWeight: 'bold'}}>{completedSale.customer?.name || 'Walk-in'}</strong></td>
-                      <td style={{ padding: '0 4px', width: '34%', color: '#000000' }}>ទីតាំង: <strong style={{fontWeight: 'bold'}}>{completedSale.customer?.location || 'N/A'}</strong></td>
-                      <td style={{ padding: '0 4px', width: '33%', color: '#000000' }}>លេខទូរសព្ទ: <strong style={{fontWeight: 'bold'}}>{completedSale.customer?.phone || 'N/A'}</strong></td>
-                    </tr>
-                  </tbody>
-                </table>
+              <table style={{ width: '746px', borderCollapse: 'collapse', marginBottom: '4px', tableLayout: 'fixed', boxSizing: 'border-box' }}>
+                <colgroup>
+                  <col style={{ width: '45px' }} />
+                  <col style={{ width: '331px' }} />
+                  <col style={{ width: '100px' }} />
+                  <col style={{ width: '120px' }} />
+                  <col style={{ width: '150px' }} />
+                </colgroup>
+                <thead>
+                  <tr style={{ backgroundColor: '#fef08a', height: '36px' }}>
+                    <th style={{ border: '1px solid #000000', padding: '0', textAlign: 'center', fontWeight: 'bold', color: '#000000', verticalAlign: 'middle' }}>
+                      <div style={{ lineHeight: '14px' }}>No.<br/>ល.រ</div>
+                    </th>
+                    <th style={{ border: '1px solid #000000', padding: '0', textAlign: 'center', fontWeight: 'bold', color: '#000000', verticalAlign: 'middle' }}>
+                      <div style={{ lineHeight: '14px' }}>Item Descriptions<br/>រាយឈ្មោះទំនិញ</div>
+                    </th>
+                    <th style={{ border: '1px solid #000000', padding: '0', textAlign: 'center', fontWeight: 'bold', color: '#000000', verticalAlign: 'middle' }}>
+                      <div style={{ lineHeight: '14px' }}>Quantity<br/>ចំនួន</div>
+                    </th>
+                    <th style={{ border: '1px solid #000000', padding: '0', textAlign: 'center', fontWeight: 'bold', color: '#000000', verticalAlign: 'middle' }}>
+                      <div style={{ lineHeight: '14px' }}>Unit Price<br/>តម្លៃរាយ</div>
+                    </th>
+                    <th style={{ border: '1px solid #000000', padding: '0', textAlign: 'center', fontWeight: 'bold', color: '#000000', verticalAlign: 'middle' }}>
+                      <div style={{ lineHeight: '14px' }}>Subtotal<br/>តម្លៃសរុប</div>
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(() => {
+                    const displayItems = getCategorizedItems(completedSale.cartSnapshot);
+                    const rows = [];
+                    let grandTotal = 0;
+                    let itemIndex = 0;
+                    const maxRows = Math.max(10, displayItems.length);
+                    
+                    for (let i = 0; i < maxRows; i++) {
+                      const item = displayItems[i];
+                      if (item) {
+                        itemIndex++;
+                        let total = item.custom_price_riel * item.quantity;
+                        const desc = item.custom_name;
 
-                <table style={{ width: '746px', borderCollapse: 'collapse', marginBottom: '4px', tableLayout: 'fixed', boxSizing: 'border-box' }}>
-                  <colgroup>
-                    <col style={{ width: '45px' }} />
-                    <col style={{ width: '331px' }} />
-                    <col style={{ width: '100px' }} />
-                    <col style={{ width: '120px' }} />
-                    <col style={{ width: '150px' }} />
-                  </colgroup>
-                  <thead>
-                    <tr style={{ backgroundColor: '#fffacd', height: '36px' }}>
-                      <th style={{ border: '1px solid #000000', padding: '0', textAlign: 'center', fontWeight: 'bold', color: '#000000', verticalAlign: 'middle' }}>
-                        <div style={{ lineHeight: '14px' }}>No.<br/>ល.រ</div>
-                      </th>
-                      <th style={{ border: '1px solid #000000', padding: '0', textAlign: 'center', fontWeight: 'bold', color: '#000000', verticalAlign: 'middle' }}>
-                        <div style={{ lineHeight: '14px' }}>Item Descriptions<br/>រាយឈ្មោះទំនិញ</div>
-                      </th>
-                      <th style={{ border: '1px solid #000000', padding: '0', textAlign: 'center', fontWeight: 'bold', color: '#000000', verticalAlign: 'middle' }}>
-                        <div style={{ lineHeight: '14px' }}>Quantity<br/>ចំនួន</div>
-                      </th>
-                      <th style={{ border: '1px solid #000000', padding: '0', textAlign: 'center', fontWeight: 'bold', color: '#000000', verticalAlign: 'middle' }}>
-                        <div style={{ lineHeight: '14px' }}>Unit Price<br/>តម្លៃរាយ</div>
-                      </th>
-                      <th style={{ border: '1px solid #000000', padding: '0', textAlign: 'center', fontWeight: 'bold', color: '#000000', verticalAlign: 'middle' }}>
-                        <div style={{ lineHeight: '14px' }}>Subtotal<br/>តម្លៃសរុប</div>
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {(() => {
-                      const displayItems = getCategorizedItems(completedSale.cartSnapshot);
-                      const rows = [];
-                      let grandTotal = 0;
-                      let itemIndex = 0;
-                      const maxRows = Math.max(10, displayItems.length);
-                      
-                      for (let i = 0; i < maxRows; i++) {
-                        const item = displayItems[i];
-                        if (item) {
-                          itemIndex++;
-                          let total = item.custom_price_riel * item.quantity;
-                          const desc = item.custom_name;
-
-                          if (desc.includes('ដូរ') || desc.includes('បញ្ចុះតម្លៃ') || desc.includes('កក់')) {
-                            total = total * -1;
-                          }
-                          grandTotal += total;
-
-                          const isCenter = desc.includes('ដូរ') || desc.includes('បញ្ចុះតម្លៃ') || desc.includes('កក់') || desc.includes('សេវាឡាន (អតិថិជន)');
-
-                          rows.push(
-                            <tr key={i} style={{ height: '24px' }}>
-                              <td style={{ border: '1px solid #000000', padding: '0 4px', textAlign: 'center', verticalAlign: 'middle', color: '#000000' }}>{itemIndex}</td>
-                              <td style={{ border: '1px solid #000000', padding: '0 4px', textAlign: isCenter ? 'center' : 'left', verticalAlign: 'middle', color: '#000000', wordWrap: 'break-word', overflow: 'hidden' }}>{desc}</td>
-                              <td style={{ border: '1px solid #000000', padding: '0 4px', textAlign: 'center', verticalAlign: 'middle', color: '#000000' }}>{item.quantity.toLocaleString('en-US', { maximumFractionDigits: 2 })}</td>
-                              <td style={{ border: '1px solid #000000', padding: '0 4px', textAlign: 'center', verticalAlign: 'middle', color: '#000000' }}>{item.custom_price_riel.toLocaleString('en-US', { maximumFractionDigits: 2 })}</td>
-                              <td style={{ border: '1px solid #000000', padding: '0 4px', textAlign: 'center', verticalAlign: 'middle', color: total < 0 ? 'red' : '#000000' }}>{total.toLocaleString('en-US')}</td>
-                            </tr>
-                          );
-                        } else {
-                          rows.push(
-                            <tr key={i} style={{ height: '24px' }}>
-                              <td style={{ border: '1px solid #000000', padding: '0' }}>&nbsp;</td>
-                              <td style={{ border: '1px solid #000000', padding: '0' }}>&nbsp;</td>
-                              <td style={{ border: '1px solid #000000', padding: '0' }}>&nbsp;</td>
-                              <td style={{ border: '1px solid #000000', padding: '0' }}>&nbsp;</td>
-                              <td style={{ border: '1px solid #000000', padding: '0' }}>&nbsp;</td>
-                            </tr>
-                          );
+                        if (desc.includes('ដូរ') || desc.includes('បញ្ចុះតម្លៃ') || desc.includes('កក់')) {
+                          total = total * -1;
                         }
-                      }
-                      return (
-                        <>
-                          {rows}
-                          <tr style={{ height: '26px' }}>
-                            <td colSpan={4} style={{ border: '1px solid #000000', padding: '0 6px', backgroundColor: '#fffacd', textAlign: 'right', verticalAlign: 'middle', fontWeight: 'bold', color: '#000000' }}>Total | សរុប</td>
-                            <td style={{ border: '1px solid #000000', padding: '0 4px', backgroundColor: '#fffacd', textAlign: 'center', verticalAlign: 'middle', fontWeight: 'bold', color: '#000000' }}>{grandTotal.toLocaleString('en-US')}</td>
+                        grandTotal += total;
+
+                        const isCenter = desc.includes('ដូរ') || desc.includes('បញ្ចុះតម្លៃ') || desc.includes('កក់') || desc.includes('សេវាឡាន (អតិថិជន)');
+
+                        rows.push(
+                          <tr key={i} style={{ height: '24px' }}>
+                            <td style={{ border: '1px solid #000000', padding: '0 4px', textAlign: 'center', verticalAlign: 'middle', color: '#000000' }}>{itemIndex}</td>
+                            <td style={{ border: '1px solid #000000', padding: '0 4px', textAlign: isCenter ? 'center' : 'left', verticalAlign: 'middle', color: '#000000', wordWrap: 'break-word', overflow: 'hidden' }}>{desc}</td>
+                            <td style={{ border: '1px solid #000000', padding: '0 4px', textAlign: 'center', verticalAlign: 'middle', color: '#000000' }}>{item.quantity.toLocaleString('en-US', { maximumFractionDigits: 2 })}</td>
+                            <td style={{ border: '1px solid #000000', padding: '0 4px', textAlign: 'center', verticalAlign: 'middle', color: '#000000' }}>{item.custom_price_riel.toLocaleString('en-US', { maximumFractionDigits: 2 })}</td>
+                            <td style={{ border: '1px solid #000000', padding: '0 4px', textAlign: 'center', verticalAlign: 'middle', color: total < 0 ? 'red' : '#000000' }}>{total.toLocaleString('en-US')}</td>
                           </tr>
-                        </>
-                      );
-                    })()}
-                  </tbody>
-                </table>
-              </div>
-              
-              {/* Perfectly centered vertically in the remaining space */}
-              <div style={{ margin: 'auto 0', width: '746px', display: 'flex', justifyContent: 'space-between', fontSize: '13px', color: '#000000', position: 'relative', zIndex: 1 }}>
+                        );
+                      } else {
+                        rows.push(
+                          <tr key={i} style={{ height: '24px' }}>
+                            <td style={{ border: '1px solid #000000', padding: '0' }}>&nbsp;</td>
+                            <td style={{ border: '1px solid #000000', padding: '0' }}>&nbsp;</td>
+                            <td style={{ border: '1px solid #000000', padding: '0' }}>&nbsp;</td>
+                            <td style={{ border: '1px solid #000000', padding: '0' }}>&nbsp;</td>
+                            <td style={{ border: '1px solid #000000', padding: '0' }}>&nbsp;</td>
+                          </tr>
+                        );
+                      }
+                    }
+                    return (
+                      <>
+                        {rows}
+                        <tr style={{ height: '26px' }}>
+                          <td colSpan={4} style={{ border: '1px solid #000000', padding: '0 6px', backgroundColor: '#fef08a', textAlign: 'right', verticalAlign: 'middle', fontWeight: 'bold', color: '#000000' }}>Total | សរុប</td>
+                          <td style={{ border: '1px solid #000000', padding: '0 4px', backgroundColor: '#fef08a', textAlign: 'center', verticalAlign: 'middle', fontWeight: 'bold', color: '#000000' }}>{grandTotal.toLocaleString('en-US')}</td>
+                        </tr>
+                      </>
+                    );
+                  })()}
+                </tbody>
+              </table>
+
+              <div style={{ margin: 'auto 0', width: '746px', display: 'flex', justifyContent: 'space-between', fontSize: '13px', color: '#000000' }}>
                  <div style={{ textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
                     <div style={{ marginBottom: '35px' }}>ហត្ថលេខាអ្នកទិញ</div>
                     <div>..........................................</div>
@@ -951,24 +909,56 @@ export default function POSPage() {
         </div>
       )}
 
+      {/* RENDERED IMAGE PREVIEW MODAL */}
+      {completedSale && (
+        <div className="invoice-modal-overlay" style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(0,0,0,0.85)', zIndex: 10000, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+          
+          <div className="invoice-controls" style={{ display: 'flex', justifyContent: 'space-between', width: '100%', maxWidth: '850px', marginBottom: '16px', padding: '0 20px' }}>
+            <button onClick={() => { setCompletedSale(null); setPreviewImageUrl(null); }} style={{ backgroundColor: '#dc2626', color: '#fff', border: 'none', padding: '10px 20px', borderRadius: '8px', fontSize: '16px', fontWeight: 'bold', cursor: 'pointer' }}>{currentT.close}</button>
+            
+            <div style={{ display: 'flex', gap: '10px' }}>
+              {isDeviceMobile ? (
+                <>
+                  <button onClick={handleMobileShare} disabled={!previewImageUrl} style={{ backgroundColor: '#3b82f6', color: '#fff', border: 'none', padding: '10px 16px', borderRadius: '8px', fontSize: '14px', fontWeight: 'bold', cursor: 'pointer' }}>{currentT.shareInvoice}</button>
+                  <button onClick={handleNativePrint} style={{ backgroundColor: '#10b981', color: '#fff', border: 'none', padding: '10px 16px', borderRadius: '8px', fontSize: '14px', fontWeight: 'bold', cursor: 'pointer' }}>🖨️ Print</button>
+                </>
+              ) : (
+                <>
+                  <button onClick={handleDesktopDownloadPNG} disabled={!previewImageUrl} style={{ backgroundColor: '#f59e0b', color: '#fff', border: 'none', padding: '10px 20px', borderRadius: '8px', fontSize: '16px', fontWeight: 'bold', cursor: 'pointer' }}>{currentT.openInvoice}</button>
+                  <button onClick={handleNativePrint} style={{ backgroundColor: '#3b82f6', color: '#fff', border: 'none', padding: '10px 20px', borderRadius: '8px', fontSize: '16px', fontWeight: 'bold', cursor: 'pointer' }}>🖨️ Print</button>
+                </>
+              )}
+            </div>
+          </div>
+
+          <div className="invoice-preview-container" style={{ width: '100%', maxWidth: '850px', padding: '0 10px', display: 'flex', justifyContent: 'center' }}>
+            {isGeneratingPreview || !previewImageUrl ? (
+              <div style={{ padding: '40px', backgroundColor: '#fff', borderRadius: '8px', color: '#4a3b1b', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <span style={{ fontSize: '24px' }}>⏳</span> Generating High-Resolution Invoice...
+              </div>
+            ) : (
+              <img src={previewImageUrl} alt="Invoice Preview" style={{ width: '100%', maxWidth: '794px', borderRadius: '4px', objectFit: 'contain' }} />
+            )}
+          </div>
+        </div>
+      )}
+
       <style jsx global>{`
         @media print {
           body * { visibility: hidden; }
           #invoice-capture-area, #invoice-capture-area * { visibility: visible; }
           #invoice-capture-area {
-            position: absolute !important;
+            position: fixed !important;
             left: 0 !important;
             top: 0 !important;
             width: 100% !important; 
             max-width: none !important;
-            box-shadow: none !important;
-            margin: 0 !important;
-            padding: 24px !important; 
           }
           * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
           @page { size: A5 landscape; margin: 5mm; }
           .invoice-controls { display: none !important; }
-          .invoice-preview-container { overflow: visible !important; max-height: none !important; }
+          .invoice-modal-overlay { background: transparent !important; }
+          .invoice-preview-container img { display: none !important; }
         }
 
         .hide-scrollbar::-webkit-scrollbar { display: none; }
@@ -978,7 +968,7 @@ export default function POSPage() {
         
         @media (max-width: 1023px) { 
           .desktop-cart-panel { display: none !important; }
-          .pos-main-engine .pos-header { padding: 60px 16px 12px 16px !important; }
+          .pos-main-engine .pos-header { padding: max(80px, env(safe-area-inset-top, 80px)) 16px 12px 16px !important; }
           .pos-tools-area { padding: 16px 16px 16px 16px !important; }
           .pos-grid-area { padding: 16px 16px 16px 16px !important; }
           .mobile-fab {
@@ -986,7 +976,7 @@ export default function POSPage() {
             justify-content: space-between; 
             align-items: center; 
             position: fixed; 
-            bottom: 20px; 
+            bottom: max(40px, env(safe-area-inset-bottom, 40px)); 
             left: 20px; 
             right: 20px; 
             background: #10b981; 
