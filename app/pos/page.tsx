@@ -175,11 +175,13 @@ export default function POSPage() {
           if (saleRows && saleRows.length > 0) {
             const rebuiltCart = saleRows.map(row => ({
               id: Math.random(), 
-              name: row.rice_type, // Base Database Name
-              custom_name: row.custom_rice_type || row.rice_type, // Custom Name
+              product_id: row.product_id, // Store actual product ID for FIFO logic
+              name: row.rice_type, 
+              custom_name: row.custom_rice_type || row.rice_type, 
               custom_price_riel: row.price_per_bag,
               quantity: row.qty,
-              cost_price: row.cogs_price
+              cost_price: row.cogs_price,
+              stock: 0 // Mock stock to prevent errors during edit
             }));
             setCart(rebuiltCart);
 
@@ -224,7 +226,7 @@ export default function POSPage() {
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab, customers]) // NOTICE: selectedCustomerId is explicitly removed here!
+  }, [activeTab, customers]) 
 
   // MAGIC INVOICE GENERATOR (Runs Invisibly when completedSale is set)
   useEffect(() => {
@@ -285,12 +287,12 @@ export default function POSPage() {
   }
 
   function addToCartDirect(product: any, qtyToAdd: number = 1) {
-    const existing = cart.find((item) => item.id === product.id)
+    const existing = cart.find((item) => item.product_id === product.id)
     const priceInRiel = Number(product.price); 
     if (existing) {
-      setCart(cart.map((item) => item.id === product.id ? { ...item, quantity: item.quantity + qtyToAdd } : item))
+      setCart(cart.map((item) => item.product_id === product.id ? { ...item, quantity: item.quantity + qtyToAdd } : item))
     } else {
-      setCart([...cart, { ...product, quantity: qtyToAdd, custom_name: product.name, custom_price_riel: priceInRiel }])
+      setCart([...cart, { ...product, product_id: product.id, id: Math.random(), quantity: qtyToAdd, custom_name: product.name, custom_price_riel: priceInRiel }])
     }
   }
 
@@ -299,9 +301,9 @@ export default function POSPage() {
     const finalQty = typeof mobileQty === 'number' ? mobileQty : (parseFloat(mobileQty) || 0);
     const finalPrice = typeof mobilePrice === 'number' ? mobilePrice : (parseFloat(mobilePrice) || 0);
     
-    const existing = cart.find((item) => item.id === selectedMobileProduct.id);
+    const existing = cart.find((item) => item.product_id === selectedMobileProduct.id);
     if (existing) {
-      setCart(cart.map((item) => item.id === selectedMobileProduct.id ? { 
+      setCart(cart.map((item) => item.product_id === selectedMobileProduct.id ? { 
         ...item, 
         custom_name: mobileName, 
         custom_price_riel: finalPrice, 
@@ -310,7 +312,8 @@ export default function POSPage() {
     } else {
       setCart([...cart, { 
         ...selectedMobileProduct, 
-        id: selectedMobileProduct.id, 
+        product_id: selectedMobileProduct.id,
+        id: Math.random(), 
         custom_name: mobileName, 
         custom_price_riel: finalPrice, 
         quantity: finalQty 
@@ -391,6 +394,45 @@ export default function POSPage() {
     }
   }
 
+  // FIFO COGS CALCULATION LOGIC
+  async function calculateFIFOCogs(productId: number, qtySold: number, fallbackCogs: number) {
+    let remainingQtyToCost = qtySold;
+    let totalCogsForThisItem = 0;
+
+    const { data: batches } = await supabase
+      .from('price_history')
+      .select('*')
+      .eq('product_id', productId)
+      .gt('imported_qty', 0) 
+      .order('created_at', { ascending: true });
+
+    if (!batches || batches.length === 0) {
+      return fallbackCogs * qtySold;
+    }
+
+    const availableBatches = batches.filter(b => (b.sold_qty || 0) < (b.imported_qty || 0));
+
+    for (const batch of availableBatches) {
+      if (remainingQtyToCost <= 0) break;
+
+      const availableInBatch = (batch.imported_qty || 0) - (batch.sold_qty || 0);
+      const qtyTakenFromBatch = Math.min(availableInBatch, remainingQtyToCost);
+
+      totalCogsForThisItem += (qtyTakenFromBatch * batch.cost_price);
+      remainingQtyToCost -= qtyTakenFromBatch;
+
+      await supabase.from('price_history').update({
+        sold_qty: (batch.sold_qty || 0) + qtyTakenFromBatch
+      }).eq('id', batch.id);
+    }
+
+    if (remainingQtyToCost > 0) {
+      totalCogsForThisItem += (remainingQtyToCost * fallbackCogs);
+    }
+
+    return totalCogsForThisItem;
+  }
+
   const totalRiel = cart.reduce((sum, item) => sum + (Number(item.custom_price_riel) * Number(item.quantity)), 0)
   const totalUSD = totalRiel / EXCHANGE_RATE; 
 
@@ -453,7 +495,6 @@ export default function POSPage() {
       const currentTotalRiel = totalRiel;
 
       if (activeTab === 'retail') {
-        // === RETAIL FLOW: Route purely to retail_sales table ===
         const retailTxId = `RET-${Date.now().toString().slice(-6)}`;
         
         const retailRows = currentCart.map(item => ({
@@ -468,29 +509,47 @@ export default function POSPage() {
         await supabase.from('retail_sales').insert(retailRows);
 
         for (const item of currentCart) {
-          await supabase.rpc('decrease_stock', { product_id_input: item.id, qty: item.quantity });
+          // This implicitly fires your new trigger to auto-refill wholesale to retail if empty
+          await supabase.from('products').update({ stock: item.stock - item.quantity }).eq('id', item.product_id);
         }
 
       } else {
-        // === WHOLESALE FLOW: Route to sales and invoice_summaries ===
         const displayInvoiceNo = editingInvoiceId ? editingInvoiceId : `INV-${Date.now().toString().slice(-6)}`;
         const finalCustomerName = cartCustomerEdits.name.trim() || 'Walk-in';
-        const finalOwner = selectedCustomer?.owner || null; // Safely assign DB owner
+        const finalOwner = selectedCustomer?.owner || null; 
+        
+        const saleRows = [];
+        let invoiceTotalSales = 0;
+        let invoiceTotalCogs = 0;
 
-        const saleRows = currentCart.map(item => ({
-          invoice_id: displayInvoiceNo,
-          customer_name: finalCustomerName,
-          rice_type: item.name,
-          custom_rice_type: item.custom_name !== item.name ? item.custom_name : null,
-          qty: item.quantity,
-          price_per_bag: item.custom_price_riel,
-          cogs_price: item.cost_price || 0,
-          owner: finalOwner
-        }));
+        for (const item of currentCart) {
+          const actualTotalCogs = editingInvoiceId 
+            ? (item.cost_price || 0) * item.quantity 
+            : await calculateFIFOCogs(item.product_id, item.quantity, item.cost_price || 0);
+
+          const actualUnitCogs = actualTotalCogs / item.quantity;
+
+          saleRows.push({
+            invoice_id: displayInvoiceNo,
+            product_id: item.product_id,
+            customer_name: finalCustomerName,
+            rice_type: item.name,
+            custom_rice_type: item.custom_name !== item.name ? item.custom_name : null,
+            qty: item.quantity,
+            price_per_bag: item.custom_price_riel,
+            cogs_price: actualUnitCogs,
+            owner: finalOwner
+          });
+
+          invoiceTotalSales += (Number(item.custom_price_riel) * Number(item.quantity));
+          invoiceTotalCogs += actualTotalCogs;
+
+          if (!editingInvoiceId) {
+            await supabase.from('products').update({ stock: item.stock - item.quantity }).eq('id', item.product_id);
+          }
+        }
 
         const combinedRiceTypes = currentCart.map(item => `${item.custom_name} (x${item.quantity})`).join(', ');
-        const invoiceTotalSales = currentCart.reduce((sum, item) => sum + (Number(item.custom_price_riel) * Number(item.quantity)), 0);
-        const invoiceTotalCogs = currentCart.reduce((sum, item) => sum + (Number(item.cost_price || 0) * Number(item.quantity)), 0);
         const invoiceTotalProfit = invoiceTotalSales - invoiceTotalCogs;
 
         const summaryRow = {
@@ -511,11 +570,6 @@ export default function POSPage() {
         await supabase.from('sales').insert(saleRows);
         await supabase.from('invoice_summaries').insert([summaryRow]);
 
-        for (const item of currentCart) {
-          await supabase.rpc('decrease_stock', { product_id_input: item.id, qty: item.quantity });
-        }
-
-        // Only wholesale pre-stages an invoice preview block
         const currentDate = new Date();
         setCompletedSale({
           invoiceNo: displayInvoiceNo,
@@ -525,18 +579,15 @@ export default function POSPage() {
         });
       }
 
-      // UI Completion Logic
       const received = Number(amountReceived) || 0;
       const change = received - currentTotalRiel;
 
-      // Clean up UI state safely
       setCart([]);
       setIsMobileCartOpen(false);
       setEditingInvoiceId(null);
       window.history.replaceState({}, document.title, window.location.pathname);
       loadProductsAndSettings();
 
-      // Reset Wholesale Default
       if (activeTab === 'wholesale') {
         const walkInCust = customers.find(c => c.name.toLowerCase() === 'walk-in' || c.name.toLowerCase() === 'walk in');
         if (walkInCust) setSelectedCustomerId(walkInCust.id.toString());
@@ -545,17 +596,15 @@ export default function POSPage() {
       }
 
       if (received > 0) {
-        // Any tab + Cash: Show Change Summary
         if (activeTab === 'wholesale') {
           setIsGeneratingPreview(true);
-          setShowInvoicePreview(true); // Generates invoice in background
+          setShowInvoicePreview(true); 
         }
         setSaleSummary({ total: currentTotalRiel, received, change: change > 0 ? change : 0, type: activeTab, isCashless: false });
       } else {
-        // Any tab + Cashless
         if (activeTab === 'wholesale') {
           setIsGeneratingPreview(true);
-          setShowInvoicePreview(true); // Pops up standard full-screen invoice immediately
+          setShowInvoicePreview(true); 
         } else {
           setSaleSummary({ total: currentTotalRiel, received: 0, change: 0, type: 'retail', isCashless: true, items: currentCart });
         }
@@ -767,7 +816,6 @@ export default function POSPage() {
         
         <div style={{ flex: 1, overflowY: 'auto', paddingTop: '16px', paddingRight: '16px', paddingBottom: '16px', paddingLeft: '16px' }}>
           
-          {/* LIVE CART OVERRIDE COMPONENT: ONLY INJECTED ON ACTIVE WHOLESALE SELECTION MODES */}
           {activeTab === 'wholesale' && selectedCustomerId && (
             <div style={{ background: '#f8fafc', padding: '12px', borderRadius: '8px', border: '1px solid #e2e8f0', marginBottom: '16px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
               <div style={{ fontSize: '11px', fontWeight: 'bold', color: '#8a7650', textTransform: 'uppercase', letterSpacing: '0.5px' }}>📄 Invoice Customizer</div>
