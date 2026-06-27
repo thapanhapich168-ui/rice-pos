@@ -21,6 +21,7 @@ export default function Sidebar() {
     { label: '👥 Customer Database', href: '/customerdatabase' },
     { label: '🧮 Mix Calculator', href: '/calculator' },
     { label: '🖼️ Invoice Gallery', href: '/invoice-gallery' },
+    { label: '🧾 COGS Accounting', href: '/cogs-report' },
     { label: '⚙️ Settings', href: '/settings' }
   ]
 

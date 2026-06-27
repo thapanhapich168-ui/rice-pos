@@ -15,7 +15,7 @@ const formatRiel = (amount: number) => `${new Intl.NumberFormat('en-US').format(
 // Translations Dictionary
 const t = {
   en: {
-    title: "Angkor Radiant Rice POS",
+    title: "Point of Sale",
     retail: "🛍️ Retail (1kg)",
     wholesale: "🌾 Wholesale (50kg)",
     searchPlaceholder: "🔍 Search products...",
@@ -39,7 +39,7 @@ const t = {
     add: "Add to Cart"
   },
   kh: {
-    title: "អង្គរ រេឌឌៀន រ៉ាយស៍ ភីអូអេស",
+    title: "អង្គរ រេឌឌៀន រ៉ាយស៍",
     retail: "🛍️ លក់រាយ (1kg)",
     wholesale: "🌾 លក់ដុំ (50kg)",
     searchPlaceholder: "🔍 ស្វែងរកឈ្មោះទំនិញ...",
@@ -124,6 +124,9 @@ export default function POSPage() {
   const [customerSearchTerm, setCustomerSearchTerm] = useState('')
   const [isCustomerDropdownOpen, setIsCustomerDropdownOpen] = useState(false)
 
+  // IN-CART INVOICE CUSTOMER OVERRIDES STATE
+  const [cartCustomerEdits, setCartCustomerOverrides] = useState({ name: '', phone: '', location: '' })
+
   const [isCreateCustomerModalOpen, setIsCreateCustomerModalOpen] = useState(false)
   const [newCustomerForm, setNewCustomerForm] = useState({ name: '', phone: '', location: '', owner: '', type: '' })
 
@@ -172,7 +175,8 @@ export default function POSPage() {
           if (saleRows && saleRows.length > 0) {
             const rebuiltCart = saleRows.map(row => ({
               id: Math.random(), 
-              custom_name: row.rice_type,
+              name: row.rice_type, // Base Database Name
+              custom_name: row.custom_rice_type || row.rice_type, // Custom Name
               custom_price_riel: row.price_per_bag,
               quantity: row.qty,
               cost_price: row.cogs_price
@@ -197,6 +201,19 @@ export default function POSPage() {
 
     return () => window.removeEventListener('resize', checkDeviceType);
   }, [])
+
+  // Sync Master Customer State to Cart Customizer Session
+  useEffect(() => {
+    if (selectedCustomer) {
+      setCartCustomerOverrides({
+        name: selectedCustomer.name || '',
+        phone: selectedCustomer.phone || '',
+        location: selectedCustomer.location || ''
+      });
+    } else {
+      setCartCustomerOverrides({ name: 'Walk-in', phone: '', location: '' });
+    }
+  }, [selectedCustomerId, customers])
 
   // MAGIC INVOICE GENERATOR (Runs Invisibly when completedSale is set)
   useEffect(() => {
@@ -340,7 +357,7 @@ export default function POSPage() {
     const finalName = newCustomerForm.name.trim() || 'Walk-in';
     const finalPhone = newCustomerForm.phone.trim();
     const finalLocation = newCustomerForm.location.trim();
-    const finalOwner = newCustomerForm.owner.trim();
+    const finalOwner = newCustomerForm.owner.trim() || null;
     const finalType = newCustomerForm.type.trim();
 
     const { data, error } = await supabase.from('customers').insert([{
@@ -413,7 +430,7 @@ export default function POSPage() {
     return [...normalItems, ...specialItems, ...negativeItems, ...serviceItems];
   }
 
-  // CHECKOUT FUNCTION - Routing logic for Cash Summary vs Invoice
+  // CHECKOUT FUNCTION - Processes DB and handles summary routing rules
   async function confirmCheckout() {
     if (cart.length === 0) return alert(lang === 'kh' ? 'សូមជ្រើសរើសទំនិញក្នុងកន្ត្រក!' : 'Cart is empty');
     if (activeTab === 'wholesale' && !selectedCustomerId) return alert(lang === 'kh' ? 'សូមជ្រើសរើសអតិថិជនសម្រាប់ដុំ!' : 'Please select a customer for wholesale');
@@ -424,90 +441,112 @@ export default function POSPage() {
       const currentCart = [...cart];
       const currentTotalRiel = totalRiel;
 
-      const displayInvoiceNo = editingInvoiceId ? editingInvoiceId : `INV-${Date.now().toString().slice(-6)}`;
-      const cName = selectedCustomer ? selectedCustomer.name : 'Walk-in';
-      const finalOwner = activeTab === 'wholesale' ? (selectedCustomer?.owner || null) : null;
+      if (activeTab === 'retail') {
+        // === RETAIL FLOW: Route purely to retail_sales table ===
+        const retailTxId = `RET-${Date.now().toString().slice(-6)}`;
+        
+        const retailRows = currentCart.map(item => ({
+          transaction_id: retailTxId,
+          rice_type: item.name,
+          custom_rice_type: item.custom_name !== item.name ? item.custom_name : null,
+          qty: item.quantity,
+          price_per_bag: item.custom_price_riel,
+          cogs_price: item.cost_price || 0
+        }));
 
-      const saleRows = currentCart.map(item => ({
-        invoice_id: displayInvoiceNo,
-        customer_name: cName,
-        rice_type: item.custom_name,
-        qty: item.quantity,
-        price_per_bag: item.custom_price_riel,
-        cogs_price: item.cost_price || 0,
-        owner: finalOwner
-      }));
+        await supabase.from('retail_sales').insert(retailRows);
 
-      const combinedRiceTypes = currentCart.map(item => `${item.custom_name} (x${item.quantity})`).join(', ');
-      const invoiceTotalSales = currentCart.reduce((sum, item) => sum + (Number(item.custom_price_riel) * Number(item.quantity)), 0);
-      const invoiceTotalCogs = currentCart.reduce((sum, item) => sum + (Number(item.cost_price || 0) * Number(item.quantity)), 0);
-      const invoiceTotalProfit = invoiceTotalSales - invoiceTotalCogs;
+        for (const item of currentCart) {
+          await supabase.rpc('decrease_stock', { product_id_input: item.id, qty: item.quantity });
+        }
 
-      const summaryRow = {
-        invoice_id: displayInvoiceNo,
-        customer_name: cName,
-        owner: finalOwner,
-        rice_types: combinedRiceTypes,
-        total_sales: invoiceTotalSales,
-        total_cogs: invoiceTotalCogs,
-        total_profit: invoiceTotalProfit
-      };
+      } else {
+        // === WHOLESALE FLOW: Route to sales and invoice_summaries ===
+        const displayInvoiceNo = editingInvoiceId ? editingInvoiceId : `INV-${Date.now().toString().slice(-6)}`;
+        const finalCustomerName = cartCustomerEdits.name.trim() || 'Walk-in';
+        const finalOwner = selectedCustomer?.owner || null; // Safely assign DB owner
 
-      if (editingInvoiceId) {
-        await supabase.from('sales').delete().eq('invoice_id', editingInvoiceId);
-        await supabase.from('invoice_summaries').delete().eq('invoice_id', editingInvoiceId);
+        const saleRows = currentCart.map(item => ({
+          invoice_id: displayInvoiceNo,
+          customer_name: finalCustomerName,
+          rice_type: item.name,
+          custom_rice_type: item.custom_name !== item.name ? item.custom_name : null,
+          qty: item.quantity,
+          price_per_bag: item.custom_price_riel,
+          cogs_price: item.cost_price || 0,
+          owner: finalOwner
+        }));
+
+        const combinedRiceTypes = currentCart.map(item => `${item.custom_name} (x${item.quantity})`).join(', ');
+        const invoiceTotalSales = currentCart.reduce((sum, item) => sum + (Number(item.custom_price_riel) * Number(item.quantity)), 0);
+        const invoiceTotalCogs = currentCart.reduce((sum, item) => sum + (Number(item.cost_price || 0) * Number(item.quantity)), 0);
+        const invoiceTotalProfit = invoiceTotalSales - invoiceTotalCogs;
+
+        const summaryRow = {
+          invoice_id: displayInvoiceNo,
+          customer_name: finalCustomerName,
+          owner: finalOwner,
+          rice_types: combinedRiceTypes,
+          total_sales: invoiceTotalSales,
+          total_cogs: invoiceTotalCogs,
+          total_profit: invoiceTotalProfit
+        };
+
+        if (editingInvoiceId) {
+          await supabase.from('sales').delete().eq('invoice_id', editingInvoiceId);
+          await supabase.from('invoice_summaries').delete().eq('invoice_id', editingInvoiceId);
+        }
+
+        await supabase.from('sales').insert(saleRows);
+        await supabase.from('invoice_summaries').insert([summaryRow]);
+
+        for (const item of currentCart) {
+          await supabase.rpc('decrease_stock', { product_id_input: item.id, qty: item.quantity });
+        }
+
+        // Only wholesale pre-stages an invoice preview block
+        const currentDate = new Date();
+        setCompletedSale({
+          invoiceNo: displayInvoiceNo,
+          cartSnapshot: currentCart,
+          customer: { name: finalCustomerName, phone: cartCustomerEdits.phone, location: cartCustomerEdits.location },
+          dateObj: { day: String(currentDate.getDate()).padStart(2, '0'), month: String(currentDate.getMonth() + 1).padStart(2, '0'), year: currentDate.getFullYear() }
+        });
       }
 
-      await supabase.from('sales').insert(saleRows);
-      await supabase.from('invoice_summaries').insert([summaryRow]);
-
-      for (const item of currentCart) {
-        await supabase.rpc('decrease_stock', { product_id_input: item.id, qty: item.quantity });
-      }
-
-      // Check amount logic
+      // UI Completion Logic
       const received = Number(amountReceived) || 0;
       const change = received - currentTotalRiel;
 
-      // Clean up UI instantly
+      // Clean up UI state safely
       setCart([]);
       setIsMobileCartOpen(false);
       setEditingInvoiceId(null);
       window.history.replaceState({}, document.title, window.location.pathname);
       loadProductsAndSettings();
 
-      // UI Routing Logic
-      if (activeTab === 'retail') {
-        if (received > 0) {
-          // Retail + Cash: Show Change Summary
-          setSaleSummary({ total: currentTotalRiel, received, change: change > 0 ? change : 0, type: 'retail', isCashless: false });
-        } else {
-          // Retail + No Cash: Show Successful Item Summary
-          setSaleSummary({ total: currentTotalRiel, received: 0, change: 0, type: 'retail', isCashless: true, items: currentCart });
-        }
+      // Reset Wholesale Default
+      if (activeTab === 'wholesale') {
+        const walkInCust = customers.find(c => c.name.toLowerCase() === 'walk-in' || c.name.toLowerCase() === 'walk in');
+        if (walkInCust) setSelectedCustomerId(walkInCust.id.toString());
       } else {
-        // Wholesale triggers invoice generation invisibly
-        const currentDate = new Date();
-        setCompletedSale({
-          invoiceNo: displayInvoiceNo,
-          cartSnapshot: currentCart,
-          customer: selectedCustomer,
-          dateObj: { 
-            day: String(currentDate.getDate()).padStart(2, '0'), 
-            month: String(currentDate.getMonth() + 1).padStart(2, '0'), 
-            year: currentDate.getFullYear() 
-          }
-        });
+        setSelectedCustomerId('');
+      }
 
-        if (received > 0) {
-          // Wholesale + Cash: Show Change Summary with Invoice options
+      if (received > 0) {
+        // Any tab + Cash: Show Change Summary
+        if (activeTab === 'wholesale') {
           setIsGeneratingPreview(true);
-          setShowInvoicePreview(true); // Generates in background
-          setSaleSummary({ total: currentTotalRiel, received, change: change > 0 ? change : 0, type: 'wholesale', isCashless: false });
+          setShowInvoicePreview(true); // Generates invoice in background
+        }
+        setSaleSummary({ total: currentTotalRiel, received, change: change > 0 ? change : 0, type: activeTab, isCashless: false });
+      } else {
+        // Any tab + Cashless
+        if (activeTab === 'wholesale') {
+          setIsGeneratingPreview(true);
+          setShowInvoicePreview(true); // Pops up standard full-screen invoice immediately
         } else {
-          // Wholesale + No Cash: Show standard full-screen Invoice Preview
-          setIsGeneratingPreview(true);
-          setShowInvoicePreview(true);
+          setSaleSummary({ total: currentTotalRiel, received: 0, change: 0, type: 'retail', isCashless: true, items: currentCart });
         }
       }
 
@@ -574,131 +613,138 @@ export default function POSPage() {
     <div className="pos-layout-wrapper" style={{ display: 'flex', height: '100vh', overflow: 'hidden', width: '100%', backgroundColor: '#ffffff', boxSizing: 'border-box' }}>
       
       {/* SELECTION ENGINE VIEW GRID PANEL */}
-      <div className="pos-main-engine" style={{ flex: 1, display: 'flex', flexDirection: 'column', backgroundColor: '#ffffff', minWidth: 0, height: '100%' }}>
+      <div className="pos-main-engine hide-scrollbar" style={{ flex: 1, display: 'flex', flexDirection: 'column', backgroundColor: '#f8fafc', minWidth: 0, height: '100%', overflowY: 'auto' }}>
         
-        {/* Adjusted paddingLeft to 70px to avoid overlapping with fixed Hamburger Icon */}
-        <header className="pos-header" style={{ display: 'flex', alignItems: 'center', borderBottom: '1px solid #f3f4f6', backgroundColor: '#ffffff', justifyContent: 'space-between', flexShrink: 0, paddingTop: '12px', paddingRight: '20px', paddingBottom: '12px', paddingLeft: '70px', minHeight: '60px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-            <h1 style={{ fontSize: '20px', fontWeight: 'bold', margin: 0, color: '#4a3b1b' }}>
-              {editingInvoiceId ? `✏️ Editing: ${editingInvoiceId}` : currentT.title}
+        {/* Enforced Main Wrapper Standardized Settings Layout */}
+        <div className="main-wrapper" style={{ paddingBottom: '100px', flex: 1 }}>
+          
+          <div className="header-container">
+            <h1 className="page-title">
+              {editingInvoiceId ? `✏️ Editing: ${editingInvoiceId}` : `🛒 ${currentT.title}`}
             </h1>
-          </div>
-          <div style={{ backgroundColor: '#f4f1ea', borderRadius: '20px', padding: '2px' }}>
-            <button onClick={() => setLang('en')} style={{ border: 'none', backgroundColor: lang === 'en' ? '#b58a3d' : 'transparent', color: lang === 'en' ? '#fff' : '#6b582f', padding: '6px 12px', borderRadius: '18px', fontWeight: 'bold', cursor: 'pointer', fontSize: '12px' }}>EN</button>
-            <button onClick={() => setLang('kh')} style={{ border: 'none', backgroundColor: lang === 'kh' ? '#b58a3d' : 'transparent', color: lang === 'kh' ? '#fff' : '#6b582f', padding: '6px 12px', borderRadius: '18px', fontWeight: 'bold', cursor: 'pointer', fontSize: '12px' }}>KH</button>
-          </div>
-        </header>
-
-        <div className="pos-tools-area" style={{ padding: '16px 20px 16px 70px', backgroundColor: '#ffffff', borderBottom: '1px solid #f3f4f6', flexShrink: 0 }}>
-          <div style={{ display: 'flex', gap: '12px', marginBottom: '16px', flexWrap: 'wrap' }}>
-            <button onClick={() => { setActiveTab('retail'); setSelectedCustomerId(''); setCustomerSearchTerm(''); }} style={{ flex: 1, padding: '12px', borderRadius: '8px', border: 'none', fontWeight: 'bold', cursor: 'pointer', backgroundColor: activeTab === 'retail' ? '#b58a3d' : '#f4f1ea', color: activeTab === 'retail' ? '#ffffff' : '#6b582f', minWidth: '120px' }}>{currentT.retail}</button>
-            <button onClick={() => setActiveTab('wholesale')} style={{ flex: 1, padding: '12px', borderRadius: '8px', border: 'none', fontWeight: 'bold', cursor: 'pointer', backgroundColor: activeTab === 'wholesale' ? '#b58a3d' : '#f4f1ea', color: activeTab === 'wholesale' ? '#ffffff' : '#6b582f', minWidth: '120px' }}>{currentT.wholesale}</button>
+            <div style={{ backgroundColor: '#f4f1ea', borderRadius: '20px', padding: '2px' }}>
+              <button onClick={() => setLang('en')} style={{ border: 'none', backgroundColor: lang === 'en' ? '#b58a3d' : 'transparent', color: lang === 'en' ? '#fff' : '#6b582f', padding: '6px 12px', borderRadius: '18px', fontWeight: 'bold', cursor: 'pointer', fontSize: '12px' }}>EN</button>
+              <button onClick={() => setLang('kh')} style={{ border: 'none', backgroundColor: lang === 'kh' ? '#b58a3d' : 'transparent', color: lang === 'kh' ? '#fff' : '#6b582f', padding: '6px 12px', borderRadius: '18px', fontWeight: 'bold', cursor: 'pointer', fontSize: '12px' }}>KH</button>
+            </div>
           </div>
 
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px', alignItems: 'flex-start' }}>
-            <input type="text" placeholder={currentT.searchPlaceholder} value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} style={{ flex: 1, minWidth: '240px', padding: '10px 14px', borderRadius: '6px', border: '1px solid #dcd7cc', outline: 'none', fontSize: '14px', color: '#333333', backgroundColor: '#ffffff' }} />
-            
-            {activeTab === 'wholesale' && (
-              <div style={{ flex: 1, minWidth: '300px', position: 'relative' }}>
-                {!selectedCustomer ? (
-                  <>
-                    <input type="text" placeholder={currentT.selectCustomer} value={customerSearchTerm} onChange={(e) => { setCustomerSearchTerm(e.target.value); setIsCustomerDropdownOpen(true); setSelectedCustomerId(''); }} onFocus={() => setIsCustomerDropdownOpen(true)} onBlur={() => setTimeout(() => setIsCustomerDropdownOpen(false), 200)} style={{ width: '100%', padding: '10px 14px', borderRadius: '6px', border: '1px solid #dcd7cc', outline: 'none', fontSize: '14px', color: '#333333', backgroundColor: '#ffffff' }} />
-                    {isCustomerDropdownOpen && (
-                      <div style={{ position: 'absolute', top: '44px', left: 0, right: 0, backgroundColor: '#fff', border: '1px solid #dcd7cc', borderRadius: '6px', maxHeight: '300px', overflowY: 'auto', zIndex: 100, boxShadow: '0 4px 12px rgba(0,0,0,0.15)' }}>
-                        <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '13px' }}>
-                          <thead style={{ backgroundColor: '#f8fafc', position: 'sticky', top: 0, zIndex: 2 }}>
-                            <tr>
-                              <th colSpan={3} style={{ padding: '8px 12px', borderBottom: '1px solid #e2e8f0' }}>
-                                <button 
-                                  onMouseDown={(e) => { e.preventDefault(); setIsCreateCustomerModalOpen(true); setIsCustomerDropdownOpen(false); }}
-                                  style={{ width: '100%', padding: '6px', backgroundColor: '#e0f2fe', color: '#2563eb', border: '1px dashed #93c5fd', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}
-                                >
-                                  + Create New Customer
-                                </button>
-                              </th>
-                            </tr>
-                            <tr>
-                              <th style={{ padding: '8px 12px', borderBottom: '1px solid #e2e8f0', color: '#64748b' }}>Name</th>
-                              <th style={{ padding: '8px 12px', borderBottom: '1px solid #e2e8f0', color: '#64748b' }}>Phone</th>
-                              <th style={{ padding: '8px 12px', borderBottom: '1px solid #e2e8f0', color: '#64748b' }}>Location</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {filteredCustomers.map(c => (
-                              <tr key={c.id} onMouseDown={(e) => { e.preventDefault(); setSelectedCustomerId(c.id.toString()); setCustomerSearchTerm(''); setIsCustomerDropdownOpen(false); }} style={{ cursor: 'pointer', borderBottom: '1px solid #f3f4f6', color: '#4a3b1b' }} onMouseEnter={e => e.currentTarget.style.backgroundColor = '#fefcf3'} onMouseLeave={e => e.currentTarget.style.backgroundColor = 'transparent'}>
-                                <td style={{ padding: '10px 12px', fontWeight: 'bold' }}>{c.name}</td>
-                                <td style={{ padding: '10px 12px' }}>{c.phone || '-'}</td>
-                                <td style={{ padding: '10px 12px', color: '#64748b' }}>{c.location || '-'}</td>
+          <div className="pos-tools-area" style={{ marginBottom: '24px' }}>
+            <div style={{ display: 'flex', gap: '12px', marginBottom: '16px', flexWrap: 'wrap' }}>
+              <button onClick={() => { setActiveTab('retail'); setSelectedCustomerId(''); setCustomerSearchTerm(''); }} style={{ flex: 1, padding: '12px', borderRadius: '8px', border: 'none', fontWeight: 'bold', cursor: 'pointer', backgroundColor: activeTab === 'retail' ? '#b58a3d' : '#fff', color: activeTab === 'retail' ? '#ffffff' : '#6b582f', borderBottom: activeTab === 'retail' ? 'none' : '1px solid #e2e8f0', minWidth: '120px' }}>{currentT.retail}</button>
+              <button onClick={() => { 
+                setActiveTab('wholesale');
+                if (!selectedCustomerId) {
+                  const walkInCust = customers.find(c => c.name.toLowerCase() === 'walk-in' || c.name.toLowerCase() === 'walk in');
+                  if (walkInCust) setSelectedCustomerId(walkInCust.id.toString());
+                }
+              }} style={{ flex: 1, padding: '12px', borderRadius: '8px', border: 'none', fontWeight: 'bold', cursor: 'pointer', backgroundColor: activeTab === 'wholesale' ? '#b58a3d' : '#fff', color: activeTab === 'wholesale' ? '#ffffff' : '#6b582f', borderBottom: activeTab === 'wholesale' ? 'none' : '1px solid #e2e8f0', minWidth: '120px' }}>{currentT.wholesale}</button>
+            </div>
+
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px', alignItems: 'flex-start' }}>
+              <input type="text" placeholder={currentT.searchPlaceholder} value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} style={{ flex: 1, minWidth: '240px', padding: '10px 14px', borderRadius: '6px', border: '1px solid #dcd7cc', outline: 'none', fontSize: '14px', color: '#333333', backgroundColor: '#ffffff' }} />
+              
+              {activeTab === 'wholesale' && (
+                <div style={{ flex: 1, minWidth: '300px', position: 'relative' }}>
+                  {!selectedCustomer ? (
+                    <>
+                      <input type="text" placeholder={currentT.selectCustomer} value={customerSearchTerm} onChange={(e) => { setCustomerSearchTerm(e.target.value); setIsCustomerDropdownOpen(true); setSelectedCustomerId(''); }} onFocus={() => setIsCustomerDropdownOpen(true)} onBlur={() => setTimeout(() => setIsCustomerDropdownOpen(false), 200)} style={{ width: '100%', padding: '10px 14px', borderRadius: '6px', border: '1px solid #dcd7cc', outline: 'none', fontSize: '14px', color: '#333333', backgroundColor: '#ffffff' }} />
+                      {isCustomerDropdownOpen && (
+                        <div style={{ position: 'absolute', top: '44px', left: 0, right: 0, backgroundColor: '#fff', border: '1px solid #dcd7cc', borderRadius: '6px', maxHeight: '300px', overflowY: 'auto', zIndex: 100, boxShadow: '0 4px 12px rgba(0,0,0,0.15)' }}>
+                          <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '13px' }}>
+                            <thead style={{ backgroundColor: '#f8fafc', position: 'sticky', top: 0, zIndex: 2 }}>
+                              <tr>
+                                <th colSpan={3} style={{ padding: '8px 12px', borderBottom: '1px solid #e2e8f0' }}>
+                                  <button 
+                                    onMouseDown={(e) => { e.preventDefault(); setIsCreateCustomerModalOpen(true); setIsCustomerDropdownOpen(false); }}
+                                    style={{ width: '100%', padding: '6px', backgroundColor: '#e0f2fe', color: '#2563eb', border: '1px dashed #93c5fd', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}
+                                  >
+                                    + Create New Customer
+                                  </button>
+                                </th>
                               </tr>
-                            ))}
-                          </tbody>
-                        </table>
+                              <tr>
+                                <th style={{ padding: '8px 12px', borderBottom: '1px solid #e2e8f0', color: '#64748b' }}>Name</th>
+                                <th style={{ padding: '8px 12px', borderBottom: '1px solid #e2e8f0', color: '#64748b' }}>Phone</th>
+                                <th style={{ padding: '8px 12px', borderBottom: '1px solid #e2e8f0', color: '#64748b' }}>Location</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {filteredCustomers.map(c => (
+                                <tr key={c.id} onMouseDown={(e) => { e.preventDefault(); setSelectedCustomerId(c.id.toString()); setCustomerSearchTerm(''); setIsCustomerDropdownOpen(false); }} style={{ cursor: 'pointer', borderBottom: '1px solid #f3f4f6', color: '#4a3b1b' }} onMouseEnter={e => e.currentTarget.style.backgroundColor = '#fefcf3'} onMouseLeave={e => e.currentTarget.style.backgroundColor = 'transparent'}>
+                                  <td style={{ padding: '10px 12px', fontWeight: 'bold' }}>{c.name}</td>
+                                  <td style={{ padding: '10px 12px' }}>{c.phone || '-'}</td>
+                                  <td style={{ padding: '10px 12px', color: '#64748b' }}>{c.location || '-'}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <div style={{ width: '100%', padding: '12px', backgroundColor: '#fefcf3', border: '1px solid #eadeca', borderRadius: '6px', fontSize: '13px', color: '#4a3b1b', position: 'relative' }}>
+                      <button onClick={() => { setSelectedCustomerId(''); setCustomerSearchTerm(''); }} style={{ position: 'absolute', top: '6px', right: '6px', background: 'none', border: 'none', cursor: 'pointer', fontSize: '14px' }}>❌</button>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '10px', paddingRight: '20px' }}>
+                        <div><strong style={{ color: '#8a7650', fontSize: '11px', display: 'block', marginBottom: '2px' }}>👤 NAME</strong>{selectedCustomer.name}</div>
+                        <div><strong style={{ color: '#8a7650', fontSize: '11px', display: 'block', marginBottom: '2px' }}>📞 PHONE</strong>{selectedCustomer.phone || '-'}</div>
+                        <div><strong style={{ color: '#8a7650', fontSize: '11px', display: 'block', marginBottom: '2px' }}>📍 LOCATION</strong>{selectedCustomer.location || '-'}</div>
                       </div>
-                    )}
-                  </>
-                ) : (
-                  <div style={{ width: '100%', padding: '12px', backgroundColor: '#fefcf3', border: '1px solid #eadeca', borderRadius: '6px', fontSize: '13px', color: '#4a3b1b', position: 'relative' }}>
-                    <button onClick={() => { setSelectedCustomerId(''); setCustomerSearchTerm(''); }} style={{ position: 'absolute', top: '6px', right: '6px', background: 'none', border: 'none', cursor: 'pointer', fontSize: '14px' }}>❌</button>
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '10px', paddingRight: '20px' }}>
-                      <div><strong style={{ color: '#8a7650', fontSize: '11px', display: 'block', marginBottom: '2px' }}>👤 NAME</strong>{selectedCustomer.name}</div>
-                      <div><strong style={{ color: '#8a7650', fontSize: '11px', display: 'block', marginBottom: '2px' }}>📞 PHONE</strong>{selectedCustomer.phone || '-'}</div>
-                      <div><strong style={{ color: '#8a7650', fontSize: '11px', display: 'block', marginBottom: '2px' }}>📍 LOCATION</strong>{selectedCustomer.location || '-'}</div>
                     </div>
-                  </div>
-                )}
+                  )}
+                </div>
+              )}
+            </div>
+
+            {activeTab !== 'retail' && (
+              <div className="hide-scrollbar" style={{ display: 'flex', overflowX: 'auto', gap: '8px', paddingBottom: '4px', marginTop: '16px' }}>
+                {RICE_CATEGORIES.map(cat => (
+                  <button key={cat} onClick={() => setActiveCategory(cat)} style={{ padding: '6px 14px', borderRadius: '20px', border: activeCategory === cat ? 'none' : '1px solid #dcd7cc', backgroundColor: activeCategory === cat ? '#b58a3d' : '#ffffff', color: activeCategory === cat ? '#fff' : '#6b582f', fontWeight: 'bold', cursor: 'pointer', fontSize: '13px', whiteSpace: 'nowrap' }}>{cat === 'All' ? (lang === 'kh' ? 'ទាំងអស់' : 'All') : cat}</button>
+                ))}
               </div>
             )}
           </div>
 
-          {activeTab !== 'retail' && (
-            <div className="hide-scrollbar" style={{ display: 'flex', overflowX: 'auto', gap: '8px', paddingBottom: '4px', marginTop: '16px' }}>
-              {RICE_CATEGORIES.map(cat => (
-                <button key={cat} onClick={() => setActiveCategory(cat)} style={{ padding: '6px 14px', borderRadius: '20px', border: activeCategory === cat ? 'none' : '1px solid #dcd7cc', backgroundColor: activeCategory === cat ? '#b58a3d' : '#f4f1ea', color: activeCategory === cat ? '#fff' : '#6b582f', fontWeight: 'bold', cursor: 'pointer', fontSize: '13px', whiteSpace: 'nowrap' }}>{cat === 'All' ? (lang === 'kh' ? 'ទាំងអស់' : 'All') : cat}</button>
-              ))}
-            </div>
-          )}
-        </div>
-
-        <div className="pos-grid-area" style={{ flex: 1, paddingTop: '20px', paddingRight: '20px', paddingBottom: '100px', paddingLeft: '70px', overflowY: 'auto', backgroundColor: '#ffffff' }}>
-          {filteredProducts.length === 0 ? (
-            <div style={{ textAlign: 'center', padding: '40px', color: '#8a7650' }}>{currentT.noProducts}</div>
-          ) : (
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: '16px' }}>
-              {filteredProducts.map((p) => (
-                <div key={p.id} draggable={editingCardId !== p.id} onDragStart={(e) => handleProductDragStart(e, p.id)} onDragOver={handleProductDragOver} onDrop={(e) => handleProductDrop(e, p.id)} onMouseEnter={() => setHoveredCardId(p.id)} onMouseLeave={() => setHoveredCardId(null)} onClick={() => handleProductClick(p)} style={{ border: '1px solid #eadeca', borderRadius: '10px', padding: '14px', cursor: editingCardId === p.id ? 'default' : 'pointer', backgroundColor: '#ffffff', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', minHeight: '100px', transition: 'transform 0.1s', boxShadow: '0 2px 4px rgba(0,0,0,0.02)' }} onMouseDown={e => { if(editingCardId !== p.id) e.currentTarget.style.transform = 'scale(0.97)'; }} onMouseUp={e => e.currentTarget.style.transform = 'scale(1)'}>
-                  {editingCardId === p.id ? (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', height: '100%' }} onClick={e => e.stopPropagation()}>
-                      <input autoFocus value={editCardForm.name} onChange={e => setEditCardForm({...editCardForm, name: e.target.value})} style={{ padding: '4px 6px', border: '1px solid #b58a3d', borderRadius: '4px', outline: 'none', width: '100%', boxSizing: 'border-box', color: '#333333', backgroundColor: '#ffffff', fontSize: '12px' }} />
-                      <input type="number" value={editCardForm.price} onChange={e => setEditCardForm({...editCardForm, price: e.target.value})} style={{ padding: '4px 6px', border: '1px solid #b58a3d', borderRadius: '4px', outline: 'none', width: '100%', boxSizing: 'border-box', color: '#333333', backgroundColor: '#ffffff', fontSize: '12px' }} />
-                      <div style={{ display: 'flex', gap: '6px', marginTop: 'auto' }}>
-                        <button onClick={(e) => { e.stopPropagation(); saveCardEdit(p.id); }} style={{ flex: 1, backgroundColor: '#10b981', color: 'white', border: 'none', padding: '4px', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}>✅</button>
-                        <button onClick={(e) => { e.stopPropagation(); setEditingCardId(null); }} style={{ flex: 1, backgroundColor: '#ef4444', color: 'white', border: 'none', padding: '4px', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}>❌</button>
-                      </div>
-                    </div>
-                  ) : (
-                    <>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                        <div style={{ fontWeight: 'bold', fontSize: '14px', color: '#4a3b1b', marginBottom: '8px' }}>{p.name}</div>
-                        <button 
-                          onClick={(e) => { e.preventDefault(); e.stopPropagation(); setEditingCardId(p.id); setEditCardForm({ name: p.name, price: String(p.price) }); }} 
-                          onTouchStart={(e) => e.stopPropagation()}
-                          onPointerDown={(e) => e.stopPropagation()}
-                          style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '14px', padding: '4px', margin: '-4px -4px 0 0', display: hoveredCardId === p.id || (typeof window !== 'undefined' && window.innerWidth < 1024) ? 'block' : 'none' }} 
-                          title="Edit Product"
-                        >✏️</button>
-                      </div>
-                      <div style={{ borderTop: '1px dashed #f4f1ea', paddingTop: '8px', marginTop: 'auto' }}>
-                        <div style={{ fontWeight: 'bold', fontSize: '14px', color: '#b58a3d' }}>
-                          {formatRielSymbol(activeTab === 'retail' ? (p.price || 0) : (p.cost_price || 0))}
+          <div className="pos-grid-area">
+            {filteredProducts.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '40px', color: '#8a7650' }}>{currentT.noProducts}</div>
+            ) : (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: '16px' }}>
+                {filteredProducts.map((p) => (
+                  <div key={p.id} draggable={editingCardId !== p.id} onDragStart={(e) => handleProductDragStart(e, p.id)} onDragOver={handleProductDragOver} onDrop={(e) => handleProductDrop(e, p.id)} onMouseEnter={() => setHoveredCardId(p.id)} onMouseLeave={() => setHoveredCardId(null)} onClick={() => handleProductClick(p)} style={{ border: '1px solid #eadeca', borderRadius: '10px', padding: '14px', cursor: editingCardId === p.id ? 'default' : 'pointer', backgroundColor: '#ffffff', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', minHeight: '100px', transition: 'transform 0.1s', boxShadow: '0 2px 4px rgba(0,0,0,0.02)' }} onMouseDown={e => { if(editingCardId !== p.id) e.currentTarget.style.transform = 'scale(0.97)'; }} onMouseUp={e => e.currentTarget.style.transform = 'scale(1)'}>
+                    {editingCardId === p.id ? (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', height: '100%' }} onClick={e => e.stopPropagation()}>
+                        <input autoFocus value={editCardForm.name} onChange={e => setEditCardForm({...editCardForm, name: e.target.value})} style={{ padding: '4px 6px', border: '1px solid #b58a3d', borderRadius: '4px', outline: 'none', width: '100%', boxSizing: 'border-box', color: '#333333', backgroundColor: '#ffffff', fontSize: '12px' }} />
+                        <input type="number" value={editCardForm.price} onChange={e => setEditCardForm({...editCardForm, price: e.target.value})} style={{ padding: '4px 6px', border: '1px solid #b58a3d', borderRadius: '4px', outline: 'none', width: '100%', boxSizing: 'border-box', color: '#333333', backgroundColor: '#ffffff', fontSize: '12px' }} />
+                        <div style={{ display: 'flex', gap: '6px', marginTop: 'auto' }}>
+                          <button onClick={(e) => { e.stopPropagation(); saveCardEdit(p.id); }} style={{ flex: 1, backgroundColor: '#10b981', color: 'white', border: 'none', padding: '4px', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}>✅</button>
+                          <button onClick={(e) => { e.stopPropagation(); setEditingCardId(null); }} style={{ flex: 1, backgroundColor: '#ef4444', color: 'white', border: 'none', padding: '4px', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}>❌</button>
                         </div>
-                        {(activeTab === 'wholesale') && <div style={{ fontSize: '11px', marginTop: '4px', color: Number(p.stock) < 5 ? '#dc2626' : '#10b981', fontWeight: 'bold' }}>📦 {currentT.stock}: {p.stock}</div>}
                       </div>
-                    </>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
+                    ) : (
+                      <>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                          <div style={{ fontWeight: 'bold', fontSize: '14px', color: '#4a3b1b', marginBottom: '8px' }}>{p.name}</div>
+                          <button 
+                            onClick={(e) => { e.preventDefault(); e.stopPropagation(); setEditingCardId(p.id); setEditCardForm({ name: p.name, price: String(p.price) }); }} 
+                            onTouchStart={(e) => e.stopPropagation()}
+                            onPointerDown={(e) => e.stopPropagation()}
+                            style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '14px', padding: '4px', margin: '-4px -4px 0 0', display: hoveredCardId === p.id || (typeof window !== 'undefined' && window.innerWidth < 1024) ? 'block' : 'none' }} 
+                            title="Edit Product"
+                          >✏️</button>
+                        </div>
+                        <div style={{ borderTop: '1px dashed #f4f1ea', paddingTop: '8px', marginTop: 'auto' }}>
+                          <div style={{ fontWeight: 'bold', fontSize: '14px', color: '#b58a3d' }}>
+                            {formatRielSymbol(activeTab === 'retail' ? (p.price || 0) : (p.cost_price || 0))}
+                          </div>
+                          {(activeTab === 'wholesale') && <div style={{ fontSize: '11px', marginTop: '4px', color: Number(p.stock) < 5 ? '#dc2626' : '#10b981', fontWeight: 'bold' }}>📦 {currentT.stock}: {p.stock}</div>}
+                        </div>
+                      </>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
@@ -709,6 +755,19 @@ export default function POSPage() {
         </div>
         
         <div style={{ flex: 1, overflowY: 'auto', paddingTop: '16px', paddingRight: '16px', paddingBottom: '16px', paddingLeft: '16px' }}>
+          
+          {/* LIVE CART OVERRIDE COMPONENT: ONLY INJECTED ON ACTIVE WHOLESALE SELECTION MODES */}
+          {activeTab === 'wholesale' && selectedCustomerId && (
+            <div style={{ background: '#f8fafc', padding: '12px', borderRadius: '8px', border: '1px solid #e2e8f0', marginBottom: '16px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <div style={{ fontSize: '11px', fontWeight: 'bold', color: '#8a7650', textTransform: 'uppercase', letterSpacing: '0.5px' }}>📄 Invoice Customizer</div>
+              <input type="text" placeholder="Invoice Name..." value={cartCustomerEdits.name} onChange={e => setCartCustomerOverrides({...cartCustomerEdits, name: e.target.value})} style={{ width: '100%', padding: '6px 10px', fontSize: '12px', borderRadius: '4px', border: '1px solid #cbd5e1', outline: 'none', color: '#333' }} />
+              <div style={{ display: 'flex', gap: '6px' }}>
+                <input type="text" placeholder="Phone Override..." value={cartCustomerEdits.phone} onChange={e => setCartCustomerOverrides({...cartCustomerEdits, phone: e.target.value})} style={{ flex: 1, padding: '6px 10px', fontSize: '12px', borderRadius: '4px', border: '1px solid #cbd5e1', outline: 'none', color: '#333' }} />
+                <input type="text" placeholder="Location Override..." value={cartCustomerEdits.location} onChange={e => setCartCustomerOverrides({...cartCustomerEdits, location: e.target.value})} style={{ flex: 1, padding: '6px 10px', fontSize: '12px', borderRadius: '4px', border: '1px solid #cbd5e1', outline: 'none', color: '#333' }} />
+              </div>
+            </div>
+          )}
+
           {cart.length === 0 ? (
             <div style={{ textAlign: 'center', marginTop: '40px', color: '#9c8a6c' }}>{currentT.emptyCart}</div>
           ) : (
@@ -819,6 +878,7 @@ export default function POSPage() {
                 <option value="Pich">Pich</option>
                 <option value="Jing">Jing</option>
                 <option value="Both">Both</option>
+                <option value="Mom">Mom</option>
               </select>
             </div>
 
@@ -895,6 +955,15 @@ export default function POSPage() {
             </div>
             
             <div style={{ flex: 1, overflowY: 'auto', paddingTop: '16px', paddingRight: '16px', paddingBottom: '220px', paddingLeft: '16px' }}>
+              {activeTab === 'wholesale' && selectedCustomerId && (
+                <div style={{ background: '#f8fafc', padding: '12px', borderRadius: '8px', border: '1px solid #e2e8f0', marginBottom: '16px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  <div style={{ fontSize: '11px', fontWeight: 'bold', color: '#8a7650', textTransform: 'uppercase' }}>📄 Invoice Customizer</div>
+                  <input type="text" placeholder="Invoice Name..." value={cartCustomerEdits.name} onChange={e => setCartCustomerOverrides({...cartCustomerEdits, name: e.target.value})} style={{ width: '100%', padding: '6px 10px', fontSize: '12px', borderRadius: '4px', border: '1px solid #cbd5e1', outline: 'none', color: '#333' }} />
+                  <input type="text" placeholder="Phone Override..." value={cartCustomerEdits.phone} onChange={e => setCartCustomerOverrides({...cartCustomerEdits, phone: e.target.value})} style={{ width: '100%', padding: '6px 10px', fontSize: '12px', borderRadius: '4px', border: '1px solid #cbd5e1', outline: 'none', color: '#333' }} />
+                  <input type="text" placeholder="Location Override..." value={cartCustomerEdits.location} onChange={e => setCartCustomerOverrides({...cartCustomerEdits, location: e.target.value})} style={{ width: '100%', padding: '6px 10px', fontSize: '12px', borderRadius: '4px', border: '1px solid #cbd5e1', outline: 'none', color: '#333' }} />
+                </div>
+              )}
+
               {cart.map(item => (
                 <div key={item.id} style={{ padding: '12px', backgroundColor: '#fcfbfa', border: '1px solid #f4f1ea', borderRadius: '8px', marginBottom: '12px', position: 'relative' }}>
                   <button onClick={() => removeFromCart(item.id)} style={{ position: 'absolute', top: '8px', right: '8px', background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', zIndex: 5 }}>✕</button>
@@ -981,10 +1050,10 @@ export default function POSPage() {
         </div>
       )}
 
-      {/* SALE SUMMARY MODAL (Shows Change Due - No Invoice) */}
+      {/* SALE SUMMARY MODAL (Shows Change Due / Cashless Summary View Panel) */}
       {saleSummary && (
         <div className="modal-overlay" style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(0,0,0,0.85)', zIndex: 10001, display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '20px', boxSizing: 'border-box' }}>
-          <div className="modal-content" style={{ backgroundColor: '#ffffff', width: '100%', maxWidth: '400px', borderRadius: '16px', padding: '30px', boxShadow: '0 10px 25px rgba(0,0,0,0.2)', textAlign: 'center' }}>
+          <div className="modal-content" style={{ backgroundColor: '#ffffff', width: '100%', maxWidth: '400px', borderRadius: '16px', padding: '30px', boxShadow: '0 10px 25px rgba(0,0,0,0.2)' }}>
             <h2 style={{ marginTop: 0, color: '#10b981', fontSize: '24px', marginBottom: '8px', textAlign: 'center' }}>
               {saleSummary.isCashless ? 'Sale Recorded! ✅' : 'Sale Complete!'}
             </h2>
@@ -992,12 +1061,12 @@ export default function POSPage() {
             <div style={{ background: '#f8fafc', padding: '24px', borderRadius: '12px', margin: '20px 0', border: '1px solid #e2e8f0' }}>
               {saleSummary.isCashless ? (
                 <>
-                  <div style={{ fontSize: '13px', color: '#64748b', marginBottom: '12px', textTransform: 'uppercase', fontWeight: 'bold' }}>Items Sold</div>
+                  <div style={{ fontSize: '13px', color: '#64748b', marginBottom: '12px', textTransform: 'uppercase', fontWeight: 'bold', textAlign: 'center' }}>Items Description Formula</div>
                   <div style={{ maxHeight: '150px', overflowY: 'auto', marginBottom: '12px' }}>
                     {saleSummary.items?.map((item: any, idx: number) => (
-                      <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px', fontSize: '15px', color: '#0f172a', fontWeight: 'bold' }}>
+                      <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px', fontSize: '14px', color: '#334155' }}>
                         <span>{item.custom_name}</span>
-                        <span>x{item.quantity}</span>
+                        <span style={{ fontWeight: 'bold' }}>x{item.quantity}</span>
                       </div>
                     ))}
                   </div>
@@ -1024,24 +1093,8 @@ export default function POSPage() {
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-              {saleSummary.type === 'wholesale' && !saleSummary.isCashless && (
-                <div style={{ display: 'flex', gap: '10px' }}>
-                  {isDeviceMobile ? (
-                    <button onClick={handleMobileShare} disabled={!previewImageUrl || isGeneratingPreview} style={{ flex: 1, padding: '14px', background: '#3b82f6', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', fontSize: '14px' }}>
-                       {isGeneratingPreview ? '⏳ Generating...' : '📤 Share Invoice'}
-                    </button>
-                  ) : (
-                    <button onClick={handleDesktopDownloadPNG} disabled={!previewImageUrl || isGeneratingPreview} style={{ flex: 1, padding: '14px', background: '#b58a3d', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', fontSize: '14px' }}>
-                       {isGeneratingPreview ? '⏳ Generating...' : '⬇️ Download Invoice'}
-                    </button>
-                  )}
-                  <button onClick={handleNativePrint} disabled={!previewImageUrl || isGeneratingPreview} style={{ flex: 1, padding: '14px', background: '#10b981', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', fontSize: '14px' }}>
-                     🖨️ Print
-                  </button>
-                </div>
-              )}
-              <button onClick={() => { setSaleSummary(null); setCompletedSale(null); setPreviewImageUrl(null); }} style={{ width: '100%', padding: '14px', background: '#ef4444', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', fontSize: '15px' }}>
-                 ❌ Close & Next Sale
+              <button onClick={() => { setSaleSummary(null); setCompletedSale(null); setPreviewImageUrl(null); setShowInvoicePreview(false); }} style={{ width: '100%', padding: '14px', background: '#ef4444', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', fontSize: '15px' }}>
+                 ❌ Close
               </button>
             </div>
           </div>
@@ -1072,7 +1125,7 @@ export default function POSPage() {
                 <tbody>
                   <tr>
                     <td style={{ fontSize: '12.5px', padding: '2px 3px', width: '33%', textAlign: 'left' }}>
-                      ឈ្មោះអតិថិជន: <span>{completedSale.customer?.name && completedSale.customer.name !== 'Walk-in' ? completedSale.customer.name : ''}</span>
+                      ឈ្មោះអតិថិជន: <span>{completedSale.customer?.name || ''}</span>
                     </td>
                     <td style={{ fontSize: '12.5px', padding: '2px 3px', width: '34%', textAlign: 'center' }}>
                       ទីតាំង: <span>{completedSale.customer?.location || ''}</span>
@@ -1178,7 +1231,7 @@ export default function POSPage() {
         </div>
       )}
 
-      {/* RENDERED INVOICE PREVIEW MODAL (Shows only if showInvoicePreview is true) */}
+      {/* RENDERED INVOICE PREVIEW MODAL */}
       {showInvoicePreview && completedSale && (
         <div className="invoice-modal-overlay" style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(0,0,0,0.85)', zIndex: 10000, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
           
@@ -1209,6 +1262,27 @@ export default function POSPage() {
       )}
 
       <style jsx global>{`
+        .main-wrapper { 
+          padding: 24px 24px 24px 75px; 
+          background: #f8fafc; 
+          min-height: 100vh; 
+          font-family: Arial, sans-serif; 
+          box-sizing: border-box; 
+          color: #333;
+        }
+        .header-container { 
+          margin-bottom: 24px; 
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+        }
+        .page-title { 
+          font-size: 24px; 
+          font-weight: bold; 
+          color: #4a3b1b; 
+          margin: 0; 
+        }
+
         input[type="number"].no-spinners::-webkit-inner-spin-button,
         input[type="number"].no-spinners::-webkit-outer-spin-button {
           -webkit-appearance: none; margin: 0;
@@ -1245,9 +1319,10 @@ export default function POSPage() {
         @media (max-width: 1023px) { 
           .desktop-controls { display: none !important; }
           .desktop-cart-panel { display: none !important; }
-          .pos-main-engine .pos-header { paddingTop: max(80px, env(safe-area-inset-top, 80px)) !important; }
-          .pos-tools-area { paddingTop: 16px !important; paddingRight: 16px !important; paddingBottom: 16px !important; paddingLeft: 16px !important; }
-          .pos-grid-area { paddingTop: 16px !important; paddingRight: 16px !important; paddingBottom: 16px !important; paddingLeft: 16px !important; }
+          .main-wrapper { 
+            padding: max(80px, env(safe-area-inset-top, 80px)) 16px 16px 16px !important; 
+            min-height: auto;
+          }
           .mobile-fab {
             display: flex !important; 
             justify-content: space-between; 
