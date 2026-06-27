@@ -9,7 +9,7 @@ const EXCHANGE_RATE = 4000;
 const formatRiel = (v: number) => `${new Intl.NumberFormat('en-US').format(Math.round(v))} ៛`;
 const formatUSD = (v: number) => `$${(v / EXCHANGE_RATE).toFixed(2)}`;
 
-// Smart Converter: Safely converts any database value to Riel (mainly used for Expenses now)
+// Smart Converter: Safely converts any database value to Riel (mainly used for Expenses)
 const parseToRiel = (amount: any, currency?: string) => {
   const val = Number(amount || 0);
   if (val === 0) return 0;
@@ -21,25 +21,41 @@ const parseToRiel = (amount: any, currency?: string) => {
 }
 
 export default function DashboardPage() {
-  const [sales, setSales] = useState<any[]>([])
+  const [wholesaleSales, setWholesaleSales] = useState<any[]>([])
+  const [retailSales, setRetailSales] = useState<any[]>([])
   const [expenses, setExpenses] = useState<any[]>([])
+
+  const [activeTab, setActiveTab] = useState<'wholesale' | 'retail'>('wholesale')
 
   const [fromDate, setFromDate] = useState('')
   const [toDate, setToDate] = useState('')
 
   // -------------------------
-  // LOAD DATA (FIXED FAILSAFE)
+  // LOAD DATA (WITH FAILSAFES)
   // -------------------------
   useEffect(() => {
     loadData()
   }, [])
 
   async function loadData() {
-    // 1. Fetch Sales
+    // 1. Fetch Wholesale Sales
     const { data: salesData } = await supabase.from('sales').select('*')
-    setSales(salesData || [])
+    setWholesaleSales(salesData || [])
 
-    // 2. Fetch Expenses with a safe Try-Catch block to prevent crashes if table is missing
+    // 2. Fetch Retail Sales
+    try {
+      const { data: retailData, error: retailError } = await supabase.from('retail_sales').select('*')
+      if (!retailError && retailData) {
+        setRetailSales(retailData)
+      } else {
+        setRetailSales([])
+      }
+    } catch (e) {
+      console.warn("Retail table missing, defaulting to empty.", e)
+      setRetailSales([])
+    }
+
+    // 3. Fetch Expenses 
     try {
       const { data: expensesData, error } = await supabase.from('expenses').select('*')
       if (!error && expensesData) {
@@ -66,7 +82,8 @@ export default function DashboardPage() {
     })
   }
 
-  const filteredSales = filterByDate(sales)
+  const activeSalesData = activeTab === 'wholesale' ? wholesaleSales : retailSales;
+  const filteredSales = filterByDate(activeSalesData)
 
   // -------------------------
   // TIME HELPERS FOR DASHBOARD
@@ -102,18 +119,22 @@ export default function DashboardPage() {
   }
 
   // -------------------------
-  // CORE CALCULATION ENGINE (UPDATED FOR FLAT TABLE)
+  // CORE CALCULATION ENGINE
   // -------------------------
   function calculateMetrics(dataSet: any[], timeFilter: (d: string) => boolean) {
     const filtered = dataSet.filter(s => timeFilter(s.created_at))
     
-    let totalSales = 0, pichSales = 0, jingSales = 0, bothSales = 0
-    let totalProfit = 0, pichProfit = 0, jingProfit = 0, bothProfit = 0
+    let totalSales = 0, pichSales = 0, jingSales = 0, bothSales = 0, momSales = 0
+    let totalProfit = 0, pichProfit = 0, jingProfit = 0, bothProfit = 0, momProfit = 0
 
     filtered.forEach(sale => {
-      // The new flat table already calculates total_sales and total_profit in Riel for us!
-      const revenue = Number(sale.total_sales || 0)
-      const profit = Number(sale.total_profit || 0)
+      // Calculate from raw row data (qty * price)
+      const qty = Number(sale.qty || 0);
+      const price = Number(sale.price_per_bag || 0);
+      const cogs = Number(sale.cogs_price || 0);
+
+      const revenue = qty * price;
+      const profit = (price - cogs) * qty;
 
       totalSales += revenue
       totalProfit += profit
@@ -122,16 +143,17 @@ export default function DashboardPage() {
       if (owner === 'pich') { pichSales += revenue; pichProfit += profit }
       else if (owner === 'jing') { jingSales += revenue; jingProfit += profit }
       else if (owner === 'both') { bothSales += revenue; bothProfit += profit }
+      else if (owner === 'mom') { momSales += revenue; momProfit += profit }
     })
 
-    return { totalSales, pichSales, jingSales, bothSales, totalProfit, pichProfit, jingProfit, bothProfit }
+    return { totalSales, pichSales, jingSales, bothSales, momSales, totalProfit, pichProfit, jingProfit, bothProfit, momProfit }
   }
 
   function calculateExpenses(expSet: any[], timeFilter: (d: string) => boolean) {
     const filtered = expSet.filter(e => timeFilter(e.created_at))
     
     let bizTotal = 0
-    let personalTotal = 0, pichPers = 0, jingPers = 0, bothPers = 0
+    let personalTotal = 0, pichPers = 0, jingPers = 0, bothPers = 0, momPers = 0
 
     filtered.forEach(exp => {
       const amt = parseToRiel(exp.amount, exp.currency)
@@ -145,15 +167,16 @@ export default function DashboardPage() {
         if (owner === 'pich') pichPers += amt
         else if (owner === 'jing') jingPers += amt
         else if (owner === 'both') bothPers += amt
+        else if (owner === 'mom') momPers += amt
       }
     })
 
-    return { bizTotal, personalTotal, pichPers, jingPers, bothPers }
+    return { bizTotal, personalTotal, pichPers, jingPers, bothPers, momPers }
   }
 
-  const todayM = calculateMetrics(sales, isToday)
-  const mtdM = calculateMetrics(sales, isMTD)
-  const lastMonthM = calculateMetrics(sales, isLastMonth)
+  const todayM = calculateMetrics(activeSalesData, isToday)
+  const mtdM = calculateMetrics(activeSalesData, isMTD)
+  const lastMonthM = calculateMetrics(activeSalesData, isLastMonth)
 
   const todayE = calculateExpenses(expenses, isToday)
   const mtdE = calculateExpenses(expenses, isMTD)
@@ -169,8 +192,12 @@ export default function DashboardPage() {
     const filtered = dataSet.filter(s => isTargetMonth(s.created_at))
     filtered.forEach(sale => {
       const dayIdx = getDayOfMonth(sale.created_at) - 1
-      const revenue = Number(sale.total_sales || 0)
-      const profit = Number(sale.total_profit || 0)
+      const qty = Number(sale.qty || 0);
+      const price = Number(sale.price_per_bag || 0);
+      const cogs = Number(sale.cogs_price || 0);
+
+      const revenue = qty * price;
+      const profit = (price - cogs) * qty;
 
       if (dayIdx >= 0 && dayIdx < 31) {
         dailySales[dayIdx] += revenue
@@ -180,127 +207,155 @@ export default function DashboardPage() {
     return { dailySales, dailyProfit }
   }
 
-  const thisMonthData = generateDailyArray(sales, isMTD)
-  const lastMonthData = generateDailyArray(sales, isLastMonth)
+  const thisMonthData = generateDailyArray(activeSalesData, isMTD)
+  const lastMonthData = generateDailyArray(activeSalesData, isLastMonth)
 
   // -------------------------
   // UI COMPONENTS
   // -------------------------
   return (
-    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', height: '100%', width: '100%', background: '#f8fafc', overflowX: 'hidden' }}>
+    <div className="main-wrapper">
       
-      <header style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 20px 12px 65px', borderBottom: '1px solid #e2e8f0', background: '#ffffff', flexShrink: 0 }}>
-        <h1 style={{ fontSize: '20px', fontWeight: 'bold', margin: 0, color: '#111827', fontFamily: 'sans-serif' }}>📊 Business Dashboard</h1>
+      {/* HEADER */}
+      <div className="header-container" style={{ flexWrap: 'wrap', gap: '16px' }}>
+        <h1 className="page-title">📊 Business Dashboard</h1>
         
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+          {/* Ensure input text is dark and 16px to prevent iOS Zoom */}
           <input
             type="date"
             value={fromDate}
             onChange={(e) => setFromDate(e.target.value)}
-            style={{ padding: '6px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', outline: 'none', fontSize: '14px', color: '#0f172a' }}
+            style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', outline: 'none', fontSize: '16px', color: '#0f172a', backgroundColor: '#ffffff' }}
           />
-          <span style={{ color: '#64748b', fontSize: '14px' }}>to</span>
+          <span style={{ color: '#64748b', fontSize: '14px', fontWeight: 'bold' }}>To</span>
           <input
             type="date"
             value={toDate}
             onChange={(e) => setToDate(e.target.value)}
-            style={{ padding: '6px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', outline: 'none', fontSize: '14px', color: '#0f172a' }}
+            style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', outline: 'none', fontSize: '16px', color: '#0f172a', backgroundColor: '#ffffff' }}
           />
           <button 
             onClick={loadData} 
-            style={{ padding: '8px 14px', background: '#b59410', color: 'white', border: 'none', borderRadius: '6px', fontWeight: 'bold', cursor: 'pointer', fontSize: '13px', transition: 'background 0.2s' }}
+            style={{ padding: '10px 16px', background: '#b59410', color: 'white', border: 'none', borderRadius: '6px', fontWeight: 'bold', cursor: 'pointer', fontSize: '14px', transition: 'background 0.2s' }}
           >
             🔄 Refresh
           </button>
         </div>
-      </header>
+      </div>
 
-      <div style={{ flex: 1, overflowY: 'auto', padding: '24px 24px 24px 65px' }}>
+      {/* TAB SELECTOR */}
+      <div style={{ display: 'flex', gap: '8px', marginBottom: '24px', background: '#ffffff', padding: '6px', borderRadius: '8px', border: '1px solid #e2e8f0', width: 'fit-content' }}>
+        <button 
+          onClick={() => setActiveTab('wholesale')} 
+          style={{ padding: '10px 20px', borderRadius: '6px', border: 'none', fontWeight: 'bold', cursor: 'pointer', fontSize: '14px', background: activeTab === 'wholesale' ? '#b58a3d' : 'transparent', color: activeTab === 'wholesale' ? '#fff' : '#64748b', transition: 'all 0.2s' }}
+        >
+          🌾 Wholesale Data
+        </button>
+        <button 
+          onClick={() => setActiveTab('retail')} 
+          style={{ padding: '10px 20px', borderRadius: '6px', border: 'none', fontWeight: 'bold', cursor: 'pointer', fontSize: '14px', background: activeTab === 'retail' ? '#b58a3d' : 'transparent', color: activeTab === 'retail' ? '#fff' : '#64748b', transition: 'all 0.2s' }}
+        >
+          🛍️ Retail Data
+        </button>
+      </div>
+
+      {/* DYNAMIC CONTENT AREA */}
+      <div>
         
         {/* ROW 1: TODAY'S METRICS */}
-        <h2 style={{ fontSize: '16px', color: '#475569', marginBottom: '12px', borderBottom: '2px solid #e2e8f0', paddingBottom: '6px' }}>📅 TODAY'S PERFORMANCE</h2>
+        <h2 className="section-divider">📅 TODAY'S PERFORMANCE</h2>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '16px', marginBottom: '32px' }}>
-          <ComplexCard title="Today Sales" total={todayM.totalSales} pich={todayM.pichSales} jing={todayM.jingSales} both={todayM.bothSales} color="#2563eb" />
-          <ComplexCard title="Today Profit" total={todayM.totalProfit} pich={todayM.pichProfit} jing={todayM.jingProfit} both={todayM.bothProfit} color="#10b981" />
-          <ComplexCard title="Today Biz Expenses" total={todayE.bizTotal} hideSubboxes color="#b91c1c" />
-          <ComplexCard title="Today Personal Exp" total={todayE.personalTotal} pich={todayE.pichPers} jing={todayE.jingPers} both={todayE.bothPers} color="#f59e0b" />
-        </div>
-
-        {/* ROW 2: MONTH TO DATE METRICS */}
-        <h2 style={{ fontSize: '16px', color: '#475569', marginBottom: '12px', borderBottom: '2px solid #e2e8f0', paddingBottom: '6px' }}>📈 MONTH TO DATE (MTD)</h2>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '16px', marginBottom: '32px' }}>
-          <ComplexCard title="MTD Sales" total={mtdM.totalSales} pich={mtdM.pichSales} jing={mtdM.jingSales} both={mtdM.bothSales} color="#2563eb" />
-          <ComplexCard title="MTD Profit" total={mtdM.totalProfit} pich={mtdM.pichProfit} jing={mtdM.jingProfit} both={mtdM.bothProfit} color="#10b981" />
-          <ComplexCard title="MTD Biz Expenses" total={mtdE.bizTotal} hideSubboxes color="#b91c1c" />
-          <ComplexCard title="MTD Personal Exp" total={mtdE.personalTotal} pich={mtdE.pichPers} jing={mtdE.jingPers} both={mtdE.bothPers} color="#f59e0b" />
-        </div>
-
-        {/* ROW 3: HEALTH BARS (COMPARE VS LAST MONTH) */}
-        <h2 style={{ fontSize: '16px', color: '#475569', marginBottom: '12px', borderBottom: '2px solid #e2e8f0', paddingBottom: '6px' }}>⚖️ COMPARE MTD VS LAST MONTH</h2>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '20px', background: '#fff', padding: '20px', borderRadius: '12px', border: '1px solid #e2e8f0', marginBottom: '32px' }}>
-          <HealthBar title="Sales" current={mtdM.totalSales} target={lastMonthM.totalSales} color="#2563eb" />
-          <HealthBar title="Profit" current={mtdM.totalProfit} target={lastMonthM.totalProfit} color="#10b981" />
-          <HealthBar title="Biz Expenses" current={mtdE.bizTotal} target={lastMonthE.bizTotal} color="#b91c1c" reverseLogic />
-          <HealthBar title="Personal Expenses" current={mtdE.personalTotal} target={lastMonthE.personalTotal} color="#f59e0b" reverseLogic />
-        </div>
-
-        {/* ROW 4 & 5: GRAPHS (Pure SVG) */}
-        <h2 style={{ fontSize: '16px', color: '#475569', marginBottom: '12px', borderBottom: '2px solid #e2e8f0', paddingBottom: '6px' }}>📉 TREND ANALYSIS (Day 1 - 31)</h2>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '20px', marginBottom: '40px' }}>
-          <LineChartCard title="Sales: This Month vs Last Month" dataCurrent={thisMonthData.dailySales} dataLast={lastMonthData.dailySales} color="#2563eb" />
-          <LineChartCard title="Profit: This Month vs Last Month" dataCurrent={thisMonthData.dailyProfit} dataLast={lastMonthData.dailyProfit} color="#10b981" />
-        </div>
-
-        {/* RECENT SALES LOG (UPDATED FOR FLAT TABLE) */}
-        <div style={{ background: '#ffffff', borderRadius: '12px', border: '1px solid #e2e8f0', padding: '24px', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
-          <h2 style={{ margin: '0 0 16px 0', fontSize: '18px', color: '#0f172a', fontFamily: 'sans-serif', borderBottom: '1px solid #f1f5f9', paddingBottom: '12px' }}>🧾 Itemized Sales Log</h2>
+          <ComplexCard title="Today Sales" total={todayM.totalSales} pich={todayM.pichSales} jing={todayM.jingSales} both={todayM.bothSales} mom={todayM.momSales} hideSubboxes={activeTab === 'retail'} color="#2563eb" />
+          <ComplexCard title="Today Profit" total={todayM.totalProfit} pich={todayM.pichProfit} jing={todayM.jingProfit} both={todayM.bothProfit} mom={todayM.momProfit} hideSubboxes={activeTab === 'retail'} color="#10b981" />
           
-          {filteredSales.length === 0 ? (
-            <p style={{ textAlign: 'center', color: '#64748b', padding: '20px', margin: 0 }}>No items match the specified date filter boundaries.</p>
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-              {filteredSales.map((s) => {
-                const rielAmount = Number(s.total_sales || 0);
-                return (
-                  <div 
-                    key={s.id} 
-                    style={{
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      alignItems: 'center',
-                      background: '#f8fafc',
-                      padding: '16px',
-                      borderRadius: '8px',
-                      border: '1px solid #e2e8f0',
-                      fontFamily: 'sans-serif'
-                    }}
-                  >
-                    <div>
-                      <span style={{ fontWeight: 'bold', color: '#0f172a', fontSize: '15px' }}>{s.invoice_id}</span>
-                      <div style={{ fontSize: '13px', color: '#64748b', marginTop: '4px' }}>
-                        📦 Item: <span style={{ fontWeight: '600', color: '#334155' }}>{s.rice_type} (x{s.qty})</span>
-                      </div>
-                      <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '2px', textTransform: 'uppercase' }}>
-                        Owner: {s.owner || 'N/A'} | Customer: {s.customer_name || 'Walk-in'}
-                      </div>
-                    </div>
-                    <div style={{ textAlign: 'right' }}>
-                      <div style={{ fontWeight: 'bold', color: '#1b4d3e', fontSize: '16px' }}>{formatRiel(rielAmount)}</div>
-                      <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '4px', fontWeight: 'bold' }}>
-                        {formatUSD(rielAmount)}
-                      </div>
-                      <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '4px' }}>
-                        {new Date(s.created_at).toLocaleString()}
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
+          {/* Expenses are usually company-wide, but we'll show them on Wholesale, and hide on Retail to keep Retail pure */}
+          {activeTab === 'wholesale' && (
+            <>
+              <ComplexCard title="Today Biz Expenses" total={todayE.bizTotal} hideSubboxes color="#b91c1c" />
+              <ComplexCard title="Today Personal Exp" total={todayE.personalTotal} pich={todayE.pichPers} jing={todayE.jingPers} both={todayE.bothPers} mom={todayE.momPers} color="#f59e0b" />
+            </>
           )}
         </div>
 
+        {/* ROW 2: MONTH TO DATE METRICS */}
+        <h2 className="section-divider">📈 MONTH TO DATE (MTD)</h2>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '16px', marginBottom: '32px' }}>
+          <ComplexCard title="MTD Sales" total={mtdM.totalSales} pich={mtdM.pichSales} jing={mtdM.jingSales} both={mtdM.bothSales} mom={mtdM.momSales} hideSubboxes={activeTab === 'retail'} color="#2563eb" />
+          <ComplexCard title="MTD Profit" total={mtdM.totalProfit} pich={mtdM.pichProfit} jing={mtdM.jingProfit} both={mtdM.bothProfit} mom={mtdM.momProfit} hideSubboxes={activeTab === 'retail'} color="#10b981" />
+          
+          {activeTab === 'wholesale' && (
+            <>
+              <ComplexCard title="MTD Biz Expenses" total={mtdE.bizTotal} hideSubboxes color="#b91c1c" />
+              <ComplexCard title="MTD Personal Exp" total={mtdE.personalTotal} pich={mtdE.pichPers} jing={mtdE.jingPers} both={mtdE.bothPers} mom={mtdE.momPers} color="#f59e0b" />
+            </>
+          )}
+        </div>
+
+        {/* ROW 3: HEALTH BARS (COMPARE VS LAST MONTH) */}
+        <h2 className="section-divider">⚖️ COMPARE MTD VS LAST MONTH</h2>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '20px', background: '#fff', padding: '24px', borderRadius: '12px', border: '1px solid #e2e8f0', marginBottom: '32px' }}>
+          <HealthBar title="Sales" current={mtdM.totalSales} target={lastMonthM.totalSales} color="#2563eb" />
+          <HealthBar title="Profit" current={mtdM.totalProfit} target={lastMonthM.totalProfit} color="#10b981" />
+          
+          {activeTab === 'wholesale' && (
+            <>
+              <HealthBar title="Biz Expenses" current={mtdE.bizTotal} target={lastMonthE.bizTotal} color="#b91c1c" reverseLogic />
+              <HealthBar title="Personal Expenses" current={mtdE.personalTotal} target={lastMonthE.personalTotal} color="#f59e0b" reverseLogic />
+            </>
+          )}
+        </div>
+
+        {/* ROW 4: GRAPHS (Pure SVG) */}
+        <h2 className="section-divider">📉 TREND ANALYSIS (Day 1 - 31)</h2>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '24px', marginBottom: '40px' }}>
+          <LineChartCard title={`${activeTab === 'wholesale' ? 'Wholesale' : 'Retail'} Sales: This Month vs Last Month`} dataCurrent={thisMonthData.dailySales} dataLast={lastMonthData.dailySales} color="#2563eb" />
+          <LineChartCard title={`${activeTab === 'wholesale' ? 'Wholesale' : 'Retail'} Profit: This Month vs Last Month`} dataCurrent={thisMonthData.dailyProfit} dataLast={lastMonthData.dailyProfit} color="#10b981" />
+        </div>
+
       </div>
+
+      {/* GLOBAL STYLES */}
+      <style jsx global>{`
+        .main-wrapper { 
+          padding: 24px 24px 24px 75px; 
+          background: #f8fafc; 
+          min-height: 100vh; 
+          font-family: Arial, sans-serif; 
+          box-sizing: border-box; 
+          color: #333;
+        }
+        .header-container { 
+          margin-bottom: 24px; 
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+        }
+        .page-title { 
+          font-size: 24px; 
+          font-weight: bold; 
+          color: #4a3b1b; 
+          margin: 0; 
+        }
+        .section-divider {
+          font-size: 16px; 
+          color: #475569; 
+          margin-bottom: 16px; 
+          border-bottom: 2px solid #e2e8f0; 
+          padding-bottom: 6px;
+        }
+
+        @media (max-width: 1023px) { 
+          .main-wrapper { 
+            padding: max(80px, env(safe-area-inset-top, 80px)) 16px 16px 16px !important; 
+          }
+          .header-container {
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 16px;
+          }
+        }
+      `}</style>
     </div>
   )
 }
@@ -309,31 +364,32 @@ export default function DashboardPage() {
 // REUSABLE DASHBOARD COMPONENTS
 // -------------------------
 
-function ComplexCard({ title, total, pich = 0, jing = 0, both = 0, hideSubboxes = false, color = '#1e293b' }: any) {
+function ComplexCard({ title, total, pich = 0, jing = 0, both = 0, mom = 0, hideSubboxes = false, color = '#1e293b' }: any) {
   return (
-    <div style={{ background: '#ffffff', padding: '20px', borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', fontFamily: 'sans-serif' }}>
+    <div style={{ background: '#ffffff', padding: '20px', borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: '0 4px 6px rgba(0,0,0,0.02)' }}>
       <h3 style={{ margin: 0, fontSize: '12px', fontWeight: 'bold', color: '#64748b', textTransform: 'uppercase' }}>{title}</h3>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px' }}>
-        <h2 style={{ margin: '8px 0 12px 0', fontSize: '24px', fontWeight: 'bold', color: color }}>{formatRiel(total)}</h2>
+        <h2 style={{ margin: '8px 0 4px 0', fontSize: '24px', fontWeight: 'bold', color: color }}>{formatRiel(total)}</h2>
       </div>
-      <div style={{ fontSize: '13px', color: '#94a3b8', fontWeight: 'bold', marginBottom: '12px' }}>{formatUSD(total)}</div>
+      <div style={{ fontSize: '13px', color: '#94a3b8', fontWeight: 'bold', marginBottom: '16px' }}>{formatUSD(total)}</div>
       
       {!hideSubboxes && (
-        <div style={{ display: 'flex', gap: '8px', borderTop: '1px solid #f1f5f9', paddingTop: '12px' }}>
-          <div style={{ flex: 1, background: '#f8fafc', padding: '8px', borderRadius: '6px', textAlign: 'center' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '6px', borderTop: '1px solid #f1f5f9', paddingTop: '16px' }}>
+          <div style={{ background: '#f8fafc', padding: '6px', borderRadius: '6px', textAlign: 'center' }}>
             <div style={{ fontSize: '10px', color: '#94a3b8', fontWeight: 'bold', textTransform: 'uppercase' }}>Pich</div>
-            <div style={{ fontSize: '12px', fontWeight: 'bold', color: '#334155', marginTop: '2px' }}>{formatRiel(pich)}</div>
-            <div style={{ fontSize: '10px', fontWeight: 'bold', color: '#94a3b8' }}>{formatUSD(pich)}</div>
+            <div style={{ fontSize: '11px', fontWeight: 'bold', color: '#334155', marginTop: '2px' }}>{formatRiel(pich)}</div>
           </div>
-          <div style={{ flex: 1, background: '#f8fafc', padding: '8px', borderRadius: '6px', textAlign: 'center' }}>
+          <div style={{ background: '#f8fafc', padding: '6px', borderRadius: '6px', textAlign: 'center' }}>
             <div style={{ fontSize: '10px', color: '#94a3b8', fontWeight: 'bold', textTransform: 'uppercase' }}>Jing</div>
-            <div style={{ fontSize: '12px', fontWeight: 'bold', color: '#334155', marginTop: '2px' }}>{formatRiel(jing)}</div>
-            <div style={{ fontSize: '10px', fontWeight: 'bold', color: '#94a3b8' }}>{formatUSD(jing)}</div>
+            <div style={{ fontSize: '11px', fontWeight: 'bold', color: '#334155', marginTop: '2px' }}>{formatRiel(jing)}</div>
           </div>
-          <div style={{ flex: 1, background: '#f8fafc', padding: '8px', borderRadius: '6px', textAlign: 'center' }}>
+          <div style={{ background: '#f8fafc', padding: '6px', borderRadius: '6px', textAlign: 'center' }}>
             <div style={{ fontSize: '10px', color: '#94a3b8', fontWeight: 'bold', textTransform: 'uppercase' }}>Both</div>
-            <div style={{ fontSize: '12px', fontWeight: 'bold', color: '#334155', marginTop: '2px' }}>{formatRiel(both)}</div>
-            <div style={{ fontSize: '10px', fontWeight: 'bold', color: '#94a3b8' }}>{formatUSD(both)}</div>
+            <div style={{ fontSize: '11px', fontWeight: 'bold', color: '#334155', marginTop: '2px' }}>{formatRiel(both)}</div>
+          </div>
+          <div style={{ background: '#fefcf3', padding: '6px', borderRadius: '6px', textAlign: 'center', border: '1px solid #fde047' }}>
+            <div style={{ fontSize: '10px', color: '#ca8a04', fontWeight: 'bold', textTransform: 'uppercase' }}>Mom</div>
+            <div style={{ fontSize: '11px', fontWeight: 'bold', color: '#854d0e', marginTop: '2px' }}>{formatRiel(mom)}</div>
           </div>
         </div>
       )}
@@ -371,12 +427,10 @@ function HealthBar({ title, current, target, color, reverseLogic = false }: any)
         <div style={{ display: 'flex', flexDirection: 'column' }}>
           <span style={{ fontSize: '10px', color: '#64748b', fontWeight: 'bold', textTransform: 'uppercase' }}>This MTD</span>
           <span style={{ fontSize: '12px', fontWeight: 'bold', color: '#1e293b' }}>{formatRiel(current)}</span>
-          <span style={{ fontSize: '10px', fontWeight: 'bold', color: '#94a3b8' }}>{formatUSD(current)}</span>
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', textAlign: 'right' }}>
           <span style={{ fontSize: '10px', color: '#64748b', fontWeight: 'bold', textTransform: 'uppercase' }}>Last Month</span>
           <span style={{ fontSize: '12px', fontWeight: 'bold', color: '#1e293b' }}>{formatRiel(target)}</span>
-          <span style={{ fontSize: '10px', fontWeight: 'bold', color: '#94a3b8' }}>{formatUSD(target)}</span>
         </div>
       </div>
     </div>
@@ -398,15 +452,15 @@ function LineChartCard({ title, dataCurrent, dataLast, color }: any) {
   const lastPoints = formatPoints(dataLast);
 
   return (
-    <div style={{ background: '#ffffff', padding: '24px', borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+    <div style={{ background: '#ffffff', padding: '24px', borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: '0 4px 6px rgba(0,0,0,0.02)' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '12px' }}>
         <h3 style={{ margin: 0, fontSize: '14px', fontWeight: 'bold', color: '#475569' }}>{title}</h3>
-        <div style={{ display: 'flex', gap: '16px', fontSize: '11px', fontWeight: 'bold' }}>
+        <div style={{ display: 'flex', gap: '16px', fontSize: '12px', fontWeight: 'bold' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <div style={{ width: '12px', height: '3px', background: color }}></div> <span style={{ color: '#334155' }}>This Mth</span>
+            <div style={{ width: '14px', height: '4px', background: color, borderRadius: '2px' }}></div> <span style={{ color: '#334155' }}>This Mth</span>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <div style={{ width: '12px', height: '3px', borderBottom: '2px dashed #cbd5e1' }}></div> <span style={{ color: '#94a3b8' }}>Last Mth</span>
+            <div style={{ width: '14px', height: '4px', borderBottom: '2px dashed #cbd5e1' }}></div> <span style={{ color: '#94a3b8' }}>Last Mth</span>
           </div>
         </div>
       </div>
@@ -428,7 +482,7 @@ function LineChartCard({ title, dataCurrent, dataLast, color }: any) {
           })}
         </svg>
 
-        <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '8px', color: '#94a3b8', fontSize: '10px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '12px', color: '#94a3b8', fontSize: '11px', fontWeight: 'bold' }}>
           <span>1</span><span>5</span><span>10</span><span>15</span><span>20</span><span>25</span><span>31</span>
         </div>
       </div>

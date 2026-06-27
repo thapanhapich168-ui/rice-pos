@@ -215,6 +215,17 @@ export default function POSPage() {
     }
   }, [selectedCustomerId, customers])
 
+  // FIX: Auto-Select "Walk-in" ONLY when the tab changes or data loads, not when clearing manually
+  useEffect(() => {
+    if (activeTab === 'wholesale' && !selectedCustomerId && customers.length > 0) {
+      const walkInCust = customers.find(c => c.name.toLowerCase() === 'walk-in' || c.name.toLowerCase() === 'walk in');
+      if (walkInCust) {
+        setSelectedCustomerId(walkInCust.id.toString());
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, customers]) // NOTICE: selectedCustomerId is explicitly removed here!
+
   // MAGIC INVOICE GENERATOR (Runs Invisibly when completedSale is set)
   useEffect(() => {
     if (completedSale && invoiceRef.current && !previewImageUrl && showInvoicePreview) {
