@@ -114,7 +114,6 @@ export default function RiceControl() {
       const order = data.find(d => d.setting_key === 'column_order')
       if (widths && widths.setting_value) setColumnWidths(widths.setting_value)
       if (order && order.setting_value) {
-        // Ensure actions is strictly always at the end
         const cleanOrder = order.setting_value.filter((o: string) => o !== 'actions');
         setColumnOrder([...cleanOrder, 'actions']);
       }
@@ -243,7 +242,7 @@ export default function RiceControl() {
 
   // --- COLUMN DRAG & DROP LOGIC ---
   const handleDragStart = (e: React.DragEvent, col: string) => {
-    if (col === 'actions') return; // Cannot drag actions
+    if (col === 'actions') return; 
     e.dataTransfer.setData('text/plain', col)
     e.dataTransfer.effectAllowed = 'move'
   }
@@ -257,7 +256,9 @@ export default function RiceControl() {
     e.preventDefault()
     if (targetCol === 'actions') return;
 
-    const sourceCol = e.dataTransfer.getData('text/plain') as keyof Product | 'linked_wholesale'
+    // VERCEL FIX: Added 'actions' to the allowed type array here so the if check passes!
+    const sourceCol = e.dataTransfer.getData('text/plain') as keyof Product | 'linked_wholesale' | 'actions'
+    
     if (!sourceCol || sourceCol === targetCol || sourceCol === 'actions') return
 
     setColumnOrder(prev => {
