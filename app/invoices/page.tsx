@@ -7,6 +7,7 @@ import { supabase } from '@/lib/supabaseClient'
 interface Invoice {
   id: string;
   invoice_id: string;
+  fileName: string;
   invoice_url: string;
   created_at: string;
   customer_name: string;
@@ -122,13 +123,18 @@ export default function InvoiceGallery() {
     }
   }
 
+  // VERCEL FIX: Used strict typeof check and removed .canShare completely
   const handleAction = async (url: string, id: string) => {
-    if (isDeviceMobile && navigator.share && navigator.canShare) {
+    if (isDeviceMobile && typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
       try {
         const res = await fetch(url);
         const blob = await res.blob();
         const file = new File([blob], `Invoice-${id}.jpg`, { type: 'image/jpeg' });
-        await navigator.share({ files: [file], title: `Invoice ${id}` });
+        
+        await navigator.share({
+          files: [file],
+          title: `Invoice ${id}`
+        });
       } catch (err) {
         // If user cancels share or error occurs, fallback to silent download
         forceDownload(url, id); 
@@ -139,10 +145,11 @@ export default function InvoiceGallery() {
     }
   }
 
+  // VERCEL FIX: Used strict typeof check and removed .canShare completely
   const handleBulkAction = async () => {
     const selectedData = invoices.filter(inv => selectedInvoices.has(inv.invoice_id));
 
-    if (isDeviceMobile) {
+    if (isDeviceMobile && typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
       try {
         const files = await Promise.all(selectedData.map(async (inv) => {
           const res = await fetch(inv.invoice_url);
@@ -150,13 +157,12 @@ export default function InvoiceGallery() {
           return new File([blob], `Invoice-${inv.invoice_id}.jpg`, { type: 'image/jpeg' });
         }));
 
-        if (navigator.share && navigator.canShare && navigator.canShare({ files })) {
-          await navigator.share({ files, title: `Saved Invoices (${files.length})` });
-        } else {
-          alert('Bulk share is not fully supported on this browser.');
-        }
+        await navigator.share({ 
+          files, 
+          title: `Saved Invoices (${files.length})` 
+        });
       } catch (err) {
-        console.error("Bulk share error:", err);
+        console.error("Bulk share error or user cancelled:", err);
       }
     } else {
       // Sequential silent downloads for PC
