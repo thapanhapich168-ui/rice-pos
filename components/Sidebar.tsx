@@ -20,7 +20,7 @@ export default function Sidebar() {
     { label: '💼 Master Biz Database', href: '/bizdatabase' },
     { label: '👥 Customer Database', href: '/customerdatabase' },
     { label: '🧮 Mix Calculator', href: '/calculator' },
-    { label: '🖼️ Invoice Gallery', href: '/invoice-gallery' },
+    { label: '🖼️ Invoice Gallery', href: '/invoices' },
     { label: '🧾 COGS Accounting', href: '/cogs-report' },
     { label: '⚙️ Settings', href: '/settings' }
   ]
