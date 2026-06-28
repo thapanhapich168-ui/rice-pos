@@ -19,6 +19,8 @@ type SortConfig = {
   direction: 'asc' | 'desc';
 } | null;
 
+type FilterTab = 'All' | 'Today' | 'This Week' | 'This Month';
+
 export default function InvoiceGallery() {
   const [invoices, setInvoices] = useState<Invoice[]>([])
   const [isLoading, setIsLoading] = useState<boolean>(true)
@@ -26,18 +28,19 @@ export default function InvoiceGallery() {
   const [mounted, setMounted] = useState<boolean>(false)
   
   const [selectedInvoices, setSelectedInvoices] = useState<Set<string>>(new Set())
-  const [dateRange, setDateRange] = useState({ start: '', end: '' })
+  const [filterTab, setFilterTab] = useState<FilterTab>('All')
+  const [searchQuery, setSearchQuery] = useState<string>('')
   
-  // View & Sort State
+  // View & Sort State (Defaults to newest invoices first)
   const [viewMode, setViewMode] = useState<'grid' | 'table'>('grid')
-  const [sortConfig, setSortConfig] = useState<SortConfig>(null)
+  const [sortConfig, setSortConfig] = useState<SortConfig>({ key: 'created_at', direction: 'desc' })
 
   useEffect(() => {
     setMounted(true);
     const isMobile = window.innerWidth < 1024 || /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
     setIsDeviceMobile(isMobile);
     fetchInvoices();
-  }, [dateRange])
+  }, [filterTab])
 
   async function fetchInvoices() {
     setIsLoading(true)
@@ -45,12 +48,27 @@ export default function InvoiceGallery() {
       .from('invoice_summaries')
       .select('*')
       .not('invoice_url', 'is', null) // Only fetch records that still have an image attached
-      .order('created_at', { ascending: false })
 
-    if (dateRange.start) query = query.gte('created_at', dateRange.start)
-    if (dateRange.end) query = query.lte('created_at', dateRange.end + 'T23:59:59')
+    // Dynamic Filter Range Calculations
+    const now = new Date()
+    if (filterTab === 'Today') {
+      const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString()
+      query = query.gte('created_at', todayStart)
+    } else if (filterTab === 'This Week') {
+      const currentDay = now.getDay()
+      const dayDifference = now.getDate() - currentDay + (currentDay === 0 ? -6 : 1) // Sets week start to Monday
+      const weekStart = new Date(now.getFullYear(), now.getMonth(), dayDifference)
+      weekStart.setHours(0, 0, 0, 0)
+      query = query.gte('created_at', weekStart.toISOString())
+    } else if (filterTab === 'This Month') {
+      const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString()
+      query = query.gte('created_at', monthStart)
+    }
 
-    const { data } = await query
+    const { data, error } = await query
+    if (error) {
+      console.error("Error fetching data from Supabase:", error.message)
+    }
     setInvoices(data || [])
     setIsLoading(false)
   }
@@ -63,10 +81,10 @@ export default function InvoiceGallery() {
   }
 
   const toggleSelectAll = () => {
-    if (selectedInvoices.size === invoices.length && invoices.length > 0) {
+    if (selectedInvoices.size === processedInvoices.length && processedInvoices.length > 0) {
       setSelectedInvoices(new Set())
     } else {
-      setSelectedInvoices(new Set(invoices.map(inv => inv.invoice_id)))
+      setSelectedInvoices(new Set(processedInvoices.map(inv => inv.invoice_id)))
     }
   }
 
@@ -105,7 +123,6 @@ export default function InvoiceGallery() {
     }
   }
 
-  // --- SILENT FORCED DOWNLOAD LOGIC (NO PREVIEWS) ---
   const forceDownload = async (url: string, id: string) => {
     try {
       const res = await fetch(url);
@@ -117,13 +134,12 @@ export default function InvoiceGallery() {
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
-      URL.revokeObjectURL(blobUrl); // Clean up memory
+      URL.revokeObjectURL(blobUrl);
     } catch (err) {
       console.error("Failed to download silently", err);
     }
   }
 
-  // VERCEL FIX: Used strict typeof check and removed .canShare completely
   const handleAction = async (url: string, id: string) => {
     if (isDeviceMobile && typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
       try {
@@ -136,16 +152,13 @@ export default function InvoiceGallery() {
           title: `Invoice ${id}`
         });
       } catch (err) {
-        // If user cancels share or error occurs, fallback to silent download
         forceDownload(url, id); 
       }
     } else {
-      // Laptop / PC directly saves the file (no preview tab)
       forceDownload(url, id); 
     }
   }
 
-  // VERCEL FIX: Used strict typeof check and removed .canShare completely
   const handleBulkAction = async () => {
     const selectedData = invoices.filter(inv => selectedInvoices.has(inv.invoice_id));
 
@@ -162,17 +175,16 @@ export default function InvoiceGallery() {
           title: `Saved Invoices (${files.length})` 
         });
       } catch (err) {
-        console.error("Bulk share error or user cancelled:", err);
+        console.error("Bulk share error:", err);
       }
     } else {
-      // Sequential silent downloads for PC
       selectedData.forEach((inv, index) => {
         setTimeout(() => forceDownload(inv.invoice_url, inv.invoice_id), index * 400);
       });
     }
   }
 
-  // --- TABLE SORTING LOGIC ---
+  // --- SORTING TRIGGER ---
   const handleSort = (key: keyof Invoice) => {
     let direction: 'asc' | 'desc' = 'asc';
     if (sortConfig && sortConfig.key === key && sortConfig.direction === 'asc') {
@@ -181,13 +193,33 @@ export default function InvoiceGallery() {
     setSortConfig({ key, direction });
   }
 
-  const sortedInvoices = [...invoices].sort((a, b) => {
-    if (!sortConfig) return 0;
-    const { key, direction } = sortConfig;
-    if (a[key] < b[key]) return direction === 'asc' ? -1 : 1;
-    if (a[key] > b[key]) return direction === 'asc' ? 1 : -1;
-    return 0;
-  });
+  // --- CLIENT-SIDE SEARCH & SORT DYNAMICS ---
+  const processedInvoices = invoices
+    .filter(inv => {
+      if (!searchQuery) return true;
+      const term = searchQuery.toLowerCase().trim();
+      return (
+        inv.invoice_id?.toLowerCase().includes(term) ||
+        inv.customer_name?.toLowerCase().includes(term)
+      );
+    })
+    .sort((a, b) => {
+      if (!sortConfig) return 0;
+      const { key, direction } = sortConfig;
+      
+      let valA = a[key];
+      let valB = b[key];
+
+      if (key === 'created_at') {
+        return direction === 'asc' 
+          ? new Date(valA).getTime() - new Date(valB).getTime()
+          : new Date(valB).getTime() - new Date(valA).getTime();
+      }
+
+      if (valA < valB) return direction === 'asc' ? -1 : 1;
+      if (valA > valB) return direction === 'asc' ? 1 : -1;
+      return 0;
+    });
 
   const formatDate = (dateStr: string) => {
     return new Date(dateStr).toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
@@ -203,49 +235,56 @@ export default function InvoiceGallery() {
         <h1 className="page-title">🖼️ Invoice Image Gallery</h1>
       </div>
 
-      {/* TOOLBAR */}
-      <div style={{ background: '#fff', padding: '16px 20px', borderRadius: '12px', border: '1px solid #e2e8f0', marginBottom: '24px', display: 'flex', gap: '16px', alignItems: 'center', flexWrap: 'wrap', boxShadow: '0 4px 6px rgba(0,0,0,0.02)' }}>
-        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-          <label style={{ fontWeight: 'bold', color: '#64748b', fontSize: '14px' }}>From:</label>
+      {/* FILTER TABS & SEARCH CONTAINER */}
+      <div className="toolbar-container">
+        
+        {/* Pre-Filter Tabs */}
+        <div className="tab-group">
+          {(['All', 'Today', 'This Week', 'This Month'] as FilterTab[]).map(tab => (
+            <button
+              key={tab}
+              onClick={() => setFilterTab(tab)}
+              className={`tab-btn ${filterTab === tab ? 'active' : ''}`}
+            >
+              {tab}
+            </button>
+          ))}
+        </div>
+
+        {/* Live Text Search Field */}
+        <div className="search-box-wrapper">
           <input 
-            type="date" 
-            value={dateRange.start} 
-            onChange={e => setDateRange({...dateRange, start: e.target.value})} 
-            onKeyDown={e => e.key === 'Enter' && e.currentTarget.blur()}
-            style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '16px', outline: 'none', color: '#0f172a', backgroundColor: '#ffffff' }} 
+            type="text"
+            placeholder="🔍 Search ID or Customer..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.currentTarget.blur(); // Hides keyboard & forces iOS zoom-out reset
+              }
+            }}
+            className="search-input"
           />
         </div>
-        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-          <label style={{ fontWeight: 'bold', color: '#64748b', fontSize: '14px' }}>To:</label>
-          <input 
-            type="date" 
-            value={dateRange.end} 
-            onChange={e => setDateRange({...dateRange, end: e.target.value})} 
-            onKeyDown={e => e.key === 'Enter' && e.currentTarget.blur()}
-            style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '16px', outline: 'none', color: '#0f172a', backgroundColor: '#ffffff' }} 
-          />
+
+        {/* Layout Toggle Buttons */}
+        <div className="view-toggle-container">
+          <button onClick={() => setViewMode('grid')} className={`toggle-btn ${viewMode === 'grid' ? 'active' : ''}`}>Grid</button>
+          <button onClick={() => setViewMode('table')} className={`toggle-btn ${viewMode === 'table' ? 'active' : ''}`}>Table</button>
         </div>
 
-        <div style={{ borderLeft: '1px solid #e2e8f0', height: '30px', margin: '0 8px' }} />
-
-        <div style={{ display: 'flex', gap: '8px', background: '#f1f5f9', padding: '4px', borderRadius: '8px' }}>
-          <button onClick={() => setViewMode('grid')} style={{ padding: '8px 16px', borderRadius: '6px', border: 'none', fontWeight: 'bold', cursor: 'pointer', fontSize: '14px', background: viewMode === 'grid' ? '#10b981' : 'transparent', color: viewMode === 'grid' ? '#fff' : '#64748b' }}>Grid</button>
-          <button onClick={() => setViewMode('table')} style={{ padding: '8px 16px', borderRadius: '6px', border: 'none', fontWeight: 'bold', cursor: 'pointer', fontSize: '14px', background: viewMode === 'table' ? '#10b981' : 'transparent', color: viewMode === 'table' ? '#fff' : '#64748b' }}>Table</button>
-        </div>
-
-        <div style={{ flex: 1 }} />
-
-        <div style={{ display: 'flex', gap: '10px' }}>
-          <button onClick={toggleSelectAll} disabled={invoices.length === 0} style={{ padding: '10px 16px', background: '#f8fafc', color: '#4a3b1b', border: '1px solid #e2e8f0', borderRadius: '6px', cursor: invoices.length === 0 ? 'not-allowed' : 'pointer', fontWeight: 'bold', fontSize: '14px' }}>
-            {selectedInvoices.size === invoices.length && invoices.length > 0 ? 'Deselect All' : 'Select All'}
+        {/* Global Action Modifiers (Strict high-contrast borders & text definitions) */}
+        <div className="actions-wrapper">
+          <button onClick={toggleSelectAll} disabled={processedInvoices.length === 0} className="secondary-action-btn">
+            {selectedInvoices.size === processedInvoices.length && processedInvoices.length > 0 ? 'Deselect All' : 'Select All'}
           </button>
 
           {selectedInvoices.size > 0 && (
             <>
-              <button onClick={deleteSelected} style={{ padding: '10px 16px', background: '#ef4444', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', fontSize: '14px' }}>
+              <button onClick={deleteSelected} className="danger-action-btn">
                 Clear ({selectedInvoices.size})
               </button>
-              <button onClick={handleBulkAction} style={{ padding: '10px 16px', background: '#3b82f6', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', fontSize: '14px' }}>
+              <button onClick={handleBulkAction} className="primary-action-btn">
                 {isDeviceMobile ? `Share (${selectedInvoices.size})` : `Download (${selectedInvoices.size})`}
               </button>
             </>
@@ -253,40 +292,53 @@ export default function InvoiceGallery() {
         </div>
       </div>
 
+      {/* Dynamic Sorting Status Bar for Grid Mode */}
+      {viewMode === 'grid' && processedInvoices.length > 0 && (
+        <div className="sort-status-bar">
+          <span style={{ fontSize: '13px', color: '#64748b', fontWeight: 'bold' }}>Sorted By:</span>
+          <button className="sort-toggle-pill" onClick={() => handleSort('created_at')}>
+            📅 Date {sortConfig?.key === 'created_at' ? (sortConfig.direction === 'asc' ? '▲ Oldest First' : '▼ Newest First') : '↕'}
+          </button>
+          <button className="sort-toggle-pill" onClick={() => handleSort('invoice_id')}>
+            🆔 Invoice ID {sortConfig?.key === 'invoice_id' ? (sortConfig.direction === 'asc' ? '▲ A-Z' : '▼ Z-A') : '↕'}
+          </button>
+        </div>
+      )}
+
       {/* CONTENT AREA */}
       {isLoading ? (
-        <p style={{ color: '#64748b', fontSize: '16px', textAlign: 'center', padding: '40px' }}>Loading records...</p>
-      ) : sortedInvoices.length === 0 ? (
-        <div style={{ padding: '40px', textAlign: 'center', color: '#94a3b8', background: '#fff', borderRadius: '12px', border: '1px dashed #cbd5e1', fontSize: '16px' }}>
-          No records found.
+        <p className="status-message">Loading records...</p>
+      ) : processedInvoices.length === 0 ? (
+        <div className="empty-message-box">
+          No records found matching the chosen timeframe or search filters.
         </div>
       ) : viewMode === 'grid' ? (
         
         /* --- GRID VIEW --- */
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: '20px' }}>
-          {sortedInvoices.map((inv) => {
+        <div className="grid-layout">
+          {processedInvoices.map((inv) => {
             const isSelected = selectedInvoices.has(inv.invoice_id);
             return (
-              <div key={inv.id} style={{ background: isSelected ? '#fefcf3' : '#fff', borderRadius: '12px', border: isSelected ? '2px solid #b58a3d' : '1px solid #e2e8f0', overflow: 'hidden', boxShadow: isSelected ? '0 4px 12px rgba(181, 138, 61, 0.15)' : '0 2px 6px rgba(0,0,0,0.02)', display: 'flex', flexDirection: 'column', position: 'relative', transition: 'all 0.2s' }}>
+              <div key={inv.id} className={`grid-card ${isSelected ? 'selected' : ''}`}>
                 
-                <input type="checkbox" checked={isSelected} onChange={() => toggleSelect(inv.invoice_id)} style={{ position: 'absolute', top: '12px', left: '12px', zIndex: 10, cursor: 'pointer', accentColor: '#b58a3d', width: '20px', height: '20px' }} />
+                <input type="checkbox" checked={isSelected} onChange={() => toggleSelect(inv.invoice_id)} className="card-checkbox" />
 
-                <div onClick={() => toggleSelect(inv.invoice_id)} style={{ width: '100%', height: '220px', overflow: 'hidden', background: '#f8fafc', borderBottom: '1px solid #f1f5f9', cursor: 'pointer' }}>
-                  <img src={inv.invoice_url} alt="Invoice" style={{ width: '100%', height: '100%', objectFit: 'contain', opacity: isSelected ? 0.8 : 1 }} />
+                <div onClick={() => toggleSelect(inv.invoice_id)} className="card-image-box">
+                  <img src={inv.invoice_url} alt="Invoice Document File" className="card-img" style={{ opacity: isSelected ? 0.7 : 1 }} />
                 </div>
 
-                <div style={{ padding: '16px', borderBottom: '1px solid #f1f5f9' }}>
-                  <div style={{ fontWeight: 'bold', color: '#1e293b', fontSize: '14px' }}>{inv.invoice_id}</div>
-                  <div style={{ fontSize: '14px', color: '#64748b', marginTop: '6px' }}>👤 {inv.customer_name}</div>
-                  <div style={{ fontSize: '16px', color: '#b58a3d', marginTop: '6px', fontWeight: 'bold' }}>💰 {new Intl.NumberFormat('en-US').format(inv.total_sales)} ៛</div>
+                <div className="card-body">
+                  <div className="card-id-title">{inv.invoice_id}</div>
+                  <div className="card-customer-row">Customer: {inv.customer_name}</div>
+                  <div className="card-amount-row">💰 {new Intl.NumberFormat('en-US').format(inv.total_sales)} ៛</div>
                 </div>
 
-                <div style={{ padding: '12px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#fcfbfa', marginTop: 'auto' }}>
-                  <div style={{ fontSize: '12px', color: '#94a3b8' }}>{formatDate(inv.created_at)}</div>
+                <div className="card-footer">
+                  <div className="card-date-label">{formatDate(inv.created_at)}</div>
                   
                   <div style={{ display: 'flex', gap: '8px' }}>
-                    <button onClick={() => window.location.href = `/pos?edit=${inv.invoice_id}`} style={{ padding: '6px 12px', background: '#fef3c7', color: '#ca8a04', border: '1px solid #fde047', borderRadius: '6px', fontSize: '12px', fontWeight: 'bold', cursor: 'pointer' }}>Edit</button>
-                    <button onClick={() => handleAction(inv.invoice_url, inv.invoice_id)} style={{ padding: '6px 12px', background: '#f1f5f9', color: '#475569', border: '1px solid #cbd5e1', borderRadius: '6px', fontSize: '12px', fontWeight: 'bold', cursor: 'pointer' }}>
+                    <button onClick={() => window.location.href = `/pos?edit=${inv.invoice_id}`} className="card-edit-btn">Edit</button>
+                    <button onClick={() => handleAction(inv.invoice_url, inv.invoice_id)} className="card-download-btn">
                       {isDeviceMobile ? 'Share' : 'Download'}
                     </button>
                   </div>
@@ -299,45 +351,47 @@ export default function InvoiceGallery() {
       ) : (
 
         /* --- TABLE VIEW --- */
-        <div style={{ background: '#fff', borderRadius: '12px', border: '1px solid #e2e8f0', overflowX: 'auto', boxShadow: '0 4px 6px rgba(0,0,0,0.02)' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '14px' }}>
+        <div className="table-responsive-wrapper">
+          <table className="data-table">
             <thead>
-              <tr style={{ background: '#f8fafc', borderBottom: '2px solid #e2e8f0' }}>
-                <th style={{ padding: '16px', width: '50px', textAlign: 'center' }}>
-                  <input type="checkbox" checked={selectedInvoices.size === invoices.length && invoices.length > 0} onChange={toggleSelectAll} style={{ width: '18px', height: '18px', accentColor: '#b58a3d', cursor: 'pointer' }} />
+              <tr>
+                <th style={{ width: '50px', textAlign: 'center', padding: '16px' }}>
+                  <input type="checkbox" checked={selectedInvoices.size === processedInvoices.length && processedInvoices.length > 0} onChange={toggleSelectAll} style={{ width: '18px', height: '18px', accentColor: '#b58a3d', cursor: 'pointer' }} />
                 </th>
-                <th style={{ padding: '16px', color: '#475569', cursor: 'pointer', whiteSpace: 'nowrap' }} onClick={() => handleSort('invoice_id')}>
-                  Invoice ID {sortConfig?.key === 'invoice_id' ? (sortConfig.direction === 'asc' ? '↑' : '↓') : '↕'}
+                <th onClick={() => handleSort('invoice_id')} className="sortable-header">
+                  Invoice ID {sortConfig?.key === 'invoice_id' ? (sortConfig.direction === 'asc' ? '▲' : '▼') : '↕'}
                 </th>
-                <th style={{ padding: '16px', color: '#475569', cursor: 'pointer', whiteSpace: 'nowrap' }} onClick={() => handleSort('customer_name')}>
-                  Customer {sortConfig?.key === 'customer_name' ? (sortConfig.direction === 'asc' ? '↑' : '↓') : '↕'}
+                <th onClick={() => handleSort('customer_name')} className="sortable-header">
+                  Customer {sortConfig?.key === 'customer_name' ? (sortConfig.direction === 'asc' ? '▲' : '▼') : '↕'}
                 </th>
-                <th style={{ padding: '16px', color: '#475569', cursor: 'pointer', whiteSpace: 'nowrap' }} onClick={() => handleSort('total_sales')}>
-                  Total Amount {sortConfig?.key === 'total_sales' ? (sortConfig.direction === 'asc' ? '↑' : '↓') : '↕'}
+                <th onClick={() => handleSort('total_sales')} className="sortable-header">
+                  Total Amount {sortConfig?.key === 'total_sales' ? (sortConfig.direction === 'asc' ? '▲' : '▼') : '↕'}
                 </th>
-                <th style={{ padding: '16px', color: '#475569', cursor: 'pointer', whiteSpace: 'nowrap' }} onClick={() => handleSort('created_at')}>
-                  Date {sortConfig?.key === 'created_at' ? (sortConfig.direction === 'asc' ? '↑' : '↓') : '↕'}
+                <th onClick={() => handleSort('created_at')} className="sortable-header">
+                  Date {sortConfig?.key === 'created_at' ? (sortConfig.direction === 'asc' ? '▲' : '▼') : '↕'}
                 </th>
-                <th style={{ padding: '16px', color: '#475569', textAlign: 'center' }}>Actions</th>
+                <th style={{ padding: '16px', color: '#0f172a', textAlign: 'center', fontWeight: 'bold' }}>Actions</th>
               </tr>
             </thead>
             <tbody>
-              {sortedInvoices.map((inv) => {
+              {processedInvoices.map((inv) => {
                 const isSelected = selectedInvoices.has(inv.invoice_id);
                 return (
-                  <tr key={inv.id} style={{ borderBottom: '1px solid #f1f5f9', background: isSelected ? '#fefcf3' : 'transparent', transition: 'background 0.2s' }}>
-                    <td style={{ padding: '16px', textAlign: 'center' }}>
+                  <tr key={inv.id} className={isSelected ? 'row-selected' : ''}>
+                    <td style={{ textAlign: 'center', padding: '16px' }}>
                       <input type="checkbox" checked={isSelected} onChange={() => toggleSelect(inv.invoice_id)} style={{ width: '18px', height: '18px', accentColor: '#b58a3d', cursor: 'pointer' }} />
                     </td>
-                    <td style={{ padding: '16px', fontWeight: 'bold', color: '#1e293b' }}>{inv.invoice_id}</td>
+                    <td style={{ padding: '16px', fontWeight: 'bold', color: '#0f172a' }}>{inv.invoice_id}</td>
                     <td style={{ padding: '16px', color: '#334155', fontWeight: 'bold' }}>{inv.customer_name}</td>
                     <td style={{ padding: '16px', color: '#b58a3d', fontWeight: 'bold' }}>{new Intl.NumberFormat('en-US').format(inv.total_sales)} ៛</td>
-                    <td style={{ padding: '16px', color: '#64748b' }}>{formatDate(inv.created_at)}</td>
-                    <td style={{ padding: '16px', display: 'flex', gap: '8px', justifyContent: 'center' }}>
-                      <button onClick={() => window.location.href = `/pos?edit=${inv.invoice_id}`} style={{ padding: '8px 14px', background: '#fef3c7', color: '#ca8a04', border: 'none', borderRadius: '6px', fontSize: '13px', fontWeight: 'bold', cursor: 'pointer' }}>Edit</button>
-                      <button onClick={() => handleAction(inv.invoice_url, inv.invoice_id)} style={{ padding: '8px 14px', background: '#e2e8f0', color: '#475569', border: 'none', borderRadius: '6px', fontSize: '13px', fontWeight: 'bold', cursor: 'pointer' }}>
-                        {isDeviceMobile ? 'Share' : 'Download'}
-                      </button>
+                    <td style={{ padding: '16px', color: '#475569' }}>{formatDate(inv.created_at)}</td>
+                    <td style={{ padding: '16px' }}>
+                      <div style={{ display: 'flex', gap: '8px', justifyContent: 'center' }}>
+                        <button onClick={() => window.location.href = `/pos?edit=${inv.invoice_id}`} className="table-edit-btn">Edit</button>
+                        <button onClick={() => handleAction(inv.invoice_url, inv.invoice_id)} className="table-download-btn">
+                          {isDeviceMobile ? 'Share' : 'Download'}
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 )
@@ -347,14 +401,15 @@ export default function InvoiceGallery() {
         </div>
       )}
 
+      {/* --- REINFORCED STYLING FOR RESPONSIVENESS --- */}
       <style jsx global>{`
         .main-wrapper { 
-          padding: 24px 24px 24px 75px; 
+          padding: 24px 24px 24px 85px; 
           background: #f8fafc; 
           min-height: 100vh; 
           font-family: Arial, sans-serif; 
           box-sizing: border-box; 
-          color: #333;
+          color: #0f172a;
         }
         .header-container { 
           margin-bottom: 24px; 
@@ -369,14 +424,365 @@ export default function InvoiceGallery() {
           margin: 0; 
         }
 
+        /* TOOLBAR CONFIGURATION */
+        .toolbar-container {
+          background: #ffffff; 
+          padding: 16px 20px; 
+          border-radius: 12px; 
+          border: 1px solid #cbd5e1; 
+          margin-bottom: 20px; 
+          display: flex; 
+          gap: 16px; 
+          align-items: center; 
+          flex-wrap: wrap; 
+          box-shadow: 0 4px 6px rgba(0,0,0,0.02);
+        }
+
+        /* FILTER TABS */
+        .tab-group {
+          display: flex;
+          background: #f1f5f9;
+          padding: 4px;
+          border-radius: 8px;
+          gap: 2px;
+        }
+        .tab-btn {
+          padding: 8px 16px;
+          border-radius: 6px;
+          border: none;
+          font-weight: bold;
+          cursor: pointer;
+          font-size: 14px;
+          background: transparent;
+          color: #475569;
+          transition: all 0.2s;
+        }
+        .tab-btn.active {
+          background: #b58a3d;
+          color: #ffffff;
+        }
+
+        /* LIVE SEARCH FIELD */
+        .search-box-wrapper {
+          flex: 1;
+          min-width: 200px;
+        }
+        .search-input {
+          width: 100%;
+          padding: 10px 14px;
+          border: 1px solid #cbd5e1;
+          border-radius: 6px;
+          font-size: 16px; /* Enforces absolute 16px minimum to avoid mobile browser auto-zoom */
+          outline: none;
+          color: #0f172a;
+          background-color: #ffffff;
+          box-sizing: border-box;
+        }
+        .search-input:focus {
+          border-color: #b58a3d;
+          box-shadow: 0 0 0 2px rgba(181, 138, 61, 0.2);
+        }
+
+        /* VIEW TOGGLE LAYOUT BUTTONS */
+        .view-toggle-container {
+          display: flex;
+          background: #e2e8f0;
+          padding: 4px;
+          border-radius: 8px;
+          gap: 2px;
+        }
+        .toggle-btn {
+          padding: 8px 14px;
+          border-radius: 6px;
+          border: none;
+          font-weight: bold;
+          cursor: pointer;
+          font-size: 13px;
+          background: transparent;
+          color: #475569;
+        }
+        .toggle-btn.active {
+          background: #10b981;
+          color: #ffffff;
+        }
+
+        /* GLOBAL BUTTONS WITH HIGH-CONTRAST LABELS */
+        .actions-wrapper {
+          display: flex;
+          gap: 10px;
+          flex-wrap: wrap;
+        }
+        .secondary-action-btn {
+          padding: 10px 16px;
+          background: #ffffff;
+          color: #0f172a;
+          border: 1px solid #94a3b8;
+          border-radius: 6px;
+          cursor: pointer;
+          font-weight: bold;
+          font-size: 14px;
+        }
+        .secondary-action-btn:disabled {
+          background: #f1f5f9;
+          color: #94a3b8;
+          border-color: #cbd5e1;
+          cursor: not-allowed;
+        }
+        .primary-action-btn {
+          padding: 10px 16px;
+          background: #3b82f6;
+          color: #ffffff;
+          border: none;
+          border-radius: 6px;
+          cursor: pointer;
+          font-weight: bold;
+          font-size: 14px;
+        }
+        .danger-action-btn {
+          padding: 10px 16px;
+          background: #ef4444;
+          color: #ffffff;
+          border: none;
+          border-radius: 6px;
+          cursor: pointer;
+          font-weight: bold;
+          font-size: 14px;
+        }
+
+        /* GRID SORT STATUS BAR */
+        .sort-status-bar {
+          display: flex;
+          gap: 8px;
+          align-items: center;
+          margin-bottom: 16px;
+          flex-wrap: wrap;
+        }
+        .sort-toggle-pill {
+          padding: 6px 12px;
+          background: #ffffff;
+          border: 1px solid #cbd5e1;
+          border-radius: 20px;
+          font-size: 12px;
+          font-weight: bold;
+          color: #475569;
+          cursor: pointer;
+        }
+        .sort-toggle-pill:hover {
+          border-color: #b58a3d;
+          color: #b58a3d;
+        }
+
+        /* GRID VIEW ELEMENTS */
+        .grid-layout {
+          display: grid;
+          grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+          gap: 20px;
+        }
+        .grid-card {
+          background: #ffffff;
+          border-radius: 12px;
+          border: 1px solid #cbd5e1;
+          overflow: hidden;
+          box-shadow: 0 2px 4px rgba(0,0,0,0.02);
+          display: flex;
+          flex-direction: column;
+          position: relative;
+          transition: transform 0.2s, box-shadow 0.2s;
+        }
+        .grid-card.selected {
+          border: 2px solid #b58a3d;
+          background: #fefcf3;
+          box-shadow: 0 4px 12px rgba(181, 138, 61, 0.15);
+        }
+        .card-checkbox {
+          position: absolute;
+          top: 12px;
+          left: 12px;
+          z-index: 10;
+          cursor: pointer;
+          accentColor: #b58a3d;
+          width: 22px;
+          height: 22px;
+        }
+        .card-image-box {
+          width: 100%;
+          height: 220px;
+          overflow: hidden;
+          background: #f8fafc;
+          border-bottom: 1px solid #e2e8f0;
+          cursor: pointer;
+        }
+        .card-img {
+          width: 100%;
+          height: 100%;
+          object-fit: contain;
+        }
+        .card-body {
+          padding: 16px;
+          border-bottom: 1px solid #e2e8f0;
+        }
+        .card-id-title {
+          font-weight: bold;
+          color: #0f172a;
+          font-size: 15px;
+        }
+        .card-customer-row {
+          font-size: 14px;
+          color: #475569;
+          margin-top: 6px;
+          font-weight: bold;
+        }
+        .card-amount-row {
+          font-size: 16px;
+          color: #b58a3d;
+          margin-top: 6px;
+          font-weight: bold;
+        }
+        .card-footer {
+          padding: 12px 16px;
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          background: #f8fafc;
+          margin-top: auto;
+        }
+        .card-date-label {
+          font-size: 12px;
+          color: #64748b;
+        }
+        .card-edit-btn {
+          padding: 6px 12px;
+          background: #fef3c7;
+          color: #b45309;
+          border: 1px solid #fde047;
+          border-radius: 6px;
+          fontSize: 12px;
+          font-weight: bold;
+          cursor: pointer;
+        }
+        .card-download-btn {
+          padding: 6px 12px;
+          background: #ffffff;
+          color: #334155;
+          border: 1px solid #cbd5e1;
+          border-radius: 6px;
+          fontSize: 12px;
+          font-weight: bold;
+          cursor: pointer;
+        }
+
+        /* TABLE VIEW ELEMENTS */
+        .table-responsive-wrapper {
+          background: #ffffff;
+          border-radius: 12px;
+          border: 1px solid #cbd5e1;
+          overflow-x: auto;
+          box-shadow: 0 4px 6px rgba(0,0,0,0.02);
+        }
+        .data-table {
+          width: 100%;
+          border-collapse: collapse;
+          textAlign: left;
+          font-size: 14px;
+        }
+        .data-table th {
+          background: #f8fafc;
+          border-bottom: 2px solid #cbd5e1;
+          padding: 16px;
+          font-weight: bold;
+          color: #0f172a;
+        }
+        .sortable-header {
+          cursor: pointer;
+          white-space: nowrap;
+          user-select: none;
+        }
+        .sortable-header:hover {
+          color: #b58a3d;
+          background: #f1f5f9;
+        }
+        .data-table tr {
+          border-bottom: 1px solid #e2e8f0;
+          transition: background 0.2s;
+        }
+        .data-table tr.row-selected {
+          background: #fefcf3;
+        }
+        .table-edit-btn {
+          padding: 8px 14px;
+          background: #fef3c7;
+          color: #b45309;
+          border: none;
+          border-radius: 6px;
+          font-size: 13px;
+          font-weight: bold;
+          cursor: pointer;
+        }
+        .table-download-btn {
+          padding: 8px 14px;
+          background: #f1f5f9;
+          color: #334155;
+          border: 1px solid #cbd5e1;
+          border-radius: 6px;
+          font-size: 13px;
+          font-weight: bold;
+          cursor: pointer;
+        }
+
+        .status-message {
+          color: #475569;
+          font-size: 16px;
+          text-align: center;
+          padding: 40px;
+        }
+        .empty-message-box {
+          padding: 40px;
+          text-align: center;
+          color: #475569;
+          background: #ffffff;
+          border-radius: 12px;
+          border: 2px dashed #cbd5e1;
+          font-size: 16px;
+          font-weight: bold;
+        }
+
+        /* RESPONSIVE LAYOUT ADJUSTMENTS */
         @media (max-width: 1023px) { 
           .main-wrapper { 
-            padding: max(80px, env(safe-area-inset-top, 80px)) 16px 16px 16px !important; 
+            /* Extra top margin protection ensures burger menus/global app shell headers never clash */
+            padding: max(100px, env(safe-area-inset-top, 100px)) 16px 16px 16px !important; 
           }
           .header-container {
             flex-direction: column;
             align-items: flex-start;
-            gap: 16px;
+            gap: 12px;
+            margin-bottom: 16px;
+          }
+          .toolbar-container {
+            flex-direction: column;
+            align-items: stretch;
+            padding: 14px;
+            gap: 12px;
+          }
+          .tab-group, .view-toggle-container, .search-box-wrapper, .actions-wrapper {
+            width: 100%;
+          }
+          .tab-group {
+            justify-content: space-between;
+          }
+          .tab-btn {
+            flex: 1;
+            text-align: center;
+            padding: 10px 4px;
+            font-size: 13px;
+          }
+          .actions-wrapper {
+            flex-direction: column;
+          }
+          .secondary-action-btn, .primary-action-btn, .danger-action-btn {
+            width: 100%;
+            text-align: center;
+            padding: 12px;
           }
         }
       `}</style>

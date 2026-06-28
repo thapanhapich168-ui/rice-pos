@@ -28,35 +28,29 @@ const formatHeader = (key: string) => {
   if (key === 'qty') return 'Quantity';
   if (key === 'cogs_price') return 'COGS Price';
   if (key === 'invoice_id') return 'Invoice ID';
+  if (key === 'transaction_id') return 'Transaction ID';
   return key.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
 }
 
 // --- UNIFIED TRANSACTION TYPE ---
 interface UnifiedTransaction {
-  [key: string]: any; // Allows dynamic access for sorting/filtering
+  [key: string]: any; 
   id: string;
-  source: 'Invoice Summary' | 'Daily Invoice' | 'Expense';
+  source: 'Wholesale Invoice Summary' | 'Wholesale Day Invoice Item' | 'Retails only' | 'Expense log';
   created_at: string;
 }
 
-type SortDirection = 'asc' | 'desc'
-interface SortRule {
-  id: number
-  column: string
-  direction: SortDirection
-}
+type SortConfig = {
+  key: string;
+  direction: 'asc' | 'desc';
+} | null;
 
-type FilterOperator = 'contains' | 'equals' | 'gt' | 'lt'
-interface FilterRule {
-  id: number
-  column: string
-  operator: FilterOperator
-  value: string | number
-}
+type TimeFilter = 'Today' | 'This Week' | 'This Month' | 'All Time';
 
 // Standardized initial widths for all possible columns
 const DEFAULT_WIDTHS: Record<string, number> = {
   invoice_id: 140,
+  transaction_id: 140,
   created_at: 160,
   customer_name: 160,
   owner: 100,
@@ -76,33 +70,35 @@ const DEFAULT_WIDTHS: Record<string, number> = {
 
 const DEFAULT_SUMMARY_COLS = ['invoice_id', 'created_at', 'customer_name', 'owner', 'rice_types', 'total_sales', 'total_cogs', 'total_profit'];
 const DEFAULT_DAILY_COLS = ['invoice_id', 'created_at', 'customer_name', 'owner', 'rice_type', 'qty', 'price_per_bag', 'cogs_price', 'total_sales', 'total_cogs', 'total_profit'];
+const DEFAULT_RETAIL_COLS = ['transaction_id', 'created_at', 'rice_type', 'qty', 'price_per_bag', 'cogs_price', 'total_sales', 'total_cogs', 'total_profit'];
 const DEFAULT_EXPENSE_COLS = ['created_at', 'description', 'amount', 'category', 'status', 'owner'];
 
 export default function BizDatabase() {
   // --- CORE STATE ---
   const [transactions, setTransactions] = useState<UnifiedTransaction[]>([])
-  const [activeTab, setActiveTab] = useState<'Invoice Summary' | 'Daily Invoice' | 'Expense'>('Invoice Summary')
+  const [activeTab, setActiveTab] = useState<'Wholesale Invoice Summary' | 'Wholesale Day Invoice Item' | 'Retails only' | 'Expense log'>('Wholesale Invoice Summary')
   const [searchQuery, setSearchQuery] = useState('')
+  const [timeFilter, setTimeFilter] = useState<TimeFilter>('Today')
   const [isLoading, setIsLoading] = useState(true)
   
   // --- PREFERENCES ---
   const [columnWidths, setColumnWidths] = useState<Record<string, number>>(DEFAULT_WIDTHS)
   const [summaryCols, setSummaryCols] = useState<string[]>(DEFAULT_SUMMARY_COLS)
   const [dailyCols, setDailyCols] = useState<string[]>(DEFAULT_DAILY_COLS)
+  const [retailCols, setRetailCols] = useState<string[]>(DEFAULT_RETAIL_COLS)
   const [expenseCols, setExpenseCols] = useState<string[]>(DEFAULT_EXPENSE_COLS)
   
   const widthsRef = useRef(columnWidths)
   widthsRef.current = columnWidths
 
-  // --- MODAL STATES ---
-  const [isSortOpen, setIsSortOpen] = useState(false)
-  const [sortRules, setSortRules] = useState<SortRule[]>([])
-
-  const [isFilterOpen, setIsFilterOpen] = useState(false)
-  const [filterRules, setFilterRules] = useState<FilterRule[]>([])
+  // --- SORT STATE ---
+  const [sortConfig, setSortConfig] = useState<SortConfig>(null)
 
   // Dynamic active columns based on tab
-  const activeColumns = activeTab === 'Invoice Summary' ? summaryCols : activeTab === 'Daily Invoice' ? dailyCols : expenseCols;
+  const activeColumns = activeTab === 'Wholesale Invoice Summary' ? summaryCols 
+                      : activeTab === 'Wholesale Day Invoice Item' ? dailyCols 
+                      : activeTab === 'Retails only' ? retailCols 
+                      : expenseCols;
 
   // --- LIFECYCLE ---
   useEffect(() => { 
@@ -112,16 +108,18 @@ export default function BizDatabase() {
 
   // --- DATABASE OPERATIONS ---
   async function fetchSettings() {
-    const { data } = await supabase.from('app_settings').select('*').in('setting_key', ['biz_col_widths', 'biz_sum_cols', 'biz_daily_cols', 'biz_exp_cols'])
+    const { data } = await supabase.from('app_settings').select('*').in('setting_key', ['biz_col_widths', 'biz_sum_cols', 'biz_daily_cols', 'biz_retail_cols', 'biz_exp_cols'])
     if (data) {
       const widths = data.find(d => d.setting_key === 'biz_col_widths')
       const sumCols = data.find(d => d.setting_key === 'biz_sum_cols')
       const dalCols = data.find(d => d.setting_key === 'biz_daily_cols')
+      const retCols = data.find(d => d.setting_key === 'biz_retail_cols')
       const expCols = data.find(d => d.setting_key === 'biz_exp_cols')
       
       if (widths?.setting_value) setColumnWidths(widths.setting_value)
       if (sumCols?.setting_value) setSummaryCols(sumCols.setting_value)
       if (dalCols?.setting_value) setDailyCols(dalCols.setting_value)
+      if (retCols?.setting_value) setRetailCols(retCols.setting_value)
       if (expCols?.setting_value) setExpenseCols(expCols.setting_value)
     }
   }
@@ -129,17 +127,21 @@ export default function BizDatabase() {
   async function fetchData() {
     setIsLoading(true)
     
-    // Fetch all 3 tables safely
     const { data: summaryData } = await supabase.from('invoice_summaries').select('*')
     const { data: dailyData } = await supabase.from('sales').select('*')
     
-    // Fixed Try-Catch block for Expenses
+    let retailData: any[] = []
+    try {
+      const { data, error } = await supabase.from('retail_sales').select('*')
+      if (data && !error) retailData = data;
+    } catch (e) {
+      console.warn("Retail table not found or accessible yet. Defaulting to empty.", e)
+    }
+
     let expensesData: any[] = []
     try {
       const { data, error } = await supabase.from('expenses').select('*')
-      if (data && !error) {
-        expensesData = data
-      }
+      if (data && !error) expensesData = data;
     } catch (e) {
       console.warn("Expenses table not found or accessible yet. Defaulting to empty.", e)
     }
@@ -150,7 +152,7 @@ export default function BizDatabase() {
       summaryData.forEach(s => {
         unified.push({
           id: `sum_${s.id}`,
-          source: 'Invoice Summary',
+          source: 'Wholesale Invoice Summary',
           created_at: s.created_at,
           invoice_id: s.invoice_id,
           customer_name: s.customer_name || 'Walk-in',
@@ -165,20 +167,46 @@ export default function BizDatabase() {
 
     if (dailyData) {
       dailyData.forEach(d => {
+        const qty = Number(d.qty || 0);
+        const price = Number(d.price_per_bag || 0);
+        const cogs = Number(d.cogs_price || 0);
+        
         unified.push({
           id: `daily_${d.id}`,
-          source: 'Daily Invoice',
+          source: 'Wholesale Day Invoice Item',
           created_at: d.created_at,
           invoice_id: d.invoice_id,
           customer_name: d.customer_name || 'Walk-in',
           owner: d.owner || '-',
-          rice_type: d.rice_type,
-          qty: Number(d.qty || 0),
-          price_per_bag: Number(d.price_per_bag || 0),
-          cogs_price: Number(d.cogs_price || 0),
-          total_sales: Number(d.total_sales || 0),
-          total_cogs: Number(d.total_cogs || 0),
-          total_profit: Number(d.total_profit || 0)
+          rice_type: d.custom_rice_type || d.rice_type,
+          qty: qty,
+          price_per_bag: price,
+          cogs_price: cogs,
+          total_sales: qty * price,
+          total_cogs: qty * cogs,
+          total_profit: (price - cogs) * qty
+        })
+      })
+    }
+
+    if (retailData) {
+      retailData.forEach(r => {
+        const qty = Number(r.qty || 0);
+        const price = Number(r.price_per_bag || 0);
+        const cogs = Number(r.cogs_price || 0);
+
+        unified.push({
+          id: `ret_${r.id}`,
+          source: 'Retails only',
+          created_at: r.created_at,
+          transaction_id: r.transaction_id,
+          rice_type: r.custom_rice_type || r.rice_type,
+          qty: qty,
+          price_per_bag: price,
+          cogs_price: cogs,
+          total_sales: qty * price,
+          total_cogs: qty * cogs,
+          total_profit: (price - cogs) * qty
         })
       })
     }
@@ -187,7 +215,7 @@ export default function BizDatabase() {
       expensesData.forEach(e => {
         unified.push({
           id: `exp_${e.id}`,
-          source: 'Expense',
+          source: 'Expense log',
           created_at: e.created_at,
           description: e.description || `Expense #${e.id}`,
           amount: parseToRiel(e.amount, e.currency),
@@ -198,11 +226,46 @@ export default function BizDatabase() {
       })
     }
 
-    // Sort globally by newest first
+    // Default global sort (newest first) applied initially
     unified.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
     
     setTransactions(unified)
     setIsLoading(false)
+  }
+
+  // --- TIME FILTER LOGIC ---
+  const isWithinTimeFilter = (dateString: string) => {
+    if (timeFilter === 'All Time') return true;
+    
+    const d = new Date(dateString);
+    const now = new Date();
+    
+    if (timeFilter === 'Today') {
+      return d.getDate() === now.getDate() && d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+    }
+    
+    if (timeFilter === 'This Month') {
+      return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+    }
+    
+    if (timeFilter === 'This Week') {
+      const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      const dayOfWeek = today.getDay(); // 0 is Sunday
+      const diff = today.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1);
+      const startOfWeek = new Date(today.setDate(diff));
+      return d >= startOfWeek;
+    }
+    
+    return true;
+  }
+
+  // --- HEADER SORT LOGIC ---
+  const handleSort = (key: string) => {
+    let direction: 'asc' | 'desc' = 'asc';
+    if (sortConfig && sortConfig.key === key && sortConfig.direction === 'asc') {
+      direction = 'desc';
+    }
+    setSortConfig({ key, direction });
   }
 
   // --- COLUMN DRAG & DROP LOGIC ---
@@ -228,14 +291,18 @@ export default function BizDatabase() {
       return newOrder
     }
 
-    if (activeTab === 'Invoice Summary') {
+    if (activeTab === 'Wholesale Invoice Summary') {
       const updated = reorder(summaryCols)
       setSummaryCols(updated)
       supabase.from('app_settings').upsert({ setting_key: 'biz_sum_cols', setting_value: updated }, { onConflict: 'setting_key' }).then()
-    } else if (activeTab === 'Daily Invoice') {
+    } else if (activeTab === 'Wholesale Day Invoice Item') {
       const updated = reorder(dailyCols)
       setDailyCols(updated)
       supabase.from('app_settings').upsert({ setting_key: 'biz_daily_cols', setting_value: updated }, { onConflict: 'setting_key' }).then()
+    } else if (activeTab === 'Retails only') {
+      const updated = reorder(retailCols)
+      setRetailCols(updated)
+      supabase.from('app_settings').upsert({ setting_key: 'biz_retail_cols', setting_value: updated }, { onConflict: 'setting_key' }).then()
     } else {
       const updated = reorder(expenseCols)
       setExpenseCols(updated)
@@ -276,64 +343,35 @@ export default function BizDatabase() {
     .filter(t => {
       // 1. Tab Filter
       if (t.source !== activeTab) return false
+      
+      // 2. Time Filter
+      if (!isWithinTimeFilter(t.created_at)) return false;
 
-      // 2. Quick Search (Check string matching across main columns)
+      // 3. Quick Search
       if (searchQuery) {
         const query = searchQuery.toLowerCase()
-        const searchableText = `${t.invoice_id || ''} ${t.customer_name || ''} ${t.rice_types || ''} ${t.rice_type || ''} ${t.description || ''} ${t.category || ''}`.toLowerCase()
+        const searchableText = `${t.invoice_id || ''} ${t.transaction_id || ''} ${t.customer_name || ''} ${t.rice_types || ''} ${t.rice_type || ''} ${t.description || ''} ${t.category || ''}`.toLowerCase()
         if (!searchableText.includes(query)) return false
       }
 
-      // 3. Advanced Filters
-      for (const rule of filterRules) {
-        if (!rule.value && rule.value !== 0) continue
-        const val = t[rule.column]
-        const checkVal = String(rule.value).toLowerCase()
-        
-        if (rule.operator === 'contains' && !String(val).toLowerCase().includes(checkVal)) return false
-        if (rule.operator === 'equals' && String(val).toLowerCase() !== checkVal) return false
-        if (rule.operator === 'gt' && Number(val) <= Number(rule.value)) return false
-        if (rule.operator === 'lt' && Number(val) >= Number(rule.value)) return false
-      }
       return true
     })
     .sort((a, b) => {
-      // 4. Sorting
-      for (const rule of sortRules) {
-        const valA = a[rule.column]
-        const valB = b[rule.column]
-        if (valA < valB) return rule.direction === 'asc' ? -1 : 1
-        if (valA > valB) return rule.direction === 'asc' ? 1 : -1
-      }
-      return 0
+      // 4. Header Click Sorting
+      if (!sortConfig) return 0; // Fallback to the initial fetch sort
+      const { key, direction } = sortConfig;
+      
+      let valA = a[key];
+      let valB = b[key];
+      
+      // Handle missing values
+      if (valA === undefined || valA === null) valA = '';
+      if (valB === undefined || valB === null) valB = '';
+
+      if (valA < valB) return direction === 'asc' ? -1 : 1;
+      if (valA > valB) return direction === 'asc' ? 1 : -1;
+      return 0;
     })
-
-  // --- CONTEXT-AWARE SUMMARY CARDS ---
-  let card1 = { title: '', value: '', color: '#1e293b' }
-  let card2 = { title: '', value: '', color: '#1e293b' }
-  let card3 = { title: '', value: '', color: '#1e293b' }
-
-  if (activeTab === 'Invoice Summary') {
-    const sumSales = processedTransactions.reduce((acc, t) => acc + (t.total_sales || 0), 0)
-    const sumCogs = processedTransactions.reduce((acc, t) => acc + (t.total_cogs || 0), 0)
-    const sumProfit = processedTransactions.reduce((acc, t) => acc + (t.total_profit || 0), 0)
-    card1 = { title: 'Total Sales Revenue', value: formatRiel(sumSales), color: '#2563eb' }
-    card2 = { title: 'Total COGS', value: formatRiel(sumCogs), color: '#b91c1c' }
-    card3 = { title: 'Total Net Profit', value: formatRiel(sumProfit), color: sumProfit >= 0 ? '#10b981' : '#ef4444' }
-  } else if (activeTab === 'Daily Invoice') {
-    const sumQty = processedTransactions.reduce((acc, t) => acc + (t.qty || 0), 0)
-    const sumSales = processedTransactions.reduce((acc, t) => acc + (t.total_sales || 0), 0)
-    card1 = { title: 'Total Items Sold', value: formatNumber(sumQty), color: '#475569' }
-    card2 = { title: 'Total Row Sales', value: formatRiel(sumSales), color: '#2563eb' }
-    card3 = { title: 'Records Matching', value: formatNumber(processedTransactions.length), color: '#475569' }
-  } else {
-    const bizExp = processedTransactions.filter(t => t.category?.toLowerCase().includes('biz') || t.category?.toLowerCase().includes('business')).reduce((acc, t) => acc + (t.amount || 0), 0)
-    const persExp = processedTransactions.filter(t => !t.category?.toLowerCase().includes('biz') && !t.category?.toLowerCase().includes('business')).reduce((acc, t) => acc + (t.amount || 0), 0)
-    const sumExp = processedTransactions.reduce((acc, t) => acc + (t.amount || 0), 0)
-    card1 = { title: 'Business Expenses', value: formatRiel(bizExp), color: '#b91c1c' }
-    card2 = { title: 'Personal Expenses', value: formatRiel(persExp), color: '#f59e0b' }
-    card3 = { title: 'Total Expenses', value: formatRiel(sumExp), color: '#1e293b' }
-  }
 
   // --- HELPERS ---
   const formatDate = (dateString: string) => {
@@ -376,68 +414,49 @@ export default function BizDatabase() {
         </button>
       </div>
 
-      {/* DYNAMIC CONTEXT-AWARE CARDS */}
-      <div className="summary-cards">
-        <div className="card">
-          <p className="card-title">{card1.title}</p>
-          <h2 className="card-value" style={{ color: card1.color }}>{card1.value}</h2>
+      {/* TOOLBAR */}
+      <div className="toolbar-container">
+        
+        {/* TOP ROW: TABS */}
+        <div className="toolbar-tabs" style={{ width: '100%', borderBottom: '1px solid #e2e8f0', paddingBottom: '12px', marginBottom: '4px' }}>
+          <button className={activeTab === 'Wholesale Invoice Summary' ? 'tab active' : 'tab'} onClick={() => {setActiveTab('Wholesale Invoice Summary'); setSortConfig(null)}}>
+            🌾 Wholesale Invoice Summary
+          </button>
+          <button className={activeTab === 'Wholesale Day Invoice Item' ? 'tab active' : 'tab'} onClick={() => {setActiveTab('Wholesale Day Invoice Item'); setSortConfig(null)}}>
+            🌾 Wholesale Day Invoice Item
+          </button>
+          <button className={activeTab === 'Retails only' ? 'tab active' : 'tab'} onClick={() => {setActiveTab('Retails only'); setSortConfig(null)}}>
+            🛍️ Retails only
+          </button>
+          <button className={activeTab === 'Expense log' ? 'tab active' : 'tab'} onClick={() => {setActiveTab('Expense log'); setSortConfig(null)}}>
+            📉 Expense log
+          </button>
         </div>
-        <div className="card">
-          <p className="card-title">{card2.title}</p>
-          <h2 className="card-value" style={{ color: card2.color }}>{card2.value}</h2>
-        </div>
-        <div className="card">
-          <p className="card-title">{card3.title}</p>
-          <h2 className="card-value" style={{ color: card3.color }}>{card3.value}</h2>
+
+        {/* BOTTOM ROW: FILTERS & SEARCH */}
+        <div style={{ display: 'flex', width: '100%', gap: '12px', flexWrap: 'wrap', alignItems: 'center' }}>
+          
+          {/* TIME PRE-FILTERS */}
+          <div style={{ display: 'flex', background: '#f1f5f9', padding: '4px', borderRadius: '8px', gap: '4px' }}>
+            <button className={timeFilter === 'Today' ? 'time-btn active' : 'time-btn'} onClick={() => setTimeFilter('Today')}>Today</button>
+            <button className={timeFilter === 'This Week' ? 'time-btn active' : 'time-btn'} onClick={() => setTimeFilter('This Week')}>This Week</button>
+            <button className={timeFilter === 'This Month' ? 'time-btn active' : 'time-btn'} onClick={() => setTimeFilter('This Month')}>This Month</button>
+            <button className={timeFilter === 'All Time' ? 'time-btn active' : 'time-btn'} onClick={() => setTimeFilter('All Time')}>All Time</button>
+          </div>
+
+          <input 
+            className="toolbar-search" 
+            placeholder="🔍 Search records..." 
+            value={searchQuery} 
+            onChange={(e) => setSearchQuery(e.target.value)} 
+            onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
+          />
         </div>
       </div>
 
-      {/* TOOLBAR */}
-      <div className="toolbar-container">
-        <div className="toolbar-tabs">
-          <button 
-            className={activeTab === 'Invoice Summary' ? 'tab active' : 'tab'} 
-            onClick={() => setActiveTab('Invoice Summary')}
-          >
-            Invoice Summary
-          </button>
-          <button 
-            className={activeTab === 'Daily Invoice' ? 'tab active' : 'tab'} 
-            onClick={() => setActiveTab('Daily Invoice')}
-          >
-            Daily Invoice Items
-          </button>
-          <button 
-            className={activeTab === 'Expense' ? 'tab active' : 'tab'} 
-            onClick={() => setActiveTab('Expense')}
-          >
-            Expenses Log
-          </button>
-        </div>
-        
-        <input 
-          className="toolbar-search" 
-          placeholder="🔍 Search records..." 
-          value={searchQuery} 
-          onChange={(e) => setSearchQuery(e.target.value)} 
-        />
-        
-        <div className="toolbar-filters">
-          <button 
-            className="filter-btn" 
-            onClick={() => setIsFilterOpen(true)} 
-            style={{ color: filterRules.length > 0 ? '#3b82f6' : '#4a3b1b' }}
-          >
-            Y Filter {filterRules.length > 0 && `(${filterRules.length})`}
-          </button>
-          <button 
-            className="sort-btn" 
-            onClick={() => setIsSortOpen(true)} 
-            style={{ color: sortRules.length > 0 ? '#3b82f6' : '#4a3b1b' }}
-          >
-            ⇅ Sort {sortRules.length > 0 && `(${sortRules.length})`}
-          </button>
-        </div>
+      {/* RECORD COUNT BADGE */}
+      <div style={{ marginBottom: '12px', color: '#64748b', fontSize: '13px', fontWeight: 'bold' }}>
+        Showing {processedTransactions.length} records for {timeFilter}
       </div>
 
       {/* MAIN SPREADSHEET */}
@@ -452,20 +471,26 @@ export default function BizDatabase() {
                   onDragStart={(e) => handleDragStart(e, key)}
                   onDragOver={handleDragOver}
                   onDrop={(e) => handleDrop(e, key)}
+                  onClick={() => handleSort(key)}
                   style={{ 
                     width: columnWidths[key] || 150, 
                     position: 'relative', 
                     padding: '14px 12px', 
                     textAlign: 'left', 
-                    color: '#64748b', 
-                    fontSize: '12px', 
+                    color: '#475569', 
+                    fontSize: '13px', 
                     textTransform: 'uppercase', 
                     fontWeight: 'bold', 
                     borderRight: '1px solid #f1f5f9', 
-                    cursor: 'grab' 
+                    cursor: 'pointer',
+                    userSelect: 'none'
                   }}
+                  title="Click to sort, Drag to reorder"
                 >
                   {formatHeader(key)}
+                  <span style={{ marginLeft: '6px', fontSize: '12px', opacity: sortConfig?.key === key ? 1 : 0.3 }}>
+                    {sortConfig?.key === key ? (sortConfig.direction === 'asc' ? '↑' : '↓') : '↕'}
+                  </span>
                   <Resizer columnKey={key} />
                 </th>
               ))}
@@ -486,12 +511,12 @@ export default function BizDatabase() {
               </tr>
             ) : (
               processedTransactions.map(t => (
-                <tr key={t.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                <tr key={t.id} style={{ borderBottom: '1px solid #f1f5f9', transition: 'background 0.2s' }} onMouseEnter={e => e.currentTarget.style.backgroundColor = '#f8fafc'} onMouseLeave={e => e.currentTarget.style.backgroundColor = 'transparent'}>
                   {activeColumns.map(col => (
                     <td 
                       key={col} 
                       style={{ 
-                        padding: '12px', 
+                        padding: '14px 12px', 
                         borderRight: '1px solid #f1f5f9', 
                         overflow: 'hidden', 
                         whiteSpace: 'nowrap', 
@@ -501,8 +526,8 @@ export default function BizDatabase() {
                       }}
                     >
                       {/* TEXT FIELDS */}
-                      {['invoice_id', 'customer_name', 'rice_types', 'rice_type', 'description'].includes(col) && (
-                        <span style={{ fontWeight: col === 'invoice_id' ? 'bold' : 'normal', color: col === 'invoice_id' ? '#1e293b' : 'inherit' }}>
+                      {['invoice_id', 'transaction_id', 'customer_name', 'rice_types', 'rice_type', 'description'].includes(col) && (
+                        <span style={{ fontWeight: ['invoice_id', 'transaction_id'].includes(col) ? 'bold' : 'normal', color: ['invoice_id', 'transaction_id'].includes(col) ? '#1e293b' : 'inherit' }}>
                           {t[col] || '-'}
                         </span>
                       )}
@@ -534,121 +559,6 @@ export default function BizDatabase() {
         </table>
       </div>
 
-      {/* === MODALS === */}
-
-      {/* SORT MODAL */}
-      {isSortOpen && (
-        <div className="modal-overlay">
-          <div className="modal-content">
-            <h3 style={{ marginTop: 0, borderBottom: '1px solid #eee', paddingBottom: '10px' }}>Sort Records</h3>
-            {sortRules.map((rule, index) => (
-              <div key={rule.id} style={{ display: 'flex', gap: '10px', marginBottom: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
-                <span style={{ fontSize: '12px', color: '#666', width: '60px' }}>{index === 0 ? 'Sort by' : 'Then by'}</span>
-                <select 
-                  value={rule.column} 
-                  onChange={e => setSortRules(prev => prev.map(r => r.id === rule.id ? { ...r, column: e.target.value } : r))} 
-                  style={{ flex: 1, minWidth: '100px', padding: '8px', border: '1px solid #ccc', borderRadius: '4px' }}
-                >
-                  {activeColumns.map(c => <option key={c} value={c}>{formatHeader(c)}</option>)}
-                </select>
-                <select 
-                  value={rule.direction} 
-                  onChange={e => setSortRules(prev => prev.map(r => r.id === rule.id ? { ...r, direction: e.target.value as SortDirection } : r))} 
-                  style={{ flex: 1, minWidth: '100px', padding: '8px', border: '1px solid #ccc', borderRadius: '4px' }}
-                >
-                  <option value="asc">Ascending (A-Z / Low-High)</option>
-                  <option value="desc">Descending (Z-A / High-Low)</option>
-                </select>
-                <button 
-                  onClick={() => setSortRules(prev => prev.filter(r => r.id !== rule.id))} 
-                  style={{ background: 'none', border: 'none', color: 'red', cursor: 'pointer', fontSize: '16px' }}
-                >
-                  ✕
-                </button>
-              </div>
-            ))}
-            <button 
-              onClick={() => setSortRules(prev => [...prev, { id: Date.now(), column: 'created_at', direction: 'desc' }])} 
-              style={{ background: 'none', border: 'none', color: '#3b82f6', fontWeight: 'bold', cursor: 'pointer', marginTop: '10px' }}
-            >
-              + Add sort level
-            </button>
-            <div style={{ marginTop: '24px', display: 'flex', justifyContent: 'flex-end' }}>
-              <button 
-                onClick={() => setIsSortOpen(false)} 
-                style={{ padding: '8px 16px', background: '#10b981', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
-              >
-                Apply Sort
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* FILTER MODAL */}
-      {isFilterOpen && (
-        <div className="modal-overlay">
-          <div className="modal-content">
-            <h3 style={{ marginTop: 0, borderBottom: '1px solid #eee', paddingBottom: '10px' }}>Filter Records</h3>
-            {filterRules.map((rule, index) => (
-              <div key={rule.id} style={{ display: 'flex', gap: '8px', marginBottom: '10px', alignItems: 'center', flexWrap: 'wrap', background: '#f8fafc', padding: '10px', borderRadius: '6px' }}>
-                <span style={{ fontSize: '12px', color: '#666', width: '40px' }}>{index === 0 ? 'Where' : 'And'}</span>
-                <select 
-                  value={rule.column} 
-                  onChange={e => setFilterRules(prev => prev.map(r => r.id === rule.id ? { ...r, column: e.target.value } : r))} 
-                  style={{ flex: '1 1 100px', padding: '8px', border: '1px solid #ccc', borderRadius: '4px' }}
-                >
-                  {activeColumns.map(c => <option key={c} value={c}>{formatHeader(c)}</option>)}
-                </select>
-                <select 
-                  value={rule.operator} 
-                  onChange={e => setFilterRules(prev => prev.map(r => r.id === rule.id ? { ...r, operator: e.target.value as FilterOperator } : r))} 
-                  style={{ flex: '1 1 100px', padding: '8px', border: '1px solid #ccc', borderRadius: '4px' }}
-                >
-                  <option value="contains">Contains (Text)</option>
-                  <option value="equals">Equals (=)</option>
-                  <option value="gt">Greater Than (&gt;)</option>
-                  <option value="lt">Less Than (&lt;)</option>
-                </select>
-                <input 
-                  placeholder="Value..." 
-                  value={rule.value} 
-                  onChange={e => setFilterRules(prev => prev.map(r => r.id === rule.id ? { ...r, value: e.target.value } : r))} 
-                  style={{ flex: '1 1 120px', padding: '8px', border: '1px solid #ccc', borderRadius: '4px' }} 
-                  type={['amount', 'total_sales', 'total_profit', 'total_cogs', 'qty'].includes(rule.column) ? 'number' : 'text'} 
-                />
-                <button 
-                  onClick={() => setFilterRules(prev => prev.filter(r => r.id !== rule.id))} 
-                  style={{ background: 'none', border: 'none', color: 'red', cursor: 'pointer', fontSize: '16px' }}
-                >
-                  ✕
-                </button>
-              </div>
-            ))}
-            <button 
-              onClick={() => setFilterRules(prev => [...prev, { id: Date.now(), column: activeColumns[0], operator: 'contains', value: '' }])} 
-              style={{ background: 'none', border: 'none', color: '#3b82f6', fontWeight: 'bold', cursor: 'pointer', marginTop: '10px' }}
-            >
-              + Add condition
-            </button>
-            <div style={{ marginTop: '24px', display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
-              <button 
-                onClick={() => setFilterRules([])} 
-                style={{ padding: '8px 16px', background: '#f1f5f9', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
-              >
-                Clear All
-              </button>
-              <button 
-                onClick={() => setIsFilterOpen(false)} 
-                style={{ padding: '8px 16px', background: '#10b981', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
-              >
-                Apply Filters
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* --- GLOBAL CSS --- */}
       <style jsx global>{`
         .main-wrapper {
@@ -672,121 +582,89 @@ export default function BizDatabase() {
           margin: 0;
         }
         .refresh-btn {
-          padding: 8px 16px;
+          padding: 10px 16px;
           background: #e2e8f0;
           color: #475569;
           border: none;
           border-radius: 6px;
           font-weight: bold;
           cursor: pointer;
+          transition: background 0.2s;
         }
-        .summary-cards {
-          display: flex;
-          gap: 16px;
-          margin-bottom: 24px;
-          flex-wrap: wrap;
-        }
-        .card {
-          flex: 1;
-          min-width: 200px;
-          background: #fff;
-          padding: 20px;
-          border-radius: 12px;
-          border: 1px solid #e2e8f0;
-          box-shadow: 0 1px 3px rgba(0,0,0,0.05);
-        }
-        .card-title {
-          margin: 0 0 8px 0;
-          font-size: 13px;
-          color: #64748b;
-          text-transform: uppercase;
-          font-weight: bold;
-        }
-        .card-value {
-          margin: 0;
-          font-size: 24px;
-        }
+        .refresh-btn:hover { background: #cbd5e1; }
+        
         .toolbar-container {
           display: flex;
-          gap: 10px;
+          flex-direction: column;
+          gap: 12px;
           margin-bottom: 20px;
           background: #fff;
-          padding: 10px;
-          border-radius: 8px;
+          padding: 16px 20px;
+          border-radius: 12px;
           border: 1px solid #e2e8f0;
-          align-items: center;
-          flex-wrap: wrap;
+          box-shadow: 0 4px 6px rgba(0,0,0,0.02);
         }
         .toolbar-tabs {
           display: flex;
-          gap: 5px;
+          gap: 8px;
+          flex-wrap: wrap;
         }
         .tab {
-          padding: 8px 16px;
-          border-radius: 4px;
+          padding: 10px 16px;
+          border-radius: 6px;
           border: none;
           background: transparent;
           font-weight: bold;
+          font-size: 14px;
+          color: #64748b;
+          cursor: pointer;
+          transition: all 0.2s;
+        }
+        .tab.active {
+          background: #10b981;
+          color: #fff;
+        }
+        
+        .time-btn {
+          padding: 8px 12px;
+          border-radius: 6px;
+          border: none;
+          background: transparent;
+          font-weight: bold;
+          font-size: 13px;
           color: #64748b;
           cursor: pointer;
         }
-        .tab.active {
-          background: #f1f5f9;
-          color: #0f172a;
+        .time-btn.active {
+          background: #fff;
+          color: #b58a3d;
+          box-shadow: 0 2px 4px rgba(0,0,0,0.05);
         }
+
         .toolbar-search {
-          padding: 8px 12px;
-          border: 1px solid #e2e8f0;
-          border-radius: 4px;
+          padding: 10px 14px;
+          border: 1px solid #cbd5e1;
+          border-radius: 6px;
           flex: 1;
           outline: none;
+          min-width: 200px;
+          font-size: 16px; /* Prevents iOS Zoom */
+          color: #0f172a;
+          background-color: #ffffff;
         }
-        .toolbar-filters {
-          display: flex;
-          gap: 10px;
-        }
-        .filter-btn, .sort-btn {
-          padding: 8px 16px;
-          border: 1px solid #e2e8f0;
-          border-radius: 4px;
-          cursor: pointer;
-          font-weight: bold;
-        }
+        
         .table-wrapper {
           background: #fff;
           border: 1px solid #e2e8f0;
-          border-radius: 6px;
+          border-radius: 12px;
           overflow-x: auto;
           -webkit-overflow-scrolling: touch;
-        }
-        .modal-overlay {
-          position: fixed;
-          top: 0;
-          left: 0;
-          width: 100vw;
-          height: 100vh;
-          background: rgba(0,0,0,0.5);
-          display: flex;
-          justify-content: center;
-          align-items: center;
-          z-index: 1000;
-          padding: 16px;
-          box-sizing: border-box;
-        }
-        .modal-content {
-          background: #fff;
-          padding: 24px;
-          border-radius: 12px;
-          width: 100%;
-          max-width: 600px;
-          max-height: 90vh;
-          overflow-y: auto;
-          box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+          box-shadow: 0 4px 6px rgba(0,0,0,0.02);
         }
         
-        @media (max-width: 768px) {
+        @media (max-width: 1023px) {
           .main-wrapper {
-            padding: 80px 16px 16px 16px; 
+            padding: max(80px, env(safe-area-inset-top, 80px)) 16px 16px 16px !important; 
           }
           .header-container {
             flex-direction: column;
@@ -795,31 +673,28 @@ export default function BizDatabase() {
           }
           .refresh-btn {
             width: 100%;
-            padding: 12px;
-          }
-          .summary-cards {
-            flex-direction: column;
+            padding: 14px;
           }
           .toolbar-container {
-            flex-direction: column;
-            align-items: stretch;
+            padding: 12px;
           }
           .toolbar-tabs {
-            flex-wrap: wrap;
+            gap: 4px;
           }
           .tab {
-            flex: 1 1 100px;
+            flex: 1 1 45%;
+            padding: 12px;
+            font-size: 13px;
+          }
+          .time-btn {
+            flex: 1;
+            padding: 10px 4px;
+            font-size: 12px;
             text-align: center;
           }
           .toolbar-search {
             width: 100%;
             box-sizing: border-box;
-          }
-          .toolbar-filters {
-            width: 100%;
-          }
-          .filter-btn, .sort-btn {
-            flex: 1;
           }
         }
       `}</style>

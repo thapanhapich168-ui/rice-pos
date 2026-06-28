@@ -11,17 +11,25 @@ export default function Sidebar() {
   const pathname = usePathname()
   const router = useRouter()
 
-  // Define your key navigation paths with the exact requested order
+  // Navigation paths logically arranged by business workflow
   const menuItems = [
+    // 1. Daily Operations
     { label: '📊 Dashboard', href: '/dashboard' },
     { label: '🛒 POS System', href: '/pos' },
-    { label: '💵 Expense Ledger', href: '/expense' },
+    { label: '🚚 Delivery & Credit', href: '/delivery' },
+    
+    // 2. Money & Inventory
+    { label: '💵 Expense & Payroll', href: '/expense' },
     { label: '🌾 Rice Control', href: '/rice' },
-    { label: '💼 Master Biz Database', href: '/bizdatabase' },
-    { label: '👥 Customer Database', href: '/customerdatabase' },
     { label: '🧮 Mix Calculator', href: '/calculator' },
+    
+    // 3. Records & Accounting
     { label: '🖼️ Invoice Gallery', href: '/invoices' },
     { label: '🧾 COGS Accounting', href: '/cogs-report' },
+    
+    // 4. Databases & Config
+    { label: '👥 Customer Database', href: '/customerdatabase' },
+    { label: '💼 Master Biz Database', href: '/bizdatabase' },
     { label: '⚙️ Settings', href: '/settings' }
   ]
 
@@ -111,7 +119,7 @@ export default function Sidebar() {
                   style={{
                     color: 'white',
                     textDecoration: 'none',
-                    fontSize: '15px',
+                    fontSize: '14px',
                     padding: '10px 12px',
                     borderRadius: '6px',
                     display: 'block',

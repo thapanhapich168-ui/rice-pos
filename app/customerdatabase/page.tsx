@@ -1,375 +1,478 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { supabase } from '@/lib/supabaseClient'
 
-// Translations Dictionary (Matching POS style system)
-const t = {
-  en: {
-    dashboard: "📊 Dashboard",
-    posSystem: "🛒 POS System",
-    productsAdmin: "📦 Products Admin",
-    detailedReports: "📈 Detailed Reports",
-    riceControl: "🌾 Rice Control",
-    customersDb: "👥 Customer Database",
-    logout: "Logout",
-  },
-  kh: {
-    dashboard: "📊 ផ្ទាំងគ្រប់គ្រង",
-    posSystem: "🛒 ប្រព័ន្ធលក់ POS",
-    productsAdmin: "📦 គ្រប់គ្រងទំនិញ",
-    detailedReports: "📈 របាយការណ៍លម្អិត",
-    riceControl: "🌾 គ្រប់គ្រងតម្លៃអង្ករ",
-    customersDb: "👥 ទិន្នន័យអតិថិជន",
-    logout: "ចាកចេញ",
-  }
-};
-
-interface CustomerView {
+// --- TYPES ---
+interface Customer {
   id: string;
   name: string;
-  filterOwner?: 'Jing' | 'Pich' | 'Both' | 'All';
+  owner: string;
+  type: string;
+  phone: string;
+  location: string;
+  google_map: string;
+  created_at: string;
+  last_purchase_date: string;
+  days_since_last_purchase?: number | null; // Stored as integer for perfect sorting
 }
 
+type SortConfig = {
+  key: keyof Customer;
+  direction: 'asc' | 'desc';
+} | null;
+
+const DEFAULT_WIDTHS: Record<string, number> = {
+  created_at: 120,
+  id: 280,
+  name: 200,
+  owner: 120,
+  type: 120,
+  phone: 150,
+  location: 200,
+  google_map: 120,
+  last_purchase_date: 150,
+  days_since_last_purchase: 160 // Reduced width since text is now short
+}
+
+const DEFAULT_ORDER: Array<keyof Customer> = [
+  'created_at', 'name', 'phone', 'location', 'type', 'owner', 'google_map', 'last_purchase_date', 'days_since_last_purchase', 'id'
+]
+
 export default function CustomerDatabasePage() {
-  const [customers, setCustomers] = useState<any[]>([])
-  const [lang, setLang] = useState<'en' | 'kh'>('en')
+  // --- CORE STATE ---
+  const [customers, setCustomers] = useState<Customer[]>([])
   const [searchQuery, setSearchQuery] = useState('')
+  const [edits, setEdits] = useState<Record<string, Partial<Customer>>>({})
+  const [selectedToDelete, setSelectedToDelete] = useState<Set<string>>(new Set())
+  const [hoveredId, setHoveredId] = useState<string | null>(null)
 
-  // Customer Type Filter State: Persistent via localStorage
-  const [customerTypeFilter, setCustomerTypeFilter] = useState<'All' | 'ហូប' | 'លក់បាយ' | 'លក់ត' | 'ធ្វើនំ' | 'អំណោយ'>(() => {
-    if (typeof window !== 'undefined') {
-      return (localStorage.getItem('rice_pos_type_filter') as any) || 'All';
-    }
-    return 'All';
-  })
+  // --- CELL EDITING STATE ---
+  const [editingCell, setEditingCell] = useState<{id: string, col: string} | null>(null)
 
-  // Table Column Sort Configuration State: Persistent via localStorage
-  const [sortConfig, setSortConfig] = useState<{ key: string, direction: 'asc' | 'desc' } | null>(() => {
-    if (typeof window !== 'undefined') {
-      const savedSort = localStorage.getItem('rice_pos_sort');
-      return savedSort ? JSON.parse(savedSort) : null;
-    }
-    return null;
-  });
+  // --- FILTER & SORT STATE ---
+  const [customerTypeFilter, setCustomerTypeFilter] = useState<string>('All')
+  const [sortConfig, setSortConfig] = useState<SortConfig>(null)
 
-  // Airtable Views State Configuration: Persistent via localStorage
-  const [views, setViews] = useState<CustomerView[]>(() => {
-    if (typeof window !== 'undefined') {
-      const savedViews = localStorage.getItem('rice_pos_views');
-      return savedViews ? JSON.parse(savedViews) : [
-        { id: 'all', name: 'All Customers', filterOwner: 'All' },
-        { id: 'jing', name: 'Jing’s Accounts', filterOwner: 'Jing' },
-        { id: 'pich', name: 'Pich’s Accounts', filterOwner: 'Pich' },
-      ];
-    }
-    return [
-      { id: 'all', name: 'All Customers', filterOwner: 'All' },
-      { id: 'jing', name: 'Jing’s Accounts', filterOwner: 'Jing' },
-      { id: 'pich', name: 'Pich’s Accounts', filterOwner: 'Pich' },
-    ];
-  })
-  
-  const [activeViewId, setActiveViewId] = useState<string>(() => {
-    if (typeof window !== 'undefined') {
-      return localStorage.getItem('rice_pos_active_view') || 'all';
-    }
-    return 'all';
-  })
-  
-  const [showCreateViewModal, setShowCreateViewModal] = useState(false)
-  const [newViewName, setNewViewName] = useState('')
-  const [newViewFilter, setNewViewFilter] = useState<'Jing' | 'Pich' | 'Both' | 'All'>('All')
+  // --- COLUMN PREFERENCE STATE ---
+  const [columnWidths, setColumnWidths] = useState<Record<string, number>>(DEFAULT_WIDTHS)
+  const [columnOrder, setColumnOrder] = useState<Array<keyof Customer>>(DEFAULT_ORDER)
+  const widthsRef = useRef(columnWidths)
+  widthsRef.current = columnWidths
 
-  // "Add New Customer" Form Modal States
+  // --- MODALS ---
   const [showAddModal, setShowAddModal] = useState(false)
   const [newCustomer, setNewCustomer] = useState({
-    name: '',
-    owner: 'Both',
-    type: 'ហូប', 
-    phone: '',
-    location: '',
-    google_map: ''
+    name: '', owner: 'Both', type: 'ហូប', phone: '', location: '', google_map: ''
   })
 
-  // Track state changes to save data directly back to local storage containers
-  useEffect(() => {
-    localStorage.setItem('rice_pos_views', JSON.stringify(views));
-  }, [views]);
-
-  useEffect(() => {
-    localStorage.setItem('rice_pos_active_view', activeViewId);
-  }, [activeViewId]);
-
-  useEffect(() => {
-    localStorage.setItem('rice_pos_type_filter', customerTypeFilter);
-  }, [customerTypeFilter]);
-
-  useEffect(() => {
-    if (sortConfig) {
-      localStorage.setItem('rice_pos_sort', JSON.stringify(sortConfig));
-    } else {
-      localStorage.removeItem('rice_pos_sort');
-    }
-  }, [sortConfig]);
-
+  // --- LIFECYCLE ---
   useEffect(() => {
     loadCustomers()
+    fetchSettings()
   }, [])
 
-  async function loadCustomers() {
-    const { data, error } = await supabase
-      .from('customers')
-      .select('*')
-      .order('created_at', { ascending: false })
-    if (!error && data) setCustomers(data)
-  }
-
-  // Handle custom view creation logic
-  function handleCreateView(e: React.FormEvent) {
-    e.preventDefault()
-    if (!newViewName.trim()) return
-    const newView: CustomerView = {
-      id: `view_${Date.now()}`,
-      name: newViewName,
-      filterOwner: newViewFilter
+  // --- DATABASE OPERATIONS ---
+  async function fetchSettings() {
+    const { data } = await supabase.from('app_settings').select('*').in('setting_key', ['cust_col_widths', 'cust_col_order'])
+    if (data) {
+      const widths = data.find(d => d.setting_key === 'cust_col_widths')
+      const order = data.find(d => d.setting_key === 'cust_col_order')
+      
+      if (widths && widths.setting_value) {
+        setColumnWidths({ ...DEFAULT_WIDTHS, ...widths.setting_value })
+      }
+      if (order && order.setting_value) {
+        const savedOrder = order.setting_value as Array<keyof Customer>;
+        if (!savedOrder.includes('days_since_last_purchase')) {
+          savedOrder.splice(savedOrder.indexOf('last_purchase_date') + 1, 0, 'days_since_last_purchase');
+        }
+        setColumnOrder(savedOrder)
+      }
     }
-    setViews([...views, newView])
-    setActiveViewId(newView.id)
-    setNewViewName('')
-    setShowCreateViewModal(false)
   }
 
-  // Handle new customer submittal save profile
+  async function loadCustomers() {
+    const { data, error } = await supabase.from('customers').select('*').order('created_at', { ascending: false })
+    if (!error && data) {
+      setCustomers(data)
+      setEdits({})
+    }
+  }
+
+  // --- RECORD OPERATIONS ---
+  const handleSaveRecord = async (id: string) => {
+    if (!edits[id]) return;
+    const { error } = await supabase.from('customers').update(edits[id]).eq('id', id)
+    if (!error) {
+      setEdits(prev => { const n = { ...prev }; delete n[id]; return n })
+      setEditingCell(null)
+      loadCustomers()
+    } else {
+      alert(`Error saving: ${error.message}`)
+    }
+  }
+
+  const handleDelete = async () => {
+    if (!confirm(`Are you sure you want to delete ${selectedToDelete.size} customer(s)?`)) return
+    const { error } = await supabase.from('customers').delete().in('id', Array.from(selectedToDelete))
+    if (!error) { setSelectedToDelete(new Set()); loadCustomers() }
+  }
+
   async function handleAddCustomer(e: React.FormEvent) {
     e.preventDefault()
     if (!newCustomer.name.trim()) return
 
-    try {
-      const { error } = await supabase
-        .from('customers')
-        .insert([{
-          name: newCustomer.name,
-          owner: newCustomer.owner, 
-          type: newCustomer.type, 
-          phone: newCustomer.phone,
-          location: newCustomer.location,
-          google_map: newCustomer.google_map
-        }])
+    const { error } = await supabase.from('customers').insert([{
+      name: newCustomer.name, owner: newCustomer.owner, type: newCustomer.type, 
+      phone: newCustomer.phone, location: newCustomer.location, google_map: newCustomer.google_map
+    }])
 
-      if (error) throw error
-
+    if (!error) {
       setShowAddModal(false)
       setNewCustomer({ name: '', owner: 'Both', type: 'ហូប', phone: '', location: '', google_map: '' })
       loadCustomers() 
-    } catch (err: any) {
-      alert(`Supabase Sink Error: ${err.message}`)
+    } else {
+      alert(`Error: ${error.message}`)
     }
   }
 
-  // Determine current applied active filtering rules
-  const currentActiveView = views.find(v => v.id === activeViewId)
-  
-  const filteredCustomers = customers
+  // --- COLUMN DRAG & DROP LOGIC ---
+  const handleDragStart = (e: React.DragEvent, col: string) => {
+    e.dataTransfer.setData('text/plain', col)
+    e.dataTransfer.effectAllowed = 'move'
+  }
+
+  const handleDragOver = (e: React.DragEvent) => { e.preventDefault() }
+
+  const handleDrop = async (e: React.DragEvent, targetCol: string) => {
+    e.preventDefault()
+    const sourceCol = e.dataTransfer.getData('text/plain') as keyof Customer
+    if (!sourceCol || sourceCol === targetCol) return
+
+    setColumnOrder(prev => {
+      const newOrder = prev.filter(c => c !== sourceCol)
+      const targetIdx = newOrder.indexOf(targetCol as keyof Customer)
+      newOrder.splice(targetIdx, 0, sourceCol)
+      
+      supabase.from('app_settings').upsert({ setting_key: 'cust_col_order', setting_value: newOrder }, { onConflict: 'setting_key' }).then()
+      return newOrder
+    })
+  }
+
+  // --- COLUMN RESIZE LOGIC ---
+  const handleResizeStart = (e: React.MouseEvent | React.TouchEvent, columnKey: string) => {
+    e.preventDefault()
+    e.stopPropagation() 
+    const startX = 'touches' in e ? e.touches[0].pageX : e.pageX
+    const startWidth = widthsRef.current[columnKey] || 150
+
+    const handleMove = (moveEvent: MouseEvent | TouchEvent) => {
+      const currentX = 'touches' in moveEvent ? moveEvent.touches[0].pageX : moveEvent.pageX
+      const newWidth = Math.max(60, startWidth + (currentX - startX))
+      setColumnWidths(prev => ({ ...prev, [columnKey]: newWidth }))
+    }
+
+    const handleUp = async () => {
+      document.removeEventListener('mousemove', handleMove)
+      document.removeEventListener('mouseup', handleUp)
+      document.removeEventListener('touchmove', handleMove)
+      document.removeEventListener('touchend', handleUp)
+      
+      await supabase.from('app_settings').upsert({ setting_key: 'cust_col_widths', setting_value: widthsRef.current }, { onConflict: 'setting_key' })
+    }
+
+    document.addEventListener('mousemove', handleMove)
+    document.addEventListener('mouseup', handleUp)
+    document.addEventListener('touchmove', handleMove, { passive: false })
+    document.addEventListener('touchend', handleUp)
+  }
+
+  const handleSort = (key: keyof Customer) => {
+    let direction: 'asc' | 'desc' = 'asc';
+    if (sortConfig && sortConfig.key === key && sortConfig.direction === 'asc') {
+      direction = 'desc';
+    }
+    setSortConfig({ key, direction });
+  }
+
+  // --- DATA PROCESSING ---
+  const now = new Date().getTime(); 
+
+  const processedCustomers = customers
+    .map(c => {
+      const merged = { ...c, ...edits[c.id] };
+      
+      // Calculate Days Since Last Purchase as a raw integer
+      let daysSince = null;
+      if (merged.last_purchase_date) {
+        const diffTime = now - new Date(merged.last_purchase_date).getTime();
+        daysSince = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+        if (daysSince < 0) daysSince = 0; 
+      }
+      
+      return { ...merged, days_since_last_purchase: daysSince };
+    })
     .filter(c => {
-      // 1. Filter by Account Owner Tab View
-      if (currentActiveView?.filterOwner && currentActiveView.filterOwner !== 'All') {
-        if (c.owner !== currentActiveView.filterOwner) return false
-      }
+      if (customerTypeFilter !== 'All' && c.type !== customerTypeFilter) return false;
 
-      // 2. Filter by Customer Type Segment Badge
-      if (customerTypeFilter !== 'All') {
-        if (c.type !== customerTypeFilter) return false
+      if (searchQuery) {
+        const q = searchQuery.toLowerCase();
+        return (
+          c.name?.toLowerCase().includes(q) ||
+          c.phone?.toLowerCase().includes(q) ||
+          c.location?.toLowerCase().includes(q)
+        )
       }
-
-      // 3. Filter by Search Text String Query
-      const searchString = searchQuery.toLowerCase()
-      return (
-        c.name?.toLowerCase().includes(searchString) ||
-        c.phone?.toLowerCase().includes(searchString) ||
-        c.location?.toLowerCase().includes(searchString)
-      )
+      return true;
     })
     .sort((a, b) => {
       if (!sortConfig) return 0;
       const { key, direction } = sortConfig;
-      const aValue = a[key] || '';
-      const bValue = b[key] || '';
-      if (aValue < bValue) return direction === 'asc' ? -1 : 1;
-      if (aValue > bValue) return direction === 'asc' ? 1 : -1;
+      
+      let valA = a[key];
+      let valB = b[key];
+
+      // Push nulls/empty values to the bottom gracefully
+      if (valA === null || valA === undefined || valA === '') return 1;
+      if (valB === null || valB === undefined || valB === '') return -1;
+
+      if (valA < valB) return direction === 'asc' ? -1 : 1;
+      if (valA > valB) return direction === 'asc' ? 1 : -1;
       return 0;
-    });
+    })
+
+  // --- FORMATTERS ---
+  const formatHeader = (key: string) => {
+    if (key === 'id') return 'ID';
+    if (key === 'google_map') return 'Map Link';
+    if (key === 'days_since_last_purchase') return 'Days Since Last Order';
+    return key.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
+  }
+
+  const formatDisplayValue = (col: string, val: any) => {
+    if (val === null || val === undefined || val === '') {
+      if (col === 'days_since_last_purchase') return 'No purchases';
+      return '—';
+    }
+    
+    if (col === 'created_at' || col === 'last_purchase_date') {
+      return new Date(val).toLocaleDateString('en-GB');
+    }
+    
+    // Dynamic Time String Formatter (Short Version)
+    if (col === 'days_since_last_purchase') {
+      if (val === 0) return 'Today';
+      
+      const totalDays = Number(val);
+      const years = Math.floor(totalDays / 365);
+      const remDays = totalDays % 365;
+      const months = Math.floor(remDays / 30);
+      const days = remDays % 30;
+
+      const parts = [];
+      if (years > 0) parts.push(`${years}Y`);
+      if (months > 0) parts.push(`${months}M`);
+      if (days > 0) parts.push(`${days}D`);
+
+      if (parts.length === 0) return 'Today';
+      return parts.join(' '); // Returns format like: "1Y 2M 3D"
+    }
+
+    return String(val);
+  }
+
+  const isReadOnly = (col: string) => ['id', 'created_at', 'last_purchase_date', 'days_since_last_purchase'].includes(col);
+
+  const Resizer = ({ columnKey }: { columnKey: string }) => (
+    <div
+      onMouseDown={(e) => handleResizeStart(e, columnKey)}
+      onTouchStart={(e) => handleResizeStart(e, columnKey)}
+      style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: '14px', cursor: 'col-resize', background: 'transparent', zIndex: 10, transform: 'translateX(50%)' }}
+    />
+  )
 
   return (
-    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', height: '100%', width: '100%', background: '#ffffff', overflow: 'hidden' }}>
+    <div className="main-wrapper">
       
-      {/* HEADER TOP OPERATIONS BAR (Padded on the left to offset your layout layout's fixed burger button) */}
-      <header style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 20px 12px 65px', borderBottom: '1px solid #f3f4f6', background: '#ffffff', flexShrink: 0 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          <h1 style={{ fontSize: '20px', fontWeight: 'bold', margin: 0, color: '#4a3b1b' }}>Customer Database</h1>
-        </div>
-        
-        <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
-          <input 
-            type="text" 
-            placeholder="🔍 Search accounts..." 
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            style={{ padding: '6px 12px', borderRadius: '6px', border: '1px solid #dcd7cc', outline: 'none', fontSize: '14px', width: '220px' }}
-          />
-          <div style={{ background: '#f4f1ea', borderRadius: '20px', padding: '2px' }}>
-            <button onClick={() => setLang('en')} style={{ border: 'none', background: lang === 'en' ? '#b58a3d' : 'transparent', color: lang === 'en' ? '#fff' : '#6b582f', padding: '4px 10px', borderRadius: '18px', fontWeight: 'bold', cursor: 'pointer', fontSize: '11px' }}>EN</button>
-            <button onClick={() => setLang('kh')} style={{ border: 'none', background: lang === 'kh' ? '#b58a3d' : 'transparent', color: lang === 'kh' ? '#fff' : '#6b582f', padding: '4px 10px', borderRadius: '18px', fontWeight: 'bold', cursor: 'pointer', fontSize: '11px' }}>KH</button>
-          </div>
-          <button 
-            onClick={() => setShowAddModal(true)}
-            style={{ background: '#10b981', color: 'white', border: 'none', borderRadius: '6px', padding: '8px 14px', fontWeight: 'bold', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }}
-          >
+      {/* HEADER */}
+      <div className="header-container">
+        <h1 className="page-title">👥 Customer Database</h1>
+        <div className="header-actions">
+          {selectedToDelete.size > 0 && (
+            <button className="delete-btn" onClick={handleDelete}>
+              Delete ({selectedToDelete.size})
+            </button>
+          )}
+          <button className="add-btn" onClick={() => setShowAddModal(true)}>
             ➕ Add Customer
           </button>
         </div>
-      </header>
-
-      {/* AIRTABLE-STYLE VIEW TABS BAR */}
-      <div style={{ background: '#fcfbfa', borderBottom: '1px solid #eadeca', padding: '8px 20px 0 65px', display: 'flex', alignItems: 'center', gap: '8px', overflowX: 'auto', flexShrink: 0 }}>
-        {views.map((v) => (
-          <button
-            key={v.id}
-            onClick={() => setActiveViewId(v.id)}
-            style={{
-              background: activeViewId === v.id ? '#ffffff' : 'transparent',
-              color: activeViewId === v.id ? '#b58a3d' : '#7c6a46',
-              border: '1px solid #eadeca',
-              borderBottom: activeViewId === v.id ? '1px solid #ffffff' : '1px solid #eadeca',
-              padding: '8px 16px',
-              borderRadius: '6px 6px 0 0',
-              fontSize: '13px',
-              fontWeight: activeViewId === v.id ? 'bold' : 'normal',
-              cursor: 'pointer',
-              whiteSpace: 'nowrap',
-              position: 'relative',
-              bottom: '-1px'
-            }}
-          >
-            📋 {v.name}
-          </button>
-        ))}
-        <button 
-          onClick={() => setShowCreateViewModal(true)}
-          style={{ background: 'none', border: '1px dashed #b58a3d', color: '#b58a3d', padding: '4px 10px', borderRadius: '4px', fontSize: '12px', cursor: 'pointer', fontWeight: 'bold', marginBottom: '4px' }}
-        >
-          ⚡ Create New View
-        </button>
       </div>
 
-      {/* INTERACTIVE CUSTOMER TYPE SUB-FILTER CONTROLS BAR */}
-      <div style={{ padding: '10px 20px 10px 65px', background: '#fcfbfa', borderBottom: '1px solid #eadeca', display: 'flex', gap: '8px', alignItems: 'center', flexShrink: 0, overflowX: 'auto' }}>
-        <span style={{ fontSize: '12px', color: '#8a7650', fontWeight: 'bold', marginRight: '8px', whiteSpace: 'nowrap' }}>Filter Segment:</span>
-        
-        <button
-          onClick={() => setCustomerTypeFilter('All')}
-          style={{ padding: '6px 12px', fontSize: '12px', borderRadius: '20px', border: '1px solid #eadeca', cursor: 'pointer', fontWeight: 'bold', background: customerTypeFilter === 'All' ? '#b58a3d' : '#fff', color: customerTypeFilter === 'All' ? '#fff' : '#6b582f', whiteSpace: 'nowrap' }}
+      {/* TOOLBAR */}
+      <div className="toolbar-container">
+        <input 
+          className="toolbar-search" 
+          placeholder="🔍 Search customers by name, phone, or location..." 
+          value={searchQuery} 
+          onChange={(e) => setSearchQuery(e.target.value)} 
+          onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
+        />
+      </div>
+
+      {/* FILTER SEGMENTS */}
+      <div className="hide-scrollbar" style={{ display: 'flex', overflowX: 'auto', gap: '8px', paddingBottom: '16px', marginBottom: '8px' }}>
+        <button 
+          onClick={() => setCustomerTypeFilter('All')} 
+          style={{ padding: '8px 16px', borderRadius: '20px', border: customerTypeFilter === 'All' ? 'none' : '1px solid #cbd5e1', backgroundColor: customerTypeFilter === 'All' ? '#b58a3d' : '#ffffff', color: customerTypeFilter === 'All' ? '#fff' : '#475569', fontWeight: 'bold', cursor: 'pointer', fontSize: '13px', whiteSpace: 'nowrap' }}
         >
           All Types ({customers.length})
         </button>
-
-        {(['ហូប', 'លក់បាយ', 'លក់ត', 'ធ្វើនំ', 'អំណោយ'] as const).map((typeItem) => (
-          <button
-            key={typeItem}
-            onClick={() => setCustomerTypeFilter(typeItem)}
-            style={{ padding: '6px 12px', fontSize: '12px', borderRadius: '20px', border: '1px solid #eadeca', cursor: 'pointer', fontWeight: 'bold', background: customerTypeFilter === typeItem ? '#b58a3d' : '#fff', color: customerTypeFilter === typeItem ? '#fff' : '#6b582f', whiteSpace: 'nowrap' }}
-          >
-            🏷️ {typeItem} ({customers.filter(c => c.type === typeItem).length})
-          </button>
-        ))}
+        {(['ហូប', 'លក់បាយ', 'លក់ត', 'ធ្វើនំ', 'អំណោយ'] as const).map(typeItem => {
+          const count = customers.filter(c => c.type === typeItem).length;
+          return (
+            <button 
+              key={typeItem} 
+              onClick={() => setCustomerTypeFilter(typeItem)} 
+              style={{ padding: '8px 16px', borderRadius: '20px', border: customerTypeFilter === typeItem ? 'none' : '1px solid #cbd5e1', backgroundColor: customerTypeFilter === typeItem ? '#b58a3d' : '#ffffff', color: customerTypeFilter === typeItem ? '#fff' : '#475569', fontWeight: 'bold', cursor: 'pointer', fontSize: '13px', whiteSpace: 'nowrap' }}
+            >
+              🏷️ {typeItem} ({count})
+            </button>
+          )
+        })}
       </div>
 
-      {/* GRID SPREADSHEET CANVAS VIEW */}
-      <div style={{ flex: 1, overflow: 'auto', background: '#ffffff', paddingLeft: '15px' }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '13px', minWidth: '1100px' }}>
+      {/* SPREADSHEET TABLE */}
+      <div className="table-wrapper">
+        <table style={{ borderCollapse: 'collapse', tableLayout: 'fixed', width: 'max-content', minWidth: '100%' }}>
           <thead>
-            <tr style={{ background: '#f9f8f6', borderBottom: '1px solid #eadeca', color: '#5c4d32' }}>
-              {[
-                { label: 'Date Added', key: 'created_at', width: '150px' },
-                { label: 'ID', key: 'id', width: '80px' },
-                { label: 'Customer Name', key: 'name', width: '220px' },
-                { label: 'Account Owner', key: 'owner', width: '140px' },
-                { label: 'Customer Type', key: 'type', width: '130px' },
-                { label: 'Phone Number', key: 'phone', width: '140px' },
-                { label: 'Location', key: 'location', width: '200px' },
-                { label: 'Google Map', key: '', width: '100px' }, 
-                { label: 'Last Purchase Date', key: 'last_purchase_date', width: 'auto' }
-              ].map((col) => (
+            <tr style={{ background: '#f8fafc', borderBottom: '2px solid #e2e8f0' }}>
+              {columnOrder.map(key => (
                 <th 
-                  key={col.label} 
-                  onClick={() => col.key && setSortConfig({ key: col.key, direction: sortConfig?.key === col.key && sortConfig.direction === 'asc' ? 'desc' : 'asc' })}
+                  key={key} 
+                  draggable 
+                  onDragStart={(e) => handleDragStart(e, key)}
+                  onDragOver={handleDragOver}
+                  onDrop={(e) => handleDrop(e, key)}
+                  onClick={() => handleSort(key)}
                   style={{ 
-                    padding: '12px', 
-                    borderRight: '1px solid #f4f1ea', 
-                    cursor: col.key ? 'pointer' : 'default',
-                    width: col.width,
-                    userSelect: 'none'
+                    width: columnWidths[key] || 150, 
+                    position: 'relative', 
+                    padding: '16px 12px', 
+                    textAlign: 'left', 
+                    color: '#475569', 
+                    fontSize: '13px', 
+                    textTransform: 'uppercase', 
+                    fontWeight: 'bold', 
+                    borderRight: '1px solid #f1f5f9', 
+                    cursor: 'pointer', 
+                    whiteSpace: 'nowrap' 
                   }}
+                  title="Click to Sort, Drag to Reorder"
                 >
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '6px' }}>
-                    <span>{col.label}</span>
-                    <span style={{ fontSize: '11px', color: sortConfig?.key === col.key ? '#b58a3d' : '#bbb' }}>
-                      {sortConfig?.key === col.key ? (sortConfig.direction === 'asc' ? ' ▲' : ' ▼') : col.key ? ' ↕' : ''}
-                    </span>
-                  </div>
+                  {formatHeader(key)}
+                  <span style={{ marginLeft: '6px', fontSize: '12px', opacity: sortConfig?.key === key ? 1 : 0.3 }}>
+                    {sortConfig?.key === key ? (sortConfig.direction === 'asc' ? '↑' : '↓') : '↕'}
+                  </span>
+                  <Resizer columnKey={key} />
                 </th>
               ))}
             </tr>
           </thead>
           <tbody>
-            {filteredCustomers.length === 0 ? (
-              <tr>
-                <td colSpan={9} style={{ padding: '30px', textAlign: 'center', color: '#8a7650', background: '#ffffff' }}>
-                  No record items found inside this grid selection sheet view.
-                </td>
-              </tr>
+            {processedCustomers.length === 0 ? (
+              <tr><td colSpan={columnOrder.length} style={{ padding: '40px', textAlign: 'center', color: '#94a3b8' }}>No customers found.</td></tr>
             ) : (
-              filteredCustomers.map((c) => (
-                <tr key={c.id} style={{ borderBottom: '1px solid #f4f1ea' }} className="table-row">
-                  <td style={{ padding: '10px 12px', borderRight: '1px solid #f4f1ea', color: '#666' }}>
-                    {c.created_at ? new Date(c.created_at).toLocaleDateString('en-GB') : 'N/A'}
-                  </td>
-                  <td style={{ padding: '10px 12px', borderRight: '1px solid #f4f1ea', color: '#999', fontFamily: 'monospace' }}>
-                    {c.id}
-                  </td>
-                  <td style={{ padding: '10px 12px', borderRight: '1px solid #f4f1ea', fontWeight: 'bold', color: '#4a3b1b' }}>
-                    {c.name}
-                  </td>
-                  <td style={{ padding: '10px 12px', borderRight: '1px solid #f4f1ea' }}>
-                    <span style={{
-                      padding: '2px 8px', borderRadius: '12px', fontSize: '11px', fontWeight: 'bold',
-                      background: c.owner === 'Jing' ? '#fee2e2' : c.owner === 'Pich' ? '#dbeafe' : '#f3e8ff',
-                      color: c.owner === 'Jing' ? '#991b1b' : c.owner === 'Pich' ? '#1e40af' : '#6b21a8'
-                    }}>
-                      {c.owner || 'Both'}
-                    </span>
-                  </td>
-                  <td style={{ padding: '10px 12px', borderRight: '1px solid #f4f1ea', color: '#4a3b1b' }}>
-                    <span style={{ fontWeight: 'bold', fontSize: '12px', background: '#f4f1ea', padding: '2px 6px', borderRadius: '4px' }}>
-                      {c.type}
-                    </span>
-                  </td>
-                  <td style={{ padding: '10px 12px', borderRight: '1px solid #f4f1ea', color: '#111827' }}>
-                    {c.phone || '—'}
-                  </td>
-                  <td style={{ padding: '10px 12px', borderRight: '1px solid #f4f1ea', color: '#4b5563' }}>
-                    {c.location || '—'}
-                  </td>
-                  <td style={{ padding: '10px 12px', borderRight: '1px solid #f4f1ea', textAlign: 'center' }}>
-                    {c.google_map ? (
-                      <a href={c.google_map} target="_blank" rel="noreferrer" style={{ color: '#b58a3d', textDecoration: 'underline', fontWeight: 'bold' }}>🗺️ View Map</a>
-                    ) : (
-                      <span style={{ color: '#ccc' }}>—</span>
-                    )}
-                  </td>
-                  <td style={{ padding: '10px 12px', color: '#6b7280', fontStyle: 'italic' }}>
-                    {c.last_purchase_date ? new Date(c.last_purchase_date).toLocaleDateString('en-GB') : 'Sync pending...'}
-                  </td>
+              processedCustomers.map(c => (
+                <tr key={c.id} onMouseEnter={() => setHoveredId(c.id)} onMouseLeave={() => setHoveredId(null)} style={{ borderBottom: '1px solid #f1f5f9', background: edits[c.id] ? '#fefcf3' : 'transparent', transition: 'background 0.2s' }}>
+                  
+                  {columnOrder.map(col => {
+                    const isNameCol = col === 'name';
+                    const editing = editingCell?.id === c.id && editingCell?.col === col;
+                    const val = edits[c.id]?.[col] ?? (c as any)[col] ?? '';
+                    const readOnly = isReadOnly(col);
+
+                    return (
+                      <td key={col} className={editing ? 'cell-editing' : ''} style={{ borderRight: '1px solid #f1f5f9', overflow: 'hidden', position: 'relative', padding: 0 }}>
+                        
+                        {/* Hover Checkbox */}
+                        {isNameCol && (hoveredId === c.id || selectedToDelete.has(c.id)) && (
+                          <div style={{ position: 'absolute', left: '8px', top: '50%', transform: 'translateY(-50%)', zIndex: 25, background: edits[c.id] ? '#fefcf3' : '#fff', paddingRight: '4px' }}>
+                            <input type="checkbox" checked={selectedToDelete.has(c.id)} onChange={() => {
+                              const next = new Set(selectedToDelete)
+                              next.has(c.id) ? next.delete(c.id) : next.add(c.id)
+                              setSelectedToDelete(next)
+                            }} style={{ cursor: 'pointer', width: '18px', height: '18px', margin: 0, accentColor: '#b58a3d' }} />
+                          </div>
+                        )}
+                        
+                        {/* Input Transform */}
+                        {editing && !readOnly ? (
+                          col === 'owner' ? (
+                            <select 
+                              autoFocus 
+                              className="cell-input" 
+                              value={val} 
+                              onChange={(e) => setEdits(prev => ({ ...prev, [c.id]: { ...(prev[c.id] || {}), [col]: e.target.value } }))}
+                              onBlur={() => handleSaveRecord(c.id)}
+                              onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); if (e.key === 'Escape') setEditingCell(null); }}
+                            >
+                              <option value="Both">Both</option>
+                              <option value="Jing">Jing</option>
+                              <option value="Pich">Pich</option>
+                              <option value="Mom">Mom</option>
+                            </select>
+                          ) : col === 'type' ? (
+                            <select 
+                              autoFocus 
+                              className="cell-input" 
+                              value={val} 
+                              onChange={(e) => setEdits(prev => ({ ...prev, [c.id]: { ...(prev[c.id] || {}), [col]: e.target.value } }))}
+                              onBlur={() => handleSaveRecord(c.id)}
+                              onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); if (e.key === 'Escape') setEditingCell(null); }}
+                            >
+                              <option value="ហូប">ហូប</option>
+                              <option value="លក់បាយ">លក់បាយ</option>
+                              <option value="លក់ត">លក់ត</option>
+                              <option value="ធ្វើនំ">ធ្វើនំ</option>
+                              <option value="អំណោយ">អំណោយ</option>
+                            </select>
+                          ) : (
+                            <input 
+                              autoFocus
+                              type="text"
+                              className="cell-input"
+                              style={{ paddingLeft: isNameCol ? '36px' : '12px' }}
+                              value={val}
+                              onChange={(e) => setEdits(prev => ({ ...prev, [c.id]: { ...(prev[c.id] || {}), [col]: e.target.value } }))}
+                              onBlur={() => handleSaveRecord(c.id)}
+                              onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); if (e.key === 'Escape') { setEdits(prev => { const n = { ...prev }; delete n[c.id]; return n }); setEditingCell(null); } }}
+                            />
+                          )
+                        ) : (
+                          <div 
+                            className="cell-display"
+                            style={{ 
+                              paddingLeft: isNameCol ? '36px' : '12px', 
+                              fontWeight: isNameCol || col === 'days_since_last_purchase' ? 'bold' : 'normal', 
+                              color: isNameCol ? '#1e293b' : col === 'days_since_last_purchase' ? '#b58a3d' : readOnly ? '#94a3b8' : '#334155',
+                              cursor: readOnly ? 'default' : 'text',
+                              fontFamily: col === 'id' ? 'monospace' : 'inherit'
+                            }}
+                            onClick={() => !readOnly && setEditingCell({ id: c.id, col: col as string })}
+                          >
+                            {col === 'google_map' && val ? (
+                              <a href={val} target="_blank" rel="noreferrer" style={{ color: '#2563eb', textDecoration: 'none', fontWeight: 'bold' }} onClick={e => e.stopPropagation()}>🗺️ Open Map</a>
+                            ) : (
+                              formatDisplayValue(col as string, val)
+                            )}
+                          </div>
+                        )}
+
+                      </td>
+                    )
+                  })}
                 </tr>
               ))
             )}
@@ -377,97 +480,226 @@ export default function CustomerDatabasePage() {
         </table>
       </div>
 
-      {/* MODAL WINDOW 1: DYNAMIC VIEWS CREATOR */}
-      {showCreateViewModal && (
-        <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', background: 'rgba(0,0,0,0.5)', zIndex: 9999, display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '20px' }}>
-          <form onSubmit={handleCreateView} style={{ background: '#ffffff', width: '100%', maxWidth: '400px', borderRadius: '12px', padding: '24px', boxShadow: '0 10px 25px rgba(0,0,0,0.15)' }}>
-            <h3 style={{ margin: '0 0 16px 0', color: '#4a3b1b', borderBottom: '1px solid #f3f4f6', paddingBottom: '10px' }}>Create Custom Spreadsheet View</h3>
-            
-            <div style={{ marginBottom: '16px' }}>
-              <label style={{ display: 'block', fontSize: '12px', fontWeight: 'bold', color: '#8a7650', marginBottom: '4px' }}>View Name</label>
-              <input type="text" placeholder="e.g. Jing Premium Row" value={newViewName} onChange={(e) => setNewViewName(e.target.value)} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #dcd7cc', boxSizing: 'border-box' }} required />
-            </div>
-
-            <div style={{ marginBottom: '20px' }}>
-              <label style={{ display: 'block', fontSize: '12px', fontWeight: 'bold', color: '#8a7650', marginBottom: '4px' }}>Filter accounts assigned to:</label>
-              <select value={newViewFilter} onChange={(e: any) => setNewViewFilter(e.target.value)} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #dcd7cc', background: '#fff' }}>
-                <option value="All">Show All Accounts</option>
-                <option value="Jing">Jing</option>
-                <option value="Pich">Pich</option>
-                <option value="Both">Both</option>
-              </select>
-            </div>
-
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
-              <button type="button" onClick={() => setShowCreateViewModal(false)} style={{ padding: '10px 16px', background: '#f4f1ea', border: 'none', borderRadius: '6px', cursor: 'pointer', color: '#6b582f', fontWeight: 'bold' }}>Cancel</button>
-              <button type="submit" style={{ padding: '10px 16px', background: '#b58a3d', border: 'none', borderRadius: '6px', cursor: 'pointer', color: '#fff', fontWeight: 'bold' }}>Apply Grid View</button>
-            </div>
-          </form>
-        </div>
-      )}
-
-      {/* MODAL WINDOW 2: CREATION CUSTOMER CARD PROFILES */}
+      {/* --- ADD CUSTOMER MODAL --- */}
       {showAddModal && (
-        <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', background: 'rgba(0,0,0,0.5)', zIndex: 9999, display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '20px' }}>
-          <form onSubmit={handleAddCustomer} style={{ background: '#ffffff', width: '100%', maxWidth: '460px', borderRadius: '12px', padding: '24px', boxShadow: '0 10px 25px rgba(0,0,0,0.15)' }}>
-            <h3 style={{ margin: '0 0 16px 0', color: '#4a3b1b', borderBottom: '1px solid #f3f4f6', paddingBottom: '10px' }}>👤 File New Customer Profile Record</h3>
+        <div className="modal-overlay" onMouseDown={() => setShowAddModal(false)}>
+          <form onSubmit={handleAddCustomer} className="modal-content" style={{ maxWidth: '460px' }} onMouseDown={e => e.stopPropagation()}>
+            <h2 style={{ marginTop: 0, marginBottom: '20px', color: '#1e293b' }}>👤 Add New Customer</h2>
             
-            <div style={{ marginBottom: '14px' }}>
-              <label style={{ display: 'block', fontSize: '12px', fontWeight: 'bold', color: '#8a7650', marginBottom: '4px' }}>Customer Full Name *</label>
-              <input type="text" value={newCustomer.name} onChange={(e) => setNewCustomer({ ...newCustomer, name: e.target.value })} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #dcd7cc', boxSizing: 'border-box' }} required />
-            </div>
-
-            <div style={{ display: 'flex', gap: '12px', marginBottom: '14px' }}>
-              <div style={{ flex: 1 }}>
-                <label style={{ display: 'block', fontSize: '12px', fontWeight: 'bold', color: '#8a7650', marginBottom: '4px' }}>Who customer is it?</label>
-                <select value={newCustomer.owner} onChange={(e) => setNewCustomer({ ...newCustomer, owner: e.target.value })} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #dcd7cc', background: '#fff' }}>
-                  <option value="Jing">Jing</option>
-                  <option value="Pich">Pich</option>
-                  <option value="Both">Both</option>
-                </select>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              <div>
+                <label style={{ display: 'block', fontSize: '13px', color: '#0f172a', fontWeight: 'bold', marginBottom: '6px' }}>Customer Full Name *</label>
+                <input type="text" value={newCustomer.name} onChange={(e) => setNewCustomer({ ...newCustomer, name: e.target.value })} style={{ width: '100%', padding: '10px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', fontSize: '16px', color: '#0f172a', backgroundColor: '#ffffff' }} required />
               </div>
-              <div style={{ flex: 1 }}>
-                <label style={{ display: 'block', fontSize: '12px', fontWeight: 'bold', color: '#8a7650', marginBottom: '4px' }}>Customer Type</label>
-                <select value={newCustomer.type} onChange={(e) => setNewCustomer({ ...newCustomer, type: e.target.value })} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #dcd7cc', background: '#fff' }}>
-                  <option value="ហូប">ហូប</option>
-                  <option value="លក់បាយ">លក់បាយ</option>
-                  <option value="លក់ត">លក់ត</option>
-                  <option value="ធ្វើនំ">ធ្វើនំ</option>
-                  <option value="អំណោយ">អំណោយ</option>
-                </select>
+
+              <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
+                <div style={{ flex: '1 1 130px' }}>
+                  <label style={{ display: 'block', fontSize: '13px', color: '#0f172a', fontWeight: 'bold', marginBottom: '6px' }}>Account Owner</label>
+                  <select value={newCustomer.owner} onChange={(e) => setNewCustomer({ ...newCustomer, owner: e.target.value })} style={{ width: '100%', padding: '10px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', fontSize: '16px', color: '#0f172a', backgroundColor: '#ffffff' }}>
+                    <option value="Both">Both</option>
+                    <option value="Jing">Jing</option>
+                    <option value="Pich">Pich</option>
+                    <option value="Mom">Mom</option>
+                  </select>
+                </div>
+                <div style={{ flex: '1 1 130px' }}>
+                  <label style={{ display: 'block', fontSize: '13px', color: '#0f172a', fontWeight: 'bold', marginBottom: '6px' }}>Customer Type</label>
+                  <select value={newCustomer.type} onChange={(e) => setNewCustomer({ ...newCustomer, type: e.target.value })} style={{ width: '100%', padding: '10px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', fontSize: '16px', color: '#0f172a', backgroundColor: '#ffffff' }}>
+                    <option value="ហូប">ហូប</option>
+                    <option value="លក់បាយ">លក់បាយ</option>
+                    <option value="លក់ត">លក់ត</option>
+                    <option value="ធ្វើនំ">ធ្វើនំ</option>
+                    <option value="អំណោយ">អំណោយ</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '13px', color: '#0f172a', fontWeight: 'bold', marginBottom: '6px' }}>Phone Number</label>
+                <input type="text" value={newCustomer.phone} onChange={(e) => setNewCustomer({ ...newCustomer, phone: e.target.value })} placeholder="e.g. 012 345 678" style={{ width: '100%', padding: '10px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', fontSize: '16px', color: '#0f172a', backgroundColor: '#ffffff' }} />
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '13px', color: '#0f172a', fontWeight: 'bold', marginBottom: '6px' }}>Location</label>
+                <input type="text" value={newCustomer.location} onChange={(e) => setNewCustomer({ ...newCustomer, location: e.target.value })} placeholder="Phnom Penh" style={{ width: '100%', padding: '10px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', fontSize: '16px', color: '#0f172a', backgroundColor: '#ffffff' }} />
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '13px', color: '#0f172a', fontWeight: 'bold', marginBottom: '6px' }}>Google Map URL Link</label>
+                <input type="url" value={newCustomer.google_map} onChange={(e) => setNewCustomer({ ...newCustomer, google_map: e.target.value })} placeholder="https://maps.google.com/..." style={{ width: '100%', padding: '10px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', fontSize: '16px', color: '#0f172a', backgroundColor: '#ffffff' }} />
               </div>
             </div>
 
-            <div style={{ marginBottom: '14px' }}>
-              <label style={{ display: 'block', fontSize: '12px', fontWeight: 'bold', color: '#8a7650', marginBottom: '4px' }}>Phone Number</label>
-              <input type="text" value={newCustomer.phone} onChange={(e) => setNewCustomer({ ...newCustomer, phone: e.target.value })} placeholder="e.g. 012 345 678" style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #dcd7cc', boxSizing: 'border-box' }} />
-            </div>
-
-            <div style={{ marginBottom: '14px' }}>
-              <label style={{ display: 'block', fontSize: '12px', fontWeight: 'bold', color: '#8a7650', marginBottom: '4px' }}>Delivery Address Location</label>
-              <input type="text" value={newCustomer.location} onChange={(e) => setNewCustomer({ ...newCustomer, location: e.target.value })} placeholder="Phnom Penh" style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #dcd7cc', boxSizing: 'border-box' }} />
-            </div>
-
-            <div style={{ marginBottom: '20px' }}>
-              <label style={{ display: 'block', fontSize: '12px', fontWeight: 'bold', color: '#8a7650', marginBottom: '4px' }}>Google Map URL Link</label>
-              <input type="url" value={newCustomer.google_map} onChange={(e) => setNewCustomer({ ...newCustomer, google_map: e.target.value })} placeholder="https://maps.google.com/..." style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #dcd7cc', boxSizing: 'border-box' }} />
-            </div>
-
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
-              <button type="button" onClick={() => setShowAddModal(false)} style={{ padding: '10px 16px', background: '#f4f1ea', border: 'none', borderRadius: '6px', cursor: 'pointer', color: '#6b582f', fontWeight: 'bold' }}>Cancel</button>
-              <button type="submit" style={{ padding: '10px 16px', background: '#10b981', border: 'none', borderRadius: '6px', cursor: 'pointer', color: '#fff', fontWeight: 'bold' }}>Save To Database</button>
+            <div style={{ marginTop: '24px', display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
+              <button type="button" onClick={() => setShowAddModal(false)} style={{ padding: '10px 16px', background: '#f1f5f9', color: '#475569', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', fontSize: '14px' }}>Cancel</button>
+              <button type="submit" style={{ padding: '10px 16px', background: '#10b981', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', fontSize: '14px' }}>Save Customer</button>
             </div>
           </form>
         </div>
       )}
 
-      {/* HOVER CSS RULES FOR SPREADSHEET ALIGNMENT */}
+      {/* --- GLOBAL CSS --- */}
       <style jsx global>{`
-        .table-row:hover {
-          background-color: #fcfbfa !important;
+        .main-wrapper {
+          padding: 24px 24px 24px 75px;
+          background: #f8fafc;
+          min-height: 100vh;
+          font-family: Arial, sans-serif;
+          color: #333;
+          box-sizing: border-box;
+        }
+        .header-container {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          margin-bottom: 24px;
+        }
+        .page-title {
+          font-size: 24px;
+          font-weight: bold;
+          color: #1e293b;
+          margin: 0;
+        }
+        .header-actions {
+          display: flex;
+          gap: 10px;
+        }
+        .delete-btn {
+          padding: 10px 20px;
+          background: #ef4444;
+          color: #fff;
+          border: none;
+          border-radius: 6px;
+          font-weight: bold;
+          cursor: pointer;
+        }
+        .add-btn {
+          padding: 10px 20px;
+          background: #10b981;
+          color: #fff;
+          border: none;
+          border-radius: 6px;
+          font-weight: bold;
+          cursor: pointer;
+        }
+        .toolbar-container {
+          display: flex;
+          gap: 12px;
+          margin-bottom: 16px;
+          background: #fff;
+          padding: 16px 20px;
+          border-radius: 12px;
+          border: 1px solid #e2e8f0;
+          align-items: center;
+          flex-wrap: wrap;
+          box-shadow: 0 4px 6px rgba(0,0,0,0.02);
+        }
+        .toolbar-search {
+          padding: 10px 14px;
+          border: 1px solid #cbd5e1;
+          border-radius: 6px;
+          flex: 1;
+          outline: none;
+          min-width: 150px;
+          font-size: 16px;
+          color: #0f172a;
+          background-color: #ffffff;
+        }
+        .hide-scrollbar::-webkit-scrollbar { display: none; }
+        .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+        .table-wrapper {
+          background: #fff;
+          border: 1px solid #e2e8f0;
+          border-radius: 12px;
+          overflow-x: auto;
+          box-shadow: 0 4px 6px rgba(0,0,0,0.02);
+          -webkit-overflow-scrolling: touch;
+        }
+        .cell-display {
+          padding: 16px 12px;
+          font-size: 14px;
+          min-height: 48px;
+          cursor: text;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          display: flex;
+          align-items: center;
+        }
+        .cell-input {
+          width: 100%;
+          height: 100%;
+          padding: 16px 12px;
+          font-size: 16px;
+          border: none;
+          outline: 2px solid #b58a3d;
+          box-shadow: 0 0 5px rgba(181, 138, 61, 0.3);
+          background: #fff;
+          position: absolute;
+          top: 0;
+          left: 0;
+          z-index: 20;
+          box-sizing: border-box;
+          color: #0f172a;
+        }
+        .cell-editing {
+          z-index: 20;
+          position: relative;
+        }
+
+        .modal-overlay {
+          position: fixed;
+          top: 0;
+          left: 0;
+          width: 100vw;
+          height: 100vh;
+          background: rgba(0,0,0,0.5);
+          display: flex;
+          justify-content: center;
+          align-items: center;
+          z-index: 1000;
+          padding: 16px;
+          box-sizing: border-box;
+        }
+        .modal-content {
+          background: #fff;
+          padding: 30px;
+          border-radius: 16px;
+          width: 100%;
+          max-height: 90vh;
+          overflow-y: auto;
+          box-shadow: 0 10px 25px rgba(0,0,0,0.2);
+        }
+
+        @media (max-width: 1023px) {
+          .main-wrapper {
+            padding: max(80px, env(safe-area-inset-top, 80px)) 16px 16px 16px !important; 
+          }
+          .header-container {
+            flex-direction: column;
+            align-items: stretch;
+            gap: 16px;
+          }
+          .header-actions {
+            flex-direction: column;
+            width: 100%;
+          }
+          .delete-btn, .add-btn {
+            width: 100%;
+            padding: 14px;
+            font-size: 15px;
+          }
+          .toolbar-container {
+            flex-direction: column;
+            align-items: stretch;
+          }
+          .toolbar-search {
+            width: 100%;
+            box-sizing: border-box;
+          }
         }
       `}</style>
-
     </div>
   )
 }

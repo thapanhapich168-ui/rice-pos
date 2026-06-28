@@ -23,94 +23,93 @@ const parseToRiel = (amount: any, currency?: string) => {
 export default function DashboardPage() {
   const [wholesaleSales, setWholesaleSales] = useState<any[]>([])
   const [retailSales, setRetailSales] = useState<any[]>([])
+  const [invoiceSummaries, setInvoiceSummaries] = useState<any[]>([])
   const [expenses, setExpenses] = useState<any[]>([])
+  const [staffList, setStaffList] = useState<any[]>([]) 
 
-  const [activeTab, setActiveTab] = useState<'wholesale' | 'retail'>('wholesale')
+  // --- MANUAL ASSET STATES ---
+  const [baseCapital, setBaseCapital] = useState<number>(0)
+  const [initCash, setInitCash] = useState<number>(0)
+  const [initQr, setInitQr] = useState<number>(0)
+  const [persOweRiel, setPersOweRiel] = useState<number>(0)
+  const [persOweUsd, setPersOweUsd] = useState<number>(0)
+
+  const [activeTab, setActiveTab] = useState<'wholesale' | 'retail' | 'asset'>('wholesale')
+  const [assetFilter, setAssetFilter] = useState<'today' | 'yesterday' | 'week' | 'month' | 'all'>('month')
 
   const [fromDate, setFromDate] = useState('')
   const [toDate, setToDate] = useState('')
 
   // -------------------------
-  // LOAD DATA (WITH FAILSAFES)
+  // LOAD DATA
   // -------------------------
   useEffect(() => {
     loadData()
   }, [])
 
   async function loadData() {
-    // 1. Fetch Wholesale Sales
     const { data: salesData } = await supabase.from('sales').select('*')
     setWholesaleSales(salesData || [])
 
-    // 2. Fetch Retail Sales
-    try {
-      const { data: retailData, error: retailError } = await supabase.from('retail_sales').select('*')
-      if (!retailError && retailData) {
-        setRetailSales(retailData)
-      } else {
-        setRetailSales([])
-      }
-    } catch (e) {
-      console.warn("Retail table missing, defaulting to empty.", e)
-      setRetailSales([])
-    }
+    const { data: summariesData } = await supabase.from('invoice_summaries').select('*')
+    setInvoiceSummaries(summariesData || [])
 
-    // 3. Fetch Expenses 
     try {
-      const { data: expensesData, error } = await supabase.from('expenses').select('*')
-      if (!error && expensesData) {
-        setExpenses(expensesData)
-      } else {
-        setExpenses([])
+      const { data: retailData } = await supabase.from('retail_sales').select('*')
+      setRetailSales(retailData || [])
+    } catch (e) { setRetailSales([]) }
+
+    try {
+      const { data: expensesData } = await supabase.from('expenses').select('*')
+      setExpenses(expensesData || [])
+    } catch (e) { setExpenses([]) }
+
+    try {
+      const { data: staffData } = await supabase.from('staff').select('*')
+      setStaffList(staffData || [])
+    } catch (e) { setStaffList([]) }
+
+    try {
+      const keys = ['base_capital', 'initial_cash', 'initial_qr', 'personal_owe_riel', 'personal_owe_usd'];
+      const { data: capData } = await supabase.from('app_settings').select('*').in('setting_key', keys)
+      if (capData) {
+        capData.forEach(s => {
+          if (s.setting_key === 'base_capital') setBaseCapital(Number(s.setting_value) || 0)
+          if (s.setting_key === 'initial_cash') setInitCash(Number(s.setting_value) || 0)
+          if (s.setting_key === 'initial_qr') setInitQr(Number(s.setting_value) || 0)
+          if (s.setting_key === 'personal_owe_riel') setPersOweRiel(Number(s.setting_value) || 0)
+          if (s.setting_key === 'personal_owe_usd') setPersOweUsd(Number(s.setting_value) || 0)
+        })
       }
-    } catch (e) {
-      console.warn("Expenses table not found or accessible yet. Defaulting to 0.", e)
-      setExpenses([])
-    }
+    } catch (e) { console.warn("App settings missing.") }
+  }
+
+  async function updateSetting(key: string, val: number) {
+    await supabase.from('app_settings').upsert({ setting_key: key, setting_value: val }, { onConflict: 'setting_key' })
   }
 
   // -------------------------
-  // DATE FILTER LOGIC
-  // -------------------------
-  function filterByDate(data: any[]) {
-    if (!fromDate && !toDate) return data
-    return data.filter((item) => {
-      const date = item.created_at?.split('T')[0]
-      if (fromDate && date < fromDate) return false
-      if (toDate && date > toDate) return false
-      return true
-    })
-  }
-
-  const activeSalesData = activeTab === 'wholesale' ? wholesaleSales : retailSales;
-  const filteredSales = filterByDate(activeSalesData)
-
-  // -------------------------
-  // TIME HELPERS FOR DASHBOARD
+  // TIME HELPERS
   // -------------------------
   const now = new Date()
 
   const isToday = (dateStr: string) => {
     if (!dateStr) return false;
     const d = new Date(dateStr);
-    return d.getDate() === now.getDate() && 
-           d.getMonth() === now.getMonth() && 
-           d.getFullYear() === now.getFullYear();
+    return d.getDate() === now.getDate() && d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
   }
 
   const isMTD = (dateStr: string) => {
     if (!dateStr) return false;
     const d = new Date(dateStr);
-    return d.getMonth() === now.getMonth() && 
-           d.getFullYear() === now.getFullYear();
+    return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
   }
 
   const isLastMonth = (dateStr: string) => {
     if (!dateStr) return false;
     const d = new Date(dateStr);
     const lm = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-    return d.getMonth() === lm.getMonth() && 
-           d.getFullYear() === lm.getFullYear();
+    return d.getMonth() === lm.getMonth() && d.getFullYear() === lm.getFullYear();
   }
 
   const getDayOfMonth = (dateStr: string) => {
@@ -118,51 +117,87 @@ export default function DashboardPage() {
     return new Date(dateStr).getDate();
   }
 
+  const isAssetMatch = (dateStr: string, filter: string) => {
+    if (filter === 'all') return true;
+    if (!dateStr) return false;
+    const d = new Date(dateStr);
+    const today = new Date();
+    today.setHours(0,0,0,0);
+    d.setHours(0,0,0,0);
+    
+    if (filter === 'today') return d.getTime() === today.getTime();
+    if (filter === 'yesterday') {
+      const yest = new Date(today); yest.setDate(yest.getDate() - 1);
+      return d.getTime() === yest.getTime();
+    }
+    if (filter === 'week') {
+      const lastWeek = new Date(today); lastWeek.setDate(lastWeek.getDate() - 7);
+      return d >= lastWeek && d <= today;
+    }
+    if (filter === 'month') return d.getMonth() === today.getMonth() && d.getFullYear() === today.getFullYear();
+    return true;
+  }
+
+  function calculateDaysWorked(startDateStr: string, filter: string) {
+    if (!startDateStr) return 0;
+    const start = new Date(startDateStr); start.setHours(0,0,0,0);
+    const today = new Date(); today.setHours(0,0,0,0);
+    
+    if (filter === 'today' || filter === 'yesterday') return 1;
+    if (filter === 'week') return 7; 
+    
+    if (filter === 'month') {
+      const firstOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+      const actualStart = start > firstOfMonth ? start : firstOfMonth;
+      const diffTime = today.getTime() - actualStart.getTime();
+      return Math.max(0, Math.floor(diffTime / (1000 * 60 * 60 * 24)) + 1);
+    }
+    
+    if (filter === 'all') {
+      const diffTime = today.getTime() - start.getTime();
+      return Math.max(0, Math.floor(diffTime / (1000 * 60 * 60 * 24)) + 1);
+    }
+    return 0;
+  }
+
   // -------------------------
   // CORE CALCULATION ENGINE
   // -------------------------
+  const activeSalesData = activeTab === 'wholesale' ? wholesaleSales : retailSales;
+
   function calculateMetrics(dataSet: any[], timeFilter: (d: string) => boolean) {
     const filtered = dataSet.filter(s => timeFilter(s.created_at))
-    
     let totalSales = 0, pichSales = 0, jingSales = 0, bothSales = 0, momSales = 0
     let totalProfit = 0, pichProfit = 0, jingProfit = 0, bothProfit = 0, momProfit = 0
 
     filtered.forEach(sale => {
-      // Calculate from raw row data (qty * price)
       const qty = Number(sale.qty || 0);
       const price = Number(sale.price_per_bag || 0);
       const cogs = Number(sale.cogs_price || 0);
-
       const revenue = qty * price;
       const profit = (price - cogs) * qty;
 
-      totalSales += revenue
-      totalProfit += profit
-
+      totalSales += revenue; totalProfit += profit;
       const owner = (sale.owner || '').toLowerCase()
       if (owner === 'pich') { pichSales += revenue; pichProfit += profit }
       else if (owner === 'jing') { jingSales += revenue; jingProfit += profit }
       else if (owner === 'both') { bothSales += revenue; bothProfit += profit }
       else if (owner === 'mom') { momSales += revenue; momProfit += profit }
     })
-
     return { totalSales, pichSales, jingSales, bothSales, momSales, totalProfit, pichProfit, jingProfit, bothProfit, momProfit }
   }
 
-  function calculateExpenses(expSet: any[], timeFilter: (d: string) => boolean) {
+  function calculateExpenses(expSet: any[], timeFilter: (d: string) => boolean, period: 'today' | 'mtd' | 'lastMonth') {
     const filtered = expSet.filter(e => timeFilter(e.created_at))
-    
-    let bizTotal = 0
-    let personalTotal = 0, pichPers = 0, jingPers = 0, bothPers = 0, momPers = 0
+    let bizTotal = 0, personalTotal = 0, pichPers = 0, jingPers = 0, bothPers = 0, momPers = 0
 
     filtered.forEach(exp => {
-      const amt = parseToRiel(exp.amount, exp.currency)
-      const type = (exp.type || '').toLowerCase()
-      const owner = (exp.owner || '').toLowerCase()
+      const amt = parseToRiel(exp.amount, exp.currency) || parseToRiel(exp.amount_riel, 'KHR');
+      const type = (exp.description || '').toLowerCase()
+      const owner = (exp.spender || '').toLowerCase()
 
-      if (type === 'business' || type === 'biz') {
-        bizTotal += amt
-      } else {
+      if (type === 'business' || type === 'biz') bizTotal += amt
+      else {
         personalTotal += amt
         if (owner === 'pich') pichPers += amt
         else if (owner === 'jing') jingPers += amt
@@ -171,37 +206,98 @@ export default function DashboardPage() {
       }
     })
 
+    let payrollTotal = 0;
+    staffList.forEach(staff => {
+      const dailyRate = (Number(staff.salary) || 0) / 30;
+      if (period === 'today') payrollTotal += dailyRate;
+      else if (period === 'mtd') payrollTotal += (dailyRate * calculateDaysWorked(staff.start_date, 'month'));
+      else if (period === 'lastMonth') payrollTotal += (Number(staff.salary) || 0); 
+    });
+    bizTotal += Math.round(payrollTotal);
+
     return { bizTotal, personalTotal, pichPers, jingPers, bothPers, momPers }
   }
 
+  // --- ASSET ENGINE (PROFIT + PAYMENT METHOD SPLIT) ---
+  function calculateAssets() {
+    let cashProfit = 0, qrProfit = 0, bizCredit = 0;
+    let expCash = 0, expQr = 0;
+
+    const fRetail = retailSales.filter(s => isAssetMatch(s.created_at, assetFilter));
+    const fWhole = invoiceSummaries.filter(s => isAssetMatch(s.created_at, assetFilter));
+    const fExp = expenses.filter(e => isAssetMatch(e.created_at, assetFilter));
+
+    // Retail = Always Cash Profit
+    fRetail.forEach(r => { 
+      const profit = (Number(r.price_per_bag || 0) - Number(r.cogs_price || 0)) * Number(r.qty || 0);
+      cashProfit += profit; 
+    });
+
+    // Wholesale = QR Profit vs Cash Profit
+    fWhole.forEach(inv => {
+      bizCredit += Number(inv.balance_due || 0);
+      const profit = Number(inv.total_profit || 0);
+      
+      if (inv.payment_method === 'QR Payment') {
+        qrProfit += profit;
+      } else {
+        cashProfit += profit; // Default to Cash
+      }
+    });
+
+    // Splitting Expenses by Payment Method
+    fExp.forEach(e => { 
+      const amt = parseToRiel(e.amount, e.currency) || parseToRiel(e.amount_riel, 'KHR');
+      if (e.payment_method === 'Cash') {
+        expCash += amt;
+      } else {
+        expQr += amt; // Default to QR if missing/undefined
+      }
+    });
+
+    // Calculate Payroll (Always deducted from Cash)
+    let payroll = 0;
+    staffList.forEach(staff => {
+      const daily = (Number(staff.salary) || 0) / 30;
+      payroll += (daily * calculateDaysWorked(staff.start_date, assetFilter));
+    });
+    expCash += payroll;
+
+    // Final Math
+    const liveCash = initCash + cashProfit - expCash;
+    const liveQr = initQr + qrProfit - expQr;
+    const personalCredit = persOweRiel + (persOweUsd * EXCHANGE_RATE);
+    
+    const totalAsset = baseCapital + liveCash + liveQr + bizCredit + personalCredit;
+    
+    return { liveCash, liveQr, bizCredit, personalCredit, expCash, expQr, totalAsset, cashProfit, qrProfit, payroll };
+  }
+
+  // -------------------------
+  // RENDER VARIABLES
+  // -------------------------
   const todayM = calculateMetrics(activeSalesData, isToday)
   const mtdM = calculateMetrics(activeSalesData, isMTD)
   const lastMonthM = calculateMetrics(activeSalesData, isLastMonth)
 
-  const todayE = calculateExpenses(expenses, isToday)
-  const mtdE = calculateExpenses(expenses, isMTD)
-  const lastMonthE = calculateExpenses(expenses, isLastMonth)
+  const todayE = calculateExpenses(expenses, isToday, 'today')
+  const mtdE = calculateExpenses(expenses, isMTD, 'mtd')
+  const lastMonthE = calculateExpenses(expenses, isLastMonth, 'lastMonth')
 
-  // -------------------------
-  // GRAPH DATA PREPARATION
-  // -------------------------
+  const assetData = calculateAssets();
+
+  // Graph Data
   const generateDailyArray = (dataSet: any[], isTargetMonth: (d: string) => boolean) => {
     const dailySales = new Array(31).fill(0)
     const dailyProfit = new Array(31).fill(0)
-
-    const filtered = dataSet.filter(s => isTargetMonth(s.created_at))
-    filtered.forEach(sale => {
+    dataSet.filter(s => isTargetMonth(s.created_at)).forEach(sale => {
       const dayIdx = getDayOfMonth(sale.created_at) - 1
       const qty = Number(sale.qty || 0);
       const price = Number(sale.price_per_bag || 0);
       const cogs = Number(sale.cogs_price || 0);
-
-      const revenue = qty * price;
-      const profit = (price - cogs) * qty;
-
       if (dayIdx >= 0 && dayIdx < 31) {
-        dailySales[dayIdx] += revenue
-        dailyProfit[dayIdx] += profit
+        dailySales[dayIdx] += (qty * price);
+        dailyProfit[dayIdx] += ((price - cogs) * qty);
       }
     })
     return { dailySales, dailyProfit }
@@ -220,98 +316,164 @@ export default function DashboardPage() {
       <div className="header-container" style={{ flexWrap: 'wrap', gap: '16px' }}>
         <h1 className="page-title">📊 Business Dashboard</h1>
         
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-          {/* Ensure input text is dark and 16px to prevent iOS Zoom */}
-          <input
-            type="date"
-            value={fromDate}
-            onChange={(e) => setFromDate(e.target.value)}
-            style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', outline: 'none', fontSize: '16px', color: '#0f172a', backgroundColor: '#ffffff' }}
-          />
-          <span style={{ color: '#64748b', fontSize: '14px', fontWeight: 'bold' }}>To</span>
-          <input
-            type="date"
-            value={toDate}
-            onChange={(e) => setToDate(e.target.value)}
-            style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', outline: 'none', fontSize: '16px', color: '#0f172a', backgroundColor: '#ffffff' }}
-          />
-          <button 
-            onClick={loadData} 
-            style={{ padding: '10px 16px', background: '#b59410', color: 'white', border: 'none', borderRadius: '6px', fontWeight: 'bold', cursor: 'pointer', fontSize: '14px', transition: 'background 0.2s' }}
-          >
-            🔄 Refresh
-          </button>
-        </div>
+        {activeTab !== 'asset' && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+            <input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', outline: 'none', fontSize: '16px', color: '#0f172a', backgroundColor: '#ffffff' }} />
+            <span style={{ color: '#64748b', fontSize: '14px', fontWeight: 'bold' }}>To</span>
+            <input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', outline: 'none', fontSize: '16px', color: '#0f172a', backgroundColor: '#ffffff' }} />
+            <button onClick={loadData} style={{ padding: '10px 16px', background: '#b59410', color: 'white', border: 'none', borderRadius: '6px', fontWeight: 'bold', cursor: 'pointer', fontSize: '14px', transition: 'background 0.2s' }}>🔄 Refresh</button>
+          </div>
+        )}
       </div>
 
       {/* TAB SELECTOR */}
-      <div style={{ display: 'flex', gap: '8px', marginBottom: '24px', background: '#ffffff', padding: '6px', borderRadius: '8px', border: '1px solid #e2e8f0', width: 'fit-content' }}>
-        <button 
-          onClick={() => setActiveTab('wholesale')} 
-          style={{ padding: '10px 20px', borderRadius: '6px', border: 'none', fontWeight: 'bold', cursor: 'pointer', fontSize: '14px', background: activeTab === 'wholesale' ? '#b58a3d' : 'transparent', color: activeTab === 'wholesale' ? '#fff' : '#64748b', transition: 'all 0.2s' }}
-        >
-          🌾 Wholesale Data
-        </button>
-        <button 
-          onClick={() => setActiveTab('retail')} 
-          style={{ padding: '10px 20px', borderRadius: '6px', border: 'none', fontWeight: 'bold', cursor: 'pointer', fontSize: '14px', background: activeTab === 'retail' ? '#b58a3d' : 'transparent', color: activeTab === 'retail' ? '#fff' : '#64748b', transition: 'all 0.2s' }}
-        >
-          🛍️ Retail Data
-        </button>
+      <div style={{ display: 'flex', gap: '8px', marginBottom: '24px', background: '#ffffff', padding: '6px', borderRadius: '8px', border: '1px solid #e2e8f0', width: 'fit-content', flexWrap: 'wrap' }}>
+        <button onClick={() => setActiveTab('wholesale')} style={{ padding: '10px 20px', borderRadius: '6px', border: 'none', fontWeight: 'bold', cursor: 'pointer', fontSize: '14px', background: activeTab === 'wholesale' ? '#b58a3d' : 'transparent', color: activeTab === 'wholesale' ? '#fff' : '#64748b', transition: 'all 0.2s' }}>🌾 Wholesale Data</button>
+        <button onClick={() => setActiveTab('retail')} style={{ padding: '10px 20px', borderRadius: '6px', border: 'none', fontWeight: 'bold', cursor: 'pointer', fontSize: '14px', background: activeTab === 'retail' ? '#b58a3d' : 'transparent', color: activeTab === 'retail' ? '#fff' : '#64748b', transition: 'all 0.2s' }}>🛍️ Retail Data</button>
+        <button onClick={() => setActiveTab('asset')} style={{ padding: '10px 20px', borderRadius: '6px', border: 'none', fontWeight: 'bold', cursor: 'pointer', fontSize: '14px', background: activeTab === 'asset' ? '#10b981' : 'transparent', color: activeTab === 'asset' ? '#fff' : '#64748b', transition: 'all 0.2s' }}>💰 Business Asset</button>
       </div>
 
       {/* DYNAMIC CONTENT AREA */}
       <div>
         
-        {/* ROW 1: TODAY'S METRICS */}
-        <h2 className="section-divider">📅 TODAY'S PERFORMANCE</h2>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '16px', marginBottom: '32px' }}>
-          <ComplexCard title="Today Sales" total={todayM.totalSales} pich={todayM.pichSales} jing={todayM.jingSales} both={todayM.bothSales} mom={todayM.momSales} hideSubboxes={activeTab === 'retail'} color="#2563eb" />
-          <ComplexCard title="Today Profit" total={todayM.totalProfit} pich={todayM.pichProfit} jing={todayM.jingProfit} both={todayM.bothProfit} mom={todayM.momProfit} hideSubboxes={activeTab === 'retail'} color="#10b981" />
-          
-          {/* Expenses are usually company-wide, but we'll show them on Wholesale, and hide on Retail to keep Retail pure */}
-          {activeTab === 'wholesale' && (
-            <>
-              <ComplexCard title="Today Biz Expenses" total={todayE.bizTotal} hideSubboxes color="#b91c1c" />
-              <ComplexCard title="Today Personal Exp" total={todayE.personalTotal} pich={todayE.pichPers} jing={todayE.jingPers} both={todayE.bothPers} mom={todayE.momPers} color="#f59e0b" />
-            </>
-          )}
-        </div>
+        {/* ASSET TAB RENDER */}
+        {activeTab === 'asset' && (
+          <div className="fade-in">
+            {/* ASSET FILTERS */}
+            <div style={{ display: 'flex', gap: '8px', marginBottom: '24px', flexWrap: 'wrap' }}>
+              {['today', 'yesterday', 'week', 'month', 'all'].map(f => (
+                <button 
+                  key={f} onClick={() => setAssetFilter(f as any)} 
+                  style={{ padding: '8px 16px', borderRadius: '20px', border: assetFilter === f ? 'none' : '1px solid #cbd5e1', background: assetFilter === f ? '#0f172a' : '#fff', color: assetFilter === f ? '#fff' : '#475569', fontWeight: 'bold', cursor: 'pointer', fontSize: '13px', textTransform: 'capitalize' }}
+                >
+                  {f === 'week' ? 'This Week' : f === 'month' ? 'This Month' : f === 'all' ? 'All Time' : f}
+                </button>
+              ))}
+            </div>
 
-        {/* ROW 2: MONTH TO DATE METRICS */}
-        <h2 className="section-divider">📈 MONTH TO DATE (MTD)</h2>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '16px', marginBottom: '32px' }}>
-          <ComplexCard title="MTD Sales" total={mtdM.totalSales} pich={mtdM.pichSales} jing={mtdM.jingSales} both={mtdM.bothSales} mom={mtdM.momSales} hideSubboxes={activeTab === 'retail'} color="#2563eb" />
-          <ComplexCard title="MTD Profit" total={mtdM.totalProfit} pich={mtdM.pichProfit} jing={mtdM.jingProfit} both={mtdM.bothProfit} mom={mtdM.momProfit} hideSubboxes={activeTab === 'retail'} color="#10b981" />
-          
-          {activeTab === 'wholesale' && (
-            <>
-              <ComplexCard title="MTD Biz Expenses" total={mtdE.bizTotal} hideSubboxes color="#b91c1c" />
-              <ComplexCard title="MTD Personal Exp" total={mtdE.personalTotal} pich={mtdE.pichPers} jing={mtdE.jingPers} both={mtdE.bothPers} mom={mtdE.momPers} color="#f59e0b" />
-            </>
-          )}
-        </div>
+            {/* MANUAL INITIALIZATIONS (Row 1) */}
+            <div style={{ background: '#fff', padding: '24px', borderRadius: '12px', border: '1px solid #e2e8f0', marginBottom: '24px', boxShadow: '0 2px 4px rgba(0,0,0,0.02)' }}>
+              <h3 style={{ margin: '0 0 16px 0', fontSize: '14px', color: '#64748b', textTransform: 'uppercase' }}>⚙️ Manual Starting Balances & Owe</h3>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '16px' }}>
+                
+                <div>
+                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 'bold', color: '#475569', marginBottom: '6px' }}>Base Capital (៛)</label>
+                  <input type="number" className="no-spinners" value={baseCapital === 0 ? '' : baseCapital} onChange={(e) => setBaseCapital(Number(e.target.value))} onBlur={(e) => updateSetting('base_capital', Number(e.target.value))} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', outline: 'none', color: '#0f172a', fontWeight: 'bold', boxSizing: 'border-box' }} />
+                </div>
+                <div>
+                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 'bold', color: '#475569', marginBottom: '6px' }}>Initial Cash (៛)</label>
+                  <input type="number" className="no-spinners" value={initCash === 0 ? '' : initCash} onChange={(e) => setInitCash(Number(e.target.value))} onBlur={(e) => updateSetting('initial_cash', Number(e.target.value))} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', outline: 'none', color: '#0f172a', fontWeight: 'bold', boxSizing: 'border-box' }} />
+                </div>
+                <div>
+                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 'bold', color: '#475569', marginBottom: '6px' }}>Initial Bank / QR (៛)</label>
+                  <input type="number" className="no-spinners" value={initQr === 0 ? '' : initQr} onChange={(e) => setInitQr(Number(e.target.value))} onBlur={(e) => updateSetting('initial_qr', Number(e.target.value))} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', outline: 'none', color: '#0f172a', fontWeight: 'bold', boxSizing: 'border-box' }} />
+                </div>
+                <div>
+                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 'bold', color: '#475569', marginBottom: '6px' }}>Personal Owe (៛)</label>
+                  <input type="number" className="no-spinners" value={persOweRiel === 0 ? '' : persOweRiel} onChange={(e) => setPersOweRiel(Number(e.target.value))} onBlur={(e) => updateSetting('personal_owe_riel', Number(e.target.value))} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', outline: 'none', color: '#0f172a', fontWeight: 'bold', boxSizing: 'border-box' }} placeholder="e.g. Family Owe" />
+                </div>
+                <div>
+                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 'bold', color: '#475569', marginBottom: '6px' }}>Personal Owe ($)</label>
+                  <input type="number" className="no-spinners" value={persOweUsd === 0 ? '' : persOweUsd} onChange={(e) => setPersOweUsd(Number(e.target.value))} onBlur={(e) => updateSetting('personal_owe_usd', Number(e.target.value))} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', outline: 'none', color: '#0f172a', fontWeight: 'bold', boxSizing: 'border-box' }} />
+                </div>
 
-        {/* ROW 3: HEALTH BARS (COMPARE VS LAST MONTH) */}
-        <h2 className="section-divider">⚖️ COMPARE MTD VS LAST MONTH</h2>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '20px', background: '#fff', padding: '24px', borderRadius: '12px', border: '1px solid #e2e8f0', marginBottom: '32px' }}>
-          <HealthBar title="Sales" current={mtdM.totalSales} target={lastMonthM.totalSales} color="#2563eb" />
-          <HealthBar title="Profit" current={mtdM.totalProfit} target={lastMonthM.totalProfit} color="#10b981" />
-          
-          {activeTab === 'wholesale' && (
-            <>
-              <HealthBar title="Biz Expenses" current={mtdE.bizTotal} target={lastMonthE.bizTotal} color="#b91c1c" reverseLogic />
-              <HealthBar title="Personal Expenses" current={mtdE.personalTotal} target={lastMonthE.personalTotal} color="#f59e0b" reverseLogic />
-            </>
-          )}
-        </div>
+              </div>
+            </div>
 
-        {/* ROW 4: GRAPHS (Pure SVG) */}
-        <h2 className="section-divider">📉 TREND ANALYSIS (Day 1 - 31)</h2>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '24px', marginBottom: '40px' }}>
-          <LineChartCard title={`${activeTab === 'wholesale' ? 'Wholesale' : 'Retail'} Sales: This Month vs Last Month`} dataCurrent={thisMonthData.dailySales} dataLast={lastMonthData.dailySales} color="#2563eb" />
-          <LineChartCard title={`${activeTab === 'wholesale' ? 'Wholesale' : 'Retail'} Profit: This Month vs Last Month`} dataCurrent={thisMonthData.dailyProfit} dataLast={lastMonthData.dailyProfit} color="#10b981" />
-        </div>
+            {/* LIVE ASSET CARDS (Row 2) */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '20px', marginBottom: '32px' }}>
+              
+              <div style={{ background: '#10b981', padding: '24px', borderRadius: '16px', color: '#fff', boxShadow: '0 10px 15px -3px rgba(16, 185, 129, 0.3)' }}>
+                <div style={{ fontSize: '13px', fontWeight: 'bold', textTransform: 'uppercase', opacity: 0.9, letterSpacing: '0.5px' }}>Total Net Worth</div>
+                <div style={{ fontSize: '36px', fontWeight: 'bold', margin: '8px 0' }}>{formatRiel(assetData.totalAsset)}</div>
+                <div style={{ fontSize: '14px', opacity: 0.9 }}>{formatUSD(assetData.totalAsset)}</div>
+              </div>
+
+              <div style={{ background: '#fff', padding: '24px', borderRadius: '16px', border: '1px solid #e2e8f0', boxShadow: '0 4px 6px rgba(0,0,0,0.02)' }}>
+                <div style={{ fontSize: '13px', fontWeight: 'bold', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>💵 Cash on Hand</div>
+                <div style={{ fontSize: '28px', fontWeight: 'bold', margin: '8px 0', color: '#0f172a' }}>{formatRiel(assetData.liveCash)}</div>
+                <div style={{ fontSize: '12px', color: '#64748b', marginTop: '8px', lineHeight: '1.4' }}>
+                  <span style={{ color: '#10b981' }}>+ {formatRiel(assetData.cashProfit)}</span> (Cash Profit)<br/>
+                  <span style={{ color: '#ef4444' }}>- {formatRiel(assetData.expCash)}</span> (Cash Exp & Payroll)
+                </div>
+              </div>
+
+              <div style={{ background: '#fff', padding: '24px', borderRadius: '16px', border: '1px solid #e2e8f0', boxShadow: '0 4px 6px rgba(0,0,0,0.02)' }}>
+                <div style={{ fontSize: '13px', fontWeight: 'bold', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>📱 Bank (QR Payments)</div>
+                <div style={{ fontSize: '28px', fontWeight: 'bold', margin: '8px 0', color: '#3b82f6' }}>{formatRiel(assetData.liveQr)}</div>
+                <div style={{ fontSize: '12px', color: '#64748b', marginTop: '8px', lineHeight: '1.4' }}>
+                  <span style={{ color: '#10b981' }}>+ {formatRiel(assetData.qrProfit)}</span> (QR Profit)<br/>
+                  <span style={{ color: '#ef4444' }}>- {formatRiel(assetData.expQr)}</span> (QR Expenses)
+                </div>
+              </div>
+
+              <div style={{ background: '#fff', padding: '24px', borderRadius: '16px', border: '1px solid #e2e8f0', boxShadow: '0 4px 6px rgba(0,0,0,0.02)' }}>
+                <div style={{ fontSize: '13px', fontWeight: 'bold', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>📒 Accounts Receivable</div>
+                <div style={{ fontSize: '28px', fontWeight: 'bold', margin: '8px 0', color: '#f59e0b' }}>{formatRiel(assetData.bizCredit + assetData.personalCredit)}</div>
+                <div style={{ fontSize: '12px', color: '#64748b', marginTop: '8px', lineHeight: '1.4' }}>
+                  <span style={{ color: '#f59e0b' }}>{formatRiel(assetData.bizCredit)}</span> (Biz Debt)<br/>
+                  <span style={{ color: '#b58a3d' }}>{formatRiel(assetData.personalCredit)}</span> (Personal Debt)
+                </div>
+              </div>
+
+            </div>
+          </div>
+        )}
+
+        {/* WHOLESALE / RETAIL TAB RENDER */}
+        {activeTab !== 'asset' && (
+          <div className="fade-in">
+            {/* ROW 1: TODAY'S METRICS */}
+            <h2 className="section-divider">📅 TODAY'S PERFORMANCE</h2>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '16px', marginBottom: '32px' }}>
+              <ComplexCard title="Today Sales" total={todayM.totalSales} pich={todayM.pichSales} jing={todayM.jingSales} both={todayM.bothSales} mom={todayM.momSales} hideSubboxes={activeTab === 'retail'} color="#2563eb" />
+              <ComplexCard title="Today Profit" total={todayM.totalProfit} pich={todayM.pichProfit} jing={todayM.jingProfit} both={todayM.bothProfit} mom={todayM.momProfit} hideSubboxes={activeTab === 'retail'} color="#10b981" />
+              
+              {/* Expenses are usually company-wide, but we'll show them on Wholesale, and hide on Retail to keep Retail pure */}
+              {activeTab === 'wholesale' && (
+                <>
+                  <ComplexCard title="Today Biz Expenses" total={todayE.bizTotal} hideSubboxes color="#b91c1c" />
+                  <ComplexCard title="Today Personal Exp" total={todayE.personalTotal} pich={todayE.pichPers} jing={todayE.jingPers} both={todayE.bothPers} mom={todayE.momPers} color="#f59e0b" />
+                </>
+              )}
+            </div>
+
+            {/* ROW 2: MONTH TO DATE METRICS */}
+            <h2 className="section-divider">📈 MONTH TO DATE (MTD)</h2>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '16px', marginBottom: '32px' }}>
+              <ComplexCard title="MTD Sales" total={mtdM.totalSales} pich={mtdM.pichSales} jing={mtdM.jingSales} both={mtdM.bothSales} mom={mtdM.momSales} hideSubboxes={activeTab === 'retail'} color="#2563eb" />
+              <ComplexCard title="MTD Profit" total={mtdM.totalProfit} pich={mtdM.pichProfit} jing={mtdM.jingProfit} both={mtdM.bothProfit} mom={mtdM.momProfit} hideSubboxes={activeTab === 'retail'} color="#10b981" />
+              
+              {activeTab === 'wholesale' && (
+                <>
+                  <ComplexCard title="MTD Biz Expenses" total={mtdE.bizTotal} hideSubboxes color="#b91c1c" />
+                  <ComplexCard title="MTD Personal Exp" total={mtdE.personalTotal} pich={mtdE.pichPers} jing={mtdE.jingPers} both={mtdE.bothPers} mom={mtdE.momPers} color="#f59e0b" />
+                </>
+              )}
+            </div>
+
+            {/* ROW 3: HEALTH BARS (COMPARE VS LAST MONTH) */}
+            <h2 className="section-divider">⚖️ COMPARE MTD VS LAST MONTH</h2>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '20px', background: '#fff', padding: '24px', borderRadius: '12px', border: '1px solid #e2e8f0', marginBottom: '32px' }}>
+              <HealthBar title="Sales" current={mtdM.totalSales} target={lastMonthM.totalSales} color="#2563eb" />
+              <HealthBar title="Profit" current={mtdM.totalProfit} target={lastMonthM.totalProfit} color="#10b981" />
+              
+              {activeTab === 'wholesale' && (
+                <>
+                  <HealthBar title="Biz Expenses" current={mtdE.bizTotal} target={lastMonthE.bizTotal} color="#b91c1c" reverseLogic />
+                  <HealthBar title="Personal Expenses" current={mtdE.personalTotal} target={lastMonthE.personalTotal} color="#f59e0b" reverseLogic />
+                </>
+              )}
+            </div>
+
+            {/* ROW 4: GRAPHS (Pure SVG) */}
+            <h2 className="section-divider">📉 TREND ANALYSIS (Day 1 - 31)</h2>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '24px', marginBottom: '40px' }}>
+              <LineChartCard title={`${activeTab === 'wholesale' ? 'Wholesale' : 'Retail'} Sales: This Month vs Last Month`} dataCurrent={thisMonthData.dailySales} dataLast={lastMonthData.dailySales} color="#2563eb" />
+              <LineChartCard title={`${activeTab === 'wholesale' ? 'Wholesale' : 'Retail'} Profit: This Month vs Last Month`} dataCurrent={thisMonthData.dailyProfit} dataLast={lastMonthData.dailyProfit} color="#10b981" />
+            </div>
+          </div>
+        )}
 
       </div>
 
@@ -344,6 +506,19 @@ export default function DashboardPage() {
           border-bottom: 2px solid #e2e8f0; 
           padding-bottom: 6px;
         }
+        .fade-in {
+          animation: fadeIn 0.3s ease-in-out;
+        }
+        @keyframes fadeIn {
+          from { opacity: 0; transform: translateY(5px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+
+        input[type="number"].no-spinners::-webkit-inner-spin-button,
+        input[type="number"].no-spinners::-webkit-outer-spin-button {
+          -webkit-appearance: none; margin: 0;
+        }
+        input[type="number"].no-spinners { -moz-appearance: textfield; }
 
         @media (max-width: 1023px) { 
           .main-wrapper { 

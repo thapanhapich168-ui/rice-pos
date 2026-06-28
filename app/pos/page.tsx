@@ -110,6 +110,7 @@ export default function POSPage() {
   const [customers, setCustomers] = useState<any[]>([])
   const [cart, setCart] = useState<any[]>([])
   const [productOrder, setProductOrder] = useState<number[]>([])
+  const [activeBatches, setActiveBatches] = useState<Record<number, any[]>>({})
   
   const [lang, setLang] = useState<'en' | 'kh'>('en')
   const [searchQuery, setSearchQuery] = useState('')
@@ -124,8 +125,11 @@ export default function POSPage() {
   const [customerSearchTerm, setCustomerSearchTerm] = useState('')
   const [isCustomerDropdownOpen, setIsCustomerDropdownOpen] = useState(false)
 
-  // IN-CART INVOICE CUSTOMER OVERRIDES STATE
-  const [cartCustomerEdits, setCartCustomerOverrides] = useState({ name: '', phone: '', location: '' })
+  // CART INVOICE NAME OVERRIDE (Phone/Location removed)
+  const [cartCustomerNameOverride, setCartCustomerNameOverride] = useState('')
+
+  // CHECKOUT PAYMENT METHOD (Default to Cash)
+  const [checkoutPaymentMethod, setCheckoutPaymentMethod] = useState<'Cash' | 'QR Payment'>('Cash')
 
   const [isCreateCustomerModalOpen, setIsCreateCustomerModalOpen] = useState(false)
   const [newCustomerForm, setNewCustomerForm] = useState({ name: '', phone: '', location: '', owner: '', type: '' })
@@ -138,6 +142,11 @@ export default function POSPage() {
   const [mobilePrice, setMobilePrice] = useState<number | string>('')
   const [mobileQty, setMobileQty] = useState<number | string>('')
   const [mobileName, setMobileName] = useState<string>('')
+
+  // RETURN / EXCHANGE STATE
+  const [exchangeModal, setExchangeModal] = useState<{ isOpen: boolean, product: any, consumedKg: string | number }>({
+    isOpen: false, product: null, consumedKg: ''
+  })
 
   // CHECKOUT STATE
   const [amountReceived, setAmountReceived] = useState<number | ''>('')
@@ -164,6 +173,7 @@ export default function POSPage() {
       try {
         await loadProductsAndSettings()
         await loadCustomers()
+        await loadBatches()
 
         const urlParams = new URLSearchParams(window.location.search);
         const editId = urlParams.get('edit');
@@ -173,16 +183,27 @@ export default function POSPage() {
           
           const { data: saleRows } = await supabase.from('sales').select('*').eq('invoice_id', editId);
           if (saleRows && saleRows.length > 0) {
-            const rebuiltCart = saleRows.map(row => ({
-              id: Math.random(), 
-              product_id: row.product_id, // Store actual product ID for FIFO logic
-              name: row.rice_type, 
-              custom_name: row.custom_rice_type || row.rice_type, 
-              custom_price_riel: row.price_per_bag,
-              quantity: row.qty,
-              cost_price: row.cogs_price,
-              stock: 0 // Mock stock to prevent errors during edit
-            }));
+            const rebuiltCart = saleRows.map(row => {
+              const isSpecialRow = (row.custom_rice_type || row.rice_type).includes('ដូរ') || (row.custom_rice_type || row.rice_type).includes('បានប្រើ');
+              let sortOrder = 0;
+              if ((row.custom_rice_type || row.rice_type).includes('ដូរ')) sortOrder = 1;
+              if ((row.custom_rice_type || row.rice_type).includes('បានប្រើ')) sortOrder = 2;
+
+              return {
+                id: Math.random(), 
+                product_id: row.product_id, 
+                name: row.rice_type, 
+                custom_name: row.custom_rice_type || row.rice_type, 
+                custom_price_riel: row.price_per_bag,
+                quantity: row.qty,
+                cost_price: row.cogs_price,
+                stock: 0, 
+                isSpecial: isSpecialRow,
+                bypass_stock: (row.custom_rice_type || row.rice_type).includes('បានប្រើ'),
+                sortOrder: sortOrder,
+                selected_batch_id: null
+              };
+            });
             setCart(rebuiltCart);
 
             const cName = saleRows[0].customer_name;
@@ -207,17 +228,13 @@ export default function POSPage() {
   // Sync Master Customer State to Cart Customizer Session
   useEffect(() => {
     if (selectedCustomer) {
-      setCartCustomerOverrides({
-        name: selectedCustomer.name || '',
-        phone: selectedCustomer.phone || '',
-        location: selectedCustomer.location || ''
-      });
+      setCartCustomerNameOverride(selectedCustomer.name || '');
     } else {
-      setCartCustomerOverrides({ name: 'Walk-in', phone: '', location: '' });
+      setCartCustomerNameOverride('Walk-in');
     }
   }, [selectedCustomerId, customers])
 
-  // FIX: Auto-Select "Walk-in" ONLY when the tab changes or data loads, not when clearing manually
+  // Auto-Select "Walk-in" ONLY when the tab changes or data loads
   useEffect(() => {
     if (activeTab === 'wholesale' && !selectedCustomerId && customers.length > 0) {
       const walkInCust = customers.find(c => c.name.toLowerCase() === 'walk-in' || c.name.toLowerCase() === 'walk in');
@@ -225,10 +242,9 @@ export default function POSPage() {
         setSelectedCustomerId(walkInCust.id.toString());
       }
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab, customers]) 
 
-  // MAGIC INVOICE GENERATOR (Runs Invisibly when completedSale is set)
+  // MAGIC INVOICE GENERATOR
   useEffect(() => {
     if (completedSale && invoiceRef.current && !previewImageUrl && showInvoicePreview) {
       const timer = setTimeout(async () => {
@@ -266,6 +282,21 @@ export default function POSPage() {
     setCustomers(data || [])
   }
 
+  async function loadBatches() {
+    const { data } = await supabase.from('price_history').select('*').order('created_at', { ascending: true });
+    if (data) {
+      const batchMap: Record<number, any[]> = {};
+      data.forEach(b => {
+        const remaining = (b.imported_qty || 0) - (b.sold_qty || 0);
+        if (remaining > 0) {
+          if (!batchMap[b.product_id]) batchMap[b.product_id] = [];
+          batchMap[b.product_id].push(b);
+        }
+      });
+      setActiveBatches(batchMap);
+    }
+  }
+
   const formatRielSymbol = (amountInRiel: number) => `${new Intl.NumberFormat('en-US').format(Math.round(amountInRiel))} ៛`;
   const formatRielFromNative = (rielAmount: number) => `${new Intl.NumberFormat('en-US').format(Math.round(rielAmount))} ៛`;
   const formatUSD = (amount: number) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(amount);
@@ -287,12 +318,23 @@ export default function POSPage() {
   }
 
   function addToCartDirect(product: any, qtyToAdd: number = 1) {
-    const existing = cart.find((item) => item.product_id === product.id)
+    const existing = cart.find((item) => item.product_id === product.id && !item.isSpecial)
     const priceInRiel = Number(product.price); 
     if (existing) {
-      setCart(cart.map((item) => item.product_id === product.id ? { ...item, quantity: item.quantity + qtyToAdd } : item))
+      setCart(cart.map((item) => item.product_id === product.id && !item.isSpecial ? { ...item, quantity: item.quantity + qtyToAdd } : item))
     } else {
-      setCart([...cart, { ...product, product_id: product.id, id: Math.random(), quantity: qtyToAdd, custom_name: product.name, custom_price_riel: priceInRiel }])
+      setCart([...cart, { 
+        ...product, 
+        product_id: product.id, 
+        id: Math.random(), 
+        quantity: qtyToAdd, 
+        custom_name: product.name, 
+        custom_price_riel: priceInRiel,
+        cost_price: Number(product.cost_price || 0),
+        isSpecial: false,
+        selected_batch_id: null,
+        sortOrder: 0
+      }])
     }
   }
 
@@ -301,9 +343,9 @@ export default function POSPage() {
     const finalQty = typeof mobileQty === 'number' ? mobileQty : (parseFloat(mobileQty) || 0);
     const finalPrice = typeof mobilePrice === 'number' ? mobilePrice : (parseFloat(mobilePrice) || 0);
     
-    const existing = cart.find((item) => item.product_id === selectedMobileProduct.id);
+    const existing = cart.find((item) => item.product_id === selectedMobileProduct.id && !item.isSpecial);
     if (existing) {
-      setCart(cart.map((item) => item.product_id === selectedMobileProduct.id ? { 
+      setCart(cart.map((item) => item.product_id === selectedMobileProduct.id && !item.isSpecial ? { 
         ...item, 
         custom_name: mobileName, 
         custom_price_riel: finalPrice, 
@@ -316,10 +358,55 @@ export default function POSPage() {
         id: Math.random(), 
         custom_name: mobileName, 
         custom_price_riel: finalPrice, 
-        quantity: finalQty 
+        cost_price: Number(selectedMobileProduct.cost_price || 0),
+        quantity: finalQty,
+        isSpecial: false,
+        selected_batch_id: null,
+        sortOrder: 0
       }]);
     }
     setSelectedMobileProduct(null);
+  }
+
+  function handleConfirmExchange() {
+    if (!exchangeModal.product) return;
+    const prod = exchangeModal.product;
+    const consumedKg = Number(exchangeModal.consumedKg) || 0;
+    const perKgPrice = Math.round(Number(prod.price) / 50);
+    const perKgCogs = Math.round(Number(prod.cost_price || 0) / 50);
+
+    const newItems = [];
+
+    newItems.push({
+      ...prod,
+      id: Math.random(), 
+      product_id: prod.id,
+      custom_name: `ដូរ ${prod.name}`,
+      custom_price_riel: Number(prod.price),
+      cost_price: Number(prod.cost_price || 0),
+      quantity: 1, 
+      isSpecial: true,
+      bypass_stock: false,
+      sortOrder: 1
+    });
+
+    if (consumedKg > 0) {
+      newItems.push({
+        ...prod,
+        id: Math.random(),
+        product_id: prod.id,
+        custom_name: `បានប្រើ ${prod.name}`,
+        custom_price_riel: perKgPrice,
+        cost_price: perKgCogs,
+        quantity: consumedKg,
+        isSpecial: true,
+        bypass_stock: true, 
+        sortOrder: 2
+      });
+    }
+
+    setCart([...cart, ...newItems]);
+    setExchangeModal({ isOpen: false, product: null, consumedKg: '' });
   }
 
   function updateCartItem(id: number, field: string, value: any) {
@@ -335,9 +422,7 @@ export default function POSPage() {
     e.dataTransfer.effectAllowed = 'move';
   }
 
-  const handleProductDragOver = (e: React.DragEvent) => {
-    e.preventDefault();
-  }
+  const handleProductDragOver = (e: React.DragEvent) => { e.preventDefault(); }
 
   const handleProductDrop = async (e: React.DragEvent, targetId: number) => {
     e.preventDefault();
@@ -394,10 +479,9 @@ export default function POSPage() {
     }
   }
 
-  // FIFO COGS CALCULATION LOGIC
-  async function calculateFIFOCogs(productId: number, qtySold: number, fallbackCogs: number) {
-    let remainingQtyToCost = qtySold;
-    let totalCogsForThisItem = 0;
+  async function getFIFOSplits(productId: number, qtySold: number, fallbackCogs: number) {
+    let remainingQty = qtySold;
+    const splits: any[] = [];
 
     const { data: batches } = await supabase
       .from('price_history')
@@ -406,34 +490,42 @@ export default function POSPage() {
       .gt('imported_qty', 0) 
       .order('created_at', { ascending: true });
 
-    if (!batches || batches.length === 0) {
-      return fallbackCogs * qtySold;
-    }
-
-    const availableBatches = batches.filter(b => (b.sold_qty || 0) < (b.imported_qty || 0));
+    const availableBatches = (batches || []).filter(b => (b.sold_qty || 0) < (b.imported_qty || 0));
 
     for (const batch of availableBatches) {
-      if (remainingQtyToCost <= 0) break;
+      if (remainingQty <= 0) break;
 
       const availableInBatch = (batch.imported_qty || 0) - (batch.sold_qty || 0);
-      const qtyTakenFromBatch = Math.min(availableInBatch, remainingQtyToCost);
+      const qtyTaken = Math.min(availableInBatch, remainingQty);
 
-      totalCogsForThisItem += (qtyTakenFromBatch * batch.cost_price);
-      remainingQtyToCost -= qtyTakenFromBatch;
+      splits.push({
+        qty: qtyTaken,
+        cogs_price: batch.cost_price,
+        batch_id: batch.id,
+        current_sold: batch.sold_qty || 0
+      });
 
-      await supabase.from('price_history').update({
-        sold_qty: (batch.sold_qty || 0) + qtyTakenFromBatch
-      }).eq('id', batch.id);
+      remainingQty -= qtyTaken;
     }
 
-    if (remainingQtyToCost > 0) {
-      totalCogsForThisItem += (remainingQtyToCost * fallbackCogs);
+    if (remainingQty > 0) {
+      splits.push({
+        qty: remainingQty,
+        cogs_price: fallbackCogs,
+        batch_id: null,
+        current_sold: 0
+      });
     }
 
-    return totalCogsForThisItem;
+    return splits;
   }
 
-  const totalRiel = cart.reduce((sum, item) => sum + (Number(item.custom_price_riel) * Number(item.quantity)), 0)
+  const totalRiel = cart.reduce((sum, item) => {
+    const isReturn = item.custom_name.includes('ដូរ');
+    const itemTotal = Number(item.custom_price_riel) * Number(item.quantity);
+    return isReturn ? sum - Math.abs(itemTotal) : sum + itemTotal;
+  }, 0)
+
   const totalUSD = totalRiel / EXCHANGE_RATE; 
 
   const orderedProducts = [...products].sort((a, b) => {
@@ -469,6 +561,10 @@ export default function POSPage() {
   )
   const selectedCustomer = customers.find(c => c.id.toString() === selectedCustomerId.toString())
 
+  // Show Payment Method Selector ONLY for Retail OR Walk-in Wholesale
+  const isSimpleCustomer = !selectedCustomer || ['walk-in', 'walk in', 'mom'].includes((selectedCustomer.name || '').toLowerCase());
+  const showPaymentSelector = activeTab === 'retail' || isSimpleCustomer;
+
   const getCategorizedItems = (cartItems: any[]) => {
     let normalItems: any[] = [], specialItems: any[] = [], negativeItems: any[] = [], serviceItems: any[] = [];
     cartItems.forEach(item => {
@@ -476,14 +572,14 @@ export default function POSPage() {
       const total = item.custom_price_riel * item.quantity;
       if (desc.includes('សេវាឡាន (អតិថិជន)')) serviceItems.push({ ...item, total: total });
       else if (desc.includes('សេវាឡាន')) { /* skip hidden */ }
-      else if (desc.includes('ដូរ') || desc.includes('បញ្ចុះតម្លៃ') || desc.includes('កក់')) negativeItems.push({ ...item, total: -total });
-      else if (desc.includes('ថ្លៃបាវ')) specialItems.push({ ...item, total: total });
+      else if (desc.includes('ដូរ') || desc.includes('បញ្ចុះតម្លៃ') || desc.includes('កក់')) negativeItems.push({ ...item, total: -Math.abs(total) });
+      else if (desc.includes('ថ្លៃបាវ') || desc.includes('បានប្រើ')) specialItems.push({ ...item, total: total });
       else normalItems.push({ ...item, total: total });
     });
     return [...normalItems, ...specialItems, ...negativeItems, ...serviceItems];
   }
 
-  // CHECKOUT FUNCTION - Processes DB and handles summary routing rules
+  // --- REWRITTEN CHECKOUT: DB MULTI-ROW SPLIT ENGINE & PAYMENT RECORDING ---
   async function confirmCheckout() {
     if (cart.length === 0) return alert(lang === 'kh' ? 'សូមជ្រើសរើសទំនិញក្នុងកន្ត្រក!' : 'Cart is empty');
     if (activeTab === 'wholesale' && !selectedCustomerId) return alert(lang === 'kh' ? 'សូមជ្រើសរើសអតិថិជនសម្រាប់ដុំ!' : 'Please select a customer for wholesale');
@@ -493,10 +589,13 @@ export default function POSPage() {
     try {
       const currentCart = [...cart];
       const currentTotalRiel = totalRiel;
+      const finalCustomerName = cartCustomerNameOverride.trim() || 'Walk-in';
+
+      // Determine Payment Status String
+      const finalPaymentMethod = showPaymentSelector ? checkoutPaymentMethod : 'Pending';
 
       if (activeTab === 'retail') {
         const retailTxId = `RET-${Date.now().toString().slice(-6)}`;
-        
         const retailRows = currentCart.map(item => ({
           transaction_id: retailTxId,
           rice_type: item.name,
@@ -504,53 +603,117 @@ export default function POSPage() {
           qty: item.quantity,
           price_per_bag: item.custom_price_riel,
           cogs_price: item.cost_price || 0
+          // If you add payment_method to retail_sales in the future, it goes here
         }));
 
         await supabase.from('retail_sales').insert(retailRows);
 
         for (const item of currentCart) {
-          // This implicitly fires your new trigger to auto-refill wholesale to retail if empty
           await supabase.from('products').update({ stock: item.stock - item.quantity }).eq('id', item.product_id);
         }
 
       } else {
         const displayInvoiceNo = editingInvoiceId ? editingInvoiceId : `INV-${Date.now().toString().slice(-6)}`;
-        const finalCustomerName = cartCustomerEdits.name.trim() || 'Walk-in';
         const finalOwner = selectedCustomer?.owner || null; 
+        const finalLocation = selectedCustomer?.location || '';
+        const finalPhone = selectedCustomer?.phone || '';
         
         const saleRows = [];
         let invoiceTotalSales = 0;
         let invoiceTotalCogs = 0;
 
         for (const item of currentCart) {
-          const actualTotalCogs = editingInvoiceId 
-            ? (item.cost_price || 0) * item.quantity 
-            : await calculateFIFOCogs(item.product_id, item.quantity, item.cost_price || 0);
+          const isReturn = item.custom_name.includes('ដូរ');
+          const isCharge = item.custom_name.includes('បានប្រើ');
+          const isBypass = item.bypass_stock || isCharge;
+          const finalQty = isReturn ? -Math.abs(item.quantity) : item.quantity;
+          
+          if (isReturn || isBypass || editingInvoiceId) {
+            let actualUnitCogs = item.cost_price || 0;
+            let actualTotalCogs = actualUnitCogs * finalQty; 
+            
+            saleRows.push({
+              invoice_id: displayInvoiceNo,
+              product_id: item.product_id,
+              customer_name: finalCustomerName,
+              rice_type: item.name,
+              custom_rice_type: item.custom_name !== item.name ? item.custom_name : null,
+              qty: finalQty, 
+              price_per_bag: item.custom_price_riel,
+              cogs_price: actualUnitCogs,
+              owner: finalOwner
+            });
 
-          const actualUnitCogs = actualTotalCogs / item.quantity;
+            invoiceTotalSales += Number(item.custom_price_riel) * finalQty;
+            invoiceTotalCogs += actualTotalCogs;
 
-          saleRows.push({
-            invoice_id: displayInvoiceNo,
-            product_id: item.product_id,
-            customer_name: finalCustomerName,
-            rice_type: item.name,
-            custom_rice_type: item.custom_name !== item.name ? item.custom_name : null,
-            qty: item.quantity,
-            price_per_bag: item.custom_price_riel,
-            cogs_price: actualUnitCogs,
-            owner: finalOwner
-          });
+          } else if (item.selected_batch_id) {
+            const specificBatch = activeBatches[item.product_id]?.find(b => b.id === item.selected_batch_id);
+            let actualUnitCogs = specificBatch ? specificBatch.cost_price : (item.cost_price || 0);
+            let actualTotalCogs = actualUnitCogs * finalQty;
 
-          invoiceTotalSales += (Number(item.custom_price_riel) * Number(item.quantity));
-          invoiceTotalCogs += actualTotalCogs;
+            saleRows.push({
+              invoice_id: displayInvoiceNo,
+              product_id: item.product_id,
+              customer_name: finalCustomerName,
+              rice_type: item.name,
+              custom_rice_type: item.custom_name !== item.name ? item.custom_name : null,
+              qty: finalQty, 
+              price_per_bag: item.custom_price_riel,
+              cogs_price: actualUnitCogs,
+              owner: finalOwner
+            });
 
-          if (!editingInvoiceId) {
-            await supabase.from('products').update({ stock: item.stock - item.quantity }).eq('id', item.product_id);
+            invoiceTotalSales += Number(item.custom_price_riel) * finalQty;
+            invoiceTotalCogs += actualTotalCogs;
+
+            if (specificBatch && !editingInvoiceId && !isBypass) {
+              await supabase.from('price_history').update({
+                sold_qty: (specificBatch.sold_qty || 0) + finalQty
+              }).eq('id', specificBatch.id);
+            }
+          } else {
+            const splits = await getFIFOSplits(item.product_id, finalQty, item.cost_price || 0);
+            
+            for (const split of splits) {
+              saleRows.push({
+                invoice_id: displayInvoiceNo,
+                product_id: item.product_id,
+                customer_name: finalCustomerName,
+                rice_type: item.name,
+                custom_rice_type: item.custom_name !== item.name ? item.custom_name : null,
+                qty: split.qty, 
+                price_per_bag: item.custom_price_riel,
+                cogs_price: split.cogs_price,
+                owner: finalOwner
+              });
+
+              invoiceTotalSales += Number(item.custom_price_riel) * split.qty;
+              invoiceTotalCogs += split.cogs_price * split.qty;
+
+              if (split.batch_id && !editingInvoiceId && !isBypass) {
+                await supabase.from('price_history').update({
+                  sold_qty: split.current_sold + split.qty
+                }).eq('id', split.batch_id);
+              }
+            }
+          }
+
+          if (!editingInvoiceId && !isBypass) {
+            await supabase.from('products').update({ stock: item.stock - finalQty }).eq('id', item.product_id);
           }
         }
 
         const combinedRiceTypes = currentCart.map(item => `${item.custom_name} (x${item.quantity})`).join(', ');
         const invoiceTotalProfit = invoiceTotalSales - invoiceTotalCogs;
+
+        let calculatedBalanceDue = 0;
+        if (amountReceived !== '') {
+          calculatedBalanceDue = Math.max(0, invoiceTotalSales - Number(amountReceived));
+        } else {
+          // Auto clear balance if it is a simple Walk-in customer
+          calculatedBalanceDue = isSimpleCustomer ? 0 : invoiceTotalSales; 
+        }
 
         const summaryRow = {
           invoice_id: displayInvoiceNo,
@@ -559,7 +722,11 @@ export default function POSPage() {
           rice_types: combinedRiceTypes,
           total_sales: invoiceTotalSales,
           total_cogs: invoiceTotalCogs,
-          total_profit: invoiceTotalProfit
+          total_profit: invoiceTotalProfit,
+          delivery_status: isSimpleCustomer ? 'Delivered' : 'Pending',
+          payment_method: finalPaymentMethod, // Added Payment Tracking
+          balance_due: calculatedBalanceDue,
+          customer_location: finalLocation
         };
 
         if (editingInvoiceId) {
@@ -567,14 +734,17 @@ export default function POSPage() {
           await supabase.from('invoice_summaries').delete().eq('invoice_id', editingInvoiceId);
         }
 
-        await supabase.from('sales').insert(saleRows);
-        await supabase.from('invoice_summaries').insert([summaryRow]);
+        const { error: salesErr } = await supabase.from('sales').insert(saleRows);
+        if (salesErr) throw new Error(`Failed to save to Sales table: ${salesErr.message}`);
+
+        const { error: summaryErr } = await supabase.from('invoice_summaries').insert([summaryRow]);
+        if (summaryErr) throw new Error(`Failed to save to Summaries table: ${summaryErr.message}`);
 
         const currentDate = new Date();
         setCompletedSale({
           invoiceNo: displayInvoiceNo,
           cartSnapshot: currentCart,
-          customer: { name: finalCustomerName, phone: cartCustomerEdits.phone, location: cartCustomerEdits.location },
+          customer: { name: finalCustomerName, phone: finalPhone, location: finalLocation },
           dateObj: { day: String(currentDate.getDate()).padStart(2, '0'), month: String(currentDate.getMonth() + 1).padStart(2, '0'), year: currentDate.getFullYear() }
         });
       }
@@ -587,6 +757,7 @@ export default function POSPage() {
       setEditingInvoiceId(null);
       window.history.replaceState({}, document.title, window.location.pathname);
       loadProductsAndSettings();
+      loadBatches();
 
       if (activeTab === 'wholesale') {
         const walkInCust = customers.find(c => c.name.toLowerCase() === 'walk-in' || c.name.toLowerCase() === 'walk in');
@@ -596,13 +767,13 @@ export default function POSPage() {
       }
 
       if (received > 0) {
-        if (activeTab === 'wholesale') {
+        if (activeTab === 'wholesale' && !isSimpleCustomer) {
           setIsGeneratingPreview(true);
           setShowInvoicePreview(true); 
         }
         setSaleSummary({ total: currentTotalRiel, received, change: change > 0 ? change : 0, type: activeTab, isCashless: false });
       } else {
-        if (activeTab === 'wholesale') {
+        if (activeTab === 'wholesale' && !isSimpleCustomer) {
           setIsGeneratingPreview(true);
           setShowInvoicePreview(true); 
         } else {
@@ -615,6 +786,7 @@ export default function POSPage() {
     } finally {
       setIsProcessing(false);
       setAmountReceived('');
+      setCheckoutPaymentMethod('Cash'); // Reset default
     }
   }
 
@@ -668,6 +840,9 @@ export default function POSPage() {
   }
 
   const currentT = t[lang] || t['en'];
+  
+  // Sort the cart array for display
+  const sortedCart = [...cart].sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0));
 
   return (
     <div className="pos-layout-wrapper" style={{ display: 'flex', height: '100vh', overflow: 'hidden', width: '100%', backgroundColor: '#ffffff', boxSizing: 'border-box' }}>
@@ -770,7 +945,7 @@ export default function POSPage() {
             ) : (
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: '16px' }}>
                 {filteredProducts.map((p) => (
-                  <div key={p.id} draggable={editingCardId !== p.id} onDragStart={(e) => handleProductDragStart(e, p.id)} onDragOver={handleProductDragOver} onDrop={(e) => handleProductDrop(e, p.id)} onMouseEnter={() => setHoveredCardId(p.id)} onMouseLeave={() => setHoveredCardId(null)} onClick={() => handleProductClick(p)} style={{ border: '1px solid #eadeca', borderRadius: '10px', padding: '14px', cursor: editingCardId === p.id ? 'default' : 'pointer', backgroundColor: '#ffffff', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', minHeight: '100px', transition: 'transform 0.1s', boxShadow: '0 2px 4px rgba(0,0,0,0.02)' }} onMouseDown={e => { if(editingCardId !== p.id) e.currentTarget.style.transform = 'scale(0.97)'; }} onMouseUp={e => e.currentTarget.style.transform = 'scale(1)'}>
+                  <div key={p.id} draggable={editingCardId !== p.id} onDragStart={(e) => handleProductDragStart(e, p.id)} onDragOver={handleProductDragOver} onDrop={(e) => handleProductDrop(e, p.id)} onMouseEnter={() => setHoveredCardId(p.id)} onMouseLeave={() => setHoveredCardId(null)} onClick={() => handleProductClick(p)} style={{ border: '1px solid #eadeca', borderRadius: '10px', padding: '14px', cursor: editingCardId === p.id ? 'default' : 'pointer', backgroundColor: '#ffffff', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', minHeight: '100px', transition: 'transform 0.1s', boxShadow: '0 2px 4px rgba(0,0,0,0.02)', position: 'relative' }} onMouseDown={e => { if(editingCardId !== p.id) e.currentTarget.style.transform = 'scale(0.97)'; }} onMouseUp={e => e.currentTarget.style.transform = 'scale(1)'}>
                     {editingCardId === p.id ? (
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', height: '100%' }} onClick={e => e.stopPropagation()}>
                         <input autoFocus value={editCardForm.name} onChange={e => setEditCardForm({...editCardForm, name: e.target.value})} style={{ padding: '4px 6px', border: '1px solid #b58a3d', borderRadius: '4px', outline: 'none', width: '100%', boxSizing: 'border-box', color: '#333333', backgroundColor: '#ffffff', fontSize: '12px' }} />
@@ -792,11 +967,22 @@ export default function POSPage() {
                             title="Edit Product"
                           >✏️</button>
                         </div>
-                        <div style={{ borderTop: '1px dashed #f4f1ea', paddingTop: '8px', marginTop: 'auto' }}>
+                        <div style={{ borderTop: '1px dashed #f4f1ea', paddingTop: '8px', marginTop: 'auto', position: 'relative', minHeight: activeTab === 'wholesale' ? '35px' : 'auto' }}>
                           <div style={{ fontWeight: 'bold', fontSize: '14px', color: '#b58a3d' }}>
                             {formatRielSymbol(activeTab === 'retail' ? (p.price || 0) : (p.cost_price || 0))}
                           </div>
                           {(activeTab === 'wholesale') && <div style={{ fontSize: '11px', marginTop: '4px', color: Number(p.stock) < 5 ? '#dc2626' : '#10b981', fontWeight: 'bold' }}>📦 {currentT.stock}: {p.stock}</div>}
+                          
+                          {/* EXCHANGE & RETURN BADGE BUTTON */}
+                          {(activeTab === 'wholesale') && (
+                            <button 
+                              onClick={(e) => { e.stopPropagation(); setExchangeModal({ isOpen: true, product: p, consumedKg: '' }); }}
+                              style={{ position: 'absolute', bottom: '-4px', right: '-4px', background: '#fee2e2', color: '#ef4444', border: '1px solid #fecaca', borderRadius: '6px', padding: '4px 8px', fontSize: '14px', fontWeight: 'bold', cursor: 'pointer' }}
+                              title="Exchange / Return"
+                            >
+                              🔄
+                            </button>
+                          )}
                         </div>
                       </>
                     )}
@@ -819,67 +1005,101 @@ export default function POSPage() {
           {activeTab === 'wholesale' && selectedCustomerId && (
             <div style={{ background: '#f8fafc', padding: '12px', borderRadius: '8px', border: '1px solid #e2e8f0', marginBottom: '16px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
               <div style={{ fontSize: '11px', fontWeight: 'bold', color: '#8a7650', textTransform: 'uppercase', letterSpacing: '0.5px' }}>📄 Invoice Customizer</div>
-              <input type="text" placeholder="Invoice Name..." value={cartCustomerEdits.name} onChange={e => setCartCustomerOverrides({...cartCustomerEdits, name: e.target.value})} style={{ width: '100%', padding: '6px 10px', fontSize: '12px', borderRadius: '4px', border: '1px solid #cbd5e1', outline: 'none', color: '#333' }} />
-              <div style={{ display: 'flex', gap: '6px' }}>
-                <input type="text" placeholder="Phone Override..." value={cartCustomerEdits.phone} onChange={e => setCartCustomerOverrides({...cartCustomerEdits, phone: e.target.value})} style={{ flex: 1, padding: '6px 10px', fontSize: '12px', borderRadius: '4px', border: '1px solid #cbd5e1', outline: 'none', color: '#333' }} />
-                <input type="text" placeholder="Location Override..." value={cartCustomerEdits.location} onChange={e => setCartCustomerOverrides({...cartCustomerEdits, location: e.target.value})} style={{ flex: 1, padding: '6px 10px', fontSize: '12px', borderRadius: '4px', border: '1px solid #cbd5e1', outline: 'none', color: '#333' }} />
-              </div>
+              <input type="text" placeholder="Invoice Name Override..." value={cartCustomerNameOverride} onChange={e => setCartCustomerNameOverride(e.target.value)} style={{ width: '100%', padding: '8px 10px', fontSize: '14px', borderRadius: '4px', border: '1px solid #cbd5e1', outline: 'none', color: '#333' }} />
             </div>
           )}
 
-          {cart.length === 0 ? (
+          {sortedCart.length === 0 ? (
             <div style={{ textAlign: 'center', marginTop: '40px', color: '#9c8a6c' }}>{currentT.emptyCart}</div>
           ) : (
-            cart.map((item) => (
-              <div key={item.id} style={{ backgroundColor: '#fcfbfa', borderRadius: '8px', padding: '12px', marginBottom: '12px', border: '1px solid #f4f1ea', position: 'relative' }}>
-                <button onClick={() => removeFromCart(item.id)} style={{ position: 'absolute', top: '8px', right: '8px', background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: '16px', zIndex: 5 }}>✕</button>
+            sortedCart.map((item) => {
+              const isReturn = item.custom_name.includes('ដូរ');
+              const isCharge = item.custom_name.includes('បានប្រើ');
+              const isSpecial = isReturn || isCharge;
 
-                <input 
-                  type="text" 
-                  value={item.custom_name} 
-                  onChange={(e) => updateCartItem(item.id, 'custom_name', e.target.value)}
-                  placeholder="Item Name"
-                  style={{ 
-                    fontWeight: 'bold', 
-                    fontSize: '14px', 
-                    color: '#333333', 
-                    width: 'calc(100% - 24px)', 
-                    border: 'none',
-                    borderBottom: '1px dotted #9ca3af', 
-                    background: 'transparent', 
-                    outline: 'none',
-                    marginBottom: '10px',
-                    padding: '2px 0',
-                    transition: 'border-color 0.2s'
-                  }} 
-                  onFocus={e => e.target.style.borderBottom = '1px dashed #b58a3d'}
-                  onBlur={e => e.target.style.borderBottom = '1px dotted #9ca3af'}
-                />
-                
-                <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-end' }}>
-                  <div style={{ flex: 1 }}>
-                    <span style={{ display: 'block', fontSize: '11px', fontWeight: 'normal', color: '#4a3b1b', marginBottom: '4px' }}>{currentT.unitPrice} (៛)</span>
-                    <CartInput value={item.custom_price_riel} onChange={(v) => updateCartItem(item.id, 'custom_price_riel', v)} isQty={false} />
+              return (
+                <div key={item.id} style={{ backgroundColor: isReturn ? '#fef2f2' : isCharge ? '#fffbeb' : '#fcfbfa', borderRadius: '8px', padding: '12px', marginBottom: '12px', border: `1px solid ${isReturn ? '#fecaca' : isCharge ? '#fde68a' : '#f4f1ea'}`, position: 'relative' }}>
+                  <button onClick={() => removeFromCart(item.id)} style={{ position: 'absolute', top: '8px', right: '8px', background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: '16px', zIndex: 5 }}>✕</button>
+
+                  <div style={{ display: 'flex', alignItems: 'center', marginBottom: '10px', borderBottom: isSpecial ? 'none' : '1px dotted #9ca3af', transition: 'border-color 0.2s' }}>
+                    <input 
+                      type="text" 
+                      value={item.custom_name} 
+                      onChange={(e) => updateCartItem(item.id, 'custom_name', e.target.value)}
+                      placeholder="Item Name"
+                      readOnly={isSpecial}
+                      style={{ 
+                        fontWeight: 'bold', 
+                        fontSize: '14px', 
+                        color: isReturn ? '#dc2626' : isCharge ? '#b45309' : '#333333', 
+                        flex: 1, 
+                        border: 'none',
+                        background: 'transparent', 
+                        outline: 'none',
+                        padding: '2px 0',
+                        textAlign: isReturn ? 'center' : 'left'
+                      }} 
+                    />
+                    
+                    {!isSpecial && activeTab === 'wholesale' && (
+                      <select
+                        value={item.selected_batch_id || 'AUTO'}
+                        onChange={(e) => updateCartItem(item.id, 'selected_batch_id', e.target.value === 'AUTO' ? null : Number(e.target.value))}
+                        style={{
+                          marginLeft: '8px',
+                          padding: '2px 4px',
+                          background: '#fefcf3',
+                          border: '1px solid #eadeca',
+                          borderRadius: '4px',
+                          fontSize: '11px',
+                          fontWeight: 'bold',
+                          color: '#b58a3d',
+                          outline: 'none',
+                          cursor: 'pointer',
+                          maxWidth: '90px'
+                        }}
+                        title="Select specific batch to bypass FIFO"
+                      >
+                        <option value="AUTO">▼ Auto</option>
+                        {activeBatches[item.product_id]?.map((b: any) => {
+                          const remaining = (b.imported_qty || 0) - (b.sold_qty || 0);
+                          return (
+                            <option key={b.id} value={b.id}>
+                              {formatRiel(b.cost_price)} ({remaining})
+                            </option>
+                          );
+                        })}
+                      </select>
+                    )}
                   </div>
-                  <div style={{ flex: 1 }}>
-                    <span style={{ display: 'block', fontSize: '11px', fontWeight: 'normal', color: '#4a3b1b', marginBottom: '4px' }}>{currentT.quantity}</span>
-                    <CartInput value={item.quantity} onChange={(v) => updateCartItem(item.id, 'quantity', v)} isQty={true} />
+                  
+                  <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-end' }}>
+                    <div style={{ flex: 1 }}>
+                      <span style={{ display: 'block', fontSize: '11px', fontWeight: 'normal', color: '#4a3b1b', marginBottom: '4px' }}>{currentT.unitPrice} (៛)</span>
+                      <CartInput value={item.custom_price_riel} onChange={(v) => updateCartItem(item.id, 'custom_price_riel', v)} isQty={false} />
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <span style={{ display: 'block', fontSize: '11px', fontWeight: 'normal', color: '#4a3b1b', marginBottom: '4px' }}>{currentT.quantity}</span>
+                      <CartInput value={item.quantity} onChange={(v) => updateCartItem(item.id, 'quantity', v)} isQty={true} />
+                    </div>
+                  </div>
+
+                  <div style={{ marginTop: '10px', paddingTop: '8px', borderTop: '1px dashed #eadeca', display: 'flex', justifyContent: 'space-between', fontSize: '12px' }}>
+                    <span style={{ color: '#8a7650' }}>{currentT.subtotal}</span>
+                    <span style={{ fontWeight: 'bold', color: isReturn ? '#ef4444' : '#b58a3d', fontSize: '14px' }}>
+                      {isReturn && '-'}{formatRielFromNative(item.custom_price_riel * item.quantity)}
+                    </span>
                   </div>
                 </div>
-
-                <div style={{ marginTop: '10px', paddingTop: '8px', borderTop: '1px dashed #eadeca', display: 'flex', justifyContent: 'space-between', fontSize: '12px' }}>
-                  <span style={{ color: '#8a7650' }}>{currentT.subtotal}</span>
-                  <span style={{ fontWeight: 'bold', color: '#b58a3d', fontSize: '14px' }}>{formatRielFromNative(item.custom_price_riel * item.quantity)}</span>
-                </div>
-              </div>
-            ))
+              )
+            })
           )}
         </div>
         
         <div style={{ position: 'sticky', bottom: 0, paddingTop: '16px', paddingRight: '20px', paddingBottom: '16px', paddingLeft: '20px', borderTop: '1px solid #e5e7eb', backgroundColor: '#fcfbfa', flexShrink: 0, zIndex: 10, boxShadow: '0 -4px 10px rgba(0,0,0,0.02)' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '4px' }}>
             <span style={{ fontSize: '14px', fontWeight: 'bold', color: '#4a3b1b' }}>{currentT.totalKhmer}</span>
-            <span style={{ fontSize: '20px', fontWeight: 'bold', color: '#b58a3d' }}>{formatRielFromNative(totalRiel)}</span>
+            <span style={{ fontSize: '20px', fontWeight: 'bold', color: totalRiel < 0 ? '#ef4444' : '#b58a3d' }}>{formatRielFromNative(totalRiel)}</span>
           </div>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '14px' }}>
             <span style={{ fontSize: '11px', color: '#8a7650' }}>{currentT.totalUsd}</span>
@@ -899,6 +1119,20 @@ export default function POSPage() {
               onBlur={e => e.target.style.borderColor = '#cbd5e1'}
             />
           </div>
+
+          {/* PAYMENT METHOD SELECTOR (Only shows if Retail or Walk-in) */}
+          {showPaymentSelector && (
+            <div style={{ marginBottom: '14px' }}>
+              <select 
+                value={checkoutPaymentMethod}
+                onChange={(e) => setCheckoutPaymentMethod(e.target.value as 'Cash' | 'QR Payment')}
+                style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', fontSize: '14px', fontWeight: 'bold', outline: 'none', color: '#0f172a', backgroundColor: '#ffffff', cursor: 'pointer' }}
+              >
+                <option value="Cash">💵 Paid in Cash</option>
+                <option value="QR Payment">📱 QR Payment</option>
+              </select>
+            </div>
+          )}
           
           <button 
             onClick={confirmCheckout} 
@@ -970,6 +1204,42 @@ export default function POSPage() {
         </div>
       )}
 
+      {/* RETURN & EXCHANGE MODAL */}
+      {exchangeModal.isOpen && exchangeModal.product && (
+        <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 10000, display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '20px', boxSizing: 'border-box' }} onMouseDown={() => setExchangeModal({ isOpen: false, product: null, consumedKg: '' })}>
+          <div style={{ backgroundColor: '#ffffff', width: '100%', maxWidth: '400px', borderRadius: '12px', padding: '24px', boxShadow: '0 10px 25px rgba(0,0,0,0.15)' }} onMouseDown={e => e.stopPropagation()}>
+            <h3 style={{ margin: '0 0 16px 0', color: '#4a3b1b', borderBottom: '1px solid #f3f4f6', paddingBottom: '10px' }}>🔄 Exchange / Return Bag</h3>
+            
+            <div style={{ marginBottom: '16px' }}>
+              <label style={{ display: 'block', fontSize: '12px', fontWeight: 'bold', color: '#8a7650', marginBottom: '4px' }}>Product to Return</label>
+              <div style={{ padding: '10px', backgroundColor: '#f8fafc', border: '1px solid #cbd5e1', borderRadius: '6px', fontWeight: 'bold', color: '#0f172a' }}>{exchangeModal.product.name}</div>
+            </div>
+
+            <div style={{ marginBottom: '24px' }}>
+              <label style={{ display: 'block', fontSize: '12px', fontWeight: 'bold', color: '#8a7650', marginBottom: '4px' }}>How many kg were consumed?</label>
+              <input
+                type="number"
+                autoFocus
+                className="no-spinners"
+                placeholder="e.g. 15"
+                value={exchangeModal.consumedKg}
+                onChange={e => setExchangeModal({ ...exchangeModal, consumedKg: e.target.value })}
+                style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #dcd7cc', boxSizing: 'border-box', color: '#333333', backgroundColor: '#ffffff', fontSize: '16px' }}
+              />
+              <p style={{ fontSize: '11px', color: '#64748b', marginTop: '6px', lineHeight: 1.4 }}>
+                * Enter 0 if the bag is fully intact and unopened.<br/>
+                * The consumed amount will be added to the cart and properly tracked for profit.
+              </p>
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
+              <button onClick={() => setExchangeModal({ isOpen: false, product: null, consumedKg: '' })} style={{ padding: '10px 16px', backgroundColor: '#f4f1ea', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', color: '#6b582f' }}>Cancel</button>
+              <button onClick={handleConfirmExchange} style={{ padding: '10px 16px', backgroundColor: '#ef4444', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', color: '#fff' }}>Confirm Return</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* MOBILE PRODUCT ADD POPUP */}
       {selectedMobileProduct && (
         <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 9999, display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '20px', boxSizing: 'border-box' }}>
@@ -1018,55 +1288,91 @@ export default function POSPage() {
                 <div style={{ background: '#f8fafc', padding: '12px', borderRadius: '8px', border: '1px solid #e2e8f0', marginBottom: '16px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
                   <div style={{ fontSize: '11px', fontWeight: 'bold', color: '#8a7650', textTransform: 'uppercase' }}>📄 Invoice Customizer</div>
                   <input type="text" placeholder="Invoice Name..." value={cartCustomerEdits.name} onChange={e => setCartCustomerOverrides({...cartCustomerEdits, name: e.target.value})} style={{ width: '100%', padding: '6px 10px', fontSize: '12px', borderRadius: '4px', border: '1px solid #cbd5e1', outline: 'none', color: '#333' }} />
-                  <input type="text" placeholder="Phone Override..." value={cartCustomerEdits.phone} onChange={e => setCartCustomerOverrides({...cartCustomerEdits, phone: e.target.value})} style={{ width: '100%', padding: '6px 10px', fontSize: '12px', borderRadius: '4px', border: '1px solid #cbd5e1', outline: 'none', color: '#333' }} />
-                  <input type="text" placeholder="Location Override..." value={cartCustomerEdits.location} onChange={e => setCartCustomerOverrides({...cartCustomerEdits, location: e.target.value})} style={{ width: '100%', padding: '6px 10px', fontSize: '12px', borderRadius: '4px', border: '1px solid #cbd5e1', outline: 'none', color: '#333' }} />
                 </div>
               )}
 
-              {cart.map(item => (
-                <div key={item.id} style={{ padding: '12px', backgroundColor: '#fcfbfa', border: '1px solid #f4f1ea', borderRadius: '8px', marginBottom: '12px', position: 'relative' }}>
-                  <button onClick={() => removeFromCart(item.id)} style={{ position: 'absolute', top: '8px', right: '8px', background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', zIndex: 5 }}>✕</button>
-                  
-                  <input 
-                    type="text" 
-                    value={item.custom_name} 
-                    onChange={(e) => updateCartItem(item.id, 'custom_name', e.target.value)}
-                    placeholder="Item Name"
-                    style={{ 
-                      fontWeight: 'bold', 
-                      fontSize: '14px', 
-                      color: '#333333', 
-                      width: 'calc(100% - 24px)', 
-                      border: 'none',
-                      borderBottom: '1px dotted #9ca3af', 
-                      background: 'transparent', 
-                      outline: 'none',
-                      marginBottom: '10px',
-                      padding: '2px 0',
-                      transition: 'border-color 0.2s'
-                    }} 
-                    onFocus={e => e.target.style.borderBottom = '1px dashed #b58a3d'}
-                    onBlur={e => e.target.style.borderBottom = '1px dotted #9ca3af'}
-                  />
+              {sortedCart.map((item) => {
+                const isReturn = item.custom_name.includes('ដូរ');
+                const isCharge = item.custom_name.includes('បានប្រើ');
+                const isSpecial = isReturn || isCharge;
 
-                  <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-end', marginBottom: '6px' }}>
-                    <div style={{ flex: 1 }}>
-                      <span style={{ display: 'block', fontSize: '11px', color: '#4a3b1b', marginBottom: '4px' }}>{currentT.unitPrice}</span>
-                      <CartInput value={item.custom_price_riel} onChange={(v) => updateCartItem(item.id, 'custom_price_riel', v)} isQty={false} />
+                return (
+                  <div key={item.id} style={{ backgroundColor: isReturn ? '#fef2f2' : isCharge ? '#fffbeb' : '#fcfbfa', borderRadius: '8px', padding: '12px', marginBottom: '12px', border: `1px solid ${isReturn ? '#fecaca' : isCharge ? '#fde68a' : '#f4f1ea'}`, position: 'relative' }}>
+                    <button onClick={() => removeFromCart(item.id)} style={{ position: 'absolute', top: '8px', right: '8px', background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', zIndex: 5 }}>✕</button>
+                    
+                    <div style={{ display: 'flex', alignItems: 'center', marginBottom: '10px', borderBottom: isSpecial ? 'none' : '1px dotted #9ca3af', transition: 'border-color 0.2s' }}>
+                      <input 
+                        type="text" 
+                        value={item.custom_name} 
+                        onChange={(e) => updateCartItem(item.id, 'custom_name', e.target.value)}
+                        placeholder="Item Name"
+                        readOnly={isSpecial}
+                        style={{ 
+                          fontWeight: 'bold', 
+                          fontSize: '14px', 
+                          color: isReturn ? '#dc2626' : isCharge ? '#b45309' : '#333333', 
+                          flex: 1, 
+                          border: 'none',
+                          background: 'transparent', 
+                          outline: 'none',
+                          padding: '2px 0',
+                          textAlign: isReturn ? 'center' : 'left'
+                        }} 
+                      />
+                      
+                      {!isSpecial && activeTab === 'wholesale' && (
+                        <select
+                          value={item.selected_batch_id || 'AUTO'}
+                          onChange={(e) => updateCartItem(item.id, 'selected_batch_id', e.target.value === 'AUTO' ? null : Number(e.target.value))}
+                          style={{
+                            marginLeft: '8px',
+                            padding: '2px 4px',
+                            background: '#fefcf3',
+                            border: '1px solid #eadeca',
+                            borderRadius: '4px',
+                            fontSize: '11px',
+                            fontWeight: 'bold',
+                            color: '#b58a3d',
+                            outline: 'none',
+                            cursor: 'pointer',
+                            maxWidth: '90px'
+                          }}
+                        >
+                          <option value="AUTO">▼ Auto</option>
+                          {activeBatches[item.product_id]?.map((b: any) => {
+                            const remaining = (b.imported_qty || 0) - (b.sold_qty || 0);
+                            return (
+                              <option key={b.id} value={b.id}>
+                                {formatRiel(b.cost_price)} ({remaining})
+                              </option>
+                            );
+                          })}
+                        </select>
+                      )}
                     </div>
-                    <div style={{ flex: 1 }}>
-                      <span style={{ display: 'block', fontSize: '11px', color: '#4a3b1b', marginBottom: '4px' }}>{currentT.quantity}</span>
-                      <CartInput value={item.quantity} onChange={(v) => updateCartItem(item.id, 'quantity', v)} isQty={true} />
+
+                    <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-end', marginBottom: '6px' }}>
+                      <div style={{ flex: 1 }}>
+                        <span style={{ display: 'block', fontSize: '11px', color: '#4a3b1b', marginBottom: '4px' }}>{currentT.unitPrice}</span>
+                        <CartInput value={item.custom_price_riel} onChange={(v) => updateCartItem(item.id, 'custom_price_riel', v)} isQty={false} />
+                      </div>
+                      <div style={{ flex: 1 }}>
+                        <span style={{ display: 'block', fontSize: '11px', color: '#4a3b1b', marginBottom: '4px' }}>{currentT.quantity}</span>
+                        <CartInput value={item.quantity} onChange={(v) => updateCartItem(item.id, 'quantity', v)} isQty={true} />
+                      </div>
+                    </div>
+
+                    <div style={{ textAlign: 'right', fontSize: '12px', fontWeight: 'bold', color: isReturn ? '#ef4444' : '#b58a3d', marginTop: '8px' }}>
+                      {isReturn && '-'}{formatRielFromNative(item.custom_price_riel * item.quantity)}
                     </div>
                   </div>
-                  <div style={{ textAlign: 'right', fontSize: '12px', fontWeight: 'bold', color: '#b58a3d', marginTop: '8px' }}>{formatRielFromNative(item.custom_price_riel * item.quantity)}</div>
-                </div>
-              ))}
+                )
+              })}
             </div>
             <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, paddingTop: '16px', paddingRight: '16px', paddingBottom: 'max(40px, env(safe-area-inset-bottom, 40px))', paddingLeft: '16px', borderTop: '1px solid #e5e7eb', backgroundColor: '#fcfbfa', flexShrink: 0, zIndex: 1010, boxShadow: '0 -4px 10px rgba(0,0,0,0.05)' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
                 <span style={{ fontWeight: 'bold', fontSize: '14px' }}>{currentT.totalKhmer}</span>
-                <span style={{ fontWeight: 'bold', color: '#b58a3d', fontSize: '18px' }}>{formatRielFromNative(totalRiel)}</span>
+                <span style={{ fontWeight: 'bold', color: totalRiel < 0 ? '#ef4444' : '#b58a3d', fontSize: '18px' }}>{formatRielFromNative(totalRiel)}</span>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '12px' }}>
                 <span style={{ fontSize: '11px', color: '#8a7650' }}>{currentT.totalUsd}</span>
@@ -1086,6 +1392,20 @@ export default function POSPage() {
                   onBlur={e => e.target.style.borderColor = '#cbd5e1'}
                 />
               </div>
+
+              {/* PAYMENT METHOD SELECTOR (Only shows if Retail or Walk-in) */}
+              {showPaymentSelector && (
+                <div style={{ marginBottom: '14px' }}>
+                  <select 
+                    value={checkoutPaymentMethod}
+                    onChange={(e) => setCheckoutPaymentMethod(e.target.value as 'Cash' | 'QR Payment')}
+                    style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', fontSize: '14px', fontWeight: 'bold', outline: 'none', color: '#0f172a', backgroundColor: '#ffffff', cursor: 'pointer' }}
+                  >
+                    <option value="Cash">💵 Paid in Cash</option>
+                    <option value="QR Payment">📱 QR Payment</option>
+                  </select>
+                </div>
+              )}
               
               <button 
                 onClick={confirmCheckout} 
@@ -1109,7 +1429,7 @@ export default function POSPage() {
         </div>
       )}
 
-      {/* SALE SUMMARY MODAL (Shows Change Due / Cashless Summary View Panel) */}
+      {/* SALE SUMMARY MODAL */}
       {saleSummary && (
         <div className="modal-overlay" style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(0,0,0,0.85)', zIndex: 10001, display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '20px', boxSizing: 'border-box' }}>
           <div className="modal-content" style={{ backgroundColor: '#ffffff', width: '100%', maxWidth: '400px', borderRadius: '16px', padding: '30px', boxShadow: '0 10px 25px rgba(0,0,0,0.2)' }}>
@@ -1131,7 +1451,7 @@ export default function POSPage() {
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px dashed #cbd5e1', paddingTop: '16px', marginTop: '16px', fontSize: '16px' }}>
                     <span style={{ color: '#64748b', fontWeight: 'bold' }}>Total Sale:</span>
-                    <span style={{ color: '#10b981', fontWeight: 'bold' }}>{formatRielFromNative(saleSummary.total)}</span>
+                    <span style={{ color: saleSummary.total < 0 ? '#ef4444' : '#10b981', fontWeight: 'bold' }}>{formatRielFromNative(saleSummary.total)}</span>
                   </div>
                 </>
               ) : (
@@ -1229,7 +1549,7 @@ export default function POSPage() {
                         const desc = item.custom_name;
 
                         if (desc.includes('ដូរ') || desc.includes('បញ្ចុះតម្លៃ') || desc.includes('កក់')) {
-                          total = total * -1;
+                          total = -Math.abs(total);
                         }
                         grandTotal += total;
 
@@ -1261,7 +1581,7 @@ export default function POSPage() {
                         {rows}
                         <tr>
                           <td colSpan={4} style={{ border: '1px solid #000', backgroundColor: '#fffacd', textAlign: 'right', fontWeight: 'bold', padding: '2px 3px' }}>Total | សរុប</td>
-                          <td style={{ border: '1px solid #000', backgroundColor: '#fffacd', textAlign: 'center', fontWeight: 'bold', padding: '2px 3px' }}>{grandTotal.toLocaleString('en-US')}</td>
+                          <td style={{ border: '1px solid #000', backgroundColor: '#fffacd', textAlign: 'center', fontWeight: 'bold', padding: '2px 3px', color: grandTotal < 0 ? 'red' : 'inherit' }}>{grandTotal.toLocaleString('en-US')}</td>
                         </tr>
                       </>
                     );

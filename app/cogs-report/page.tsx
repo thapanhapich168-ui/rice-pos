@@ -130,18 +130,22 @@ export default function CogsReportPage() {
       const group = customerGroups[customer];
       let normalRows: any[] = [];
       let douRows: any[] = [];
+      let consumedRows: any[] = [];
       let specialRows: any[] = [];
 
       group.forEach(item => {
-        const desc = item.rice_type || '';
+        // BUG FIX: Must check custom_rice_type for POS modifiers (ដូរ / បានប្រើ)
+        const desc = item.custom_rice_type || item.rice_type || '';
         const price = Number(item.cogs_price || 0);
 
         if (desc.includes('សេវាដឹក')) return;
         if (desc.includes('បាវ') && price === 0) return;
 
-        if (desc.startsWith('ដូរ') || desc.includes('បញ្ចុះតម្លៃ') || desc.includes('កក់')) {
+        if (desc.includes('ដូរ') || desc.includes('បញ្ចុះតម្លៃ') || desc.includes('កក់')) {
           douRows.push(item);
-        } else if (desc.includes('ថ្លៃបាវ ប្រ៊េន') || desc.includes('ថ្លៃបាវ ស')) {
+        } else if (desc.includes('បានប្រើ') || desc.includes('អង្ករខ្វះ')) {
+          consumedRows.push(item);
+        } else if (desc.includes('ថ្លៃបាវ')) {
           specialRows.push(item);
         } else {
           normalRows.push(item);
@@ -149,15 +153,23 @@ export default function CogsReportPage() {
       });
 
       specialRows.sort((a, b) => (a.rice_type || '').localeCompare(b.rice_type || ''));
-      const sortedGroup = [...normalRows, ...specialRows, ...douRows];
+      
+      // Ensures "Consumed Kg" sorts cleanly under "Returns"
+      const sortedGroup = [...normalRows, ...specialRows, ...douRows, ...consumedRows];
 
       sortedGroup.forEach((item, index) => {
         const qty = Number(item.qty || 0);
         const price = Number(item.cogs_price || 0);
         let amount = qty * price;
 
-        const isNegative = (item.rice_type || '').startsWith('ដូរ') || (item.rice_type || '').includes('បញ្ចុះតម្លៃ') || (item.rice_type || '').includes('កក់');
-        if (isNegative) amount = -Math.abs(amount);
+        const descForMath = item.custom_rice_type || item.rice_type || '';
+        const isNegative = descForMath.includes('ដូរ') || descForMath.includes('បញ្ចុះតម្លៃ') || descForMath.includes('កក់');
+        
+        if (isNegative) {
+          amount = -Math.abs(amount);
+        } else {
+          amount = Math.abs(amount);
+        }
 
         sellerGrandTotal += amount;
 
@@ -398,7 +410,7 @@ export default function CogsReportPage() {
           text-align: center;
         }
         .report-table td {
-          font-weight: normal; /* Ensures body text is not bold */
+          font-weight: normal; 
         }
 
         @media print {

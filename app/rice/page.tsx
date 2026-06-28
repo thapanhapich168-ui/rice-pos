@@ -29,6 +29,7 @@ interface HistoryRecord {
   cost_price: number
   created_at: string
   imported_qty?: number
+  sold_qty?: number // Added Live Movement Tracker
 }
 
 type SortConfig = {
@@ -185,12 +186,10 @@ export default function RiceControl() {
     const edits = historyEdits[historyId];
     if (!edits || !historyModal.product) return setEditingHistoryId(null);
 
-    // Get original record to find stock difference
     const originalRecord = historyModal.data.find(h => h.id === historyId);
     const originalQty = originalRecord?.imported_qty || 0;
     const newQty = edits.imported_qty !== undefined ? Number(edits.imported_qty) : originalQty;
     
-    // Calculate how much we need to adjust the main stock by
     const qtyDifference = newQty - originalQty;
 
     const payload: any = {};
@@ -201,14 +200,12 @@ export default function RiceControl() {
     const { error } = await supabase.from('price_history').update(payload).eq('id', historyId);
     
     if (!error) {
-      // Apply the difference to the master product stock
       if (qtyDifference !== 0) {
         const newStock = Number(historyModal.product.stock) + qtyDifference;
         await supabase.from('products').update({ stock: newStock }).eq('id', historyModal.product.id);
         
-        // Update local state so subsequent edits have the right base stock
         setHistoryModal(prev => ({...prev, product: {...prev.product!, stock: newStock}}));
-        fetchProducts(); // refresh background table
+        fetchProducts(); 
       }
 
       fetchHistory(historyModal.product);
@@ -221,19 +218,17 @@ export default function RiceControl() {
     if (!historyModal.product) return;
     if (!confirm("Are you sure you want to delete this historical record? The imported quantity will be deducted from your stock.")) return;
     
-    // Find how much stock we need to reverse
     const recordToDelete = historyModal.data.find(h => h.id === historyId);
     const qtyToReverse = recordToDelete?.imported_qty || 0;
 
     const { error } = await supabase.from('price_history').delete().eq('id', historyId);
     
     if (!error) {
-      // Reverse the stock in the master product table
       if (qtyToReverse > 0) {
         const newStock = Number(historyModal.product.stock) - qtyToReverse;
         await supabase.from('products').update({ stock: newStock }).eq('id', historyModal.product.id);
         setHistoryModal(prev => ({...prev, product: {...prev.product!, stock: newStock}}));
-        fetchProducts(); // refresh background table
+        fetchProducts(); 
       }
       fetchHistory(historyModal.product);
     }
@@ -259,11 +254,13 @@ export default function RiceControl() {
 
     if (prodErr) return alert(`Error updating product: ${prodErr.message}`);
 
+    // Create a new batch. sold_qty starts at 0 automatically via SQL, but we explicit set it to ensure clarity
     await supabase.from('price_history').insert([{
       product_id: importModal.product.id,
       cost_price: nCost,
       price: nPrice,
-      imported_qty: qtyToAdd 
+      imported_qty: qtyToAdd,
+      sold_qty: 0 
     }]);
 
     setImportModal({ isOpen: false, product: null, add_qty: '', new_cost: '', new_price: '' });
@@ -321,7 +318,7 @@ export default function RiceControl() {
     e.preventDefault()
     if (targetCol === 'actions') return;
 
-    const sourceCol = e.dataTransfer.getData('text/plain') as keyof Product | 'linked_wholesale'
+    const sourceCol = e.dataTransfer.getData('text/plain') as keyof Product | 'linked_wholesale' | 'actions'
     if (!sourceCol || sourceCol === targetCol || sourceCol === 'actions') return
 
     setColumnOrder(prev => {
@@ -572,7 +569,7 @@ export default function RiceControl() {
                                   📦 Import
                                 </button>
                                 <button onClick={() => fetchHistory(p)} style={{ color: '#ca8a04', background: '#fef3c7', border: '1px solid #fde047', padding: '8px 12px', borderRadius: '6px', cursor: 'pointer', fontSize: '12px', fontWeight: 'bold' }}>
-                                  🕒 History
+                                  🕒 Batches
                                 </button>
                               </>
                             )}
@@ -763,13 +760,13 @@ export default function RiceControl() {
         </div>
       )}
 
-      {/* 3. PRICE HISTORY MODAL (NOW EDITABLE WITH STOCK SYNC) */}
+      {/* 3. LIVE BATCH HISTORY MODAL */}
       {historyModal.isOpen && historyModal.product && (
         <div className="modal-overlay" onMouseDown={() => setHistoryModal({ isOpen: false, product: null, data: [] })}>
           <div className="modal-content" style={{ maxWidth: '650px' }} onMouseDown={e => e.stopPropagation()}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #e2e8f0', paddingBottom: '16px', marginBottom: '16px' }}>
               <div>
-                <h2 style={{ margin: 0, color: '#1e293b', fontSize: '20px' }}>Import & Price History</h2>
+                <h2 style={{ margin: 0, color: '#1e293b', fontSize: '20px' }}>Live Batches & History</h2>
                 <p style={{ margin: '4px 0 0 0', color: '#64748b', fontSize: '14px' }}>Tracking: <b style={{ color: '#0f172a' }}>{historyModal.product.name}</b></p>
               </div>
               <button onClick={() => setHistoryModal({ isOpen: false, product: null, data: [] })} style={{ background: 'none', border: 'none', fontSize: '24px', cursor: 'pointer', color: '#94a3b8' }}>✕</button>
@@ -782,13 +779,17 @@ export default function RiceControl() {
                 historyModal.data.map((h) => {
                   const isEditing = editingHistoryId === h.id;
                   const editData = historyEdits[h.id] || { imported_qty: h.imported_qty, price: h.price, cost_price: h.cost_price };
+                  
+                  // Live Math
+                  const remaining = (h.imported_qty || 0) - (h.sold_qty || 0);
+                  const isActive = remaining > 0;
 
                   return (
-                    <div key={h.id} style={{ background: isEditing ? '#fefcf3' : '#f8fafc', padding: '16px', borderRadius: '12px', border: isEditing ? '1px solid #b58a3d' : '1px solid #e2e8f0', marginBottom: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px', transition: 'all 0.2s' }}>
+                    <div key={h.id} style={{ background: isEditing ? '#fefcf3' : (isActive ? '#f0fdf4' : '#f8fafc'), padding: '16px', borderRadius: '12px', border: isEditing ? '1px solid #b58a3d' : (isActive ? '1px solid #bbf7d0' : '1px solid #e2e8f0'), marginBottom: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px', transition: 'all 0.2s', opacity: isActive || isEditing ? 1 : 0.6 }}>
                       {isEditing ? (
                         <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', flex: 1 }}>
                           <div style={{ flex: '1 1 80px' }}>
-                            <label style={{ fontSize: '11px', fontWeight: 'bold', color: '#64748b' }}>Qty</label>
+                            <label style={{ fontSize: '11px', fontWeight: 'bold', color: '#64748b' }}>Import Qty</label>
                             <input autoFocus type="number" className="no-spinners" value={editData.imported_qty} onChange={e => setHistoryEdits({...historyEdits, [h.id]: {...editData, imported_qty: Number(e.target.value)}})} onKeyDown={e => e.key === 'Enter' && handleSaveHistory(h.id)} style={{ width: '100%', padding: '6px', border: '1px solid #b58a3d', borderRadius: '4px', fontSize: '14px', color: '#0f172a', backgroundColor: '#fff' }} />
                           </div>
                           <div style={{ flex: '1 1 100px' }}>
@@ -802,7 +803,13 @@ export default function RiceControl() {
                         </div>
                       ) : (
                         <div>
-                          {h.imported_qty !== undefined && <div style={{ fontSize: '14px', fontWeight: 'bold', color: '#3b82f6', marginBottom: '4px' }}>📦 Imported: {h.imported_qty}</div>}
+                          <div style={{ fontSize: '14px', fontWeight: 'bold', color: isActive ? '#15803d' : '#64748b', marginBottom: '6px', display: 'flex', gap: '8px', alignItems: 'center' }}>
+                            {isActive ? (
+                              <><span style={{ padding: '2px 8px', background: '#dcfce7', borderRadius: '12px', fontSize: '12px' }}>🔥 Active</span> {remaining} bags left</>
+                            ) : (
+                              <><span style={{ padding: '2px 8px', background: '#e2e8f0', borderRadius: '12px', fontSize: '12px' }}>📦 Depleted</span> 0 / {h.imported_qty} bags</>
+                            )}
+                          </div>
                           <div style={{ fontSize: '14px', fontWeight: 'bold', color: '#0f172a' }}>Selling: <span style={{ color: '#b58a3d' }}>{formatRiel(h.price)}</span></div>
                           <div style={{ fontSize: '13px', color: '#64748b', marginTop: '4px', fontWeight: 'bold' }}>Cost: {formatRiel(h.cost_price || 0)}</div>
                         </div>
