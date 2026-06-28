@@ -4,6 +4,53 @@ import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabaseClient'
 
 const formatRiel = (amount: number) => `${new Intl.NumberFormat('en-US').format(Math.round(amount))} ៛`;
+const EXCHANGE_RATE = 4000;
+
+// ==========================================
+// ROBUST LIVE COMMA FORMATTER (Stateless Display)
+// ==========================================
+function CurrencyInput({ value, onChange, placeholder, style, autoFocus }: any) {
+  const [inputValue, setInputValue] = useState('');
+
+  // Sync state when parent value changes externally
+  useEffect(() => {
+    if (value === '' || value === 0) {
+      setInputValue('');
+    } else {
+      const parsed = parseFloat(inputValue.replace(/,/g, ''));
+      if (parsed !== value) {
+        setInputValue(new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 }).format(value));
+      }
+    }
+  }, [value]);
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    let raw = e.target.value.replace(/[^0-9.]/g, '');
+    
+    const parts = raw.split('.');
+    if (parts.length > 2) raw = parts[0] + '.' + parts.slice(1).join('');
+
+    let formatted = parts[0] ? new Intl.NumberFormat('en-US').format(parseInt(parts[0], 10)) : '';
+    if (parts.length > 1) formatted += '.' + parts[1].substring(0, 2);
+    if (raw === '') formatted = '';
+
+    setInputValue(formatted);
+    const num = parseFloat(raw);
+    onChange(isNaN(num) ? '' : num);
+  };
+
+  return (
+    <input 
+      type="text"
+      inputMode="decimal"
+      placeholder={placeholder}
+      value={inputValue}
+      onChange={handleChange}
+      autoFocus={autoFocus}
+      style={{ ...style, color: '#334155', fontSize: '14px', fontWeight: 'normal' }}
+    />
+  )
+}
 
 export default function ExpenseDashboard() {
   // --- Active Tab State ---
@@ -12,18 +59,28 @@ export default function ExpenseDashboard() {
   // --- Expense Form States ---
   const [expenseDate, setExpenseDate] = useState('')
   const [spender, setSpender] = useState<'Pich' | 'Jing' | 'Both'>('Pich')
-  const [paymentMethod, setPaymentMethod] = useState<'QR Payment' | 'Cash'>('QR Payment')
   const [remarks, setRemarks] = useState('')
-  const [amountUsd, setAmountUsd] = useState('')
-  const [amountRiel, setAmountRiel] = useState('')
   const [loading, setLoading] = useState(false)
+
+  // Split Payment Tracking
+  const [paymentRows, setPaymentRows] = useState<{id: number, method: string, amount: number | ''}[]>([
+    { id: Date.now(), method: 'Cash ៛', amount: '' }
+  ]);
 
   // --- Staff Management States ---
   const [staffList, setStaffList] = useState<any[]>([])
   const [newStaffName, setNewStaffName] = useState('')
-  const [newStaffSalary, setNewStaffSalary] = useState('')
-  const [debtAdditions, setDebtAdditions] = useState<Record<number, string>>({})
+  const [newStaffSalary, setNewStaffSalary] = useState<number | ''>('')
   
+  // Debt Addition States
+  const [debtAdditions, setDebtAdditions] = useState<Record<number, number | ''>>({})
+  const [debtMethods, setDebtMethods] = useState<Record<number, string>>({})
+  
+  // Debt History Modal State
+  const [historyModal, setHistoryModal] = useState<{ isOpen: boolean, staff: any, history: any[] }>({
+    isOpen: false, staff: null, history: []
+  })
+
   // Inline Editing State
   const [editingCell, setEditingCell] = useState<{ id: number, field: string } | null>(null)
   const [editValue, setEditValue] = useState<string>('')
@@ -46,35 +103,43 @@ export default function ExpenseDashboard() {
     e.preventDefault()
 
     if (!remarks) return alert('Please add remarks/item detail')
-    if (!amountUsd && !amountRiel) return alert('Please enter an amount in either USD ($) or Riel (៛)')
+    
+    const activePayments = paymentRows.filter(r => (Number(r.amount) || 0) > 0);
+    if (activePayments.length === 0) return alert('Please enter at least one payment amount.');
 
     setLoading(true)
 
-    const finalAmountUsd = amountUsd ? Number(amountUsd) : 0
-    const finalAmountRiel = amountRiel ? Number(amountRiel) : 0
-    
-    const { error } = await supabase.from('expenses').insert([
-      {
-        expense_date: expenseDate,
-        spender: spender,
-        payment_method: paymentMethod, // <-- Added here
-        remarks: remarks,                     
-        amount: finalAmountUsd,               
-        amount_riel: finalAmountRiel,         
-        description: activeTab.toUpperCase(), 
-      },
-    ])
+    try {
+      for (const row of activePayments) {
+        let amountRiel = Number(row.amount);
+        let amountUsd = 0;
 
-    setLoading(false)
+        if (row.method.includes('$')) {
+          amountUsd = amountRiel;
+          amountRiel = amountRiel * EXCHANGE_RATE;
+        }
 
-    if (error) {
-      alert(`Error saving entry: ${error.message}`)
-    } else {
+        const { error } = await supabase.from('expenses').insert([{
+          expense_date: expenseDate,
+          spender: spender,
+          payment_method: row.method,
+          remarks: activePayments.length > 1 ? `${remarks} (Split Payment)` : remarks,                     
+          amount: amountUsd,               
+          amount_riel: amountRiel,         
+          description: activeTab.toUpperCase(), 
+        }]);
+
+        if (error) throw error;
+      }
+
       alert('Expense recorded successfully!')
       setRemarks('')
-      setAmountUsd('')
-      setAmountRiel('')
-      setPaymentMethod('QR Payment') // Reset to default
+      setPaymentRows([{ id: Date.now(), method: 'Cash ៛', amount: '' }]);
+
+    } catch (err: any) {
+      alert(`Error saving entry: ${err.message}`)
+    } finally {
+      setLoading(false)
     }
   }
 
@@ -84,14 +149,13 @@ export default function ExpenseDashboard() {
     if (!newStaffName) return alert('Staff name is required')
 
     setLoading(true)
-    // Default to the 1st of the current month if not specified
     const today = new Date();
     const firstOfMonth = new Date(today.getFullYear(), today.getMonth(), 1).toISOString().split('T')[0];
 
     const { error } = await supabase.from('staff').insert([
       { 
         name: newStaffName, 
-        salary: Number(newStaffSalary) || 0, // Using Monthly Salary
+        salary: Number(newStaffSalary) || 0,
         total_debt: 0,
         start_date: firstOfMonth
       }
@@ -112,16 +176,48 @@ export default function ExpenseDashboard() {
     const amountToAdd = Number(debtAdditions[staff.id])
     if (!amountToAdd || amountToAdd === 0) return
 
+    const method = debtMethods[staff.id] || 'Cash ៛'
     const newTotalDebt = Number(staff.total_debt || 0) + amountToAdd
 
     // Optimistic UI update
     setStaffList(prev => prev.map(s => s.id === staff.id ? { ...s, total_debt: newTotalDebt } : s));
     setDebtAdditions(prev => ({ ...prev, [staff.id]: '' }))
 
-    const { error } = await supabase.from('staff').update({ total_debt: newTotalDebt }).eq('id', staff.id)
-    if (error) {
-      alert(`Error updating debt: ${error.message}`)
-      fetchStaff() // Revert on error
+    // 1. Update total debt
+    const { error: staffErr } = await supabase.from('staff').update({ total_debt: newTotalDebt }).eq('id', staff.id)
+    
+    // 2. Log History
+    await supabase.from('staff_debt_history').insert([{ staff_id: staff.id, amount: amountToAdd, payment_method: method }])
+
+    // 3. Log as an Expense (since the business is giving them an advance)
+    let amountRiel = amountToAdd;
+    let amountUsd = 0;
+    if (method.includes('$')) {
+      amountUsd = amountToAdd;
+      amountRiel = amountToAdd * EXCHANGE_RATE;
+    }
+
+    await supabase.from('expenses').insert([{
+      expense_date: new Date().toISOString().split('T')[0],
+      spender: 'Business',
+      payment_method: method,
+      remarks: `Staff Advance: ${staff.name}`,
+      amount: amountUsd,
+      amount_riel: amountRiel,
+      description: 'STAFF'
+    }])
+
+    if (staffErr) {
+      alert(`Error updating debt: ${staffErr.message}`)
+      fetchStaff() // Revert
+    }
+  }
+
+  // --- Action: View Staff History ---
+  async function handleViewHistory(staff: any) {
+    const { data, error } = await supabase.from('staff_debt_history').select('*').eq('staff_id', staff.id).order('created_at', { ascending: false })
+    if (!error) {
+      setHistoryModal({ isOpen: true, staff: staff, history: data || [] })
     }
   }
 
@@ -134,7 +230,7 @@ export default function ExpenseDashboard() {
 
     let finalValue: any = editValue;
     if (field === 'salary' || field === 'total_debt') {
-      finalValue = Number(editValue) || 0;
+      finalValue = Number(editValue.replace(/,/g, '')) || 0;
     }
 
     // Optimistic UI Update
@@ -167,7 +263,7 @@ export default function ExpenseDashboard() {
     if (!startDateStr) return 0;
     
     const today = new Date();
-    today.setHours(0, 0, 0, 0); // Lock to midnight to avoid timezone shifts
+    today.setHours(0, 0, 0, 0); 
 
     const currentMonth = today.getMonth();
     const currentYear = today.getFullYear();
@@ -175,25 +271,30 @@ export default function ExpenseDashboard() {
     const startDate = new Date(startDateStr);
     startDate.setHours(0, 0, 0, 0);
     
-    // If they started in a previous month, reset their start date to the 1st of THIS month
     let effectiveStartDate = startDate;
     if (startDate.getMonth() !== currentMonth || startDate.getFullYear() !== currentYear) {
       effectiveStartDate = new Date(currentYear, currentMonth, 1);
       effectiveStartDate.setHours(0, 0, 0, 0);
     }
 
-    // Calculate difference in days (+1 to include today)
     const diffTime = today.getTime() - effectiveStartDate.getTime();
     const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24)) + 1; 
     
     return diffDays > 0 ? diffDays : 0;
   }
 
+  // Live Math for Expenses Tab
+  const totalExpenseRiel = paymentRows.reduce((sum, row) => {
+    const amt = Number(row.amount) || 0;
+    if (row.method.includes('$')) return sum + (amt * EXCHANGE_RATE);
+    return sum + amt;
+  }, 0);
+
   return (
     <div style={styles.pageContainer}>
       <div style={{
         ...styles.card,
-        maxWidth: activeTab === 'staff' ? '1000px' : '550px', // Wider for the big table
+        maxWidth: activeTab === 'staff' ? '1100px' : '550px', 
         transition: 'max-width 0.3s ease'
       }}>
         {/* HEADER BRANDING */}
@@ -204,25 +305,13 @@ export default function ExpenseDashboard() {
 
         {/* THREE TAB HEADER */}
         <div style={styles.tabContainer}>
-          <button
-            type="button"
-            onClick={() => setActiveTab('personal')}
-            style={{ ...styles.tabButton, ...(activeTab === 'personal' ? styles.activeTab : {}) }}
-          >
+          <button type="button" onClick={() => setActiveTab('personal')} style={{ ...styles.tabButton, ...(activeTab === 'personal' ? styles.activeTab : {}) }}>
             🏡 Personal
           </button>
-          <button
-            type="button"
-            onClick={() => setActiveTab('business')}
-            style={{ ...styles.tabButton, ...(activeTab === 'business' ? styles.activeTab : {}) }}
-          >
+          <button type="button" onClick={() => setActiveTab('business')} style={{ ...styles.tabButton, ...(activeTab === 'business' ? styles.activeTab : {}) }}>
             🏢 Business
           </button>
-          <button
-            type="button"
-            onClick={() => setActiveTab('staff')}
-            style={{ ...styles.tabButton, ...(activeTab === 'staff' ? styles.activeTab : {}) }}
-          >
+          <button type="button" onClick={() => setActiveTab('staff')} style={{ ...styles.tabButton, ...(activeTab === 'staff' ? styles.activeTab : {}) }}>
             👥 Staff Payroll
           </button>
         </div>
@@ -249,44 +338,63 @@ export default function ExpenseDashboard() {
               </div>
             </div>
 
-            <div style={styles.currencyRow}>
-              <div style={styles.inputGroup}>
-                <label style={styles.label}>Amount in Khmer Riel (៛)</label>
-                <div style={styles.currencyWrapper}>
-                  <span style={styles.currencyPrefix}>៛</span>
-                  <input type="number" step="100" placeholder="0" value={amountRiel} onChange={(e) => setAmountRiel(e.target.value)} style={{ ...styles.inputField, paddingLeft: '30px' }} className="no-spinners" />
-                </div>
-              </div>
-
-              <div style={styles.inputGroup}>
-                <label style={styles.label}>Amount in USD ($)</label>
-                <div style={styles.currencyWrapper}>
-                  <span style={styles.currencyPrefix}>$</span>
-                  <input type="number" step="0.01" placeholder="0.00" value={amountUsd} onChange={(e) => setAmountUsd(e.target.value)} style={{ ...styles.inputField, paddingLeft: '30px' }} className="no-spinners" />
-                </div>
-              </div>
-            </div>
-
-            {/* NEW: PAYMENT METHOD */}
             <div style={styles.inputGroup}>
-              <label style={styles.label}>Payment Method</label>
-              <select
-                value={paymentMethod}
-                onChange={(e) => setPaymentMethod(e.target.value as 'QR Payment' | 'Cash')}
-                style={{ ...styles.inputField, cursor: 'pointer' }}
-                required
-              >
-                <option value="QR Payment">📱 QR Payment</option>
-                <option value="Cash">💵 Cash</option>
-              </select>
+              <label style={styles.label}>Remarks / What did you buy?</label>
+              <input type="text" placeholder="e.g. Electricity Bill, Lunch..." value={remarks} onChange={(e) => setRemarks(e.target.value)} style={styles.inputField} required />
             </div>
 
-            <div style={styles.inputGroup}>
-              <label style={styles.label}>Remarks</label>
-              <input type="text" value={remarks} onChange={(e) => setRemarks(e.target.value)} style={styles.inputField} required />
+            {/* DYNAMIC SPLIT PAYMENT METHOD FOR EXPENSES */}
+            <div style={{ background: '#f8fafc', padding: '16px', borderRadius: '12px', border: '1px solid #e2e8f0', marginTop: '8px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                <label style={{ fontSize: '12px', color: '#475569', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Amount Spent</label>
+                <button type="button" onClick={() => setPaymentRows([...paymentRows, { id: Date.now(), method: 'Cash ៛', amount: '' }])} style={{ background: '#e0f2fe', color: '#0369a1', border: 'none', borderRadius: '4px', fontSize: '11px', fontWeight: 'bold', padding: '6px 12px', cursor: 'pointer' }}>+ Split</button>
+              </div>
+              
+              {paymentRows.map((row, index) => (
+                <div key={row.id} style={{ display: 'flex', gap: '8px', marginBottom: '12px', alignItems: 'center' }}>
+                  <select 
+                    value={row.method} 
+                    onChange={e => {
+                      const newRows = [...paymentRows];
+                      newRows[index].method = e.target.value;
+                      setPaymentRows(newRows);
+                    }}
+                    style={{ width: '45%', padding: '12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '14px', outline: 'none', backgroundColor: '#fff', cursor: 'pointer', color: '#334155', fontWeight: 'normal' }}
+                  >
+                    <option value="Cash ៛">💵 Cash ៛</option>
+                    <option value="Cash $">💵 Cash $</option>
+                    <option value="QR ៛">📱 QR ៛</option>
+                    <option value="QR $">📱 QR $</option>
+                  </select>
+                  
+                  <div style={{ flex: 1 }}>
+                    <CurrencyInput 
+                      placeholder="Amount..." 
+                      value={row.amount} 
+                      onChange={(val: any) => {
+                        const newRows = [...paymentRows];
+                        newRows[index].amount = val;
+                        setPaymentRows(newRows);
+                      }}
+                      style={{ width: '100%', padding: '12px', borderRadius: '8px', border: '1px solid #cbd5e1', boxSizing: 'border-box', outline: 'none', color: '#334155', fontSize: '14px', textAlign: 'right', fontWeight: 'normal' }}
+                    />
+                  </div>
+                  
+                  {paymentRows.length > 1 && (
+                    <button type="button" onClick={() => setPaymentRows(paymentRows.filter(r => r.id !== row.id))} style={{ background: 'none', border: 'none', color: '#ef4444', fontSize: '18px', cursor: 'pointer', padding: '0 4px', fontWeight: 'bold' }}>✕</button>
+                  )}
+                </div>
+              ))}
+
+              {paymentRows.some(r => Number(r.amount) > 0) && (
+                <div style={{ marginTop: '12px', paddingTop: '12px', borderTop: '1px dashed #cbd5e1', display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                  <span style={{ color: '#475569', fontSize: '13px', fontWeight: 'bold' }}>Total Expense:</span>
+                  <span style={{ color: '#ef4444', fontSize: '16px', fontWeight: 'normal' }}>{formatRiel(totalExpenseRiel)}</span>
+                </div>
+              )}
             </div>
 
-            <button type="submit" disabled={loading} style={styles.submitButton}>
+            <button type="submit" disabled={loading || totalExpenseRiel === 0} style={{...styles.submitButton, opacity: (loading || totalExpenseRiel === 0) ? 0.7 : 1}}>
               {loading ? 'Processing Entry...' : `Securely Log ${activeTab === 'business' ? 'Business' : 'Personal'} Expense`}
             </button>
           </form>
@@ -297,43 +405,42 @@ export default function ExpenseDashboard() {
           <div>
             {/* Add New Staff Form */}
             <form onSubmit={handleAddStaff} style={{ ...styles.form, padding: '16px', backgroundColor: '#f8fafc', borderRadius: '12px', marginBottom: '24px', border: '1px solid #e2e8f0' }}>
-              <div style={{ fontWeight: 'bold', color: '#1b4d3e', marginBottom: '4px' }}>➕ Register New Staff</div>
+              <div style={{ fontWeight: 'bold', color: '#1b4d3e', marginBottom: '8px', fontSize: '15px' }}>➕ Register New Staff</div>
               <div style={{ display: 'flex', gap: '15px', flexWrap: 'wrap', alignItems: 'flex-end' }}>
                 <div style={{ flex: '1 1 200px' }}>
-                  <label style={{ fontSize: '11px', fontWeight: 'bold', color: '#64748b', textTransform: 'uppercase', marginBottom: '4px', display: 'block' }}>Name</label>
-                  <input type="text" placeholder="Staff Name" value={newStaffName} onChange={e => setNewStaffName(e.target.value)} style={styles.inputField} required />
+                  <label style={{ fontSize: '11px', fontWeight: 'bold', color: '#475569', textTransform: 'uppercase', marginBottom: '6px', display: 'block' }}>Name</label>
+                  <input type="text" placeholder="Staff Name" value={newStaffName} onChange={e => setNewStaffName(e.target.value)} style={{...styles.inputField, fontSize: '14px'}} required />
                 </div>
                 <div style={{ flex: '1 1 150px' }}>
-                  <label style={{ fontSize: '11px', fontWeight: 'bold', color: '#64748b', textTransform: 'uppercase', marginBottom: '4px', display: 'block' }}>Monthly Salary (៛)</label>
-                  <input type="number" placeholder="e.g. 1200000" value={newStaffSalary} onChange={e => setNewStaffSalary(e.target.value)} style={styles.inputField} className="no-spinners" required />
+                  <label style={{ fontSize: '11px', fontWeight: 'bold', color: '#475569', textTransform: 'uppercase', marginBottom: '6px', display: 'block' }}>Monthly Salary (៛)</label>
+                  <CurrencyInput value={newStaffSalary} onChange={(v: any) => setNewStaffSalary(v)} style={{...styles.inputField, fontSize: '14px'}} placeholder="e.g. 1,200,000" />
                 </div>
-                <button type="submit" disabled={loading} style={{ ...styles.submitButton, marginTop: 0, padding: '12px 24px', height: '45px' }}>Add Staff</button>
+                <button type="submit" disabled={loading} style={{ ...styles.submitButton, marginTop: 0, padding: '12px 24px', height: '44px' }}>Add Staff</button>
               </div>
             </form>
 
             {/* Editable Staff Payroll Table */}
             <div style={{ overflowX: 'auto', borderRadius: '8px', border: '1px solid #e2e8f0', boxShadow: '0 4px 6px rgba(0,0,0,0.02)' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', minWidth: '950px' }}>
-                <thead style={{ backgroundColor: '#f1f5f9', borderBottom: '2px solid #cbd5e1' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', minWidth: '1050px' }}>
+                <thead style={{ backgroundColor: '#f8fafc', borderBottom: '1px solid #cbd5e1' }}>
                   <tr>
-                    <th style={{ padding: '12px 16px', color: '#64748b', fontSize: '12px', textTransform: 'uppercase' }}>Name</th>
-                    <th style={{ padding: '12px 16px', color: '#64748b', fontSize: '12px', textTransform: 'uppercase' }}>Start Date</th>
-                    <th style={{ padding: '12px 16px', color: '#64748b', fontSize: '12px', textTransform: 'uppercase', textAlign: 'right' }}>Monthly Salary</th>
-                    <th style={{ padding: '12px 16px', color: '#10b981', fontSize: '12px', textTransform: 'uppercase', textAlign: 'right' }}>Earned MTD</th>
-                    <th style={{ padding: '12px 16px', color: '#ef4444', fontSize: '12px', textTransform: 'uppercase', textAlign: 'right' }}>Total Debt</th>
-                    <th style={{ padding: '12px 16px', color: '#3b82f6', fontSize: '12px', textTransform: 'uppercase', textAlign: 'right' }}>Net Payout</th>
-                    <th style={{ padding: '12px 16px', color: '#b59410', fontSize: '12px', textTransform: 'uppercase', textAlign: 'center', width: '180px' }}>➕ Add Debt</th>
-                    <th style={{ padding: '12px 16px', color: '#64748b', fontSize: '12px', textAlign: 'center', width: '50px' }}>Del</th>
+                    <th style={{ padding: '12px', color: '#475569', fontSize: '12px', fontWeight: 'bold', textTransform: 'uppercase' }}>Name</th>
+                    <th style={{ padding: '12px', color: '#475569', fontSize: '12px', fontWeight: 'bold', textTransform: 'uppercase' }}>Start Date</th>
+                    <th style={{ padding: '12px', color: '#475569', fontSize: '12px', fontWeight: 'bold', textTransform: 'uppercase', textAlign: 'right' }}>Monthly Salary</th>
+                    <th style={{ padding: '12px', color: '#10b981', fontSize: '12px', fontWeight: 'bold', textTransform: 'uppercase', textAlign: 'right' }}>Earned MTD</th>
+                    <th style={{ padding: '12px', color: '#ef4444', fontSize: '12px', fontWeight: 'bold', textTransform: 'uppercase', textAlign: 'right' }}>Total Debt</th>
+                    <th style={{ padding: '12px', color: '#3b82f6', fontSize: '12px', fontWeight: 'bold', textTransform: 'uppercase', textAlign: 'right' }}>Net Payout</th>
+                    <th style={{ padding: '12px', color: '#b59410', fontSize: '12px', fontWeight: 'bold', textTransform: 'uppercase', textAlign: 'center', width: '280px' }}>➕ Add Advance/Debt</th>
+                    <th style={{ padding: '12px', color: '#475569', fontSize: '12px', fontWeight: 'bold', textAlign: 'center', width: '100px' }}>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {staffList.length === 0 ? (
-                    <tr><td colSpan={8} style={{ textAlign: 'center', padding: '30px', color: '#94a3b8' }}>No staff recorded yet.</td></tr>
+                    <tr><td colSpan={8} style={{ textAlign: 'center', padding: '30px', color: '#94a3b8', fontSize: '14px', fontWeight: 'normal' }}>No staff recorded yet.</td></tr>
                   ) : (
                     staffList.map((staff) => {
-                      // Math Logic
                       const monthlySalary = Number(staff.salary) || 0;
-                      const dailyRate = monthlySalary / 30; // Standard 30 day divisor
+                      const dailyRate = monthlySalary / 30; 
                       const daysWorked = calculateDaysWorked(staff.start_date);
                       const totalEarned = Math.round(dailyRate * daysWorked);
                       
@@ -346,7 +453,7 @@ export default function ExpenseDashboard() {
                           
                           {/* 1. Name */}
                           <td 
-                            style={{ padding: '12px 16px', fontWeight: 'bold', color: '#0f172a', cursor: 'text' }}
+                            style={{ padding: '12px', color: '#334155', cursor: 'text', fontSize: '14px', fontWeight: 'normal' }}
                             onClick={() => { setEditingCell({ id: staff.id, field: 'name' }); setEditValue(staff.name); }}
                           >
                             {editingCell?.id === staff.id && editingCell?.field === 'name' ? (
@@ -356,7 +463,7 @@ export default function ExpenseDashboard() {
 
                           {/* 2. Start Date */}
                           <td 
-                            style={{ padding: '12px 16px', color: '#475569', cursor: 'text', fontSize: '13px' }}
+                            style={{ padding: '12px', color: '#475569', cursor: 'text', fontSize: '14px', fontWeight: 'normal' }}
                             onClick={() => { setEditingCell({ id: staff.id, field: 'start_date' }); setEditValue(staff.start_date || ''); }}
                           >
                             {editingCell?.id === staff.id && editingCell?.field === 'start_date' ? (
@@ -364,74 +471,89 @@ export default function ExpenseDashboard() {
                             ) : (
                               <div>
                                 {staff.start_date || 'N/A'}
-                                <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '2px' }}>{daysWorked} days</div>
+                                <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '2px', fontWeight: 'normal' }}>{daysWorked} days</div>
                               </div>
                             )}
                           </td>
 
                           {/* 3. Monthly Salary */}
                           <td 
-                            style={{ padding: '12px 16px', color: '#475569', cursor: 'text', textAlign: 'right' }}
+                            style={{ padding: '12px', color: '#475569', cursor: 'text', textAlign: 'right', fontSize: '14px', fontWeight: 'normal' }}
                             onClick={() => { setEditingCell({ id: staff.id, field: 'salary' }); setEditValue(String(staff.salary || 0)); }}
                           >
                             {editingCell?.id === staff.id && editingCell?.field === 'salary' ? (
-                              <input type="number" autoFocus className="no-spinners" value={editValue} onChange={e => setEditValue(e.target.value)} onBlur={() => saveInlineEdit(staff.id, 'salary')} onKeyDown={e => e.key === 'Enter' && saveInlineEdit(staff.id, 'salary')} style={{...styles.tableInput, textAlign: 'right'}} />
+                              <CurrencyInput autoFocus value={Number(editValue)} onChange={(v:any) => setEditValue(String(v))} onBlur={() => saveInlineEdit(staff.id, 'salary')} onKeyDown={(e:any) => e.key === 'Enter' && saveInlineEdit(staff.id, 'salary')} style={{...styles.tableInput, textAlign: 'right'}} />
                             ) : formatRiel(monthlySalary)}
                           </td>
 
-                          {/* 4. Total Earned (Calculated MTD) */}
-                          <td style={{ padding: '12px 16px', fontWeight: 'bold', color: '#10b981', textAlign: 'right' }}>
+                          {/* 4. Total Earned */}
+                          <td style={{ padding: '12px', color: '#10b981', textAlign: 'right', fontSize: '14px', fontWeight: 'normal' }}>
                             {formatRiel(totalEarned)}
                           </td>
 
-                          {/* 5. Total Debt (Editable) */}
+                          {/* 5. Total Debt */}
                           <td 
-                            style={{ padding: '12px 16px', fontWeight: 'bold', color: '#ef4444', textAlign: 'right', cursor: 'text' }}
+                            style={{ padding: '12px', color: '#ef4444', textAlign: 'right', cursor: 'text', fontSize: '14px', fontWeight: 'normal' }}
                             onClick={() => { setEditingCell({ id: staff.id, field: 'total_debt' }); setEditValue(String(staff.total_debt || 0)); }}
                           >
                             {editingCell?.id === staff.id && editingCell?.field === 'total_debt' ? (
-                              <input type="number" autoFocus className="no-spinners" value={editValue} onChange={e => setEditValue(e.target.value)} onBlur={() => saveInlineEdit(staff.id, 'total_debt')} onKeyDown={e => e.key === 'Enter' && saveInlineEdit(staff.id, 'total_debt')} style={{...styles.tableInput, textAlign: 'right', color: '#ef4444', fontWeight: 'bold'}} />
+                              <CurrencyInput autoFocus value={Number(editValue)} onChange={(v:any) => setEditValue(String(v))} onBlur={() => saveInlineEdit(staff.id, 'total_debt')} onKeyDown={(e:any) => e.key === 'Enter' && saveInlineEdit(staff.id, 'total_debt')} style={{...styles.tableInput, textAlign: 'right', color: '#ef4444'}} />
                             ) : formatRiel(totalDebt)}
                           </td>
 
-                          {/* 6. Net Payout (Calculated) */}
-                          <td style={{ padding: '12px 16px', fontWeight: 'bold', color: isNegativePayout ? '#ef4444' : '#3b82f6', textAlign: 'right', fontSize: '15px' }}>
+                          {/* 6. Net Payout */}
+                          <td style={{ padding: '12px', color: isNegativePayout ? '#ef4444' : '#3b82f6', textAlign: 'right', fontSize: '14px', fontWeight: 'normal' }}>
                             {isNegativePayout ? '-' : ''}{formatRiel(Math.abs(netPayout))}
                           </td>
 
-                          {/* 7. Action: Add Debt */}
-                          <td style={{ padding: '10px 16px', textAlign: 'center' }}>
+                          {/* 7. Action: Add Debt & Method */}
+                          <td style={{ padding: '12px', textAlign: 'center' }}>
                             <div style={{ display: 'flex', gap: '6px' }}>
-                              <input 
-                                type="number" 
+                              <select 
+                                value={debtMethods[staff.id] || 'Cash ៛'} 
+                                onChange={e => setDebtMethods({ ...debtMethods, [staff.id]: e.target.value })}
+                                style={{ ...styles.tableInput, width: '85px', padding: '6px', fontSize: '13px', fontWeight: 'normal' }}
+                              >
+                                <option value="Cash ៛">Cash ៛</option>
+                                <option value="Cash $">Cash $</option>
+                                <option value="QR ៛">QR ៛</option>
+                                <option value="QR $">QR $</option>
+                              </select>
+                              <CurrencyInput 
                                 placeholder="0 ៛" 
                                 value={debtAdditions[staff.id] || ''} 
-                                onChange={e => setDebtAdditions({ ...debtAdditions, [staff.id]: e.target.value })} 
-                                onKeyDown={e => e.key === 'Enter' && handleAddDebt(staff)}
-                                className="no-spinners"
-                                style={{...styles.tableInput, flex: 1, padding: '6px 8px'}} 
+                                onChange={(v:any) => setDebtAdditions({ ...debtAdditions, [staff.id]: v })} 
+                                onKeyDown={(e:any) => e.key === 'Enter' && handleAddDebt(staff)}
+                                style={{...styles.tableInput, flex: 1, padding: '6px', fontSize: '13px', fontWeight: 'normal'}} 
                               />
                               <button 
                                 onClick={() => handleAddDebt(staff)}
                                 disabled={!debtAdditions[staff.id]}
-                                style={{ ...styles.actionBtn, background: debtAdditions[staff.id] ? '#b59410' : '#e2e8f0', color: debtAdditions[staff.id] ? '#fff' : '#94a3b8', cursor: debtAdditions[staff.id] ? 'pointer' : 'not-allowed', padding: '6px 10px' }}
+                                style={{ ...styles.actionBtn, background: debtAdditions[staff.id] ? '#b59410' : '#e2e8f0', color: debtAdditions[staff.id] ? '#fff' : '#94a3b8', cursor: debtAdditions[staff.id] ? 'pointer' : 'not-allowed', padding: '6px 12px' }}
                               >
                                 Add
                               </button>
                             </div>
                           </td>
 
-                          {/* 8. Action: Delete */}
-                          <td style={{ padding: '12px 16px', textAlign: 'center' }}>
-                            <button 
-                              onClick={() => handleDeleteStaff(staff.id, staff.name)}
-                              style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '16px', opacity: 0.6, transition: 'opacity 0.2s' }}
-                              title="Delete Staff"
-                              onMouseEnter={e => e.currentTarget.style.opacity = '1'}
-                              onMouseLeave={e => e.currentTarget.style.opacity = '0.6'}
-                            >
-                              🗑️
-                            </button>
+                          {/* 8. Actions: History & Delete */}
+                          <td style={{ padding: '12px', textAlign: 'center' }}>
+                            <div style={{ display: 'flex', justifyContent: 'center', gap: '8px' }}>
+                              <button 
+                                onClick={() => handleViewHistory(staff)}
+                                style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '16px', opacity: 0.7 }}
+                                title="View Debt History"
+                              >
+                                🕒
+                              </button>
+                              <button 
+                                onClick={() => handleDeleteStaff(staff.id, staff.name)}
+                                style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '16px', opacity: 0.7 }}
+                                title="Delete Staff"
+                              >
+                                🗑️
+                              </button>
+                            </div>
                           </td>
 
                         </tr>
@@ -441,7 +563,7 @@ export default function ExpenseDashboard() {
                 </tbody>
               </table>
             </div>
-            <p style={{ fontSize: '11px', color: '#94a3b8', marginTop: '12px', textAlign: 'center' }}>
+            <p style={{ fontSize: '12px', color: '#94a3b8', marginTop: '16px', textAlign: 'center', fontWeight: 'normal' }}>
               💡 <b>Tip:</b> Click on any Name, Start Date, Monthly Salary, or Total Debt to edit it directly.
             </p>
           </div>
@@ -449,8 +571,59 @@ export default function ExpenseDashboard() {
 
       </div>
 
+      {/* STAFF DEBT HISTORY MODAL */}
+      {historyModal.isOpen && historyModal.staff && (
+        <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 10000, display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '20px', boxSizing: 'border-box' }} onMouseDown={() => setHistoryModal({ isOpen: false, staff: null, history: [] })}>
+          <div style={{ backgroundColor: '#ffffff', width: '100%', maxWidth: '500px', borderRadius: '12px', padding: '24px', boxShadow: '0 10px 25px rgba(0,0,0,0.15)' }} onMouseDown={e => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #f1f5f9', paddingBottom: '12px', marginBottom: '16px' }}>
+              <h3 style={{ margin: 0, color: '#1e293b', fontSize: '18px', fontWeight: 'bold' }}>🕒 Debt History: {historyModal.staff.name}</h3>
+              <button onClick={() => setHistoryModal({ isOpen: false, staff: null, history: [] })} style={{ background: 'none', border: 'none', fontSize: '18px', cursor: 'pointer', color: '#94a3b8', fontWeight: 'bold' }}>✕</button>
+            </div>
+            
+            <div style={{ maxHeight: '400px', overflowY: 'auto', paddingRight: '8px' }}>
+              {historyModal.history.length === 0 ? (
+                <p style={{ textAlign: 'center', color: '#94a3b8', fontSize: '14px', padding: '20px', fontWeight: 'normal' }}>No debt history found.</p>
+              ) : (
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '14px' }}>
+                  <thead>
+                    <tr style={{ borderBottom: '1px solid #cbd5e1' }}>
+                      <th style={{ padding: '8px 0', textAlign: 'left', color: '#475569', fontWeight: 'bold', fontSize: '12px' }}>Date</th>
+                      <th style={{ padding: '8px 0', textAlign: 'left', color: '#475569', fontWeight: 'bold', fontSize: '12px' }}>Payment Method</th>
+                      <th style={{ padding: '8px 0', textAlign: 'right', color: '#475569', fontWeight: 'bold', fontSize: '12px' }}>Amount (៛)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {historyModal.history.map((record) => (
+                      <tr key={record.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                        <td style={{ padding: '12px 0', color: '#334155', fontWeight: 'normal' }}>{new Date(record.created_at).toLocaleDateString()}</td>
+                        <td style={{ padding: '12px 0', color: '#475569', fontWeight: 'normal' }}>{record.payment_method}</td>
+                        <td style={{ padding: '12px 0', textAlign: 'right', color: '#ef4444', fontWeight: 'normal' }}>{formatRiel(record.amount)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+            
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '20px' }}>
+              <button onClick={() => setHistoryModal({ isOpen: false, staff: null, history: [] })} style={{ padding: '10px 16px', backgroundColor: '#f1f5f9', border: 'none', borderRadius: '6px', cursor: 'pointer', color: '#475569', fontSize: '14px', fontWeight: 'bold' }}>Close</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* --- GLOBAL CSS --- */}
       <style jsx global>{`
+        /* Force inherit font for all inputs and enable tabular numbers for exact matching height */
+        input, select, button, textarea {
+          font-family: inherit;
+          font-variant-numeric: tabular-nums lining-nums;
+        }
+        
+        body {
+          font-variant-numeric: tabular-nums lining-nums;
+        }
+
         input[type="number"].no-spinners::-webkit-inner-spin-button,
         input[type="number"].no-spinners::-webkit-outer-spin-button {
           -webkit-appearance: none;
@@ -470,10 +643,10 @@ const styles = {
     backgroundColor: '#f8fafc',
     minHeight: '100vh',
     display: 'flex',
-    alignItems: 'flex-start', // Allows scrolling nicely if table gets long
+    alignItems: 'flex-start',
     justifyContent: 'center',
     padding: '40px 20px 40px 65px', 
-    fontFamily: '"SF Pro Display", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+    fontFamily: 'Arial, sans-serif',
     flex: 1,
     overflowY: 'auto' as const,
     width: '100%',
@@ -484,7 +657,7 @@ const styles = {
     width: '100%',
     borderRadius: '16px',
     padding: '35px',
-    boxShadow: '0 10px 25px rgba(0, 0, 0, 0.05), 0 2px 4px rgba(0, 0, 0, 0.02)',
+    boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03)',
     borderColor: '#e2e8f0',
     borderWidth: '1px',
     borderStyle: 'solid',
@@ -494,22 +667,23 @@ const styles = {
     marginBottom: '30px',
   },
   mainTitle: {
-    color: '#b59410',
-    fontSize: '28px',
-    fontWeight: '700',
-    letterSpacing: '-0.5px',
-    margin: '0 0 4px 0',
+    color: '#1e293b',
+    fontSize: '26px',
+    fontWeight: 'bold',
+    letterSpacing: '-0.3px',
+    margin: '0 0 6px 0',
   },
   subtitle: {
     color: '#64748b',
-    fontSize: '14px',
+    fontSize: '15px',
     margin: 0,
+    fontWeight: 'normal',
   },
   tabContainer: {
     display: 'flex',
-    gap: '6px',
+    gap: '8px',
     backgroundColor: '#f1f5f9',
-    padding: '6px',
+    padding: '8px',
     borderRadius: '10px',
     marginBottom: '30px',
     flexWrap: 'wrap' as const,
@@ -520,8 +694,8 @@ const styles = {
     backgroundColor: 'transparent', 
     borderWidth: '0px',             
     color: '#64748b',
-    fontSize: '14px',
-    fontWeight: '600',
+    fontSize: '15px',
+    fontWeight: 'bold',
     borderRadius: '8px',
     cursor: 'pointer',
     transition: 'all 0.2s ease',
@@ -530,7 +704,7 @@ const styles = {
   activeTab: {
     backgroundColor: '#1b4d3e',
     color: '#ffffff',
-    boxShadow: '0 4px 12px rgba(27,77,62,0.15)',
+    boxShadow: '0 2px 8px rgba(27,77,62,0.15)',
   },
   form: {
     display: 'flex',
@@ -544,9 +718,9 @@ const styles = {
     flex: 1,
   },
   label: {
-    color: '#b59410',
-    fontSize: '13px',
-    fontWeight: '600',
+    color: '#475569',
+    fontSize: '12px',
+    fontWeight: 'bold',
     letterSpacing: '0.3px',
     textTransform: 'uppercase' as const,
   },
@@ -557,10 +731,11 @@ const styles = {
     borderStyle: 'solid',           
     borderRadius: '8px',
     padding: '12px 14px',
-    color: '#0f172a',
-    fontSize: '15px',
+    color: '#334155',
+    fontSize: '14px', 
+    fontWeight: 'normal',
     outline: 'none',
-    transition: 'all 0.2s ease',
+    transition: 'border-color 0.2s ease',
     width: '100%',
     boxSizing: 'border-box' as const,
   },
@@ -571,8 +746,9 @@ const styles = {
     borderStyle: 'solid',           
     borderRadius: '6px',
     padding: '8px 10px',
-    color: '#0f172a',
-    fontSize: '14px',
+    color: '#334155',
+    fontSize: '14px', 
+    fontWeight: 'normal',
     outline: '2px solid #b58a3d',
     width: '100%',
     boxSizing: 'border-box' as const,
@@ -581,7 +757,7 @@ const styles = {
     border: 'none',
     borderRadius: '6px',
     fontWeight: 'bold',
-    fontSize: '12px',
+    fontSize: '13px',
     transition: 'background 0.2s'
   },
   radioGrid: {
@@ -599,15 +775,15 @@ const styles = {
     borderColor: '#cbd5e1',         
     padding: '12px',
     borderRadius: '8px',
-    color: '#64748b',
+    color: '#334155',
     cursor: 'pointer',
     fontSize: '14px',
-    fontWeight: '500',
+    fontWeight: 'normal',
     transition: 'all 0.2s ease',
   },
   radioLabelActive: {
     borderColor: '#b59410',
-    color: '#0f172a',
+    color: '#334155',
     backgroundColor: '#fefcf3',
   },
   hiddenRadio: {
@@ -623,34 +799,16 @@ const styles = {
     borderStyle: 'solid',
     display: 'inline-block',
   },
-  currencyRow: {
-    display: 'flex',
-    gap: '15px',
-    flexWrap: 'wrap' as const,
-  },
-  currencyWrapper: {
-    position: 'relative' as const,
-    display: 'flex',
-    alignItems: 'center',
-  },
-  currencyPrefix: {
-    position: 'absolute' as const,
-    left: '12px',
-    color: '#b59410',
-    fontWeight: '600',
-    fontSize: '16px',
-  },
   submitButton: {
     backgroundColor: '#b59410',
     color: '#ffffff',
     padding: '15px',
     borderWidth: '0px',             
     borderRadius: '8px',
-    fontSize: '15px',
-    fontWeight: '700',
+    fontSize: '14px',
+    fontWeight: 'bold',
     cursor: 'pointer',
-    transition: 'all 0.2s ease',
-    boxShadow: '0 6px 18px rgba(181,148,16,0.15)',
+    transition: 'background 0.2s ease',
     marginTop: '10px',
   },
 }

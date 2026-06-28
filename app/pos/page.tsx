@@ -11,6 +11,7 @@ const MAIN_KEYWORDS = ['មិញ', 'ខុន', 'ខ្ញី', 'ម្លិ�
 
 // Global helper function 
 const formatRiel = (amount: number) => `${new Intl.NumberFormat('en-US').format(Math.round(amount))} ៛`;
+const formatUSD = (amount: number) => `$${new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(amount)}`;
 
 // Translations Dictionary
 const t = {
@@ -26,8 +27,7 @@ const t = {
     emptyCart: "Cart is empty",
     unitPrice: "Unit Price",
     quantity: "Quantity",
-    subtotal: "Subtotal:",
-    totalKhmer: "Total:",
+    totalKhmer: "Total Due:",
     totalUsd: "Total in USD:",
     checkout: "Checkout",
     successTitle: "Invoice Ready",
@@ -50,7 +50,6 @@ const t = {
     emptyCart: "មិនមានទំនិញក្នុងកន្ត្រកឡើយ",
     unitPrice: "តម្លៃឯកតា",
     quantity: "បរិមាណ",
-    subtotal: "តម្លៃសរុប:",
     totalKhmer: "សរុបរួម:",
     totalUsd: "សរុបជាដុល្លារ:",
     checkout: "ចាត់ចែងការទូទាត់",
@@ -64,42 +63,88 @@ const t = {
   }
 };
 
-function CartInput({ value, onChange, isQty }: { value: number, onChange: (val: number) => void, isQty: boolean }) {
-  const [focused, setFocused] = useState(false);
-  const [temp, setTemp] = useState(value === 0 ? '' : String(value));
+// ==========================================
+// ROBUST LIVE COMMA FORMATTER (Stateless Display)
+// ==========================================
+function CurrencyInput({ value, onChange, placeholder, style, autoFocus }: any) {
+  const [inputValue, setInputValue] = useState('');
 
   useEffect(() => {
-    if (!focused) {
-      setTemp(value === 0 ? '' : String(value));
+    if (value === '' || value === 0) {
+      setInputValue('');
+    } else {
+      const parsed = parseFloat(inputValue.replace(/,/g, ''));
+      if (parsed !== value) {
+        setInputValue(new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 }).format(value));
+      }
     }
-  }, [value, focused]);
+  }, [value]);
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    let raw = e.target.value.replace(/[^0-9.]/g, '');
+    
+    const parts = raw.split('.');
+    if (parts.length > 2) raw = parts[0] + '.' + parts.slice(1).join('');
+
+    let formatted = parts[0] ? new Intl.NumberFormat('en-US').format(parseInt(parts[0], 10)) : '';
+    if (parts.length > 1) formatted += '.' + parts[1].substring(0, 2);
+    if (raw === '') formatted = '';
+
+    setInputValue(formatted);
+    const num = parseFloat(raw);
+    onChange(isNaN(num) ? '' : num);
+  };
 
   return (
     <input 
       type="text"
-      value={focused ? temp : (value === 0 ? '' : new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 }).format(value))}
-      onFocus={() => { 
-        setFocused(true); 
-        setTemp(''); 
-      }}
-      onBlur={() => {
-        setFocused(false);
-        let parsed = parseFloat(temp.replace(/,/g, ''));
-        if (isNaN(parsed)) parsed = 0; 
-        onChange(parsed);
-      }}
-      onChange={(e) => setTemp(e.target.value)}
+      inputMode="decimal"
+      placeholder={placeholder}
+      value={inputValue}
+      onChange={handleChange}
+      autoFocus={autoFocus}
+      style={{ ...style, color: '#0f172a' }}
+    />
+  )
+}
+
+function CartInput({ value, onChange, isQty }: { value: number, onChange: (val: number) => void, isQty: boolean }) {
+  const [inputValue, setInputValue] = useState('');
+
+  useEffect(() => {
+    if (value === 0) {
+      setInputValue('');
+    } else {
+      const parsed = parseFloat(inputValue.replace(/,/g, ''));
+      if (parsed !== value) {
+        setInputValue(new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 }).format(value));
+      }
+    }
+  }, [value]);
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    let raw = e.target.value.replace(/[^0-9.]/g, '');
+    const parts = raw.split('.');
+    if (parts.length > 2) raw = parts[0] + '.' + parts.slice(1).join('');
+    
+    let formatted = parts[0] ? new Intl.NumberFormat('en-US').format(parseInt(parts[0], 10)) : '';
+    if (parts.length > 1) formatted += '.' + parts[1].substring(0, 2);
+    if (raw === '') formatted = '';
+
+    setInputValue(formatted);
+    const num = parseFloat(raw);
+    onChange(isNaN(num) ? 0 : num);
+  };
+
+  return (
+    <input 
+      type="text"
+      inputMode="decimal"
+      value={inputValue}
+      onChange={handleChange}
       style={{ 
-        width: '100%', 
-        padding: '8px', 
-        borderRadius: '6px', 
-        border: '1px solid #dcd7cc', 
-        boxSizing: 'border-box', 
-        fontSize: '13px',
-        fontWeight: 'normal',
-        color: '#333333',
-        backgroundColor: '#ffffff',
-        outline: 'none'
+        width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', 
+        fontSize: '16px', fontWeight: 'bold', color: '#0f172a', backgroundColor: '#ffffff', outline: 'none', textAlign: 'center'
       }}
     />
   )
@@ -125,11 +170,14 @@ export default function POSPage() {
   const [customerSearchTerm, setCustomerSearchTerm] = useState('')
   const [isCustomerDropdownOpen, setIsCustomerDropdownOpen] = useState(false)
 
-  // CART INVOICE NAME OVERRIDE (Phone/Location removed)
   const [cartCustomerNameOverride, setCartCustomerNameOverride] = useState('')
 
-  // CHECKOUT PAYMENT METHOD (Default to Cash)
-  const [checkoutPaymentMethod, setCheckoutPaymentMethod] = useState<'Cash' | 'QR Payment'>('Cash')
+  // ==========================================
+  // DYNAMIC PAYMENT ROWS
+  // ==========================================
+  const [paymentRows, setPaymentRows] = useState<{id: number, method: string, amount: number | ''}[]>([
+    { id: Date.now(), method: 'Cash ៛', amount: '' }
+  ]);
 
   const [isCreateCustomerModalOpen, setIsCreateCustomerModalOpen] = useState(false)
   const [newCustomerForm, setNewCustomerForm] = useState({ name: '', phone: '', location: '', owner: '', type: '' })
@@ -139,18 +187,15 @@ export default function POSPage() {
   const [editCardForm, setEditCardForm] = useState({ name: '', price: '' })
 
   const [selectedMobileProduct, setSelectedMobileProduct] = useState<any>(null)
-  const [mobilePrice, setMobilePrice] = useState<number | string>('')
-  const [mobileQty, setMobileQty] = useState<number | string>('')
+  const [mobilePrice, setMobilePrice] = useState<number | ''>('')
+  const [mobileQty, setMobileQty] = useState<number | ''>('')
   const [mobileName, setMobileName] = useState<string>('')
 
-  // RETURN / EXCHANGE STATE
   const [exchangeModal, setExchangeModal] = useState<{ isOpen: boolean, product: any, consumedKg: string | number }>({
     isOpen: false, product: null, consumedKg: ''
   })
 
-  // CHECKOUT STATE
-  const [amountReceived, setAmountReceived] = useState<number | ''>('')
-  const [saleSummary, setSaleSummary] = useState<{ total: number, received: number, change: number, type?: 'retail' | 'wholesale', isCashless?: boolean, items?: any[] } | null>(null)
+  const [saleSummary, setSaleSummary] = useState<{ total: number, receivedRiel: number, receivedUsd: number, totalReceivedInRiel: number, change: number, type?: 'retail' | 'wholesale', isCashless?: boolean, items?: any[], isDebt?: boolean } | null>(null)
   const [showInvoicePreview, setShowInvoicePreview] = useState(false)
   const [completedSale, setCompletedSale] = useState<any>(null)
   const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null)
@@ -225,38 +270,26 @@ export default function POSPage() {
     return () => window.removeEventListener('resize', checkDeviceType);
   }, [])
 
-  // Sync Master Customer State to Cart Customizer Session
   useEffect(() => {
-    if (selectedCustomer) {
-      setCartCustomerNameOverride(selectedCustomer.name || '');
-    } else {
-      setCartCustomerNameOverride('Walk-in');
-    }
+    if (selectedCustomer) setCartCustomerNameOverride(selectedCustomer.name || '');
+    else setCartCustomerNameOverride('Walk-in');
   }, [selectedCustomerId, customers])
 
-  // Auto-Select "Walk-in" ONLY when the tab changes or data loads
   useEffect(() => {
     if (activeTab === 'wholesale' && !selectedCustomerId && customers.length > 0) {
       const walkInCust = customers.find(c => c.name.toLowerCase() === 'walk-in' || c.name.toLowerCase() === 'walk in');
-      if (walkInCust) {
-        setSelectedCustomerId(walkInCust.id.toString());
-      }
+      if (walkInCust) setSelectedCustomerId(walkInCust.id.toString());
     }
   }, [activeTab, customers]) 
 
-  // MAGIC INVOICE GENERATOR
   useEffect(() => {
     if (completedSale && invoiceRef.current && !previewImageUrl && showInvoicePreview) {
       const timer = setTimeout(async () => {
         try {
           await document.fonts.ready;
-          const dataUrl = await htmlToImage.toPng(invoiceRef.current!, { 
-            pixelRatio: 3, 
-            backgroundColor: '#ffffff' 
-          });
+          const dataUrl = await htmlToImage.toPng(invoiceRef.current!, { pixelRatio: 3, backgroundColor: '#ffffff' });
           setPreviewImageUrl(dataUrl);
           setIsGeneratingPreview(false);
-          
           executeAutoSaveOnly(dataUrl, completedSale.invoiceNo);
         } catch (error) {
           console.error("Preview generation failed:", error);
@@ -270,11 +303,8 @@ export default function POSPage() {
   async function loadProductsAndSettings() {
     const { data: prodData } = await supabase.from('products').select('*').order('id', { ascending: true })
     if (prodData) setProducts(prodData)
-
     const { data: setObj } = await supabase.from('app_settings').select('*').eq('setting_key', 'pos_product_order').single()
-    if (setObj && setObj.setting_value) {
-      setProductOrder(setObj.setting_value)
-    }
+    if (setObj && setObj.setting_value) setProductOrder(setObj.setting_value)
   }
 
   async function loadCustomers() {
@@ -299,14 +329,11 @@ export default function POSPage() {
 
   const formatRielSymbol = (amountInRiel: number) => `${new Intl.NumberFormat('en-US').format(Math.round(amountInRiel))} ៛`;
   const formatRielFromNative = (rielAmount: number) => `${new Intl.NumberFormat('en-US').format(Math.round(rielAmount))} ៛`;
-  const formatUSD = (amount: number) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(amount);
 
   function handleProductClick(product: any) {
     if (editingCardId === product.id) return;
-    
     const isMobile = typeof window !== 'undefined' && window.innerWidth < 1024;
     const defaultQty = activeTab === 'wholesale' ? 0 : 1;
-
     if (isMobile) {
       setSelectedMobileProduct(product);
       setMobileName(product.name);
@@ -324,45 +351,26 @@ export default function POSPage() {
       setCart(cart.map((item) => item.product_id === product.id && !item.isSpecial ? { ...item, quantity: item.quantity + qtyToAdd } : item))
     } else {
       setCart([...cart, { 
-        ...product, 
-        product_id: product.id, 
-        id: Math.random(), 
-        quantity: qtyToAdd, 
-        custom_name: product.name, 
-        custom_price_riel: priceInRiel,
-        cost_price: Number(product.cost_price || 0),
-        isSpecial: false,
-        selected_batch_id: null,
-        sortOrder: 0
+        ...product, product_id: product.id, id: Math.random(), quantity: qtyToAdd, custom_name: product.name, custom_price_riel: priceInRiel,
+        cost_price: Number(product.cost_price || 0), isSpecial: false, selected_batch_id: null, sortOrder: 0
       }])
     }
   }
 
   function handleAddMobileProductToCart() {
     if (!selectedMobileProduct) return;
-    const finalQty = typeof mobileQty === 'number' ? mobileQty : (parseFloat(mobileQty) || 0);
-    const finalPrice = typeof mobilePrice === 'number' ? mobilePrice : (parseFloat(mobilePrice) || 0);
+    const finalQty = typeof mobileQty === 'number' ? mobileQty : (parseFloat(mobileQty as string) || 0);
+    const finalPrice = typeof mobilePrice === 'number' ? mobilePrice : (parseFloat(mobilePrice as string) || 0);
     
     const existing = cart.find((item) => item.product_id === selectedMobileProduct.id && !item.isSpecial);
     if (existing) {
       setCart(cart.map((item) => item.product_id === selectedMobileProduct.id && !item.isSpecial ? { 
-        ...item, 
-        custom_name: mobileName, 
-        custom_price_riel: finalPrice, 
-        quantity: item.quantity + finalQty 
+        ...item, custom_name: mobileName, custom_price_riel: finalPrice, quantity: item.quantity + finalQty 
       } : item));
     } else {
       setCart([...cart, { 
-        ...selectedMobileProduct, 
-        product_id: selectedMobileProduct.id,
-        id: Math.random(), 
-        custom_name: mobileName, 
-        custom_price_riel: finalPrice, 
-        cost_price: Number(selectedMobileProduct.cost_price || 0),
-        quantity: finalQty,
-        isSpecial: false,
-        selected_batch_id: null,
-        sortOrder: 0
+        ...selectedMobileProduct, product_id: selectedMobileProduct.id, id: Math.random(), custom_name: mobileName, custom_price_riel: finalPrice, 
+        cost_price: Number(selectedMobileProduct.cost_price || 0), quantity: finalQty, isSpecial: false, selected_batch_id: null, sortOrder: 0
       }]);
     }
     setSelectedMobileProduct(null);
@@ -375,33 +383,15 @@ export default function POSPage() {
     const perKgPrice = Math.round(Number(prod.price) / 50);
     const perKgCogs = Math.round(Number(prod.cost_price || 0) / 50);
 
-    const newItems = [];
-
-    newItems.push({
-      ...prod,
-      id: Math.random(), 
-      product_id: prod.id,
-      custom_name: `ដូរ ${prod.name}`,
-      custom_price_riel: Number(prod.price),
-      cost_price: Number(prod.cost_price || 0),
-      quantity: 1, 
-      isSpecial: true,
-      bypass_stock: false,
-      sortOrder: 1
-    });
+    const newItems = [{
+      ...prod, id: Math.random(), product_id: prod.id, custom_name: `ដូរ ${prod.name}`, custom_price_riel: Number(prod.price),
+      cost_price: Number(prod.cost_price || 0), quantity: 1, isSpecial: true, bypass_stock: false, sortOrder: 1
+    }];
 
     if (consumedKg > 0) {
       newItems.push({
-        ...prod,
-        id: Math.random(),
-        product_id: prod.id,
-        custom_name: `បានប្រើ ${prod.name}`,
-        custom_price_riel: perKgPrice,
-        cost_price: perKgCogs,
-        quantity: consumedKg,
-        isSpecial: true,
-        bypass_stock: true, 
-        sortOrder: 2
+        ...prod, id: Math.random(), product_id: prod.id, custom_name: `បានប្រើ ${prod.name}`, custom_price_riel: perKgPrice,
+        cost_price: perKgCogs, quantity: consumedKg, isSpecial: true, bypass_stock: true, sortOrder: 2
       });
     }
 
@@ -447,76 +437,39 @@ export default function POSPage() {
     if (!error) {
       setEditingCardId(null);
       loadProductsAndSettings();
-    } else {
-      alert("Error saving: " + error.message);
-    }
+    } else alert("Error saving: " + error.message);
   }
 
   async function handleCreateCustomer() {
     const finalName = newCustomerForm.name.trim() || 'Walk-in';
-    const finalPhone = newCustomerForm.phone.trim();
-    const finalLocation = newCustomerForm.location.trim();
-    const finalOwner = newCustomerForm.owner.trim() || null;
-    const finalType = newCustomerForm.type.trim();
-
     const { data, error } = await supabase.from('customers').insert([{
-      name: finalName,
-      phone: finalPhone,
-      location: finalLocation,
-      owner: finalOwner,
-      type: finalType
+      name: finalName, phone: newCustomerForm.phone.trim(), location: newCustomerForm.location.trim(),
+      owner: newCustomerForm.owner.trim() || null, type: newCustomerForm.type.trim()
     }]).select().single();
 
     if (!error && data) {
-      const updatedCustomers = [...customers, data].sort((a, b) => (a.name || '').localeCompare(b.name || ''));
-      setCustomers(updatedCustomers);
+      setCustomers([...customers, data].sort((a, b) => (a.name || '').localeCompare(b.name || '')));
       setSelectedCustomerId(data.id.toString());
       setIsCreateCustomerModalOpen(false);
       setNewCustomerForm({ name: '', phone: '', location: '', owner: '', type: '' });
       setCustomerSearchTerm('');
-    } else {
-      alert(`Error creating customer: ${error?.message}`);
-    }
+    } else alert(`Error creating customer: ${error?.message}`);
   }
 
   async function getFIFOSplits(productId: number, qtySold: number, fallbackCogs: number) {
     let remainingQty = qtySold;
     const splits: any[] = [];
-
-    const { data: batches } = await supabase
-      .from('price_history')
-      .select('*')
-      .eq('product_id', productId)
-      .gt('imported_qty', 0) 
-      .order('created_at', { ascending: true });
-
+    const { data: batches } = await supabase.from('price_history').select('*').eq('product_id', productId).gt('imported_qty', 0).order('created_at', { ascending: true });
     const availableBatches = (batches || []).filter(b => (b.sold_qty || 0) < (b.imported_qty || 0));
 
     for (const batch of availableBatches) {
       if (remainingQty <= 0) break;
-
       const availableInBatch = (batch.imported_qty || 0) - (batch.sold_qty || 0);
       const qtyTaken = Math.min(availableInBatch, remainingQty);
-
-      splits.push({
-        qty: qtyTaken,
-        cogs_price: batch.cost_price,
-        batch_id: batch.id,
-        current_sold: batch.sold_qty || 0
-      });
-
+      splits.push({ qty: qtyTaken, cogs_price: batch.cost_price, batch_id: batch.id, current_sold: batch.sold_qty || 0 });
       remainingQty -= qtyTaken;
     }
-
-    if (remainingQty > 0) {
-      splits.push({
-        qty: remainingQty,
-        cogs_price: fallbackCogs,
-        batch_id: null,
-        current_sold: 0
-      });
-    }
-
+    if (remainingQty > 0) splits.push({ qty: remainingQty, cogs_price: fallbackCogs, batch_id: null, current_sold: 0 });
     return splits;
   }
 
@@ -538,13 +491,10 @@ export default function POSPage() {
   });
 
   const filteredProducts = orderedProducts.filter(p => {
-    const matchesSearch = p.name?.toLowerCase().includes(searchQuery.toLowerCase())
-    if (!matchesSearch) return false;
-
-    const weightVal = parseFloat(p.weight || 0)
+    if (searchQuery && !p.name?.toLowerCase().includes(searchQuery.toLowerCase())) return false;
+    const weightVal = parseFloat(p.weight || 0);
     if (activeTab === 'wholesale' && weightVal < 50) return false;
     if (activeTab === 'retail' && weightVal >= 50) return false;
-
     if (activeTab !== 'retail' && activeCategory !== 'All') {
       const name = p.name || '';
       if (activeCategory === 'ផ្សេងៗ') {
@@ -561,9 +511,17 @@ export default function POSPage() {
   )
   const selectedCustomer = customers.find(c => c.id.toString() === selectedCustomerId.toString())
 
-  // Show Payment Method Selector ONLY for Retail OR Walk-in Wholesale
   const isSimpleCustomer = !selectedCustomer || ['walk-in', 'walk in', 'mom'].includes((selectedCustomer.name || '').toLowerCase());
   const showPaymentSelector = activeTab === 'retail' || isSimpleCustomer;
+
+  // Calculate live multi-currency totals
+  const liveTotalReceivedInRiel = paymentRows.reduce((sum, row) => {
+    const amt = Number(row.amount) || 0;
+    if (row.method.includes('$')) return sum + (amt * EXCHANGE_RATE);
+    return sum + amt;
+  }, 0);
+
+  const liveRemaining = totalRiel - liveTotalReceivedInRiel;
 
   const getCategorizedItems = (cartItems: any[]) => {
     let normalItems: any[] = [], specialItems: any[] = [], negativeItems: any[] = [], serviceItems: any[] = [];
@@ -579,7 +537,7 @@ export default function POSPage() {
     return [...normalItems, ...specialItems, ...negativeItems, ...serviceItems];
   }
 
-  // --- REWRITTEN CHECKOUT: DB MULTI-ROW SPLIT ENGINE & PAYMENT RECORDING ---
+  // --- REWRITTEN CHECKOUT: DB MULTI-ROW SPLIT ENGINE & ASSET LOGGING ---
   async function confirmCheckout() {
     if (cart.length === 0) return alert(lang === 'kh' ? 'សូមជ្រើសរើសទំនិញក្នុងកន្ត្រក!' : 'Cart is empty');
     if (activeTab === 'wholesale' && !selectedCustomerId) return alert(lang === 'kh' ? 'សូមជ្រើសរើសអតិថិជនសម្រាប់ដុំ!' : 'Please select a customer for wholesale');
@@ -591,8 +549,17 @@ export default function POSPage() {
       const currentTotalRiel = totalRiel;
       const finalCustomerName = cartCustomerNameOverride.trim() || 'Walk-in';
 
-      // Determine Payment Status String
-      const finalPaymentMethod = showPaymentSelector ? checkoutPaymentMethod : 'Pending';
+      // Combine payment methods string
+      const activePayments = paymentRows.filter(r => (Number(r.amount) || 0) > 0);
+      let finalPaymentMethod = 'Pending';
+      
+      if (showPaymentSelector) {
+        if (activePayments.length > 0) {
+          finalPaymentMethod = activePayments.map(r => `${r.method}: ${r.amount}`).join(', ');
+        } else if (isSimpleCustomer) {
+           finalPaymentMethod = 'Cash ៛'; // Fallback for quick walkin
+        }
+      }
 
       if (activeTab === 'retail') {
         const retailTxId = `RET-${Date.now().toString().slice(-6)}`;
@@ -603,7 +570,6 @@ export default function POSPage() {
           qty: item.quantity,
           price_per_bag: item.custom_price_riel,
           cogs_price: item.cost_price || 0
-          // If you add payment_method to retail_sales in the future, it goes here
         }));
 
         await supabase.from('retail_sales').insert(retailRows);
@@ -633,17 +599,10 @@ export default function POSPage() {
             let actualTotalCogs = actualUnitCogs * finalQty; 
             
             saleRows.push({
-              invoice_id: displayInvoiceNo,
-              product_id: item.product_id,
-              customer_name: finalCustomerName,
-              rice_type: item.name,
-              custom_rice_type: item.custom_name !== item.name ? item.custom_name : null,
-              qty: finalQty, 
-              price_per_bag: item.custom_price_riel,
-              cogs_price: actualUnitCogs,
-              owner: finalOwner
+              invoice_id: displayInvoiceNo, product_id: item.product_id, customer_name: finalCustomerName, rice_type: item.name,
+              custom_rice_type: item.custom_name !== item.name ? item.custom_name : null, qty: finalQty, price_per_bag: item.custom_price_riel,
+              cogs_price: actualUnitCogs, owner: finalOwner
             });
-
             invoiceTotalSales += Number(item.custom_price_riel) * finalQty;
             invoiceTotalCogs += actualTotalCogs;
 
@@ -653,48 +612,29 @@ export default function POSPage() {
             let actualTotalCogs = actualUnitCogs * finalQty;
 
             saleRows.push({
-              invoice_id: displayInvoiceNo,
-              product_id: item.product_id,
-              customer_name: finalCustomerName,
-              rice_type: item.name,
-              custom_rice_type: item.custom_name !== item.name ? item.custom_name : null,
-              qty: finalQty, 
-              price_per_bag: item.custom_price_riel,
-              cogs_price: actualUnitCogs,
-              owner: finalOwner
+              invoice_id: displayInvoiceNo, product_id: item.product_id, customer_name: finalCustomerName, rice_type: item.name,
+              custom_rice_type: item.custom_name !== item.name ? item.custom_name : null, qty: finalQty, price_per_bag: item.custom_price_riel,
+              cogs_price: actualUnitCogs, owner: finalOwner
             });
-
             invoiceTotalSales += Number(item.custom_price_riel) * finalQty;
             invoiceTotalCogs += actualTotalCogs;
 
             if (specificBatch && !editingInvoiceId && !isBypass) {
-              await supabase.from('price_history').update({
-                sold_qty: (specificBatch.sold_qty || 0) + finalQty
-              }).eq('id', specificBatch.id);
+              await supabase.from('price_history').update({ sold_qty: (specificBatch.sold_qty || 0) + finalQty }).eq('id', specificBatch.id);
             }
           } else {
             const splits = await getFIFOSplits(item.product_id, finalQty, item.cost_price || 0);
-            
             for (const split of splits) {
               saleRows.push({
-                invoice_id: displayInvoiceNo,
-                product_id: item.product_id,
-                customer_name: finalCustomerName,
-                rice_type: item.name,
-                custom_rice_type: item.custom_name !== item.name ? item.custom_name : null,
-                qty: split.qty, 
-                price_per_bag: item.custom_price_riel,
-                cogs_price: split.cogs_price,
-                owner: finalOwner
+                invoice_id: displayInvoiceNo, product_id: item.product_id, customer_name: finalCustomerName, rice_type: item.name,
+                custom_rice_type: item.custom_name !== item.name ? item.custom_name : null, qty: split.qty, price_per_bag: item.custom_price_riel,
+                cogs_price: split.cogs_price, owner: finalOwner
               });
-
               invoiceTotalSales += Number(item.custom_price_riel) * split.qty;
               invoiceTotalCogs += split.cogs_price * split.qty;
 
               if (split.batch_id && !editingInvoiceId && !isBypass) {
-                await supabase.from('price_history').update({
-                  sold_qty: split.current_sold + split.qty
-                }).eq('id', split.batch_id);
+                await supabase.from('price_history').update({ sold_qty: split.current_sold + split.qty }).eq('id', split.batch_id);
               }
             }
           }
@@ -708,25 +648,17 @@ export default function POSPage() {
         const invoiceTotalProfit = invoiceTotalSales - invoiceTotalCogs;
 
         let calculatedBalanceDue = 0;
-        if (amountReceived !== '') {
-          calculatedBalanceDue = Math.max(0, invoiceTotalSales - Number(amountReceived));
+        if (liveTotalReceivedInRiel > 0) {
+          calculatedBalanceDue = Math.max(0, invoiceTotalSales - liveTotalReceivedInRiel);
         } else {
-          // Auto clear balance if it is a simple Walk-in customer
           calculatedBalanceDue = isSimpleCustomer ? 0 : invoiceTotalSales; 
         }
 
         const summaryRow = {
-          invoice_id: displayInvoiceNo,
-          customer_name: finalCustomerName,
-          owner: finalOwner,
-          rice_types: combinedRiceTypes,
-          total_sales: invoiceTotalSales,
-          total_cogs: invoiceTotalCogs,
-          total_profit: invoiceTotalProfit,
-          delivery_status: isSimpleCustomer ? 'Delivered' : 'Pending',
-          payment_method: finalPaymentMethod, // Added Payment Tracking
-          balance_due: calculatedBalanceDue,
-          customer_location: finalLocation
+          invoice_id: displayInvoiceNo, customer_name: finalCustomerName, owner: finalOwner, rice_types: combinedRiceTypes,
+          total_sales: invoiceTotalSales, total_cogs: invoiceTotalCogs, total_profit: invoiceTotalProfit,
+          delivery_status: isSimpleCustomer ? 'Delivered' : 'Pending', payment_method: finalPaymentMethod,
+          balance_due: calculatedBalanceDue, customer_location: finalLocation
         };
 
         if (editingInvoiceId) {
@@ -742,15 +674,10 @@ export default function POSPage() {
 
         const currentDate = new Date();
         setCompletedSale({
-          invoiceNo: displayInvoiceNo,
-          cartSnapshot: currentCart,
-          customer: { name: finalCustomerName, phone: finalPhone, location: finalLocation },
+          invoiceNo: displayInvoiceNo, cartSnapshot: currentCart, customer: { name: finalCustomerName, phone: finalPhone, location: finalLocation },
           dateObj: { day: String(currentDate.getDate()).padStart(2, '0'), month: String(currentDate.getMonth() + 1).padStart(2, '0'), year: currentDate.getFullYear() }
         });
       }
-
-      const received = Number(amountReceived) || 0;
-      const change = received - currentTotalRiel;
 
       setCart([]);
       setIsMobileCartOpen(false);
@@ -766,18 +693,38 @@ export default function POSPage() {
         setSelectedCustomerId('');
       }
 
-      if (received > 0) {
+      // Show Summary / Invoice logic
+      if (liveTotalReceivedInRiel > 0 || (activeTab === 'retail' && liveTotalReceivedInRiel === 0)) {
         if (activeTab === 'wholesale' && !isSimpleCustomer) {
           setIsGeneratingPreview(true);
           setShowInvoicePreview(true); 
         }
-        setSaleSummary({ total: currentTotalRiel, received, change: change > 0 ? change : 0, type: activeTab, isCashless: false });
+        
+        let cRiel = 0, qRiel = 0, cUsd = 0, qUsd = 0;
+        activePayments.forEach(r => {
+          if (r.method === 'Cash ៛') cRiel += Number(r.amount);
+          if (r.method === 'QR ៛') qRiel += Number(r.amount);
+          if (r.method === 'Cash $') cUsd += Number(r.amount);
+          if (r.method === 'QR $') qUsd += Number(r.amount);
+        });
+
+        setSaleSummary({ 
+          total: currentTotalRiel, 
+          receivedRiel: cRiel + qRiel, 
+          receivedUsd: cUsd + qUsd, 
+          totalReceivedInRiel: liveTotalReceivedInRiel,
+          change: liveRemaining < 0 ? Math.abs(liveRemaining) : 0, 
+          type: activeTab, 
+          isCashless: liveTotalReceivedInRiel === 0, 
+          items: currentCart,
+          isDebt: liveRemaining > 0
+        });
       } else {
         if (activeTab === 'wholesale' && !isSimpleCustomer) {
           setIsGeneratingPreview(true);
           setShowInvoicePreview(true); 
         } else {
-          setSaleSummary({ total: currentTotalRiel, received: 0, change: 0, type: 'retail', isCashless: true, items: currentCart });
+          setSaleSummary({ total: currentTotalRiel, receivedRiel: 0, receivedUsd: 0, totalReceivedInRiel: 0, change: 0, type: 'retail', isCashless: true, items: currentCart, isDebt: false });
         }
       }
 
@@ -785,8 +732,7 @@ export default function POSPage() {
       alert(`System Error: ${err.message || err}`);
     } finally {
       setIsProcessing(false);
-      setAmountReceived('');
-      setCheckoutPaymentMethod('Cash'); // Reset default
+      setPaymentRows([{ id: Date.now(), method: 'Cash ៛', amount: '' }]);
     }
   }
 
@@ -796,7 +742,6 @@ export default function POSPage() {
       const blob = await res.blob();
       const fileName = `${invoiceId}-${Date.now()}.jpg`;
       const { error: uploadError } = await supabase.storage.from('invoices').upload(fileName, blob, { contentType: 'image/jpeg' });
-      
       if (!uploadError) {
         const { data: publicUrlData } = supabase.storage.from('invoices').getPublicUrl(fileName);
         await supabase.from('sales').update({ invoice_url: publicUrlData.publicUrl }).eq('invoice_id', invoiceId);
@@ -821,28 +766,87 @@ export default function POSPage() {
       const res = await fetch(previewImageUrl);
       const blob = await res.blob();
       const file = new File([blob], `Invoice-${completedSale.invoiceNo}.png`, { type: 'image/png' });
-      
       if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
         await navigator.share({ files: [file], title: `Invoice ${completedSale.invoiceNo}` });
       } else {
-        const link = document.createElement('a');
-        link.download = `Invoice-${completedSale.invoiceNo}.png`;
-        link.href = previewImageUrl;
-        link.click();
+        handleDesktopDownloadPNG();
       }
-    } catch (err) {
-      console.error(err);
-    }
+    } catch (err) { console.error(err); }
   }
 
-  const handleNativePrint = () => {
-    window.print();
-  }
+  const handleNativePrint = () => { window.print(); }
 
   const currentT = t[lang] || t['en'];
-  
-  // Sort the cart array for display
   const sortedCart = [...cart].sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0));
+
+  // Payment Row UI Renderer (Used in Desktop sidebar and Mobile Tray)
+  const renderPaymentSection = () => {
+    if (!showPaymentSelector) return null;
+    return (
+      <div style={{ marginBottom: '14px', background: '#f8fafc', padding: '12px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+          <label style={{ fontSize: '11px', color: '#64748b', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Amount Received</label>
+          <button onClick={() => setPaymentRows([...paymentRows, { id: Date.now(), method: 'Cash ៛', amount: '' }])} style={{ background: '#e0f2fe', color: '#0284c7', border: 'none', borderRadius: '4px', fontSize: '11px', fontWeight: 'bold', padding: '4px 8px', cursor: 'pointer' }}>+ Split</button>
+        </div>
+        
+        {paymentRows.map((row, index) => (
+          <div key={row.id} style={{ display: 'flex', gap: '8px', marginBottom: '8px', alignItems: 'center' }}>
+            <select 
+              value={row.method} 
+              onChange={e => {
+                const newRows = [...paymentRows];
+                newRows[index].method = e.target.value;
+                setPaymentRows(newRows);
+              }}
+              style={{ width: '45%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '16px', fontWeight: 'bold', outline: 'none', backgroundColor: '#fff', cursor: 'pointer', color: '#0f172a' }}
+            >
+              <option value="Cash ៛">💵 Cash ៛</option>
+              <option value="Cash $">💵 Cash $</option>
+              <option value="QR ៛">📱 QR ៛</option>
+              <option value="QR $">📱 QR $</option>
+            </select>
+            
+            <div style={{ flex: 1 }}>
+              <CurrencyInput 
+                placeholder="Amount..." 
+                value={row.amount} 
+                onChange={(val: any) => {
+                  const newRows = [...paymentRows];
+                  newRows[index].amount = val;
+                  setPaymentRows(newRows);
+                }}
+                style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', outline: 'none', color: '#0f172a', fontWeight: 'bold', fontSize: '16px', textAlign: 'right' }}
+              />
+            </div>
+            
+            {paymentRows.length > 1 && (
+              <button onClick={() => setPaymentRows(paymentRows.filter(r => r.id !== row.id))} style={{ background: 'none', border: 'none', color: '#ef4444', fontSize: '18px', cursor: 'pointer', padding: '0 4px' }}>✕</button>
+            )}
+          </div>
+        ))}
+
+        {paymentRows.some(r => Number(r.amount) > 0) && (
+          <div style={{ marginTop: '12px', paddingTop: '12px', borderTop: '1px dashed #cbd5e1', fontSize: '13px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+              <span style={{ color: '#64748b' }}>Total Received:</span>
+              <span style={{ fontWeight: 'bold', color: '#0f172a' }}>{formatRielFromNative(liveTotalReceivedInRiel)}</span>
+            </div>
+            {liveRemaining < 0 ? (
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ color: '#ef4444', fontWeight: 'bold' }}>Change Due:</span>
+                <span style={{ fontWeight: 'bold', color: '#dc2626' }}>{formatRielFromNative(Math.abs(liveRemaining))}</span>
+              </div>
+            ) : liveRemaining > 0 ? (
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ color: '#b45309', fontWeight: 'bold' }}>Owe / Debt:</span>
+                <span style={{ fontWeight: 'bold', color: '#d97706' }}>{formatRielFromNative(liveRemaining)}</span>
+              </div>
+            ) : null}
+          </div>
+        )}
+      </div>
+    )
+  }
 
   return (
     <div className="pos-layout-wrapper" style={{ display: 'flex', height: '100vh', overflow: 'hidden', width: '100%', backgroundColor: '#ffffff', boxSizing: 'border-box' }}>
@@ -850,13 +854,9 @@ export default function POSPage() {
       {/* SELECTION ENGINE VIEW GRID PANEL */}
       <div className="pos-main-engine hide-scrollbar" style={{ flex: 1, display: 'flex', flexDirection: 'column', backgroundColor: '#f8fafc', minWidth: 0, height: '100%', overflowY: 'auto' }}>
         
-        {/* Enforced Main Wrapper Standardized Settings Layout */}
         <div className="main-wrapper" style={{ paddingBottom: '100px', flex: 1 }}>
-          
           <div className="header-container">
-            <h1 className="page-title">
-              {editingInvoiceId ? `✏️ Editing: ${editingInvoiceId}` : `🛒 ${currentT.title}`}
-            </h1>
+            <h1 className="page-title">{editingInvoiceId ? `✏️ Editing: ${editingInvoiceId}` : `🛒 ${currentT.title}`}</h1>
             <div style={{ backgroundColor: '#f4f1ea', borderRadius: '20px', padding: '2px' }}>
               <button onClick={() => setLang('en')} style={{ border: 'none', backgroundColor: lang === 'en' ? '#b58a3d' : 'transparent', color: lang === 'en' ? '#fff' : '#6b582f', padding: '6px 12px', borderRadius: '18px', fontWeight: 'bold', cursor: 'pointer', fontSize: '12px' }}>EN</button>
               <button onClick={() => setLang('kh')} style={{ border: 'none', backgroundColor: lang === 'kh' ? '#b58a3d' : 'transparent', color: lang === 'kh' ? '#fff' : '#6b582f', padding: '6px 12px', borderRadius: '18px', fontWeight: 'bold', cursor: 'pointer', fontSize: '12px' }}>KH</button>
@@ -876,25 +876,20 @@ export default function POSPage() {
             </div>
 
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px', alignItems: 'flex-start' }}>
-              <input type="text" placeholder={currentT.searchPlaceholder} value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} style={{ flex: 1, minWidth: '240px', padding: '10px 14px', borderRadius: '6px', border: '1px solid #dcd7cc', outline: 'none', fontSize: '14px', color: '#333333', backgroundColor: '#ffffff' }} />
+              <input type="text" placeholder={currentT.searchPlaceholder} value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} style={{ flex: 1, minWidth: '240px', padding: '10px 14px', borderRadius: '6px', border: '1px solid #dcd7cc', outline: 'none', fontSize: '16px', color: '#333333', backgroundColor: '#ffffff' }} />
               
               {activeTab === 'wholesale' && (
                 <div style={{ flex: 1, minWidth: '300px', position: 'relative' }}>
                   {!selectedCustomer ? (
                     <>
-                      <input type="text" placeholder={currentT.selectCustomer} value={customerSearchTerm} onChange={(e) => { setCustomerSearchTerm(e.target.value); setIsCustomerDropdownOpen(true); setSelectedCustomerId(''); }} onFocus={() => setIsCustomerDropdownOpen(true)} onBlur={() => setTimeout(() => setIsCustomerDropdownOpen(false), 200)} style={{ width: '100%', padding: '10px 14px', borderRadius: '6px', border: '1px solid #dcd7cc', outline: 'none', fontSize: '14px', color: '#333333', backgroundColor: '#ffffff' }} />
+                      <input type="text" placeholder={currentT.selectCustomer} value={customerSearchTerm} onChange={(e) => { setCustomerSearchTerm(e.target.value); setIsCustomerDropdownOpen(true); setSelectedCustomerId(''); }} onFocus={() => setIsCustomerDropdownOpen(true)} onBlur={() => setTimeout(() => setIsCustomerDropdownOpen(false), 200)} style={{ width: '100%', padding: '10px 14px', borderRadius: '6px', border: '1px solid #dcd7cc', outline: 'none', fontSize: '16px', color: '#333333', backgroundColor: '#ffffff' }} />
                       {isCustomerDropdownOpen && (
-                        <div style={{ position: 'absolute', top: '44px', left: 0, right: 0, backgroundColor: '#fff', border: '1px solid #dcd7cc', borderRadius: '6px', maxHeight: '300px', overflowY: 'auto', zIndex: 100, boxShadow: '0 4px 12px rgba(0,0,0,0.15)' }}>
+                        <div style={{ position: 'absolute', top: '44px', left: 0, right: 0, backgroundColor: '#fff', border: '1px solid #dcd7cc', borderRadius: '6px', maxHeight: '300px', overflowY: 'auto', zIndex: 1000, boxShadow: '0 4px 12px rgba(0,0,0,0.15)' }}>
                           <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '13px' }}>
                             <thead style={{ backgroundColor: '#f8fafc', position: 'sticky', top: 0, zIndex: 2 }}>
                               <tr>
                                 <th colSpan={3} style={{ padding: '8px 12px', borderBottom: '1px solid #e2e8f0' }}>
-                                  <button 
-                                    onMouseDown={(e) => { e.preventDefault(); setIsCreateCustomerModalOpen(true); setIsCustomerDropdownOpen(false); }}
-                                    style={{ width: '100%', padding: '6px', backgroundColor: '#e0f2fe', color: '#2563eb', border: '1px dashed #93c5fd', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}
-                                  >
-                                    + Create New Customer
-                                  </button>
+                                  <button onMouseDown={(e) => { e.preventDefault(); setIsCreateCustomerModalOpen(true); setIsCustomerDropdownOpen(false); }} style={{ width: '100%', padding: '6px', backgroundColor: '#e0f2fe', color: '#2563eb', border: '1px dashed #93c5fd', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}>+ Create New Customer</button>
                                 </th>
                               </tr>
                               <tr>
@@ -948,8 +943,8 @@ export default function POSPage() {
                   <div key={p.id} draggable={editingCardId !== p.id} onDragStart={(e) => handleProductDragStart(e, p.id)} onDragOver={handleProductDragOver} onDrop={(e) => handleProductDrop(e, p.id)} onMouseEnter={() => setHoveredCardId(p.id)} onMouseLeave={() => setHoveredCardId(null)} onClick={() => handleProductClick(p)} style={{ border: '1px solid #eadeca', borderRadius: '10px', padding: '14px', cursor: editingCardId === p.id ? 'default' : 'pointer', backgroundColor: '#ffffff', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', minHeight: '100px', transition: 'transform 0.1s', boxShadow: '0 2px 4px rgba(0,0,0,0.02)', position: 'relative' }} onMouseDown={e => { if(editingCardId !== p.id) e.currentTarget.style.transform = 'scale(0.97)'; }} onMouseUp={e => e.currentTarget.style.transform = 'scale(1)'}>
                     {editingCardId === p.id ? (
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', height: '100%' }} onClick={e => e.stopPropagation()}>
-                        <input autoFocus value={editCardForm.name} onChange={e => setEditCardForm({...editCardForm, name: e.target.value})} style={{ padding: '4px 6px', border: '1px solid #b58a3d', borderRadius: '4px', outline: 'none', width: '100%', boxSizing: 'border-box', color: '#333333', backgroundColor: '#ffffff', fontSize: '12px' }} />
-                        <input type="number" value={editCardForm.price} onChange={e => setEditCardForm({...editCardForm, price: e.target.value})} style={{ padding: '4px 6px', border: '1px solid #b58a3d', borderRadius: '4px', outline: 'none', width: '100%', boxSizing: 'border-box', color: '#333333', backgroundColor: '#ffffff', fontSize: '12px' }} />
+                        <input autoFocus value={editCardForm.name} onChange={e => setEditCardForm({...editCardForm, name: e.target.value})} style={{ padding: '4px 6px', border: '1px solid #b58a3d', borderRadius: '4px', outline: 'none', width: '100%', boxSizing: 'border-box', color: '#333333', backgroundColor: '#ffffff', fontSize: '16px' }} />
+                        <input type="number" value={editCardForm.price} onChange={e => setEditCardForm({...editCardForm, price: e.target.value})} style={{ padding: '4px 6px', border: '1px solid #b58a3d', borderRadius: '4px', outline: 'none', width: '100%', boxSizing: 'border-box', color: '#333333', backgroundColor: '#ffffff', fontSize: '16px' }} />
                         <div style={{ display: 'flex', gap: '6px', marginTop: 'auto' }}>
                           <button onClick={(e) => { e.stopPropagation(); saveCardEdit(p.id); }} style={{ flex: 1, backgroundColor: '#10b981', color: 'white', border: 'none', padding: '4px', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}>✅</button>
                           <button onClick={(e) => { e.stopPropagation(); setEditingCardId(null); }} style={{ flex: 1, backgroundColor: '#ef4444', color: 'white', border: 'none', padding: '4px', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}>❌</button>
@@ -973,7 +968,6 @@ export default function POSPage() {
                           </div>
                           {(activeTab === 'wholesale') && <div style={{ fontSize: '11px', marginTop: '4px', color: Number(p.stock) < 5 ? '#dc2626' : '#10b981', fontWeight: 'bold' }}>📦 {currentT.stock}: {p.stock}</div>}
                           
-                          {/* EXCHANGE & RETURN BADGE BUTTON */}
                           {(activeTab === 'wholesale') && (
                             <button 
                               onClick={(e) => { e.stopPropagation(); setExchangeModal({ isOpen: true, product: p, consumedKg: '' }); }}
@@ -994,7 +988,9 @@ export default function POSPage() {
         </div>
       </div>
 
-      {/* DESKTOP SIDEBAR CART */}
+      {/* ==============================================================================================
+          DESKTOP SIDEBAR CART
+          ============================================================================================== */}
       <div className="desktop-cart-panel" style={{ width: '380px', backgroundColor: '#ffffff', borderLeft: '1px solid #e5e7eb', display: 'flex', flexDirection: 'column', height: '100vh', position: 'sticky', top: 0 }}>
         <div style={{ paddingTop: '16px', paddingRight: '20px', paddingBottom: '16px', paddingLeft: '20px', borderBottom: '1px solid #f3f4f6', backgroundColor: '#fcfbfa', flexShrink: 0 }}>
           <h2 style={{ fontSize: '16px', margin: 0, fontWeight: 'bold', color: '#4a3b1b' }}>{currentT.cartTitle} ({cart.length})</h2>
@@ -1005,7 +1001,7 @@ export default function POSPage() {
           {activeTab === 'wholesale' && selectedCustomerId && (
             <div style={{ background: '#f8fafc', padding: '12px', borderRadius: '8px', border: '1px solid #e2e8f0', marginBottom: '16px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
               <div style={{ fontSize: '11px', fontWeight: 'bold', color: '#8a7650', textTransform: 'uppercase', letterSpacing: '0.5px' }}>📄 Invoice Customizer</div>
-              <input type="text" placeholder="Invoice Name Override..." value={cartCustomerNameOverride} onChange={e => setCartCustomerNameOverride(e.target.value)} style={{ width: '100%', padding: '8px 10px', fontSize: '14px', borderRadius: '4px', border: '1px solid #cbd5e1', outline: 'none', color: '#333' }} />
+              <input type="text" placeholder="Invoice Name Override..." value={cartCustomerNameOverride} onChange={e => setCartCustomerNameOverride(e.target.value)} style={{ width: '100%', padding: '10px', fontSize: '16px', borderRadius: '6px', border: '1px solid #cbd5e1', outline: 'none', color: '#0f172a' }} />
             </div>
           )}
 
@@ -1018,10 +1014,10 @@ export default function POSPage() {
               const isSpecial = isReturn || isCharge;
 
               return (
-                <div key={item.id} style={{ backgroundColor: isReturn ? '#fef2f2' : isCharge ? '#fffbeb' : '#fcfbfa', borderRadius: '8px', padding: '12px', marginBottom: '12px', border: `1px solid ${isReturn ? '#fecaca' : isCharge ? '#fde68a' : '#f4f1ea'}`, position: 'relative' }}>
-                  <button onClick={() => removeFromCart(item.id)} style={{ position: 'absolute', top: '8px', right: '8px', background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: '16px', zIndex: 5 }}>✕</button>
+                <div key={item.id} style={{ backgroundColor: isReturn ? '#fef2f2' : isCharge ? '#fffbeb' : '#ffffff', borderRadius: '8px', padding: '12px', marginBottom: '12px', border: `1px solid ${isReturn ? '#fecaca' : isCharge ? '#fde68a' : '#e2e8f0'}`, position: 'relative', boxShadow: '0 2px 4px rgba(0,0,0,0.02)' }}>
+                  <button onClick={() => removeFromCart(item.id)} style={{ position: 'absolute', top: '8px', right: '8px', background: '#fee2e2', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: '14px', width: '24px', height: '24px', borderRadius: '50%', zIndex: 5, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>✕</button>
 
-                  <div style={{ display: 'flex', alignItems: 'center', marginBottom: '10px', borderBottom: isSpecial ? 'none' : '1px dotted #9ca3af', transition: 'border-color 0.2s' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', marginBottom: '10px', paddingRight: '28px' }}>
                     <input 
                       type="text" 
                       value={item.custom_name} 
@@ -1029,15 +1025,8 @@ export default function POSPage() {
                       placeholder="Item Name"
                       readOnly={isSpecial}
                       style={{ 
-                        fontWeight: 'bold', 
-                        fontSize: '14px', 
-                        color: isReturn ? '#dc2626' : isCharge ? '#b45309' : '#333333', 
-                        flex: 1, 
-                        border: 'none',
-                        background: 'transparent', 
-                        outline: 'none',
-                        padding: '2px 0',
-                        textAlign: isReturn ? 'center' : 'left'
+                        fontWeight: 'bold', fontSize: '16px', color: isReturn ? '#dc2626' : isCharge ? '#b45309' : '#0f172a', 
+                        flex: 1, border: 'none', background: 'transparent', outline: 'none', padding: 0
                       }} 
                     />
                     
@@ -1045,50 +1034,26 @@ export default function POSPage() {
                       <select
                         value={item.selected_batch_id || 'AUTO'}
                         onChange={(e) => updateCartItem(item.id, 'selected_batch_id', e.target.value === 'AUTO' ? null : Number(e.target.value))}
-                        style={{
-                          marginLeft: '8px',
-                          padding: '2px 4px',
-                          background: '#fefcf3',
-                          border: '1px solid #eadeca',
-                          borderRadius: '4px',
-                          fontSize: '11px',
-                          fontWeight: 'bold',
-                          color: '#b58a3d',
-                          outline: 'none',
-                          cursor: 'pointer',
-                          maxWidth: '90px'
-                        }}
-                        title="Select specific batch to bypass FIFO"
+                        style={{ marginLeft: '8px', padding: '2px 4px', background: '#fefcf3', border: '1px solid #eadeca', borderRadius: '4px', fontSize: '11px', fontWeight: 'bold', color: '#b58a3d', outline: 'none', cursor: 'pointer', maxWidth: '90px' }}
                       >
                         <option value="AUTO">▼ Auto</option>
                         {activeBatches[item.product_id]?.map((b: any) => {
                           const remaining = (b.imported_qty || 0) - (b.sold_qty || 0);
-                          return (
-                            <option key={b.id} value={b.id}>
-                              {formatRiel(b.cost_price)} ({remaining})
-                            </option>
-                          );
+                          return <option key={b.id} value={b.id}>{formatRiel(b.cost_price)} ({remaining})</option>;
                         })}
                       </select>
                     )}
                   </div>
                   
-                  <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-end' }}>
+                  <div style={{ display: 'flex', gap: '12px', alignItems: 'flex-end' }}>
                     <div style={{ flex: 1 }}>
-                      <span style={{ display: 'block', fontSize: '11px', fontWeight: 'normal', color: '#4a3b1b', marginBottom: '4px' }}>{currentT.unitPrice} (៛)</span>
+                      <span style={{ display: 'block', fontSize: '11px', fontWeight: 'bold', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '6px' }}>{currentT.unitPrice}</span>
                       <CartInput value={item.custom_price_riel} onChange={(v) => updateCartItem(item.id, 'custom_price_riel', v)} isQty={false} />
                     </div>
                     <div style={{ flex: 1 }}>
-                      <span style={{ display: 'block', fontSize: '11px', fontWeight: 'normal', color: '#4a3b1b', marginBottom: '4px' }}>{currentT.quantity}</span>
+                      <span style={{ display: 'block', fontSize: '11px', fontWeight: 'bold', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '6px' }}>{currentT.quantity}</span>
                       <CartInput value={item.quantity} onChange={(v) => updateCartItem(item.id, 'quantity', v)} isQty={true} />
                     </div>
-                  </div>
-
-                  <div style={{ marginTop: '10px', paddingTop: '8px', borderTop: '1px dashed #eadeca', display: 'flex', justifyContent: 'space-between', fontSize: '12px' }}>
-                    <span style={{ color: '#8a7650' }}>{currentT.subtotal}</span>
-                    <span style={{ fontWeight: 'bold', color: isReturn ? '#ef4444' : '#b58a3d', fontSize: '14px' }}>
-                      {isReturn && '-'}{formatRielFromNative(item.custom_price_riel * item.quantity)}
-                    </span>
                   </div>
                 </div>
               )
@@ -1106,52 +1071,144 @@ export default function POSPage() {
             <span style={{ fontSize: '14px', fontWeight: 'bold', color: '#4a3b1b' }}>{formatUSD(totalUSD)}</span>
           </div>
 
-          <div style={{ marginBottom: '14px' }}>
-            <label style={{ display: 'block', fontSize: '11px', color: '#64748b', fontWeight: 'bold', textTransform: 'uppercase', marginBottom: '4px' }}>Amount Received (៛) - Optional</label>
-            <input 
-              type="number" 
-              className="no-spinners"
-              placeholder="0 ៛" 
-              value={amountReceived} 
-              onChange={(e) => setAmountReceived(e.target.value === '' ? '' : Number(e.target.value))} 
-              style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', fontSize: '14px', fontWeight: 'bold', outline: 'none', color: '#0f172a', backgroundColor: '#ffffff' }}
-              onFocus={e => e.target.style.borderColor = '#10b981'}
-              onBlur={e => e.target.style.borderColor = '#cbd5e1'}
-            />
-          </div>
-
-          {/* PAYMENT METHOD SELECTOR (Only shows if Retail or Walk-in) */}
-          {showPaymentSelector && (
-            <div style={{ marginBottom: '14px' }}>
-              <select 
-                value={checkoutPaymentMethod}
-                onChange={(e) => setCheckoutPaymentMethod(e.target.value as 'Cash' | 'QR Payment')}
-                style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', fontSize: '14px', fontWeight: 'bold', outline: 'none', color: '#0f172a', backgroundColor: '#ffffff', cursor: 'pointer' }}
-              >
-                <option value="Cash">💵 Paid in Cash</option>
-                <option value="QR Payment">📱 QR Payment</option>
-              </select>
-            </div>
-          )}
+          {renderPaymentSection()}
           
           <button 
             onClick={confirmCheckout} 
             disabled={cart.length === 0 || isProcessing} 
             style={{ 
               width: '100%', 
-              padding: '12px', 
+              padding: '16px', 
               backgroundColor: (cart.length === 0 || isProcessing) ? '#e5e7eb' : '#10b981', 
               color: (cart.length === 0 || isProcessing) ? '#9ca3af' : '#ffffff', 
               border: 'none', 
-              borderRadius: '6px', 
+              borderRadius: '8px', 
               fontWeight: 'bold', 
-              cursor: (cart.length === 0 || isProcessing) ? 'not-allowed' : 'pointer' 
+              fontSize: '16px',
+              cursor: (cart.length === 0 || isProcessing) ? 'not-allowed' : 'pointer',
+              boxShadow: '0 4px 6px rgba(16, 185, 129, 0.2)'
             }}
           >
-            {isProcessing ? 'Processing...' : (editingInvoiceId ? 'Update Invoice' : currentT.checkout)}
+            {isProcessing ? 'Processing...' : currentT.checkout}
           </button>
         </div>
       </div>
+
+
+      {/* ==============================================================================================
+          MOBILE CART TRAY (CENTERED POPUP)
+          ============================================================================================== */}
+      {cart.length > 0 && !isMobileCartOpen && !completedSale && !saleSummary && (
+        <div className="mobile-fab" onClick={() => setIsMobileCartOpen(true)}>
+          <div style={{ fontSize: '16px', fontWeight: 'bold' }}>🛒 View Cart ({cart.length})</div>
+          <div style={{ fontSize: '16px', fontWeight: 'bold' }}>{formatRielFromNative(totalRiel)} &nbsp; ➔</div>
+        </div>
+      )}
+
+      {isMobileCartOpen && (
+        <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(4px)', zIndex: 1000, display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '20px', boxSizing: 'border-box' }} onMouseDown={() => setIsMobileCartOpen(false)}>
+          
+          <div style={{ width: '100%', maxWidth: '450px', maxHeight: '85vh', backgroundColor: '#ffffff', borderRadius: '20px', display: 'flex', flexDirection: 'column', position: 'relative', boxShadow: '0 10px 30px rgba(0,0,0,0.2)' }} onMouseDown={e => e.stopPropagation()}>
+            
+            <div style={{ padding: '20px', borderBottom: '1px solid #e5e7eb', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
+              <h3 style={{ margin: 0, color: '#4a3b1b', fontSize: '18px' }}>{currentT.cartTitle} ({cart.length})</h3>
+              <button onClick={() => setIsMobileCartOpen(false)} style={{ background: '#f1f5f9', border: 'none', fontSize: '16px', width: '32px', height: '32px', borderRadius: '50%', color: '#475569', fontWeight: 'bold' }}>✕</button>
+            </div>
+            
+            <div style={{ flex: 1, overflowY: 'auto', padding: '20px' }}>
+              {activeTab === 'wholesale' && selectedCustomerId && (
+                <div style={{ background: '#f8fafc', padding: '12px', borderRadius: '8px', border: '1px solid #e2e8f0', marginBottom: '16px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  <div style={{ fontSize: '11px', fontWeight: 'bold', color: '#8a7650', textTransform: 'uppercase' }}>📄 Invoice Customizer</div>
+                  <input 
+                    type="text" 
+                    placeholder="Invoice Name Override..." 
+                    value={cartCustomerNameOverride} 
+                    onChange={e => setCartCustomerNameOverride(e.target.value)} 
+                    style={{ width: '100%', padding: '10px', fontSize: '16px', borderRadius: '6px', border: '1px solid #cbd5e1', outline: 'none', color: '#0f172a' }} 
+                  />
+                </div>
+              )}
+
+              {sortedCart.map((item) => {
+                const isReturn = item.custom_name.includes('ដូរ');
+                const isCharge = item.custom_name.includes('បានប្រើ');
+                const isSpecial = isReturn || isCharge;
+
+                return (
+                  <div key={item.id} style={{ backgroundColor: isReturn ? '#fef2f2' : isCharge ? '#fffbeb' : '#ffffff', borderRadius: '12px', padding: '16px', marginBottom: '12px', border: `1px solid ${isReturn ? '#fecaca' : isCharge ? '#fde68a' : '#e2e8f0'}`, position: 'relative', boxShadow: '0 2px 4px rgba(0,0,0,0.02)' }}>
+                    <button onClick={() => removeFromCart(item.id)} style={{ position: 'absolute', top: '12px', right: '12px', background: '#fee2e2', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: '14px', width: '28px', height: '28px', borderRadius: '50%', zIndex: 5, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>✕</button>
+                    
+                    <div style={{ display: 'flex', alignItems: 'center', marginBottom: '12px', paddingRight: '30px' }}>
+                      <input 
+                        type="text" 
+                        value={item.custom_name} 
+                        onChange={(e) => updateCartItem(item.id, 'custom_name', e.target.value)}
+                        placeholder="Item Name"
+                        readOnly={isSpecial}
+                        style={{ 
+                          fontWeight: 'bold', 
+                          fontSize: '16px', 
+                          color: isReturn ? '#dc2626' : isCharge ? '#b45309' : '#0f172a', 
+                          flex: 1, 
+                          border: 'none',
+                          background: 'transparent', 
+                          outline: 'none',
+                          padding: 0
+                        }} 
+                      />
+                    </div>
+
+                    <div style={{ display: 'flex', gap: '12px', alignItems: 'flex-end' }}>
+                      <div style={{ flex: 1 }}>
+                        <span style={{ display: 'block', fontSize: '11px', fontWeight: 'bold', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '6px' }}>{currentT.unitPrice}</span>
+                        <CartInput value={item.custom_price_riel} onChange={(v) => updateCartItem(item.id, 'custom_price_riel', v)} isQty={false} />
+                      </div>
+                      <div style={{ flex: 1 }}>
+                        <span style={{ display: 'block', fontSize: '11px', fontWeight: 'bold', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '6px' }}>{currentT.quantity}</span>
+                        <CartInput value={item.quantity} onChange={(v) => updateCartItem(item.id, 'quantity', v)} isQty={true} />
+                      </div>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+            
+            {/* Mobile Footer Area inside Modal */}
+            <div style={{ padding: '20px', borderTop: '1px solid #e5e7eb', backgroundColor: '#ffffff', borderBottomLeftRadius: '20px', borderBottomRightRadius: '20px', flexShrink: 0 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
+                <span style={{ fontWeight: 'bold', fontSize: '16px', color: '#475569' }}>{currentT.totalKhmer}</span>
+                <span style={{ fontWeight: 'bold', color: totalRiel < 0 ? '#ef4444' : '#b58a3d', fontSize: '22px' }}>{formatRielFromNative(totalRiel)}</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '16px' }}>
+                <span style={{ fontSize: '13px', color: '#94a3b8' }}>{currentT.totalUsd}</span>
+                <span style={{ fontWeight: 'bold', color: '#64748b', fontSize: '14px' }}>{formatUSD(totalUSD)}</span>
+              </div>
+              
+              {renderPaymentSection()}
+
+              <button 
+                onClick={confirmCheckout} 
+                disabled={cart.length === 0 || isProcessing} 
+                style={{ 
+                  width: '100%', 
+                  padding: '16px', 
+                  backgroundColor: (cart.length === 0 || isProcessing) ? '#e5e7eb' : '#10b981', 
+                  color: (cart.length === 0 || isProcessing) ? '#9ca3af' : '#ffffff', 
+                  border: 'none', 
+                  borderRadius: '12px', 
+                  fontWeight: 'bold', 
+                  fontSize: '18px', 
+                  cursor: (cart.length === 0 || isProcessing) ? 'not-allowed' : 'pointer',
+                  boxShadow: '0 4px 12px rgba(16, 185, 129, 0.25)'
+                }}
+              >
+                {isProcessing ? 'Processing...' : currentT.checkout}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
 
       {/* CREATE NEW CUSTOMER MODAL */}
       {isCreateCustomerModalOpen && (
@@ -1161,12 +1218,12 @@ export default function POSPage() {
             
             <div style={{ marginBottom: '16px' }}>
               <label style={{ display: 'block', fontSize: '12px', fontWeight: 'bold', color: '#8a7650', marginBottom: '4px' }}>Name</label>
-              <input type="text" value={newCustomerForm.name} onChange={(e) => setNewCustomerForm({...newCustomerForm, name: e.target.value})} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #dcd7cc', boxSizing: 'border-box', color: '#333333', backgroundColor: '#ffffff' }} />
+              <input type="text" value={newCustomerForm.name} onChange={(e) => setNewCustomerForm({...newCustomerForm, name: e.target.value})} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #dcd7cc', boxSizing: 'border-box', color: '#0f172a', backgroundColor: '#ffffff', fontSize: '16px' }} />
             </div>
 
             <div style={{ marginBottom: '16px' }}>
               <label style={{ display: 'block', fontSize: '12px', fontWeight: 'bold', color: '#8a7650', marginBottom: '4px' }}>Account Owner</label>
-              <select value={newCustomerForm.owner} onChange={(e) => setNewCustomerForm({...newCustomerForm, owner: e.target.value})} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #dcd7cc', boxSizing: 'border-box', color: '#333333', backgroundColor: '#ffffff', outline: 'none' }}>
+              <select value={newCustomerForm.owner} onChange={(e) => setNewCustomerForm({...newCustomerForm, owner: e.target.value})} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #dcd7cc', boxSizing: 'border-box', color: '#0f172a', backgroundColor: '#ffffff', outline: 'none', fontSize: '16px' }}>
                 <option value="">-- Select --</option>
                 <option value="Pich">Pich</option>
                 <option value="Jing">Jing</option>
@@ -1177,7 +1234,7 @@ export default function POSPage() {
 
             <div style={{ marginBottom: '16px' }}>
               <label style={{ display: 'block', fontSize: '12px', fontWeight: 'bold', color: '#8a7650', marginBottom: '4px' }}>Customer Type</label>
-              <select value={newCustomerForm.type} onChange={(e) => setNewCustomerForm({...newCustomerForm, type: e.target.value})} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #dcd7cc', boxSizing: 'border-box', color: '#333333', backgroundColor: '#ffffff', outline: 'none' }}>
+              <select value={newCustomerForm.type} onChange={(e) => setNewCustomerForm({...newCustomerForm, type: e.target.value})} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #dcd7cc', boxSizing: 'border-box', color: '#0f172a', backgroundColor: '#ffffff', outline: 'none', fontSize: '16px' }}>
                 <option value="">-- Select --</option>
                 <option value="ហូប">ហូប</option>
                 <option value="លក់បាយ">លក់បាយ</option>
@@ -1188,17 +1245,17 @@ export default function POSPage() {
 
             <div style={{ marginBottom: '16px' }}>
               <label style={{ display: 'block', fontSize: '12px', fontWeight: 'bold', color: '#8a7650', marginBottom: '4px' }}>Location</label>
-              <input type="text" value={newCustomerForm.location} onChange={(e) => setNewCustomerForm({...newCustomerForm, location: e.target.value})} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #dcd7cc', boxSizing: 'border-box', color: '#333333', backgroundColor: '#ffffff' }} />
+              <input type="text" value={newCustomerForm.location} onChange={(e) => setNewCustomerForm({...newCustomerForm, location: e.target.value})} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #dcd7cc', boxSizing: 'border-box', color: '#0f172a', backgroundColor: '#ffffff', fontSize: '16px' }} />
             </div>
             
             <div style={{ marginBottom: '24px' }}>
               <label style={{ display: 'block', fontSize: '12px', fontWeight: 'bold', color: '#8a7650', marginBottom: '4px' }}>Phone Number</label>
-              <input type="text" value={newCustomerForm.phone} onChange={(e) => setNewCustomerForm({...newCustomerForm, phone: e.target.value})} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #dcd7cc', boxSizing: 'border-box', color: '#333333', backgroundColor: '#ffffff' }} />
+              <input type="text" value={newCustomerForm.phone} onChange={(e) => setNewCustomerForm({...newCustomerForm, phone: e.target.value})} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #dcd7cc', boxSizing: 'border-box', color: '#0f172a', backgroundColor: '#ffffff', fontSize: '16px' }} />
             </div>
             
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
-              <button onClick={() => setIsCreateCustomerModalOpen(false)} style={{ padding: '10px 16px', backgroundColor: '#f4f1ea', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', color: '#6b582f' }}>Cancel</button>
-              <button onClick={handleCreateCustomer} style={{ padding: '10px 16px', backgroundColor: '#10b981', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', color: '#fff' }}>Save Customer</button>
+              <button onClick={() => setIsCreateCustomerModalOpen(false)} style={{ padding: '10px 16px', backgroundColor: '#f4f1ea', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', color: '#6b582f', fontSize: '14px' }}>Cancel</button>
+              <button onClick={handleCreateCustomer} style={{ padding: '10px 16px', backgroundColor: '#10b981', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', color: '#fff', fontSize: '14px' }}>Save Customer</button>
             </div>
           </div>
         </div>
@@ -1217,14 +1274,12 @@ export default function POSPage() {
 
             <div style={{ marginBottom: '24px' }}>
               <label style={{ display: 'block', fontSize: '12px', fontWeight: 'bold', color: '#8a7650', marginBottom: '4px' }}>How many kg were consumed?</label>
-              <input
-                type="number"
+              <CurrencyInput
                 autoFocus
-                className="no-spinners"
                 placeholder="e.g. 15"
                 value={exchangeModal.consumedKg}
-                onChange={e => setExchangeModal({ ...exchangeModal, consumedKg: e.target.value })}
-                style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #dcd7cc', boxSizing: 'border-box', color: '#333333', backgroundColor: '#ffffff', fontSize: '16px' }}
+                onChange={(v: any) => setExchangeModal({ ...exchangeModal, consumedKg: v })}
+                style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #dcd7cc', boxSizing: 'border-box', color: '#0f172a', backgroundColor: '#ffffff', fontWeight: 'bold', fontSize: '16px' }}
               />
               <p style={{ fontSize: '11px', color: '#64748b', marginTop: '6px', lineHeight: 1.4 }}>
                 * Enter 0 if the bag is fully intact and unopened.<br/>
@@ -1233,8 +1288,8 @@ export default function POSPage() {
             </div>
 
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
-              <button onClick={() => setExchangeModal({ isOpen: false, product: null, consumedKg: '' })} style={{ padding: '10px 16px', backgroundColor: '#f4f1ea', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', color: '#6b582f' }}>Cancel</button>
-              <button onClick={handleConfirmExchange} style={{ padding: '10px 16px', backgroundColor: '#ef4444', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', color: '#fff' }}>Confirm Return</button>
+              <button onClick={() => setExchangeModal({ isOpen: false, product: null, consumedKg: '' })} style={{ padding: '10px 16px', backgroundColor: '#f4f1ea', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', color: '#6b582f', fontSize: '14px' }}>Cancel</button>
+              <button onClick={handleConfirmExchange} style={{ padding: '10px 16px', backgroundColor: '#ef4444', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', color: '#fff', fontSize: '14px' }}>Confirm Return</button>
             </div>
           </div>
         </div>
@@ -1247,202 +1302,35 @@ export default function POSPage() {
             <h3 style={{ margin: '0 0 16px 0', color: '#4a3b1b', borderBottom: '1px solid #f3f4f6', paddingBottom: '10px' }}>{currentT.mobileModalTitle}</h3>
             <div style={{ marginBottom: '16px' }}>
               <label style={{ display: 'block', fontSize: '12px', fontWeight: 'bold', color: '#8a7650', marginBottom: '4px' }}>Product Identifier</label>
-              <input type="text" value={mobileName} onChange={(e) => setMobileName(e.target.value)} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #dcd7cc', boxSizing: 'border-box', color: '#333333', backgroundColor: '#ffffff' }} />
+              <input type="text" value={mobileName} onChange={(e) => setMobileName(e.target.value)} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #dcd7cc', boxSizing: 'border-box', color: '#0f172a', backgroundColor: '#ffffff', fontSize: '16px' }} />
             </div>
             <div style={{ display: 'flex', gap: '12px', marginBottom: '20px' }}>
               <div style={{ flex: 1 }}>
                 <label style={{ display: 'block', fontSize: '12px', fontWeight: 'normal', color: '#8a7650', marginBottom: '4px' }}>Price (៛)</label>
-                <input type="number" value={mobilePrice === 0 || mobilePrice === '' ? '' : mobilePrice} onChange={(e) => setMobilePrice(parseFloat(e.target.value) || 0)} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #dcd7cc', boxSizing: 'border-box', color: '#333333', backgroundColor: '#ffffff' }} />
+                <CurrencyInput value={mobilePrice} onChange={(v: any) => setMobilePrice(v)} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #dcd7cc', boxSizing: 'border-box', color: '#0f172a', backgroundColor: '#ffffff', fontWeight: 'bold', fontSize: '16px' }} />
               </div>
               <div style={{ flex: 1 }}>
                 <label style={{ display: 'block', fontSize: '12px', fontWeight: 'normal', color: '#8a7650', marginBottom: '4px' }}>Quantity</label>
-                <input type="number" min="0" value={mobileQty === 0 || mobileQty === '' ? '' : mobileQty} onChange={(e) => setMobileQty(parseInt(e.target.value) || 0)} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #dcd7cc', boxSizing: 'border-box', color: '#333333', backgroundColor: '#ffffff' }} />
+                <CurrencyInput value={mobileQty} onChange={(v: any) => setMobileQty(v)} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #dcd7cc', boxSizing: 'border-box', color: '#0f172a', backgroundColor: '#ffffff', fontWeight: 'bold', fontSize: '16px' }} />
               </div>
             </div>
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
-              <button onClick={() => setSelectedMobileProduct(null)} style={{ padding: '10px 16px', backgroundColor: '#f4f1ea', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', color: '#6b582f' }}>{currentT.cancel}</button>
-              <button onClick={handleAddMobileProductToCart} style={{ padding: '10px 16px', backgroundColor: '#b58a3d', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', color: '#fff' }}>{currentT.add}</button>
+              <button onClick={() => setSelectedMobileProduct(null)} style={{ padding: '10px 16px', backgroundColor: '#f4f1ea', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', color: '#6b582f', fontSize: '14px' }}>{currentT.cancel}</button>
+              <button onClick={handleAddMobileProductToCart} style={{ padding: '10px 16px', backgroundColor: '#b58a3d', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', color: '#fff', fontSize: '14px' }}>{currentT.add}</button>
             </div>
           </div>
         </div>
       )}
 
-      {/* MOBILE UI CART TRAY OVERLAY */}
-      {cart.length > 0 && !isMobileCartOpen && !completedSale && !saleSummary && (
-        <div className="mobile-fab" onClick={() => setIsMobileCartOpen(true)}>
-          <div style={{ fontSize: '16px', fontWeight: 'bold' }}>🛒 View Cart ({cart.length})</div>
-          <div style={{ fontSize: '16px', fontWeight: 'bold' }}>{formatRielFromNative(totalRiel)} &nbsp; ➔</div>
-        </div>
-      )}
-
-      {isMobileCartOpen && (
-        <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(0,0,0,0.4)', zIndex: 999, display: 'flex', justifyContent: 'flex-end' }}>
-          <div style={{ width: '85%', maxWidth: '360px', height: '100%', backgroundColor: '#ffffff', display: 'flex', flexDirection: 'column', position: 'relative' }}>
-            <div style={{ paddingTop: '16px', paddingRight: '16px', paddingBottom: '16px', paddingLeft: '16px', borderBottom: '1px solid #e5e7eb', display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#fcfbfa', flexShrink: 0 }}>
-              <h3 style={{ margin: 0, color: '#4a3b1b' }}>{currentT.cartTitle} ({cart.length})</h3>
-              <button onClick={() => setIsMobileCartOpen(false)} style={{ background: 'none', border: 'none', fontSize: '20px' }}>✕</button>
-            </div>
-            
-            <div style={{ flex: 1, overflowY: 'auto', paddingTop: '16px', paddingRight: '16px', paddingBottom: '220px', paddingLeft: '16px' }}>
-              {activeTab === 'wholesale' && selectedCustomerId && (
-                <div style={{ background: '#f8fafc', padding: '12px', borderRadius: '8px', border: '1px solid #e2e8f0', marginBottom: '16px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                  <div style={{ fontSize: '11px', fontWeight: 'bold', color: '#8a7650', textTransform: 'uppercase' }}>📄 Invoice Customizer</div>
-                  <input 
-                    type="text" 
-                    placeholder="Invoice Name Override..." 
-                    value={cartCustomerNameOverride} 
-                    onChange={e => setCartCustomerNameOverride(e.target.value)} 
-                    style={{ width: '100%', padding: '6px 10px', fontSize: '12px', borderRadius: '4px', border: '1px solid #cbd5e1', outline: 'none', color: '#333' }} 
-                  />
-                </div>
-              )}
-
-              {sortedCart.map((item) => {
-                const isReturn = item.custom_name.includes('ដូរ');
-                const isCharge = item.custom_name.includes('បានប្រើ');
-                const isSpecial = isReturn || isCharge;
-
-                return (
-                  <div key={item.id} style={{ backgroundColor: isReturn ? '#fef2f2' : isCharge ? '#fffbeb' : '#fcfbfa', borderRadius: '8px', padding: '12px', marginBottom: '12px', border: `1px solid ${isReturn ? '#fecaca' : isCharge ? '#fde68a' : '#f4f1ea'}`, position: 'relative' }}>
-                    <button onClick={() => removeFromCart(item.id)} style={{ position: 'absolute', top: '8px', right: '8px', background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', zIndex: 5 }}>✕</button>
-                    
-                    <div style={{ display: 'flex', alignItems: 'center', marginBottom: '10px', borderBottom: isSpecial ? 'none' : '1px dotted #9ca3af', transition: 'border-color 0.2s' }}>
-                      <input 
-                        type="text" 
-                        value={item.custom_name} 
-                        onChange={(e) => updateCartItem(item.id, 'custom_name', e.target.value)}
-                        placeholder="Item Name"
-                        readOnly={isSpecial}
-                        style={{ 
-                          fontWeight: 'bold', 
-                          fontSize: '14px', 
-                          color: isReturn ? '#dc2626' : isCharge ? '#b45309' : '#333333', 
-                          flex: 1, 
-                          border: 'none',
-                          background: 'transparent', 
-                          outline: 'none',
-                          padding: '2px 0',
-                          textAlign: isReturn ? 'center' : 'left'
-                        }} 
-                      />
-                      
-                      {!isSpecial && activeTab === 'wholesale' && (
-                        <select
-                          value={item.selected_batch_id || 'AUTO'}
-                          onChange={(e) => updateCartItem(item.id, 'selected_batch_id', e.target.value === 'AUTO' ? null : Number(e.target.value))}
-                          style={{
-                            marginLeft: '8px',
-                            padding: '2px 4px',
-                            background: '#fefcf3',
-                            border: '1px solid #eadeca',
-                            borderRadius: '4px',
-                            fontSize: '11px',
-                            fontWeight: 'bold',
-                            color: '#b58a3d',
-                            outline: 'none',
-                            cursor: 'pointer',
-                            maxWidth: '90px'
-                          }}
-                        >
-                          <option value="AUTO">▼ Auto</option>
-                          {activeBatches[item.product_id]?.map((b: any) => {
-                            const remaining = (b.imported_qty || 0) - (b.sold_qty || 0);
-                            return (
-                              <option key={b.id} value={b.id}>
-                                {formatRiel(b.cost_price)} ({remaining})
-                              </option>
-                            );
-                          })}
-                        </select>
-                      )}
-                    </div>
-
-                    <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-end', marginBottom: '6px' }}>
-                      <div style={{ flex: 1 }}>
-                        <span style={{ display: 'block', fontSize: '11px', color: '#4a3b1b', marginBottom: '4px' }}>{currentT.unitPrice}</span>
-                        <CartInput value={item.custom_price_riel} onChange={(v) => updateCartItem(item.id, 'custom_price_riel', v)} isQty={false} />
-                      </div>
-                      <div style={{ flex: 1 }}>
-                        <span style={{ display: 'block', fontSize: '11px', color: '#4a3b1b', marginBottom: '4px' }}>{currentT.quantity}</span>
-                        <CartInput value={item.quantity} onChange={(v) => updateCartItem(item.id, 'quantity', v)} isQty={true} />
-                      </div>
-                    </div>
-
-                    <div style={{ textAlign: 'right', fontSize: '12px', fontWeight: 'bold', color: isReturn ? '#ef4444' : '#b58a3d', marginTop: '8px' }}>
-                      {isReturn && '-'}{formatRielFromNative(item.custom_price_riel * item.quantity)}
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
-            <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, paddingTop: '16px', paddingRight: '16px', paddingBottom: 'max(40px, env(safe-area-inset-bottom, 40px))', paddingLeft: '16px', borderTop: '1px solid #e5e7eb', backgroundColor: '#fcfbfa', flexShrink: 0, zIndex: 1010, boxShadow: '0 -4px 10px rgba(0,0,0,0.05)' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
-                <span style={{ fontWeight: 'bold', fontSize: '14px' }}>{currentT.totalKhmer}</span>
-                <span style={{ fontWeight: 'bold', color: totalRiel < 0 ? '#ef4444' : '#b58a3d', fontSize: '18px' }}>{formatRielFromNative(totalRiel)}</span>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '12px' }}>
-                <span style={{ fontSize: '11px', color: '#8a7650' }}>{currentT.totalUsd}</span>
-                <span style={{ fontWeight: 'bold', color: '#4a3b1b', fontSize: '13px' }}>{formatUSD(totalUSD)}</span>
-              </div>
-
-              <div style={{ marginBottom: '14px' }}>
-                <label style={{ display: 'block', fontSize: '11px', color: '#64748b', fontWeight: 'bold', textTransform: 'uppercase', marginBottom: '4px' }}>Amount Received (៛) - Optional</label>
-                <input 
-                  type="number" 
-                  className="no-spinners"
-                  placeholder="0 ៛" 
-                  value={amountReceived} 
-                  onChange={(e) => setAmountReceived(e.target.value === '' ? '' : Number(e.target.value))} 
-                  style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', fontSize: '14px', fontWeight: 'bold', outline: 'none', color: '#0f172a', backgroundColor: '#ffffff' }}
-                  onFocus={e => e.target.style.borderColor = '#10b981'}
-                  onBlur={e => e.target.style.borderColor = '#cbd5e1'}
-                />
-              </div>
-
-              {/* PAYMENT METHOD SELECTOR (Only shows if Retail or Walk-in) */}
-              {showPaymentSelector && (
-                <div style={{ marginBottom: '14px' }}>
-                  <select 
-                    value={checkoutPaymentMethod}
-                    onChange={(e) => setCheckoutPaymentMethod(e.target.value as 'Cash' | 'QR Payment')}
-                    style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', fontSize: '14px', fontWeight: 'bold', outline: 'none', color: '#0f172a', backgroundColor: '#ffffff', cursor: 'pointer' }}
-                  >
-                    <option value="Cash">💵 Paid in Cash</option>
-                    <option value="QR Payment">📱 QR Payment</option>
-                  </select>
-                </div>
-              )}
-              
-              <button 
-                onClick={confirmCheckout} 
-                disabled={cart.length === 0 || isProcessing} 
-                style={{ 
-                  width: '100%', 
-                  padding: '14px', 
-                  backgroundColor: (cart.length === 0 || isProcessing) ? '#e5e7eb' : '#10b981', 
-                  color: (cart.length === 0 || isProcessing) ? '#9ca3af' : '#ffffff', 
-                  border: 'none', 
-                  borderRadius: '8px', 
-                  fontWeight: 'bold', 
-                  fontSize: '15px', 
-                  cursor: (cart.length === 0 || isProcessing) ? 'not-allowed' : 'pointer' 
-                }}
-              >
-                {isProcessing ? 'Processing...' : (editingInvoiceId ? 'Update Invoice' : currentT.checkout)}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* SALE SUMMARY MODAL */}
       {saleSummary && (
-        <div className="modal-overlay" style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(0,0,0,0.85)', zIndex: 10001, display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '20px', boxSizing: 'border-box' }}>
+        <div className="modal-overlay" style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(0,0,0,0.85)', zIndex: 10005, display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '20px', boxSizing: 'border-box' }}>
           <div className="modal-content" style={{ backgroundColor: '#ffffff', width: '100%', maxWidth: '400px', borderRadius: '16px', padding: '30px', boxShadow: '0 10px 25px rgba(0,0,0,0.2)' }}>
-            <h2 style={{ marginTop: 0, color: '#10b981', fontSize: '24px', marginBottom: '8px', textAlign: 'center' }}>
-              {saleSummary.isCashless ? 'Sale Recorded! ✅' : 'Sale Complete!'}
+            <h2 style={{ marginTop: 0, color: saleSummary.isDebt ? '#d97706' : '#10b981', fontSize: '24px', marginBottom: '8px', textAlign: 'center' }}>
+              {saleSummary.isCashless ? 'Sale Recorded! ✅' : saleSummary.isDebt ? 'Partial Payment Logged ⏳' : 'Sale Complete! ✅'}
             </h2>
-             
+              
             <div style={{ background: '#f8fafc', padding: '24px', borderRadius: '12px', margin: '20px 0', border: '1px solid #e2e8f0' }}>
               {saleSummary.isCashless ? (
                 <>
@@ -1462,23 +1350,42 @@ export default function POSPage() {
                 </>
               ) : (
                 <>
-                  <div style={{ fontSize: '14px', color: '#64748b', marginBottom: '4px', textTransform: 'uppercase', fontWeight: 'bold', textAlign: 'center' }}>Change Due</div>
-                  <div style={{ fontSize: '36px', fontWeight: 'bold', color: '#ef4444', marginBottom: '16px', textAlign: 'center' }}>{formatRielFromNative(saleSummary.change)}</div>
+                  {saleSummary.change > 0 && (
+                    <>
+                      <div style={{ fontSize: '14px', color: '#64748b', marginBottom: '4px', textTransform: 'uppercase', fontWeight: 'bold', textAlign: 'center' }}>Change Due</div>
+                      <div style={{ fontSize: '36px', fontWeight: 'bold', color: '#ef4444', marginBottom: '16px', textAlign: 'center' }}>{formatRielFromNative(saleSummary.change)}</div>
+                    </>
+                  )}
+
+                  {saleSummary.isDebt && (
+                    <>
+                      <div style={{ fontSize: '14px', color: '#64748b', marginBottom: '4px', textTransform: 'uppercase', fontWeight: 'bold', textAlign: 'center' }}>Remaining Debt</div>
+                      <div style={{ fontSize: '36px', fontWeight: 'bold', color: '#d97706', marginBottom: '16px', textAlign: 'center' }}>{formatRielFromNative(saleSummary.total - saleSummary.totalReceivedInRiel)}</div>
+                    </>
+                  )}
                     
                   <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px dashed #cbd5e1', paddingTop: '16px', fontSize: '14px' }}>
                     <span style={{ color: '#64748b', fontWeight: 'bold' }}>Total Due:</span>
                     <span style={{ color: '#0f172a', fontWeight: 'bold' }}>{formatRielFromNative(saleSummary.total)}</span>
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '8px', fontSize: '14px' }}>
-                    <span style={{ color: '#64748b', fontWeight: 'bold' }}>Amount Received:</span>
-                    <span style={{ color: '#0f172a', fontWeight: 'bold' }}>{formatRielFromNative(saleSummary.received)}</span>
+                    <span style={{ color: '#64748b', fontWeight: 'bold' }}>Total Received:</span>
+                    <span style={{ color: '#0f172a', fontWeight: 'bold' }}>{formatRielFromNative(saleSummary.totalReceivedInRiel)}</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '4px', fontSize: '12px', color: '#64748b' }}>
+                    <span>↳ Cash:</span>
+                    <span>{formatRielFromNative(saleSummary.receivedRiel)}</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '4px', fontSize: '12px', color: '#64748b' }}>
+                    <span>↳ QR:</span>
+                    <span>{formatRielFromNative(saleSummary.receivedUsd)}</span>
                   </div>
                 </>
               )}
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-              <button onClick={() => { setSaleSummary(null); setCompletedSale(null); setPreviewImageUrl(null); setShowInvoicePreview(false); }} style={{ width: '100%', padding: '14px', background: '#ef4444', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', fontSize: '15px' }}>
+              <button onClick={() => { setSaleSummary(null); setCompletedSale(null); setPreviewImageUrl(null); setShowInvoicePreview(false); }} style={{ width: '100%', padding: '16px', background: '#ef4444', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', fontSize: '16px' }}>
                  ❌ Close
               </button>
             </div>
@@ -1486,9 +1393,9 @@ export default function POSPage() {
         </div>
       )}
 
-      {/* FINAL INVISIBLE DOM CAPTURE AREA */}
+      {/* FINAL INVISIBLE DOM CAPTURE AREA - Position changed to allow mobile rendering */}
       {completedSale && showInvoicePreview && (
-        <div style={{ position: 'absolute', top: '-10000px', left: '-10000px', zIndex: -1 }}>
+        <div style={{ position: 'absolute', top: 0, left: 0, zIndex: -10, opacity: 0.01, pointerEvents: 'none' }}>
           <div id="invoice-capture-area" ref={invoiceRef} style={{ width: '794px', height: '559px', backgroundColor: '#ffffff', position: 'relative', margin: 0, padding: '19px', boxSizing: 'border-box', fontFamily: "'Noto Sans Khmer', Arial, sans-serif", fontSize: '12.8px', color: '#000000', overflow: 'hidden' }}>
             <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Khmer&display=swap" rel="stylesheet" crossOrigin="anonymous" />
             
@@ -1616,7 +1523,37 @@ export default function POSPage() {
         </div>
       )}
 
-      <style jsx global>{`
+      {/* RENDERED INVOICE PREVIEW MODAL */}
+      {showInvoicePreview && completedSale && (
+        <div className="invoice-modal-overlay" style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(0,0,0,0.85)', zIndex: 10006, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+          
+          <div className="invoice-controls" style={{ display: 'flex', justifyContent: 'space-between', width: '100%', maxWidth: '850px', marginBottom: '16px', padding: '0 20px' }}>
+            <button onClick={() => { setShowInvoicePreview(false); setCompletedSale(null); setPreviewImageUrl(null); }} style={{ backgroundColor: '#dc2626', color: '#fff', border: 'none', padding: '10px 20px', borderRadius: '8px', fontSize: '16px', fontWeight: 'bold', cursor: 'pointer' }}>{currentT.close}</button>
+            
+            <div className="desktop-controls" style={{ display: 'none', gap: '10px' }}>
+              <button onClick={handleDesktopDownloadPNG} disabled={!previewImageUrl} style={{ backgroundColor: '#f59e0b', color: '#fff', border: 'none', padding: '10px 20px', borderRadius: '8px', fontSize: '16px', fontWeight: 'bold', cursor: 'pointer' }}>{currentT.openInvoice}</button>
+              <button onClick={handleNativePrint} style={{ backgroundColor: '#3b82f6', color: '#fff', border: 'none', padding: '10px 20px', borderRadius: '8px', fontSize: '16px', fontWeight: 'bold', cursor: 'pointer' }}>🖨️ Print / PDF</button>
+            </div>
+
+            <div className="mobile-controls" style={{ display: 'flex', gap: '10px' }}>
+              <button onClick={handleMobileShare} disabled={!previewImageUrl} style={{ backgroundColor: '#3b82f6', color: '#fff', border: 'none', padding: '10px 16px', borderRadius: '8px', fontSize: '14px', fontWeight: 'bold', cursor: 'pointer' }}>{currentT.shareInvoice}</button>
+              <button onClick={handleNativePrint} style={{ backgroundColor: '#10b981', color: '#fff', border: 'none', padding: '10px 16px', borderRadius: '8px', fontSize: '14px', fontWeight: 'bold', cursor: 'pointer' }}>🖨️ Print</button>
+            </div>
+          </div>
+
+          <div className="invoice-preview-container" style={{ width: '100%', maxWidth: '850px', padding: '0 10px', display: 'flex', justifyContent: 'center' }}>
+            {isGeneratingPreview || !previewImageUrl ? (
+              <div style={{ padding: '40px', backgroundColor: '#fff', borderRadius: '8px', color: '#4a3b1b', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <span style={{ fontSize: '24px' }}>⏳</span> Generating High-Resolution Invoice...
+              </div>
+            ) : (
+              <img src={previewImageUrl} alt="Invoice Preview" style={{ width: '100%', maxWidth: '794px', borderRadius: '4px', objectFit: 'contain', boxShadow: '0 10px 25px rgba(0,0,0,0.5)' }} />
+            )}
+          </div>
+        </div>
+      )}
+
+      <style dangerouslySetInnerHTML={{ __html: `
         .main-wrapper { 
           padding: 24px 24px 24px 75px; 
           background: #f8fafc; 
@@ -1638,11 +1575,10 @@ export default function POSPage() {
           margin: 0; 
         }
 
-        input[type="number"].no-spinners::-webkit-inner-spin-button,
-        input[type="number"].no-spinners::-webkit-outer-spin-button {
+        input[type="text"].no-spinners::-webkit-inner-spin-button,
+        input[type="text"].no-spinners::-webkit-outer-spin-button {
           -webkit-appearance: none; margin: 0;
         }
-        input[type="number"].no-spinners { -moz-appearance: textfield; }
 
         @media print {
           body * { visibility: hidden; }
@@ -1695,7 +1631,7 @@ export default function POSPage() {
             cursor: pointer;
           }
         }
-      `}</style>
+      `}} />
     </div>
   )
 }
