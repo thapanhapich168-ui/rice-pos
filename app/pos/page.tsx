@@ -1287,7 +1287,13 @@ export default function POSPage() {
               {activeTab === 'wholesale' && selectedCustomerId && (
                 <div style={{ background: '#f8fafc', padding: '12px', borderRadius: '8px', border: '1px solid #e2e8f0', marginBottom: '16px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
                   <div style={{ fontSize: '11px', fontWeight: 'bold', color: '#8a7650', textTransform: 'uppercase' }}>📄 Invoice Customizer</div>
-                  <input type="text" placeholder="Invoice Name..." value={cartCustomerEdits.name} onChange={e => setCartCustomerOverrides({...cartCustomerEdits, name: e.target.value})} style={{ width: '100%', padding: '6px 10px', fontSize: '12px', borderRadius: '4px', border: '1px solid #cbd5e1', outline: 'none', color: '#333' }} />
+                  <input 
+                    type="text" 
+                    placeholder="Invoice Name Override..." 
+                    value={cartCustomerNameOverride} 
+                    onChange={e => setCartCustomerNameOverride(e.target.value)} 
+                    style={{ width: '100%', padding: '6px 10px', fontSize: '12px', borderRadius: '4px', border: '1px solid #cbd5e1', outline: 'none', color: '#333' }} 
+                  />
                 </div>
               )}
 
@@ -1606,36 +1612,6 @@ export default function POSPage() {
               </div>
 
             </div>
-          </div>
-        </div>
-      )}
-
-      {/* RENDERED INVOICE PREVIEW MODAL */}
-      {showInvoicePreview && completedSale && (
-        <div className="invoice-modal-overlay" style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(0,0,0,0.85)', zIndex: 10000, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
-          
-          <div className="invoice-controls" style={{ display: 'flex', justifyContent: 'space-between', width: '100%', maxWidth: '850px', marginBottom: '16px', padding: '0 20px' }}>
-            <button onClick={() => { setShowInvoicePreview(false); setCompletedSale(null); setPreviewImageUrl(null); }} style={{ backgroundColor: '#dc2626', color: '#fff', border: 'none', padding: '10px 20px', borderRadius: '8px', fontSize: '16px', fontWeight: 'bold', cursor: 'pointer' }}>{currentT.close}</button>
-            
-            <div className="desktop-controls" style={{ display: 'none', gap: '10px' }}>
-              <button onClick={handleDesktopDownloadPNG} disabled={!previewImageUrl} style={{ backgroundColor: '#f59e0b', color: '#fff', border: 'none', padding: '10px 20px', borderRadius: '8px', fontSize: '16px', fontWeight: 'bold', cursor: 'pointer' }}>{currentT.openInvoice}</button>
-              <button onClick={handleNativePrint} style={{ backgroundColor: '#3b82f6', color: '#fff', border: 'none', padding: '10px 20px', borderRadius: '8px', fontSize: '16px', fontWeight: 'bold', cursor: 'pointer' }}>🖨️ Print / PDF</button>
-            </div>
-
-            <div className="mobile-controls" style={{ display: 'flex', gap: '10px' }}>
-              <button onClick={handleMobileShare} disabled={!previewImageUrl} style={{ backgroundColor: '#3b82f6', color: '#fff', border: 'none', padding: '10px 16px', borderRadius: '8px', fontSize: '14px', fontWeight: 'bold', cursor: 'pointer' }}>{currentT.shareInvoice}</button>
-              <button onClick={handleNativePrint} style={{ backgroundColor: '#10b981', color: '#fff', border: 'none', padding: '10px 16px', borderRadius: '8px', fontSize: '14px', fontWeight: 'bold', cursor: 'pointer' }}>🖨️ Print</button>
-            </div>
-          </div>
-
-          <div className="invoice-preview-container" style={{ width: '100%', maxWidth: '850px', padding: '0 10px', display: 'flex', justifyContent: 'center' }}>
-            {isGeneratingPreview || !previewImageUrl ? (
-              <div style={{ padding: '40px', backgroundColor: '#fff', borderRadius: '8px', color: '#4a3b1b', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '12px' }}>
-                <span style={{ fontSize: '24px' }}>⏳</span> Generating High-Resolution Invoice...
-              </div>
-            ) : (
-              <img src={previewImageUrl} alt="Invoice Preview" style={{ width: '100%', maxWidth: '794px', borderRadius: '4px', objectFit: 'contain', boxShadow: '0 10px 25px rgba(0,0,0,0.5)' }} />
-            )}
           </div>
         </div>
       )}
