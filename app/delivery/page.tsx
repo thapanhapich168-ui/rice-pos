@@ -78,7 +78,7 @@ export default function DeliveryPage() {
   // --- QUICK UPDATES ---
   async function updateInvoiceField(invoiceId: string, field: string, value: any) {
     // Optimistic UI Update for maximum speed
-    setDeliveries(prev => prev.map(d => d.invoice_id === invoiceId ? { ...d, [field]: value } : d));
+    setDeliveries(prev => prev.map((d: any) => d.invoice_id === invoiceId ? { ...d, [field]: value } : d));
     
     const { error } = await supabase.from('invoice_summaries').update({ [field]: value }).eq('invoice_id', invoiceId);
     if (error) {
@@ -91,7 +91,7 @@ export default function DeliveryPage() {
   async function handleClearCustomerDebt() {
     if (!clearDebtModal.customerName || clearDebtModal.invoices.length === 0) return;
     
-    const invoiceIds = clearDebtModal.invoices.map(inv => inv.invoice_id);
+    const invoiceIds = clearDebtModal.invoices.map((inv: any) => inv.invoice_id);
     
     const { error } = await supabase
       .from('invoice_summaries')
@@ -109,10 +109,9 @@ export default function DeliveryPage() {
   // --- DATA PROCESSING & SORTING ---
   
   // MANUAL DONE BUTTON OVERRIDE: 
-  // It only drops to the bottom if the user explicitly clicked the "Done" button (is_done === true)
   const isFullyComplete = (d: any) => d.is_done === true;
 
-  const sortedDeliveries = [...deliveries].sort((a, b) => {
+  const sortedDeliveries = [...deliveries].sort((a: any, b: any) => {
     const aDone = isFullyComplete(a);
     const bDone = isFullyComplete(b);
     
@@ -122,7 +121,7 @@ export default function DeliveryPage() {
   });
 
   // Group Debtors for the "Owe" Tab
-  const debtorsMap = deliveries.reduce((acc, curr) => {
+  const debtorsMap = deliveries.reduce((acc: any, curr: any) => {
     const balance = Number(curr.balance_due) || 0;
     if (balance > 0) {
       if (!acc[curr.customer_name]) {
@@ -134,11 +133,11 @@ export default function DeliveryPage() {
     return acc;
   }, {} as Record<string, { totalOwed: number, invoices: any[] }>);
 
-  const debtorsList = Object.keys(debtorsMap).map(name => ({
+  const debtorsList = Object.keys(debtorsMap).map((name: string) => ({
     name,
     totalOwed: debtorsMap[name].totalOwed,
     invoices: debtorsMap[name].invoices
-  })).sort((a, b) => b.totalOwed - a.totalOwed);
+  })).sort((a: any, b: any) => b.totalOwed - a.totalOwed);
 
   return (
     <div className="main-wrapper" style={{ padding: '24px 24px 24px 75px', background: '#f8fafc', minHeight: '100vh', fontFamily: 'Arial, sans-serif' }}>
@@ -188,7 +187,7 @@ export default function DeliveryPage() {
                 {sortedDeliveries.length === 0 ? (
                   <tr><td colSpan={8} style={{ textAlign: 'center', padding: '40px', color: '#94a3b8' }}>No active wholesale deliveries.</td></tr>
                 ) : (
-                  sortedDeliveries.map(d => {
+                  sortedDeliveries.map((d: any) => {
                     const isDone = isFullyComplete(d);
                     const totalSale = Number(d.total_sales) || 0;
                     const balanceDue = Number(d.balance_due) || 0;
@@ -196,7 +195,7 @@ export default function DeliveryPage() {
                     return (
                       <tr key={d.invoice_id} style={{ borderBottom: '1px solid #f1f5f9', background: isDone ? '#f8fafc' : '#ffffff', opacity: isDone ? 0.6 : 1, transition: 'all 0.3s ease' }}>
                         
-                        {/* 1. DELIVERY STATUS BUTTON (Toggles text only, does not sort) */}
+                        {/* 1. DELIVERY STATUS BUTTON */}
                         <td style={{ padding: '16px', textAlign: 'center' }}>
                           <button 
                             onClick={() => updateInvoiceField(d.invoice_id, 'delivery_status', d.delivery_status === 'Pending' ? 'Delivered' : 'Pending')}
@@ -248,7 +247,7 @@ export default function DeliveryPage() {
                           <AmountReceivedInput 
                             invoiceTotal={totalSale} 
                             balanceDue={balanceDue} 
-                            onSave={(newBalance) => updateInvoiceField(d.invoice_id, 'balance_due', newBalance)} 
+                            onSave={(newBalance: number) => updateInvoiceField(d.invoice_id, 'balance_due', newBalance)} 
                           />
                           {balanceDue > 0 && (
                             <div style={{ fontSize: '11px', color: '#ef4444', marginTop: '6px', fontWeight: 'bold' }}>
@@ -257,7 +256,7 @@ export default function DeliveryPage() {
                           )}
                         </td>
 
-                        {/* 8. MANUAL DONE BUTTON (This controls the sorting) */}
+                        {/* 8. MANUAL DONE BUTTON */}
                         <td style={{ padding: '16px', textAlign: 'center' }}>
                           <button 
                             onClick={() => updateInvoiceField(d.invoice_id, 'is_done', !d.is_done)}
@@ -299,13 +298,13 @@ export default function DeliveryPage() {
                 {debtorsList.length === 0 ? (
                   <tr><td colSpan={4} style={{ textAlign: 'center', padding: '40px', color: '#10b981', fontWeight: 'bold', fontSize: '16px' }}>🎉 All customers are fully paid up!</td></tr>
                 ) : (
-                  debtorsList.map(debtor => (
+                  debtorsList.map((debtor: any) => (
                     <tr key={debtor.name} style={{ borderBottom: '1px solid #f1f5f9' }}>
                       <td style={{ padding: '16px', fontWeight: 'bold', color: '#0f172a', fontSize: '16px' }}>{debtor.name}</td>
                       <td style={{ padding: '16px', textAlign: 'center', color: '#64748b' }}>
                         <span style={{ fontWeight: 'bold', color: '#334155' }}>{debtor.invoices.length}</span> Invoices
                         <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '4px' }}>
-                          ({debtor.invoices.map(i => String(i.invoice_id).split('-')[1] || i.invoice_id).join(', ')})
+                          ({debtor.invoices.map((i: any) => String(i.invoice_id).split('-')[1] || i.invoice_id).join(', ')})
                         </div>
                       </td>
                       <td style={{ padding: '16px', textAlign: 'right', fontWeight: 'bold', color: '#ef4444', fontSize: '18px' }}>
