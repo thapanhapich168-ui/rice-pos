@@ -1110,7 +1110,7 @@ export default function POSPage() {
       {isMobileCartOpen && (
         <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(4px)', zIndex: 1000, display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '20px', boxSizing: 'border-box' }} onMouseDown={() => setIsMobileCartOpen(false)}>
           
-          <div style={{ width: '100%', maxWidth: '450px', maxHeight: '85vh', backgroundColor: '#ffffff', borderRadius: '20px', display: 'flex', flexDirection: 'column', position: 'relative', boxShadow: '0 10px 30px rgba(0,0,0,0.2)' }} onMouseDown={e => e.stopPropagation()}>
+          <div style={{ width: '100%', maxWidth: '450px', maxHeight: '75vh', backgroundColor: '#ffffff', borderRadius: '20px', display: 'flex', flexDirection: 'column', position: 'relative', boxShadow: '0 10px 30px rgba(0,0,0,0.2)' }} onMouseDown={e => e.stopPropagation()}>
             
             <div style={{ padding: '20px', borderBottom: '1px solid #e5e7eb', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
               <h3 style={{ margin: 0, color: '#4a3b1b', fontSize: '18px' }}>{currentT.cartTitle} ({cart.length})</h3>
@@ -1443,7 +1443,7 @@ export default function POSPage() {
         </div>
       )}
 
-      {/* FINAL INVISIBLE DOM CAPTURE AREA */}
+      {/* FINAL INVISIBLE DOM CAPTURE AREA - Positioned fixed to viewport to guarantee mobile HTML-to-Image rendering! */}
       {completedSale && showInvoicePreview && (
         <div style={{ position: 'fixed', top: '-5000px', left: 0, zIndex: -100, opacity: 1, pointerEvents: 'none' }}>
           <div id="invoice-capture-area" ref={invoiceRef} style={{ width: '794px', height: '559px', backgroundColor: '#ffffff', position: 'relative', margin: 0, padding: '19px', boxSizing: 'border-box', fontFamily: "'Noto Sans Khmer', Arial, sans-serif", fontSize: '12.8px', color: '#000000', overflow: 'hidden' }}>
@@ -1607,7 +1607,6 @@ export default function POSPage() {
         .main-wrapper { 
           padding: 24px 24px 24px 75px; 
           background: #f8fafc; 
-          min-height: 100vh; 
           font-family: Arial, sans-serif; 
           box-sizing: border-box; 
           color: #333;
@@ -1661,7 +1660,7 @@ export default function POSPage() {
           .desktop-controls { display: none !important; }
           .desktop-cart-panel { display: none !important; }
           .main-wrapper { 
-            padding: 85px 16px 16px 16px !important; 
+            padding: 85px 16px 140px 16px !important; 
             min-height: auto;
           }
           .header-container {
