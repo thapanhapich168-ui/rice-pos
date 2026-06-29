@@ -289,16 +289,24 @@ export default function POSPage() {
     }
   }, [activeTab, customers]) 
 
+  // Mobile Invoice Generation Engine
   useEffect(() => {
     if (completedSale && invoiceRef.current && !previewImageUrl && showInvoicePreview) {
       const timer = setTimeout(async () => {
         try {
           await document.fonts.ready;
           const isMobile = window.innerWidth < 1024;
+          
+          // Double-pass rendering trick for iOS Safari (Forces elements/images to strictly render first)
+          if (isMobile) {
+            await htmlToImage.toPng(invoiceRef.current!, { pixelRatio: 0.5, backgroundColor: '#ffffff' });
+          }
+          
           const dataUrl = await htmlToImage.toPng(invoiceRef.current!, { 
             pixelRatio: isMobile ? 1.5 : 3, 
             backgroundColor: '#ffffff' 
           });
+          
           setPreviewImageUrl(dataUrl);
           setIsGeneratingPreview(false);
           executeAutoSaveOnly(dataUrl, completedSale.invoiceNo);
@@ -1206,9 +1214,9 @@ export default function POSPage() {
 
       {/* CUSTOMER SEARCH MODAL (No-Zoom, Pop-up Style) */}
       {isCustomerModalOpen && (
-        <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(4px)', zIndex: 10000, display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '20px', boxSizing: 'border-box' }} onMouseDown={() => setIsCustomerModalOpen(false)}>
-          <div style={{ backgroundColor: '#ffffff', width: '100%', maxWidth: '400px', maxHeight: '80vh', borderRadius: '12px', display: 'flex', flexDirection: 'column', boxShadow: '0 10px 25px rgba(0,0,0,0.2)' }} onMouseDown={e => e.stopPropagation()}>
-            <div style={{ padding: '16px', borderBottom: '1px solid #e2e8f0', display: 'flex', gap: '10px', alignItems: 'center' }}>
+        <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(4px)', zIndex: 10000, display: 'flex', justifyContent: 'center', alignItems: 'flex-start', paddingTop: '60px', paddingLeft: '16px', paddingRight: '16px', boxSizing: 'border-box' }} onMouseDown={() => setIsCustomerModalOpen(false)}>
+          <div style={{ backgroundColor: '#ffffff', width: '100%', maxWidth: '400px', maxHeight: '80vh', borderRadius: '12px', display: 'flex', flexDirection: 'column', boxShadow: '0 10px 30px rgba(0,0,0,0.15)' }} onMouseDown={e => e.stopPropagation()}>
+            <div style={{ padding: '12px', borderBottom: '1px solid #f1f5f9', display: 'flex', gap: '8px', alignItems: 'center' }}>
               <span style={{ fontSize: '18px', color: '#94a3b8' }}>🔍</span>
               <input 
                 autoFocus
@@ -1216,14 +1224,14 @@ export default function POSPage() {
                 placeholder="Search for option..." 
                 value={customerSearchTerm} 
                 onChange={e => setCustomerSearchTerm(e.target.value)} 
-                style={{ flex: 1, padding: '8px', border: 'none', fontSize: '16px', outline: 'none', color: '#0f172a' }} 
+                style={{ flex: 1, padding: '8px', border: '1px solid transparent', fontSize: '16px', outline: 'none', color: '#0f172a', backgroundColor: 'transparent' }} 
               />
-              <button onClick={() => setIsCustomerModalOpen(false)} style={{ background: 'none', border: 'none', fontSize: '20px', color: '#94a3b8', cursor: 'pointer' }}>✕</button>
+              <button onClick={() => setIsCustomerModalOpen(false)} style={{ background: 'none', border: 'none', fontSize: '20px', color: '#94a3b8', cursor: 'pointer', padding: '0 8px' }}>✕</button>
             </div>
             
-            <div style={{ flex: 1, overflowY: 'auto', padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px', backgroundColor: '#f8fafc' }}>
-              <button onClick={() => { setIsCreateCustomerModalOpen(true); setIsCustomerModalOpen(false); }} style={{ width: '100%', padding: '14px', backgroundColor: '#e0f2fe', color: '#2563eb', border: '1px dashed #93c5fd', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold', fontSize: '14px', marginBottom: '8px' }}>
-                + Add New Customer
+            <div style={{ flex: 1, overflowY: 'auto', padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px', backgroundColor: '#fcfcfc' }}>
+              <button onClick={() => { setIsCreateCustomerModalOpen(true); setIsCustomerModalOpen(false); }} style={{ width: '100%', padding: '12px', backgroundColor: '#ffffff', color: '#0f172a', border: '1px dashed #cbd5e1', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold', fontSize: '15px', marginBottom: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
+                <span style={{ fontSize: '18px' }}>+</span> Add New Customer
               </button>
               
               {filteredCustomers.length === 0 ? (
@@ -1233,12 +1241,16 @@ export default function POSPage() {
                   <div 
                     key={c.id} 
                     onClick={() => { setSelectedCustomerId(c.id.toString()); setCustomerSearchTerm(''); setIsCustomerModalOpen(false); }} 
-                    style={{ border: '1px solid #cbd5e1', borderRadius: '8px', padding: '16px', cursor: 'pointer', transition: 'background 0.2s', backgroundColor: '#fff' }}
+                    style={{ border: '1px solid #e2e8f0', borderRadius: '8px', padding: '16px', cursor: 'pointer', backgroundColor: '#fff', position: 'relative' }}
                   >
                     <div style={{ fontWeight: 'bold', fontSize: '15px', color: '#1e293b', marginBottom: '8px' }}>{c.name}</div>
-                    <div style={{ fontSize: '13px', color: '#475569', marginBottom: '4px' }}>Location: <span style={{ color: '#64748b' }}>{c.location || '-'}</span></div>
-                    <div style={{ fontSize: '13px', color: '#475569', marginBottom: '4px' }}>Phone Number: <span style={{ color: '#64748b' }}>{c.phone || '-'}</span></div>
-                    <div style={{ fontSize: '13px', color: '#475569' }}>Types: <span style={{ color: '#64748b' }}>{c.type || '-'}</span></div>
+                    <div style={{ fontSize: '13px', color: '#64748b', marginBottom: '4px' }}>Location: <span style={{ color: '#0f172a' }}>{c.location || '-'}</span></div>
+                    <div style={{ fontSize: '13px', color: '#64748b', marginBottom: '4px' }}>Phone Number: <span style={{ color: '#0f172a' }}>{c.phone || '-'}</span></div>
+                    <div style={{ fontSize: '13px', color: '#64748b' }}>Types: <span style={{ color: '#0f172a' }}>{c.type || '-'}</span></div>
+                    
+                    <button style={{ position: 'absolute', bottom: '16px', right: '16px', padding: '6px 12px', background: '#ffffff', border: '1px solid #cbd5e1', borderRadius: '6px', fontSize: '12px', fontWeight: 'bold', color: '#475569', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                      Edit ✏️
+                    </button>
                   </div>
                 ))
               )}
@@ -1433,7 +1445,7 @@ export default function POSPage() {
 
       {/* FINAL INVISIBLE DOM CAPTURE AREA - Positioned fixed to viewport to guarantee mobile HTML-to-Image rendering! */}
       {completedSale && showInvoicePreview && (
-        <div style={{ position: 'fixed', top: 0, left: 0, zIndex: -100, opacity: 0.01, pointerEvents: 'none' }}>
+        <div style={{ position: 'fixed', top: '-5000px', left: 0, zIndex: -100, opacity: 1, pointerEvents: 'none' }}>
           <div id="invoice-capture-area" ref={invoiceRef} style={{ width: '794px', height: '559px', backgroundColor: '#ffffff', position: 'relative', margin: 0, padding: '19px', boxSizing: 'border-box', fontFamily: "'Noto Sans Khmer', Arial, sans-serif", fontSize: '12.8px', color: '#000000', overflow: 'hidden' }}>
             <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Khmer&display=swap" rel="stylesheet" crossOrigin="anonymous" />
             
@@ -1561,6 +1573,36 @@ export default function POSPage() {
         </div>
       )}
 
+      {/* RENDERED INVOICE PREVIEW MODAL */}
+      {showInvoicePreview && completedSale && (
+        <div className="invoice-modal-overlay" style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(0,0,0,0.85)', zIndex: 10006, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+          
+          <div className="invoice-controls" style={{ display: 'flex', justifyContent: 'space-between', width: '100%', maxWidth: '850px', marginBottom: '16px', padding: '0 20px' }}>
+            <button onClick={() => { setShowInvoicePreview(false); setCompletedSale(null); setPreviewImageUrl(null); }} style={{ backgroundColor: '#dc2626', color: '#fff', border: 'none', padding: '10px 20px', borderRadius: '8px', fontSize: '16px', fontWeight: 'bold', cursor: 'pointer' }}>{currentT.close}</button>
+            
+            <div className="desktop-controls" style={{ display: 'none', gap: '10px' }}>
+              <button onClick={handleDesktopDownloadPNG} disabled={!previewImageUrl} style={{ backgroundColor: '#f59e0b', color: '#fff', border: 'none', padding: '10px 20px', borderRadius: '8px', fontSize: '16px', fontWeight: 'bold', cursor: 'pointer' }}>{currentT.openInvoice}</button>
+              <button onClick={handleNativePrint} style={{ backgroundColor: '#3b82f6', color: '#fff', border: 'none', padding: '10px 20px', borderRadius: '8px', fontSize: '16px', fontWeight: 'bold', cursor: 'pointer' }}>🖨️ Print / PDF</button>
+            </div>
+
+            <div className="mobile-controls" style={{ display: 'flex', gap: '10px' }}>
+              <button onClick={handleMobileShare} disabled={!previewImageUrl} style={{ backgroundColor: '#3b82f6', color: '#fff', border: 'none', padding: '10px 16px', borderRadius: '8px', fontSize: '14px', fontWeight: 'bold', cursor: 'pointer' }}>{currentT.shareInvoice}</button>
+              <button onClick={handleNativePrint} style={{ backgroundColor: '#10b981', color: '#fff', border: 'none', padding: '10px 16px', borderRadius: '8px', fontSize: '14px', fontWeight: 'bold', cursor: 'pointer' }}>🖨️ Print</button>
+            </div>
+          </div>
+
+          <div className="invoice-preview-container" style={{ width: '100%', maxWidth: '850px', padding: '0 10px', display: 'flex', justifyContent: 'center' }}>
+            {isGeneratingPreview || !previewImageUrl ? (
+              <div style={{ padding: '40px', backgroundColor: '#fff', borderRadius: '8px', color: '#4a3b1b', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <span style={{ fontSize: '24px' }}>⏳</span> Generating High-Resolution Invoice...
+              </div>
+            ) : (
+              <img src={previewImageUrl} alt="Invoice Preview" style={{ width: '100%', maxWidth: '794px', borderRadius: '4px', objectFit: 'contain', boxShadow: '0 10px 25px rgba(0,0,0,0.5)' }} />
+            )}
+          </div>
+        </div>
+      )}
+
       <style dangerouslySetInnerHTML={{ __html: `
         .main-wrapper { 
           padding: 24px 24px 24px 75px; 
@@ -1619,8 +1661,13 @@ export default function POSPage() {
           .desktop-controls { display: none !important; }
           .desktop-cart-panel { display: none !important; }
           .main-wrapper { 
-            padding: max(80px, env(safe-area-inset-top, 80px)) 16px 16px 16px !important; 
+            padding: 80px 16px 16px 16px !important; 
             min-height: auto;
+          }
+          .header-container {
+            flex-direction: column !important;
+            align-items: flex-start !important;
+            gap: 12px !important;
           }
           .mobile-fab {
             display: flex !important; 
