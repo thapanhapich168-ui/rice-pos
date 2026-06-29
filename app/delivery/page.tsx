@@ -150,7 +150,7 @@ export default function DeliveryPage() {
         await supabase.from('expenses').insert([{
           expense_date: new Date().toISOString().split('T')[0],
           spender: 'Business',
-          payment_method: row.method, // Cash ៛, QR $, etc.
+          payment_method: row.method, // Cash ៛, QR $, Mom QR $, etc.
           remarks: `Payment from ${paymentModal.customerName} (Inv: ${invoiceIds.length > 1 ? 'Multiple' : invoiceIds[0]})`,
           amount: 0,
           amount_riel: amountRiel,
@@ -203,8 +203,8 @@ export default function DeliveryPage() {
     return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
   });
 
-  // Group Debtors by Owner -> Customer
-  const debtorsMap = deliveries.reduce((acc: any, curr: any) => {
+  // Group Debtors by Owner -> Customer (Fixed Strict Typing)
+  const debtorsMap = deliveries.reduce((acc: Record<string, any>, curr: any) => {
     const balance = Number(curr.balance_due) || 0;
     if (balance > 0) {
       let owner = (curr.owner || '').trim();
@@ -220,15 +220,16 @@ export default function DeliveryPage() {
       acc[key].invoices.push(curr);
     }
     return acc;
-  }, {});
+  }, {} as Record<string, any>);
 
   const debtorsList = Object.values(debtorsMap).sort((a: any, b: any) => b.totalOwed - a.totalOwed);
 
-  const groupedDebtors = debtorsList.reduce((acc: any, curr: any) => {
+  // Group Debtors List by Owner (Fixed Strict Typing)
+  const groupedDebtors = debtorsList.reduce((acc: Record<string, any[]>, curr: any) => {
     if (!acc[curr.owner]) acc[curr.owner] = [];
     acc[curr.owner].push(curr);
     return acc;
-  }, {});
+  }, {} as Record<string, any[]>);
 
   const ownerOrder = ['Pich', 'Jing', 'Both', 'Mom', 'Unassigned'];
   const activeOwners = Object.keys(groupedDebtors).sort((a, b) => {
@@ -491,6 +492,8 @@ export default function DeliveryPage() {
                     <option value="Cash $">💵 Cash $</option>
                     <option value="QR ៛">📱 QR ៛</option>
                     <option value="QR $">📱 QR $</option>
+                    <option value="Mom QR ៛">👩 Mom QR ៛</option>
+                    <option value="Mom QR $">👩 Mom QR $</option>
                   </select>
                   
                   <div style={{ flex: 1 }}>
@@ -550,13 +553,13 @@ export default function DeliveryPage() {
       )}
 
       {/* GLOBAL CSS FOR INPUTS */}
-      <style jsx global>{`
+      <style dangerouslySetInnerHTML={{ __html: `
         input[type="text"].no-spinners::-webkit-inner-spin-button,
         input[type="text"].no-spinners::-webkit-outer-spin-button {
           -webkit-appearance: none;
           margin: 0;
         }
-      `}</style>
+      `}} />
     </div>
   )
 }
