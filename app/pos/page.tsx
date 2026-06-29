@@ -144,7 +144,7 @@ function CartInput({ value, onChange, isQty }: { value: number, onChange: (val: 
       onChange={handleChange}
       style={{ 
         width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', 
-        fontSize: '16px', fontWeight: 'bold', color: '#0f172a', backgroundColor: '#ffffff', outline: 'none', textAlign: 'center'
+        fontSize: '14px', fontWeight: 'normal', color: '#0f172a', backgroundColor: '#ffffff', outline: 'none', textAlign: 'center'
       }}
     />
   )
@@ -168,9 +168,10 @@ export default function POSPage() {
 
   const [selectedCustomerId, setSelectedCustomerId] = useState('')
   const [customerSearchTerm, setCustomerSearchTerm] = useState('')
-  const [isCustomerDropdownOpen, setIsCustomerDropdownOpen] = useState(false)
+  const [isCustomerModalOpen, setIsCustomerModalOpen] = useState(false) 
 
   const [cartCustomerNameOverride, setCartCustomerNameOverride] = useState('')
+  const [currentTime, setCurrentTime] = useState(new Date())
 
   // ==========================================
   // DYNAMIC PAYMENT ROWS
@@ -203,6 +204,12 @@ export default function POSPage() {
   const [editingInvoiceId, setEditingInvoiceId] = useState<string | null>(null)
   
   const invoiceRef = useRef<HTMLDivElement>(null)
+
+  // Live Date and Time
+  useEffect(() => {
+    const timer = setInterval(() => setCurrentTime(new Date()), 1000);
+    return () => clearInterval(timer);
+  }, []);
 
   useEffect(() => {
     const checkDeviceType = () => {
@@ -287,7 +294,11 @@ export default function POSPage() {
       const timer = setTimeout(async () => {
         try {
           await document.fonts.ready;
-          const dataUrl = await htmlToImage.toPng(invoiceRef.current!, { pixelRatio: 3, backgroundColor: '#ffffff' });
+          const isMobile = window.innerWidth < 1024;
+          const dataUrl = await htmlToImage.toPng(invoiceRef.current!, { 
+            pixelRatio: isMobile ? 1.5 : 3, 
+            backgroundColor: '#ffffff' 
+          });
           setPreviewImageUrl(dataUrl);
           setIsGeneratingPreview(false);
           executeAutoSaveOnly(dataUrl, completedSale.invoiceNo);
@@ -703,9 +714,9 @@ export default function POSPage() {
         let cRiel = 0, qRiel = 0, cUsd = 0, qUsd = 0;
         activePayments.forEach(r => {
           if (r.method === 'Cash ៛') cRiel += Number(r.amount);
-          if (r.method === 'QR ៛') qRiel += Number(r.amount);
+          if (r.method === 'QR ៛' || r.method === 'Mom QR ៛') qRiel += Number(r.amount);
           if (r.method === 'Cash $') cUsd += Number(r.amount);
-          if (r.method === 'QR $') qUsd += Number(r.amount);
+          if (r.method === 'QR $' || r.method === 'Mom QR $') qUsd += Number(r.amount);
         });
 
         setSaleSummary({ 
@@ -798,24 +809,26 @@ export default function POSPage() {
                 newRows[index].method = e.target.value;
                 setPaymentRows(newRows);
               }}
-              style={{ width: '45%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '16px', fontWeight: 'bold', outline: 'none', backgroundColor: '#fff', cursor: 'pointer', color: '#0f172a' }}
+              style={{ width: '45%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '14px', fontWeight: 'normal', outline: 'none', backgroundColor: '#fff', cursor: 'pointer', color: '#0f172a' }}
             >
               <option value="Cash ៛">💵 Cash ៛</option>
               <option value="Cash $">💵 Cash $</option>
               <option value="QR ៛">📱 QR ៛</option>
               <option value="QR $">📱 QR $</option>
+              <option value="Mom QR ៛">👩 Mom QR ៛</option>
+              <option value="Mom QR $">👩 Mom QR $</option>
             </select>
             
             <div style={{ flex: 1 }}>
               <CurrencyInput 
-                placeholder="Amount..." 
+                placeholder="" 
                 value={row.amount} 
                 onChange={(val: any) => {
                   const newRows = [...paymentRows];
                   newRows[index].amount = val;
                   setPaymentRows(newRows);
                 }}
-                style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', outline: 'none', color: '#0f172a', fontWeight: 'bold', fontSize: '16px', textAlign: 'right' }}
+                style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', outline: 'none', color: '#0f172a', fontWeight: 'normal', fontSize: '14px', textAlign: 'right' }}
               />
             </div>
             
@@ -856,7 +869,12 @@ export default function POSPage() {
         
         <div className="main-wrapper" style={{ paddingBottom: '100px', flex: 1 }}>
           <div className="header-container">
-            <h1 className="page-title">{editingInvoiceId ? `✏️ Editing: ${editingInvoiceId}` : `🛒 ${currentT.title}`}</h1>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: '12px', flexWrap: 'wrap' }}>
+              <h1 className="page-title">{editingInvoiceId ? `✏️ Editing: ${editingInvoiceId}` : `🛒 ${currentT.title}`}</h1>
+              <span style={{ fontSize: '14px', color: '#64748b' }}>
+                {currentTime.toLocaleDateString('en-GB')} {currentTime.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
+              </span>
+            </div>
             <div style={{ backgroundColor: '#f4f1ea', borderRadius: '20px', padding: '2px' }}>
               <button onClick={() => setLang('en')} style={{ border: 'none', backgroundColor: lang === 'en' ? '#b58a3d' : 'transparent', color: lang === 'en' ? '#fff' : '#6b582f', padding: '6px 12px', borderRadius: '18px', fontWeight: 'bold', cursor: 'pointer', fontSize: '12px' }}>EN</button>
               <button onClick={() => setLang('kh')} style={{ border: 'none', backgroundColor: lang === 'kh' ? '#b58a3d' : 'transparent', color: lang === 'kh' ? '#fff' : '#6b582f', padding: '6px 12px', borderRadius: '18px', fontWeight: 'bold', cursor: 'pointer', fontSize: '12px' }}>KH</button>
@@ -881,43 +899,19 @@ export default function POSPage() {
               {activeTab === 'wholesale' && (
                 <div style={{ flex: 1, minWidth: '300px', position: 'relative' }}>
                   {!selectedCustomer ? (
-                    <>
-                      <input type="text" placeholder={currentT.selectCustomer} value={customerSearchTerm} onChange={(e) => { setCustomerSearchTerm(e.target.value); setIsCustomerDropdownOpen(true); setSelectedCustomerId(''); }} onFocus={() => setIsCustomerDropdownOpen(true)} onBlur={() => setTimeout(() => setIsCustomerDropdownOpen(false), 200)} style={{ width: '100%', padding: '10px 14px', borderRadius: '6px', border: '1px solid #dcd7cc', outline: 'none', fontSize: '16px', color: '#333333', backgroundColor: '#ffffff' }} />
-                      {isCustomerDropdownOpen && (
-                        <div style={{ position: 'absolute', top: '44px', left: 0, right: 0, backgroundColor: '#fff', border: '1px solid #dcd7cc', borderRadius: '6px', maxHeight: '300px', overflowY: 'auto', zIndex: 1000, boxShadow: '0 4px 12px rgba(0,0,0,0.15)' }}>
-                          <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '13px' }}>
-                            <thead style={{ backgroundColor: '#f8fafc', position: 'sticky', top: 0, zIndex: 2 }}>
-                              <tr>
-                                <th colSpan={3} style={{ padding: '8px 12px', borderBottom: '1px solid #e2e8f0' }}>
-                                  <button onMouseDown={(e) => { e.preventDefault(); setIsCreateCustomerModalOpen(true); setIsCustomerDropdownOpen(false); }} style={{ width: '100%', padding: '6px', backgroundColor: '#e0f2fe', color: '#2563eb', border: '1px dashed #93c5fd', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}>+ Create New Customer</button>
-                                </th>
-                              </tr>
-                              <tr>
-                                <th style={{ padding: '8px 12px', borderBottom: '1px solid #e2e8f0', color: '#64748b' }}>Name</th>
-                                <th style={{ padding: '8px 12px', borderBottom: '1px solid #e2e8f0', color: '#64748b' }}>Phone</th>
-                                <th style={{ padding: '8px 12px', borderBottom: '1px solid #e2e8f0', color: '#64748b' }}>Location</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {filteredCustomers.map(c => (
-                                <tr key={c.id} onMouseDown={(e) => { e.preventDefault(); setSelectedCustomerId(c.id.toString()); setCustomerSearchTerm(''); setIsCustomerDropdownOpen(false); }} style={{ cursor: 'pointer', borderBottom: '1px solid #f3f4f6', color: '#4a3b1b' }} onMouseEnter={e => e.currentTarget.style.backgroundColor = '#fefcf3'} onMouseLeave={e => e.currentTarget.style.backgroundColor = 'transparent'}>
-                                  <td style={{ padding: '10px 12px', fontWeight: 'bold' }}>{c.name}</td>
-                                  <td style={{ padding: '10px 12px' }}>{c.phone || '-'}</td>
-                                  <td style={{ padding: '10px 12px', color: '#64748b' }}>{c.location || '-'}</td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
-                      )}
-                    </>
+                    <button 
+                      onClick={() => setIsCustomerModalOpen(true)}
+                      style={{ width: '100%', padding: '10px 14px', borderRadius: '6px', border: '1px solid #dcd7cc', outline: 'none', fontSize: '16px', color: '#94a3b8', backgroundColor: '#ffffff', textAlign: 'left', cursor: 'pointer' }}
+                    >
+                      {currentT.selectCustomer}
+                    </button>
                   ) : (
                     <div style={{ width: '100%', padding: '12px', backgroundColor: '#fefcf3', border: '1px solid #eadeca', borderRadius: '6px', fontSize: '13px', color: '#4a3b1b', position: 'relative' }}>
                       <button onClick={() => { setSelectedCustomerId(''); setCustomerSearchTerm(''); }} style={{ position: 'absolute', top: '6px', right: '6px', background: 'none', border: 'none', cursor: 'pointer', fontSize: '14px' }}>❌</button>
                       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '10px', paddingRight: '20px' }}>
-                        <div><strong style={{ color: '#8a7650', fontSize: '11px', display: 'block', marginBottom: '2px' }}>👤 NAME</strong>{selectedCustomer.name}</div>
-                        <div><strong style={{ color: '#8a7650', fontSize: '11px', display: 'block', marginBottom: '2px' }}>📞 PHONE</strong>{selectedCustomer.phone || '-'}</div>
-                        <div><strong style={{ color: '#8a7650', fontSize: '11px', display: 'block', marginBottom: '2px' }}>📍 LOCATION</strong>{selectedCustomer.location || '-'}</div>
+                        <div><strong style={{ color: '#8a7650', fontSize: '11px', display: 'block', marginBottom: '2px', fontWeight: 'normal' }}>👤 NAME</strong>{selectedCustomer.name}</div>
+                        <div><strong style={{ color: '#8a7650', fontSize: '11px', display: 'block', marginBottom: '2px', fontWeight: 'normal' }}>📞 PHONE</strong>{selectedCustomer.phone || '-'}</div>
+                        <div><strong style={{ color: '#8a7650', fontSize: '11px', display: 'block', marginBottom: '2px', fontWeight: 'normal' }}>📍 LOCATION</strong>{selectedCustomer.location || '-'}</div>
                       </div>
                     </div>
                   )}
@@ -1001,7 +995,7 @@ export default function POSPage() {
           {activeTab === 'wholesale' && selectedCustomerId && (
             <div style={{ background: '#f8fafc', padding: '12px', borderRadius: '8px', border: '1px solid #e2e8f0', marginBottom: '16px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
               <div style={{ fontSize: '11px', fontWeight: 'bold', color: '#8a7650', textTransform: 'uppercase', letterSpacing: '0.5px' }}>📄 Invoice Customizer</div>
-              <input type="text" placeholder="Invoice Name Override..." value={cartCustomerNameOverride} onChange={e => setCartCustomerNameOverride(e.target.value)} style={{ width: '100%', padding: '10px', fontSize: '16px', borderRadius: '6px', border: '1px solid #cbd5e1', outline: 'none', color: '#0f172a' }} />
+              <input type="text" placeholder="Invoice Name Override..." value={cartCustomerNameOverride} onChange={e => setCartCustomerNameOverride(e.target.value)} style={{ width: '100%', padding: '10px', fontSize: '14px', fontWeight: 'normal', borderRadius: '6px', border: '1px solid #cbd5e1', outline: 'none', color: '#0f172a' }} />
             </div>
           )}
 
@@ -1025,7 +1019,7 @@ export default function POSPage() {
                       placeholder="Item Name"
                       readOnly={isSpecial}
                       style={{ 
-                        fontWeight: 'bold', fontSize: '16px', color: isReturn ? '#dc2626' : isCharge ? '#b45309' : '#0f172a', 
+                        fontWeight: 'normal', fontSize: '14px', color: isReturn ? '#dc2626' : isCharge ? '#b45309' : '#0f172a', 
                         flex: 1, border: 'none', background: 'transparent', outline: 'none', padding: 0
                       }} 
                     />
@@ -1108,7 +1102,7 @@ export default function POSPage() {
       {isMobileCartOpen && (
         <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(4px)', zIndex: 1000, display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '20px', boxSizing: 'border-box' }} onMouseDown={() => setIsMobileCartOpen(false)}>
           
-          <div style={{ width: '100%', maxWidth: '450px', maxHeight: '85vh', backgroundColor: '#ffffff', borderRadius: '20px', display: 'flex', flexDirection: 'column', position: 'relative', boxShadow: '0 10px 30px rgba(0,0,0,0.2)' }} onMouseDown={e => e.stopPropagation()}>
+          <div style={{ width: '100%', maxWidth: '450px', maxHeight: '75vh', backgroundColor: '#ffffff', borderRadius: '20px', display: 'flex', flexDirection: 'column', position: 'relative', boxShadow: '0 10px 30px rgba(0,0,0,0.2)' }} onMouseDown={e => e.stopPropagation()}>
             
             <div style={{ padding: '20px', borderBottom: '1px solid #e5e7eb', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
               <h3 style={{ margin: 0, color: '#4a3b1b', fontSize: '18px' }}>{currentT.cartTitle} ({cart.length})</h3>
@@ -1124,7 +1118,7 @@ export default function POSPage() {
                     placeholder="Invoice Name Override..." 
                     value={cartCustomerNameOverride} 
                     onChange={e => setCartCustomerNameOverride(e.target.value)} 
-                    style={{ width: '100%', padding: '10px', fontSize: '16px', borderRadius: '6px', border: '1px solid #cbd5e1', outline: 'none', color: '#0f172a' }} 
+                    style={{ width: '100%', padding: '10px', fontSize: '14px', fontWeight: 'normal', borderRadius: '6px', border: '1px solid #cbd5e1', outline: 'none', color: '#0f172a' }} 
                   />
                 </div>
               )}
@@ -1146,8 +1140,8 @@ export default function POSPage() {
                         placeholder="Item Name"
                         readOnly={isSpecial}
                         style={{ 
-                          fontWeight: 'bold', 
-                          fontSize: '16px', 
+                          fontWeight: 'normal', 
+                          fontSize: '14px', 
                           color: isReturn ? '#dc2626' : isCharge ? '#b45309' : '#0f172a', 
                           flex: 1, 
                           border: 'none',
@@ -1204,6 +1198,50 @@ export default function POSPage() {
               >
                 {isProcessing ? 'Processing...' : currentT.checkout}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+
+      {/* CUSTOMER SEARCH MODAL (No-Zoom, Pop-up Style) */}
+      {isCustomerModalOpen && (
+        <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(4px)', zIndex: 10000, display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '20px', boxSizing: 'border-box' }} onMouseDown={() => setIsCustomerModalOpen(false)}>
+          <div style={{ backgroundColor: '#ffffff', width: '100%', maxWidth: '400px', maxHeight: '80vh', borderRadius: '12px', display: 'flex', flexDirection: 'column', boxShadow: '0 10px 25px rgba(0,0,0,0.2)' }} onMouseDown={e => e.stopPropagation()}>
+            <div style={{ padding: '16px', borderBottom: '1px solid #e2e8f0', display: 'flex', gap: '10px', alignItems: 'center' }}>
+              <span style={{ fontSize: '18px', color: '#94a3b8' }}>🔍</span>
+              <input 
+                autoFocus
+                type="text" 
+                placeholder="Search for option..." 
+                value={customerSearchTerm} 
+                onChange={e => setCustomerSearchTerm(e.target.value)} 
+                style={{ flex: 1, padding: '8px', border: 'none', fontSize: '16px', outline: 'none', color: '#0f172a' }} 
+              />
+              <button onClick={() => setIsCustomerModalOpen(false)} style={{ background: 'none', border: 'none', fontSize: '20px', color: '#94a3b8', cursor: 'pointer' }}>✕</button>
+            </div>
+            
+            <div style={{ flex: 1, overflowY: 'auto', padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px', backgroundColor: '#f8fafc' }}>
+              <button onClick={() => { setIsCreateCustomerModalOpen(true); setIsCustomerModalOpen(false); }} style={{ width: '100%', padding: '14px', backgroundColor: '#e0f2fe', color: '#2563eb', border: '1px dashed #93c5fd', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold', fontSize: '14px', marginBottom: '8px' }}>
+                + Add New Customer
+              </button>
+              
+              {filteredCustomers.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: '20px', color: '#94a3b8', fontSize: '14px' }}>No customers found</div>
+              ) : (
+                filteredCustomers.map(c => (
+                  <div 
+                    key={c.id} 
+                    onClick={() => { setSelectedCustomerId(c.id.toString()); setCustomerSearchTerm(''); setIsCustomerModalOpen(false); }} 
+                    style={{ border: '1px solid #cbd5e1', borderRadius: '8px', padding: '16px', cursor: 'pointer', transition: 'background 0.2s', backgroundColor: '#fff' }}
+                  >
+                    <div style={{ fontWeight: 'bold', fontSize: '15px', color: '#1e293b', marginBottom: '8px' }}>{c.name}</div>
+                    <div style={{ fontSize: '13px', color: '#475569', marginBottom: '4px' }}>Location: <span style={{ color: '#64748b' }}>{c.location || '-'}</span></div>
+                    <div style={{ fontSize: '13px', color: '#475569', marginBottom: '4px' }}>Phone Number: <span style={{ color: '#64748b' }}>{c.phone || '-'}</span></div>
+                    <div style={{ fontSize: '13px', color: '#475569' }}>Types: <span style={{ color: '#64748b' }}>{c.type || '-'}</span></div>
+                  </div>
+                ))
+              )}
             </div>
           </div>
         </div>
@@ -1393,9 +1431,9 @@ export default function POSPage() {
         </div>
       )}
 
-      {/* FINAL INVISIBLE DOM CAPTURE AREA - Position changed to allow mobile rendering */}
+      {/* FINAL INVISIBLE DOM CAPTURE AREA - Positioned fixed to viewport to guarantee mobile HTML-to-Image rendering! */}
       {completedSale && showInvoicePreview && (
-        <div style={{ position: 'absolute', top: 0, left: 0, zIndex: -10, opacity: 0.01, pointerEvents: 'none' }}>
+        <div style={{ position: 'fixed', top: 0, left: 0, zIndex: -100, opacity: 0.01, pointerEvents: 'none' }}>
           <div id="invoice-capture-area" ref={invoiceRef} style={{ width: '794px', height: '559px', backgroundColor: '#ffffff', position: 'relative', margin: 0, padding: '19px', boxSizing: 'border-box', fontFamily: "'Noto Sans Khmer', Arial, sans-serif", fontSize: '12.8px', color: '#000000', overflow: 'hidden' }}>
             <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Khmer&display=swap" rel="stylesheet" crossOrigin="anonymous" />
             
