@@ -108,7 +108,7 @@ function CurrencyInput({ value, onChange, placeholder, style, autoFocus }: any) 
   )
 }
 
-function CartInput({ value, onChange, isQty }: { value: number, onChange: (val: number) => void, isQty: boolean }) {
+function CartInput({ value, onChange, isQty, fontSize = '14px' }: { value: number, onChange: (val: number) => void, isQty: boolean, fontSize?: string }) {
   const [inputValue, setInputValue] = useState('');
 
   useEffect(() => {
@@ -144,7 +144,7 @@ function CartInput({ value, onChange, isQty }: { value: number, onChange: (val: 
       onChange={handleChange}
       style={{ 
         width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', 
-        fontSize: '14px', fontWeight: 'normal', color: '#0f172a', backgroundColor: '#ffffff', outline: 'none', textAlign: 'center'
+        fontSize: fontSize, fontWeight: 'normal', color: '#0f172a', backgroundColor: '#ffffff', outline: 'none', textAlign: 'center'
       }}
     />
   )
@@ -791,7 +791,7 @@ export default function POSPage() {
   const sortedCart = [...cart].sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0));
 
   // Payment Row UI Renderer (Used in Desktop sidebar and Mobile Tray)
-  const renderPaymentSection = () => {
+  const renderPaymentSection = (isMobileCart: boolean = false) => {
     if (!showPaymentSelector) return null;
     return (
       <div style={{ marginBottom: '14px', background: '#f8fafc', padding: '12px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
@@ -809,7 +809,7 @@ export default function POSPage() {
                 newRows[index].method = e.target.value;
                 setPaymentRows(newRows);
               }}
-              style={{ width: '45%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '14px', fontWeight: 'normal', outline: 'none', backgroundColor: '#fff', cursor: 'pointer', color: '#0f172a' }}
+              style={{ width: '45%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: isMobileCart ? '16px' : '14px', fontWeight: 'normal', outline: 'none', backgroundColor: '#fff', cursor: 'pointer', color: '#0f172a' }}
             >
               <option value="Cash ៛">💵 Cash ៛</option>
               <option value="Cash $">💵 Cash $</option>
@@ -828,7 +828,7 @@ export default function POSPage() {
                   newRows[index].amount = val;
                   setPaymentRows(newRows);
                 }}
-                style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', outline: 'none', color: '#0f172a', fontWeight: 'normal', fontSize: '14px', textAlign: 'right' }}
+                style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', outline: 'none', color: '#0f172a', fontWeight: 'normal', fontSize: isMobileCart ? '16px' : '14px', textAlign: 'right' }}
               />
             </div>
             
@@ -1042,11 +1042,11 @@ export default function POSPage() {
                   <div style={{ display: 'flex', gap: '12px', alignItems: 'flex-end' }}>
                     <div style={{ flex: 1 }}>
                       <span style={{ display: 'block', fontSize: '11px', fontWeight: 'bold', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '6px' }}>{currentT.unitPrice}</span>
-                      <CartInput value={item.custom_price_riel} onChange={(v) => updateCartItem(item.id, 'custom_price_riel', v)} isQty={false} />
+                      <CartInput fontSize="14px" value={item.custom_price_riel} onChange={(v) => updateCartItem(item.id, 'custom_price_riel', v)} isQty={false} />
                     </div>
                     <div style={{ flex: 1 }}>
                       <span style={{ display: 'block', fontSize: '11px', fontWeight: 'bold', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '6px' }}>{currentT.quantity}</span>
-                      <CartInput value={item.quantity} onChange={(v) => updateCartItem(item.id, 'quantity', v)} isQty={true} />
+                      <CartInput fontSize="14px" value={item.quantity} onChange={(v) => updateCartItem(item.id, 'quantity', v)} isQty={true} />
                     </div>
                   </div>
                 </div>
@@ -1065,7 +1065,7 @@ export default function POSPage() {
             <span style={{ fontSize: '14px', fontWeight: 'bold', color: '#4a3b1b' }}>{formatUSD(totalUSD)}</span>
           </div>
 
-          {renderPaymentSection()}
+          {renderPaymentSection(false)}
           
           <button 
             onClick={confirmCheckout} 
@@ -1118,7 +1118,7 @@ export default function POSPage() {
                     placeholder="Invoice Name Override..." 
                     value={cartCustomerNameOverride} 
                     onChange={e => setCartCustomerNameOverride(e.target.value)} 
-                    style={{ width: '100%', padding: '10px', fontSize: '14px', fontWeight: 'normal', borderRadius: '6px', border: '1px solid #cbd5e1', outline: 'none', color: '#0f172a' }} 
+                    style={{ width: '100%', padding: '10px', fontSize: '16px', fontWeight: 'normal', borderRadius: '6px', border: '1px solid #cbd5e1', outline: 'none', color: '#0f172a' }} 
                   />
                 </div>
               )}
@@ -1141,7 +1141,7 @@ export default function POSPage() {
                         readOnly={isSpecial}
                         style={{ 
                           fontWeight: 'normal', 
-                          fontSize: '14px', 
+                          fontSize: '16px', 
                           color: isReturn ? '#dc2626' : isCharge ? '#b45309' : '#0f172a', 
                           flex: 1, 
                           border: 'none',
@@ -1155,11 +1155,11 @@ export default function POSPage() {
                     <div style={{ display: 'flex', gap: '12px', alignItems: 'flex-end' }}>
                       <div style={{ flex: 1 }}>
                         <span style={{ display: 'block', fontSize: '11px', fontWeight: 'bold', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '6px' }}>{currentT.unitPrice}</span>
-                        <CartInput value={item.custom_price_riel} onChange={(v) => updateCartItem(item.id, 'custom_price_riel', v)} isQty={false} />
+                        <CartInput fontSize="16px" value={item.custom_price_riel} onChange={(v) => updateCartItem(item.id, 'custom_price_riel', v)} isQty={false} />
                       </div>
                       <div style={{ flex: 1 }}>
                         <span style={{ display: 'block', fontSize: '11px', fontWeight: 'bold', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '6px' }}>{currentT.quantity}</span>
-                        <CartInput value={item.quantity} onChange={(v) => updateCartItem(item.id, 'quantity', v)} isQty={true} />
+                        <CartInput fontSize="16px" value={item.quantity} onChange={(v) => updateCartItem(item.id, 'quantity', v)} isQty={true} />
                       </div>
                     </div>
                   </div>
@@ -1178,7 +1178,7 @@ export default function POSPage() {
                 <span style={{ fontWeight: 'bold', color: '#64748b', fontSize: '14px' }}>{formatUSD(totalUSD)}</span>
               </div>
               
-              {renderPaymentSection()}
+              {renderPaymentSection(true)}
 
               <button 
                 onClick={confirmCheckout} 
@@ -1317,7 +1317,7 @@ export default function POSPage() {
                 placeholder="e.g. 15"
                 value={exchangeModal.consumedKg}
                 onChange={(v: any) => setExchangeModal({ ...exchangeModal, consumedKg: v })}
-                style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #dcd7cc', boxSizing: 'border-box', color: '#0f172a', backgroundColor: '#ffffff', fontWeight: 'normal', fontSize: '14px' }}
+                style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #dcd7cc', boxSizing: 'border-box', color: '#0f172a', backgroundColor: '#ffffff', fontWeight: 'normal', fontSize: '16px' }}
               />
               <p style={{ fontSize: '11px', color: '#64748b', marginTop: '6px', lineHeight: 1.4 }}>
                 * Enter 0 if the bag is fully intact and unopened.<br/>
@@ -1340,16 +1340,16 @@ export default function POSPage() {
             <h3 style={{ margin: '0 0 16px 0', color: '#4a3b1b', borderBottom: '1px solid #f3f4f6', paddingBottom: '10px' }}>{currentT.mobileModalTitle}</h3>
             <div style={{ marginBottom: '16px' }}>
               <label style={{ display: 'block', fontSize: '12px', fontWeight: 'bold', color: '#8a7650', marginBottom: '4px' }}>Product Identifier</label>
-              <input type="text" value={mobileName} onChange={(e) => setMobileName(e.target.value)} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #dcd7cc', boxSizing: 'border-box', color: '#0f172a', backgroundColor: '#ffffff', fontSize: '14px', fontWeight: 'normal' }} />
+              <input type="text" value={mobileName} onChange={(e) => setMobileName(e.target.value)} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #dcd7cc', boxSizing: 'border-box', color: '#0f172a', backgroundColor: '#ffffff', fontSize: '16px', fontWeight: 'normal' }} />
             </div>
             <div style={{ display: 'flex', gap: '12px', marginBottom: '20px' }}>
               <div style={{ flex: 1 }}>
                 <label style={{ display: 'block', fontSize: '12px', fontWeight: 'normal', color: '#8a7650', marginBottom: '4px' }}>Price (៛)</label>
-                <CurrencyInput value={mobilePrice} onChange={(v: any) => setMobilePrice(v)} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #dcd7cc', boxSizing: 'border-box', color: '#0f172a', backgroundColor: '#ffffff', fontWeight: 'normal', fontSize: '14px' }} />
+                <CurrencyInput value={mobilePrice} onChange={(v: any) => setMobilePrice(v)} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #dcd7cc', boxSizing: 'border-box', color: '#0f172a', backgroundColor: '#ffffff', fontWeight: 'normal', fontSize: '16px' }} />
               </div>
               <div style={{ flex: 1 }}>
                 <label style={{ display: 'block', fontSize: '12px', fontWeight: 'normal', color: '#8a7650', marginBottom: '4px' }}>Quantity</label>
-                <CurrencyInput value={mobileQty} onChange={(v: any) => setMobileQty(v)} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #dcd7cc', boxSizing: 'border-box', color: '#0f172a', backgroundColor: '#ffffff', fontWeight: 'normal', fontSize: '14px' }} />
+                <CurrencyInput value={mobileQty} onChange={(v: any) => setMobileQty(v)} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #dcd7cc', boxSizing: 'border-box', color: '#0f172a', backgroundColor: '#ffffff', fontWeight: 'normal', fontSize: '16px' }} />
               </div>
             </div>
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
@@ -1557,36 +1557,6 @@ export default function POSPage() {
               </div>
 
             </div>
-          </div>
-        </div>
-      )}
-
-      {/* RENDERED INVOICE PREVIEW MODAL */}
-      {showInvoicePreview && completedSale && (
-        <div className="invoice-modal-overlay" style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(0,0,0,0.85)', zIndex: 10006, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
-          
-          <div className="invoice-controls" style={{ display: 'flex', justifyContent: 'space-between', width: '100%', maxWidth: '850px', marginBottom: '16px', padding: '0 20px' }}>
-            <button onClick={() => { setShowInvoicePreview(false); setCompletedSale(null); setPreviewImageUrl(null); }} style={{ backgroundColor: '#dc2626', color: '#fff', border: 'none', padding: '10px 20px', borderRadius: '8px', fontSize: '16px', fontWeight: 'bold', cursor: 'pointer' }}>{currentT.close}</button>
-            
-            <div className="desktop-controls" style={{ display: 'none', gap: '10px' }}>
-              <button onClick={handleDesktopDownloadPNG} disabled={!previewImageUrl} style={{ backgroundColor: '#f59e0b', color: '#fff', border: 'none', padding: '10px 20px', borderRadius: '8px', fontSize: '16px', fontWeight: 'bold', cursor: 'pointer' }}>{currentT.openInvoice}</button>
-              <button onClick={handleNativePrint} style={{ backgroundColor: '#3b82f6', color: '#fff', border: 'none', padding: '10px 20px', borderRadius: '8px', fontSize: '16px', fontWeight: 'bold', cursor: 'pointer' }}>🖨️ Print / PDF</button>
-            </div>
-
-            <div className="mobile-controls" style={{ display: 'flex', gap: '10px' }}>
-              <button onClick={handleMobileShare} disabled={!previewImageUrl} style={{ backgroundColor: '#3b82f6', color: '#fff', border: 'none', padding: '10px 16px', borderRadius: '8px', fontSize: '14px', fontWeight: 'bold', cursor: 'pointer' }}>{currentT.shareInvoice}</button>
-              <button onClick={handleNativePrint} style={{ backgroundColor: '#10b981', color: '#fff', border: 'none', padding: '10px 16px', borderRadius: '8px', fontSize: '14px', fontWeight: 'bold', cursor: 'pointer' }}>🖨️ Print</button>
-            </div>
-          </div>
-
-          <div className="invoice-preview-container" style={{ width: '100%', maxWidth: '850px', padding: '0 10px', display: 'flex', justifyContent: 'center' }}>
-            {isGeneratingPreview || !previewImageUrl ? (
-              <div style={{ padding: '40px', backgroundColor: '#fff', borderRadius: '8px', color: '#4a3b1b', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '12px' }}>
-                <span style={{ fontSize: '24px' }}>⏳</span> Generating High-Resolution Invoice...
-              </div>
-            ) : (
-              <img src={previewImageUrl} alt="Invoice Preview" style={{ width: '100%', maxWidth: '794px', borderRadius: '4px', objectFit: 'contain', boxShadow: '0 10px 25px rgba(0,0,0,0.5)' }} />
-            )}
           </div>
         </div>
       )}
