@@ -870,12 +870,12 @@ export default function POSPage() {
   }
 
   return (
-    <div className="pos-layout-wrapper" style={{ display: 'flex', height: '100vh', overflow: 'hidden', width: '100%', backgroundColor: '#ffffff', boxSizing: 'border-box' }}>
+    <div className="pos-layout-wrapper" style={{ display: 'flex', height: '100dvh', overflow: 'hidden', width: '100%', backgroundColor: '#ffffff', boxSizing: 'border-box' }}>
       
       {/* SELECTION ENGINE VIEW GRID PANEL */}
       <div className="pos-main-engine hide-scrollbar" style={{ flex: 1, display: 'flex', flexDirection: 'column', backgroundColor: '#f8fafc', minWidth: 0, height: '100%', overflowY: 'auto' }}>
         
-        <div className="main-wrapper" style={{ paddingBottom: '100px', flex: 1 }}>
+        <div className="main-wrapper" style={{ flex: 1 }}>
           <div className="header-container">
             <div style={{ display: 'flex', alignItems: 'baseline', gap: '12px', flexWrap: 'wrap' }}>
               <h1 className="page-title">{editingInvoiceId ? `✏️ Editing: ${editingInvoiceId}` : `🛒 ${currentT.title}`}</h1>
@@ -1110,7 +1110,7 @@ export default function POSPage() {
       {isMobileCartOpen && (
         <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(4px)', zIndex: 1000, display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '20px', boxSizing: 'border-box' }} onMouseDown={() => setIsMobileCartOpen(false)}>
           
-          <div style={{ width: '100%', maxWidth: '450px', maxHeight: '75vh', backgroundColor: '#ffffff', borderRadius: '20px', display: 'flex', flexDirection: 'column', position: 'relative', boxShadow: '0 10px 30px rgba(0,0,0,0.2)' }} onMouseDown={e => e.stopPropagation()}>
+          <div style={{ width: '100%', maxWidth: '450px', maxHeight: '85vh', backgroundColor: '#ffffff', borderRadius: '20px', display: 'flex', flexDirection: 'column', position: 'relative', boxShadow: '0 10px 30px rgba(0,0,0,0.2)' }} onMouseDown={e => e.stopPropagation()}>
             
             <div style={{ padding: '20px', borderBottom: '1px solid #e5e7eb', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
               <h3 style={{ margin: 0, color: '#4a3b1b', fontSize: '18px' }}>{currentT.cartTitle} ({cart.length})</h3>
@@ -1214,8 +1214,8 @@ export default function POSPage() {
 
       {/* CUSTOMER SEARCH MODAL (No-Zoom, Pop-up Style) */}
       {isCustomerModalOpen && (
-        <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(4px)', zIndex: 10000, display: 'flex', justifyContent: 'center', alignItems: 'flex-start', paddingTop: '60px', paddingLeft: '16px', paddingRight: '16px', boxSizing: 'border-box' }} onMouseDown={() => setIsCustomerModalOpen(false)}>
-          <div style={{ backgroundColor: '#ffffff', width: '100%', maxWidth: '400px', maxHeight: '80vh', borderRadius: '12px', display: 'flex', flexDirection: 'column', boxShadow: '0 10px 30px rgba(0,0,0,0.15)' }} onMouseDown={e => e.stopPropagation()}>
+        <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(4px)', zIndex: 10000, display: 'flex', justifyContent: 'center', alignItems: 'flex-start', paddingTop: '80px', paddingLeft: '16px', paddingRight: '16px', boxSizing: 'border-box' }} onMouseDown={() => setIsCustomerModalOpen(false)}>
+          <div style={{ backgroundColor: '#ffffff', width: '100%', maxWidth: '400px', maxHeight: '75vh', borderRadius: '12px', display: 'flex', flexDirection: 'column', boxShadow: '0 10px 30px rgba(0,0,0,0.15)' }} onMouseDown={e => e.stopPropagation()}>
             <div style={{ padding: '12px', borderBottom: '1px solid #f1f5f9', display: 'flex', gap: '8px', alignItems: 'center' }}>
               <span style={{ fontSize: '18px', color: '#94a3b8' }}>🔍</span>
               <input 
@@ -1443,7 +1443,7 @@ export default function POSPage() {
         </div>
       )}
 
-      {/* FINAL INVISIBLE DOM CAPTURE AREA - Positioned fixed to viewport to guarantee mobile HTML-to-Image rendering! */}
+      {/* FINAL INVISIBLE DOM CAPTURE AREA */}
       {completedSale && showInvoicePreview && (
         <div style={{ position: 'fixed', top: '-5000px', left: 0, zIndex: -100, opacity: 1, pointerEvents: 'none' }}>
           <div id="invoice-capture-area" ref={invoiceRef} style={{ width: '794px', height: '559px', backgroundColor: '#ffffff', position: 'relative', margin: 0, padding: '19px', boxSizing: 'border-box', fontFamily: "'Noto Sans Khmer', Arial, sans-serif", fontSize: '12.8px', color: '#000000', overflow: 'hidden' }}>
@@ -1661,7 +1661,7 @@ export default function POSPage() {
           .desktop-controls { display: none !important; }
           .desktop-cart-panel { display: none !important; }
           .main-wrapper { 
-            padding: 80px 16px 16px 16px !important; 
+            padding: 85px 16px 16px 16px !important; 
             min-height: auto;
           }
           .header-container {
