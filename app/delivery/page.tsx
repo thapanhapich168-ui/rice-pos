@@ -380,11 +380,11 @@ export default function DeliveryPage() {
 
   const debtorsList = Object.values(debtorsMap).sort((a: any, b: any) => b.totalOwed - a.totalOwed);
 
-  const groupedDebtors = debtorsList.reduce((acc: any, curr: any) => {
+  const groupedDebtors: Record<string, any[]> = debtorsList.reduce((acc: Record<string, any[]>, curr: any) => {
     if (!acc[curr.owner]) acc[curr.owner] = [];
     acc[curr.owner].push(curr);
     return acc;
-  }, {});
+  }, {} as Record<string, any[]>);
 
   const ownerOrder = ['Pich', 'Jing', 'Both', 'Mom', 'Unassigned'];
   const activeOwners = Object.keys(groupedDebtors).sort((a, b) => {
