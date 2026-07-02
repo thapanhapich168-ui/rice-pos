@@ -6,7 +6,6 @@ import { usePathname, useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabaseClient'
 
 export default function Sidebar() {
-  // Changed to false: The panel is hidden on refresh/login, but the ☰ button remains!
   const [isOpen, setIsOpen] = useState(false)
   const pathname = usePathname()
   const router = useRouter()
@@ -53,14 +52,20 @@ export default function Sidebar() {
 
   return (
     <>
-      {/* FIXED BURGER BUTTON (Always shows ☰) */}
+      {/* MOBILE BACKDROP: Appears only on phones to let you click outside to close */}
+      <div 
+        className={`sidebar-backdrop ${isOpen ? 'open' : ''}`} 
+        onClick={() => setIsOpen(false)} 
+      />
+
+      {/* FIXED BURGER BUTTON (Safe-area protected so it dodges the iOS notch) */}
       <button
         onClick={() => setIsOpen(!isOpen)}
         style={{
           position: 'fixed',
-          top: '15px',
-          left: '15px',
-          zIndex: 100,
+          top: 'max(15px, env(safe-area-inset-top, 15px))',
+          left: 'max(15px, env(safe-area-inset-left, 15px))',
+          zIndex: 1001, // Guaranteed to stay on top of everything
           background: '#111827',
           color: 'white',
           border: 'none',
@@ -79,29 +84,8 @@ export default function Sidebar() {
       </button>
 
       {/* SIDEBAR CONTAINER */}
-      <div
-        style={{
-          width: isOpen ? '240px' : '0px',
-          minWidth: isOpen ? '240px' : '0px', 
-          opacity: isOpen ? 1 : 0,
-          pointerEvents: isOpen ? 'auto' : 'none',
-          background: '#111827',
-          color: 'white',
-          height: '100vh',
-          position: 'sticky',
-          top: 0,
-          left: 0,
-          display: 'flex',
-          flexDirection: 'column',
-          justifyContent: 'space-between',
-          padding: isOpen ? '15px 20px 20px 20px' : '0px',
-          boxSizing: 'border-box',
-          transition: 'all 0.3s ease-in-out',
-          overflowX: 'hidden',
-          zIndex: 90,
-          boxShadow: isOpen ? '4px 0 10px rgba(0,0,0,0.1)' : 'none'
-        }}
-      >
+      <div className={`sidebar-wrapper ${isOpen ? 'open' : 'closed'}`}>
+        
         {/* TOP SECTION: BRAND & LINKS */}
         <div>
           <div style={{ display: 'flex', alignItems: 'center', minHeight: '42px', marginBottom: '30px', paddingLeft: '45px' }}>
@@ -156,6 +140,80 @@ export default function Sidebar() {
           🚪 Log Out
         </button>
       </div>
+
+      {/* SIDEBAR RESPONSIVE & MOBILE PHYSICS */}
+      <style jsx>{`
+        /* MOBILE BACKDROP */
+        .sidebar-backdrop {
+          position: fixed;
+          top: 0; left: 0; right: 0; bottom: 0;
+          background: rgba(0,0,0,0.5);
+          z-index: 999;
+          opacity: 0;
+          pointer-events: none;
+          transition: opacity 0.3s ease;
+        }
+
+        /* BASE SIDEBAR STYLES */
+        .sidebar-wrapper {
+          background: #111827;
+          color: white;
+          height: 100dvh; /* Flawless full height bypassing Safari/Chrome URL bars */
+          display: flex;
+          flex-direction: column;
+          justify-content: space-between;
+          box-sizing: border-box;
+          transition: all 0.3s ease-in-out;
+          overflow-x: hidden;
+          overflow-y: auto;
+          z-index: 1000;
+        }
+
+        /* CLOSED STATE */
+        .sidebar-wrapper.closed {
+          width: 0px;
+          min-width: 0px;
+          opacity: 0;
+          pointer-events: none;
+          padding: 0px;
+        }
+
+        /* OPEN STATE */
+        .sidebar-wrapper.open {
+          width: 240px;
+          min-width: 240px;
+          opacity: 1;
+          pointer-events: auto;
+          /* Safely pads the top & bottom so nothing touches the absolute edges on phones */
+          padding: max(15px, env(safe-area-inset-top, 15px)) 20px max(20px, env(safe-area-inset-bottom, 20px)) 20px;
+          box-shadow: 4px 0 10px rgba(0, 0, 0, 0.1);
+        }
+
+        /* DESKTOP SPECIFIC RULES */
+        @media (min-width: 1024px) {
+          .sidebar-wrapper {
+            position: sticky;
+            top: 0;
+            left: 0;
+          }
+          .sidebar-backdrop {
+            display: none; /* We don't want a backdrop on laptops */
+          }
+        }
+
+        /* MOBILE SPECIFIC RULES */
+        @media (max-width: 1023px) {
+          .sidebar-wrapper {
+            position: fixed; /* Pops out of the layout flow as a drawer */
+            top: 0;
+            left: 0;
+          }
+          .sidebar-backdrop.open {
+            opacity: 1;
+            pointer-events: auto;
+          }
+        }
+      `}</style>
     </>
   )
 }

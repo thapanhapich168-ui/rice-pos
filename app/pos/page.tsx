@@ -14,7 +14,7 @@ const formatRiel = (amount: number) => `${new Intl.NumberFormat('en-US').format(
 const formatUSD = (amount: number) => `$${new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(amount)}`;
 
 // Translations Dictionary
-const t = {
+const t: Record<'en' | 'kh', any> = {
   en: {
     title: "Point of Sale",
     retail: "🛍️ Retail (1kg)",
@@ -186,7 +186,6 @@ export default function POSPage() {
   const [isCustomerModalOpen, setIsCustomerModalOpen] = useState(false) 
 
   const [cartCustomerNameOverride, setCartCustomerNameOverride] = useState('')
-  const [currentTime, setCurrentTime] = useState(new Date())
 
   // ==========================================
   // DYNAMIC PAYMENT ROWS
@@ -246,11 +245,28 @@ export default function POSPage() {
     });
   }, [totalRiel]);
 
-  // Live Date and Time
+  // 15-SECOND AUTO DISMISS FOR SALE SUMMARY POPUP
   useEffect(() => {
-    const timer = setInterval(() => setCurrentTime(new Date()), 1000);
-    return () => clearInterval(timer);
-  }, []);
+    if (saleSummary) {
+      const timer = setTimeout(() => {
+        setSaleSummary(null);
+        setCompletedSale(null);
+      }, 15000);
+      return () => clearTimeout(timer);
+    }
+  }, [saleSummary]);
+
+  // 15-SECOND AUTO DISMISS FOR INVOICE PREVIEW
+  useEffect(() => {
+    if (showInvoicePreview) {
+      const timer = setTimeout(() => {
+        setShowInvoicePreview(false);
+        setCompletedSale(null);
+        setPreviewImageUrl(null);
+      }, 15000);
+      return () => clearTimeout(timer);
+    }
+  }, [showInvoicePreview]);
 
   useEffect(() => {
     const checkDeviceType = () => {
@@ -330,12 +346,13 @@ export default function POSPage() {
     }
   }, [activeTab, customers]) 
 
-  // Mobile Invoice Generation Engine
+  // Mobile Invoice Generation Engine (Waits to ensure HD logos load before capture)
   useEffect(() => {
     if (completedSale && invoiceRef.current && !previewImageUrl && showInvoicePreview) {
       const timer = setTimeout(async () => {
         try {
           await document.fonts.ready;
+          // Wait 800ms to guarantee logos/qr are fetched completely in DOM before capture
           await new Promise(r => setTimeout(r, 800));
 
           const isMobile = window.innerWidth < 1024;
@@ -360,29 +377,6 @@ export default function POSPage() {
       return () => clearTimeout(timer);
     }
   }, [completedSale, previewImageUrl, showInvoicePreview])
-
-  // 15-SECOND AUTO DISMISS FOR SALE SUMMARY POPUP
-  useEffect(() => {
-    if (saleSummary) {
-      const timer = setTimeout(() => {
-        setSaleSummary(null);
-        setCompletedSale(null);
-      }, 15000);
-      return () => clearTimeout(timer);
-    }
-  }, [saleSummary]);
-
-  // 15-SECOND AUTO DISMISS FOR INVOICE PREVIEW
-  useEffect(() => {
-    if (showInvoicePreview) {
-      const timer = setTimeout(() => {
-        setShowInvoicePreview(false);
-        setCompletedSale(null);
-        setPreviewImageUrl(null);
-      }, 15000);
-      return () => clearTimeout(timer);
-    }
-  }, [showInvoicePreview]);
 
   async function loadProductsAndSettings() {
     const { data: prodData } = await supabase.from('products').select('*').order('id', { ascending: true })
@@ -963,7 +957,7 @@ export default function POSPage() {
   }
 
   return (
-    <div className="pos-layout-wrapper" style={{ display: 'flex', height: '100dvh', overflow: 'hidden', width: '100%', backgroundColor: '#ffffff', boxSizing: 'border-box' }}>
+    <div className="pos-layout-wrapper" style={{ display: 'flex', width: '100%', backgroundColor: '#ffffff', boxSizing: 'border-box' }}>
       
       {/* PRELOAD IMAGES TO FIX SAFARI MOBILE BLANK LOGO ISSUE */}
       <div style={{ width: 0, height: 0, overflow: 'hidden', position: 'absolute', opacity: 0 }}>
@@ -973,7 +967,7 @@ export default function POSPage() {
       </div>
 
       {/* SELECTION ENGINE VIEW GRID PANEL */}
-      <div className="pos-main-engine hide-scrollbar" style={{ flex: 1, display: 'flex', flexDirection: 'column', backgroundColor: '#f8fafc', minWidth: 0, height: '100%', overflowY: 'auto' }}>
+      <div className="pos-main-engine hide-scrollbar" style={{ flex: 1, display: 'flex', flexDirection: 'column', backgroundColor: '#f8fafc', minWidth: 0 }}>
         
         <div className="main-wrapper" style={{ flex: 1 }}>
           <div className="header-container">
@@ -1146,7 +1140,7 @@ export default function POSPage() {
           )}
         </div>
         
-        <div style={{ paddingTop: '12px', paddingRight: '20px', paddingBottom: '16px', paddingLeft: '20px', borderTop: '1px solid #e2e8f0', backgroundColor: '#f8fafc', flexShrink: 0, zIndex: 10, boxShadow: '0 -4px 10px rgba(0,0,0,0.02)' }}>
+        <div style={{ position: 'sticky', bottom: 0, paddingTop: '12px', paddingRight: '20px', paddingBottom: '16px', paddingLeft: '20px', borderTop: '1px solid #e2e8f0', backgroundColor: '#f8fafc', flexShrink: 0, zIndex: 10, boxShadow: '0 -4px 10px rgba(0,0,0,0.02)' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '4px' }}>
             <span style={{ fontSize: '13px', color: '#334155' }}>{currentT.totalKhmer}</span>
             <span style={{ fontSize: '18px', fontWeight: 'bold', color: totalRiel < 0 ? '#ef4444' : '#b58a3d' }}>{formatRielFromNative(totalRiel)}</span>
@@ -1194,7 +1188,7 @@ export default function POSPage() {
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.4)', zIndex: 9999, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}>
           <div style={{ flex: 1 }} onClick={() => setIsMobileCartOpen(false)}></div>
           
-          <div style={{ width: '100%', height: '85%', backgroundColor: '#ffffff', borderTopLeftRadius: '20px', borderTopRightRadius: '20px', display: 'flex', flexDirection: 'column', position: 'relative', boxShadow: '0 -10px 25px rgba(0,0,0,0.1)' }}>
+          <div style={{ width: '100%', maxHeight: '85dvh', backgroundColor: '#ffffff', borderTopLeftRadius: '20px', borderTopRightRadius: '20px', display: 'flex', flexDirection: 'column', position: 'relative', boxShadow: '0 -10px 25px rgba(0,0,0,0.1)' }}>
             <div style={{ width: '100%', display: 'flex', justifyContent: 'center', paddingTop: '12px', paddingBottom: '8px', flexShrink: 0 }}>
               <div style={{ width: '40px', height: '5px', backgroundColor: '#cbd5e1', borderRadius: '10px' }}></div>
             </div>
@@ -1257,7 +1251,7 @@ export default function POSPage() {
               })}
             </div>
             
-            <div style={{ padding: '12px 20px calc(24px + env(safe-area-inset-bottom, 12px)) 20px', borderTop: '1px solid #e2e8f0', backgroundColor: '#f8fafc', boxShadow: '0 -4px 10px rgba(0,0,0,0.05)', flexShrink: 0 }}>
+            <div style={{ padding: '12px 20px calc(80px + env(safe-area-inset-bottom, 20px)) 20px', borderTop: '1px solid #e2e8f0', backgroundColor: '#f8fafc', boxShadow: '0 -4px 10px rgba(0,0,0,0.05)', flexShrink: 0 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
                 <span style={{ fontSize: '14px', color: '#475569' }}>{currentT.totalKhmer}</span>
                 <span style={{ fontWeight: 'bold', color: totalRiel < 0 ? '#ef4444' : '#b58a3d', fontSize: '20px' }}>{formatRielFromNative(totalRiel)}</span>
@@ -1291,7 +1285,6 @@ export default function POSPage() {
           </div>
         </div>
       )}
-
 
       {/* CUSTOMER SEARCH MODAL (No-Zoom, Pop-up Style) */}
       {isCustomerModalOpen && (
@@ -1452,7 +1445,7 @@ export default function POSPage() {
 
       {/* SALE SUMMARY MODAL (AUTO-DISMISSES) */}
       {saleSummary && (
-        <div className="modal-overlay" style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(0,0,0,0.85)', zIndex: 10005, display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '20px', boxSizing: 'border-box' }}>
+        <div className="modal-overlay" style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.85)', zIndex: 10005, display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '20px', boxSizing: 'border-box' }}>
           <div className="modal-content" style={{ backgroundColor: '#ffffff', width: '100%', maxWidth: '400px', borderRadius: '16px', padding: '30px', boxShadow: '0 10px 25px rgba(0,0,0,0.2)' }}>
             <h2 style={{ marginTop: 0, color: saleSummary.isDebt ? '#d97706' : '#10b981', fontSize: '20px', marginBottom: '8px', textAlign: 'center' }}>
               {saleSummary.isCashless ? 'Sale Recorded! ✅' : saleSummary.isDebt ? 'Partial Payment Logged ⏳' : 'Sale Complete! ✅'}
@@ -1615,7 +1608,7 @@ export default function POSPage() {
 
       {/* RENDERED INVOICE PREVIEW MODAL (IF APPLICABLE) */}
       {showInvoicePreview && completedSale && (
-        <div className="invoice-modal-overlay" style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(0,0,0,0.85)', zIndex: 10006, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+        <div className="invoice-modal-overlay" style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.85)', zIndex: 10006, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
           
           <div className="invoice-controls" style={{ display: 'flex', justifyContent: 'space-between', width: '100%', maxWidth: '850px', marginBottom: '16px', padding: '0 20px' }}>
             <button onClick={() => { setShowInvoicePreview(false); setCompletedSale(null); setPreviewImageUrl(null); }} style={{ backgroundColor: '#dc2626', color: '#fff', border: 'none', padding: '10px 20px', borderRadius: '8px', fontSize: '16px', cursor: 'pointer' }}>❌ {currentT.close}</button>
@@ -1659,7 +1652,6 @@ export default function POSPage() {
           font-family: Arial, sans-serif; 
           box-sizing: border-box; 
           color: #333;
-          min-height: 100dvh;
         }
         .header-container { 
           margin-bottom: 24px; 
@@ -1723,14 +1715,14 @@ export default function POSPage() {
           .desktop-cart-panel { display: none !important; }
           
           .main-wrapper { 
-            padding: max(80px, env(safe-area-inset-top, 80px)) 16px 140px 16px !important; 
-            min-height: auto;
+            /* Safely forces content down below the hamburger and adds massive padding at the bottom */
+            padding: max(80px, env(safe-area-inset-top, 80px)) 16px 160px 16px !important; 
           }
           .header-container {
             flex-direction: column !important;
             align-items: flex-start !important;
             gap: 16px !important;
-            margin-top: 0 !important;
+            margin-top: 0 !important; 
             margin-bottom: 24px !important;
           }
           .header-left {
@@ -1756,7 +1748,7 @@ export default function POSPage() {
             cursor: pointer;
           }
           .mobile-input-field, .mobile-select-menu {
-            font-size: 16px !important; /* Neutralizes Safari Zoom */
+            font-size: 16px !important; 
           }
         }
       `}</style>
