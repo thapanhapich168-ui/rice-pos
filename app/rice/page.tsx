@@ -7,6 +7,8 @@ const formatRiel = (amount: number) => {
   return `${new Intl.NumberFormat('en-US').format(Math.round(amount))} ៛`;
 };
 
+const EXCHANGE_RATE = 4000;
+
 // --- CATEGORIES ---
 const RICE_CATEGORIES = ['All', 'មិញ', 'ខុន', 'ខ្ញី', 'ម្លិះ', 'រំដួល', 'បីកំណាត់', 'ដំណើប', 'សម្រូប', 'ផ្សេងៗ'];
 const MAIN_KEYWORDS = ['មិញ', 'ខុន', 'ខ្ញី', 'ម្លិះ', 'រំដួល', 'បីកំណាត់', 'ដំណើប', 'សម្រូប'];
@@ -47,14 +49,72 @@ interface FilterRule {
   value: string | number
 }
 
+type PaymentRow = { id: number, method: string, amount: number | '' };
+
 const DEFAULT_WIDTHS: Record<string, number> = {
   id: 60, name: 240, price: 120, cost_price: 120, stock: 100, weight: 90, linked_wholesale: 220, mtd_kg_used: 120, mtd_bags_used: 120, actions: 180
 }
 
 const DEFAULT_ORDER: Array<keyof Product | 'linked_wholesale' | 'actions'> = ['id', 'name', 'price', 'cost_price', 'stock', 'weight', 'linked_wholesale', 'mtd_kg_used', 'mtd_bags_used', 'actions']
 
+// ==========================================
+// ROBUST LIVE COMMA FORMATTER 
+// ==========================================
+function CurrencyInput({ value, onChange, placeholder, style, autoFocus, onEnter }: any) {
+  const [inputValue, setInputValue] = useState('');
+
+  useEffect(() => {
+    if (value === '' || value === undefined) {
+      setInputValue('');
+    } else {
+      const parsed = parseFloat(inputValue.replace(/,/g, ''));
+      if (parsed !== value) {
+        setInputValue(new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 }).format(value));
+      }
+    }
+  }, [value]);
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    let raw = e.target.value.replace(/[^0-9.]/g, '');
+    const parts = raw.split('.');
+    if (parts.length > 2) raw = parts[0] + '.' + parts.slice(1).join('');
+
+    let formatted = parts[0] ? new Intl.NumberFormat('en-US').format(parseInt(parts[0], 10)) : '';
+    if (parts.length > 1) formatted += '.' + parts[1].substring(0, 2);
+    if (raw === '') formatted = '';
+
+    setInputValue(formatted);
+    const num = parseFloat(raw);
+    onChange(isNaN(num) ? '' : num);
+  };
+
+  return (
+    <input 
+      type="text"
+      inputMode="decimal"
+      placeholder={placeholder}
+      value={inputValue}
+      onChange={handleChange}
+      autoFocus={autoFocus}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') {
+          e.currentTarget.blur();
+          if (onEnter) onEnter();
+        }
+      }}
+      onBlur={() => {
+        setTimeout(() => {
+          window.scrollTo(0, 0);
+          document.body.scrollTop = 0;
+        }, 100);
+      }}
+      style={{ ...style, color: '#334155', fontWeight: 'normal' }}
+      className="mobile-input-field no-spinners"
+    />
+  )
+}
+
 export default function RiceControl() {
-  // --- CORE STATE ---
   const [products, setProducts] = useState<Product[]>([])
   const [suppliers, setSuppliers] = useState<any[]>([])
   const [imports, setImports] = useState<any[]>([])
@@ -62,37 +122,37 @@ export default function RiceControl() {
   const [edits, setEdits] = useState<Record<number, Partial<Product>>>({})
   const [selectedToDelete, setSelectedToDelete] = useState<Set<number>>(new Set())
   const [hoveredId, setHoveredId] = useState<number | null>(null)
+  
   const [loading, setLoading] = useState(false)
+  const [isProcessing, setIsProcessing] = useState(false) 
 
-  // --- CELL EDITING STATE ---
   const [editingCell, setEditingCell] = useState<{id: number, col: string} | null>(null)
   const [activeDropdownId, setActiveDropdownId] = useState<number | null>(null)
   const [dropdownSearch, setDropdownSearch] = useState('')
 
-  // --- VIEWS & TABS STATE ---
   const [activeView, setActiveView] = useState<'retail' | 'wholesale' | 'import' | 'pending' | 'suppliers'>('retail')
   const [activeCategory, setActiveCategory] = useState<string>('All')
 
   // --- IMPORT FORM STATE ---
-  const [importForm, setImportForm] = useState({ supplier_id: '', product_id: '', qty: '', unit_cost: '', paid_amount: '', payment_method: 'Cash' })
+  const [importForm, setImportForm] = useState({ supplier_id: '', product_id: '', qty: '', unit_cost: '', paid_amount: '', payment_method: 'Cash ៛' })
   
   // --- MODALS ---
   const [isAddSupplierOpen, setIsAddSupplierOpen] = useState(false)
   const [newSupplier, setNewSupplier] = useState({ name: '', phone: '', location: '' })
-  const [payPendingModal, setPayPendingModal] = useState<{isOpen: boolean, record: any, amount: string, method: string}>({ isOpen: false, record: null, amount: '', method: 'Cash' })
+  
+  // Split Payment Pending Modal
+  const [payPendingModal, setPayPendingModal] = useState<{isOpen: boolean, record: any, totalDue: number}>({ isOpen: false, record: null, totalDue: 0 })
+  const [pendingPaymentRows, setPendingPaymentRows] = useState<PaymentRow[]>([{ id: Date.now(), method: 'Cash ៛', amount: '' }]);
 
-  // --- COLUMN PREFERENCE STATE ---
   const [columnWidths, setColumnWidths] = useState<Record<string, number>>(DEFAULT_WIDTHS)
   const [columnOrder, setColumnOrder] = useState<Array<keyof Product | 'linked_wholesale' | 'actions'>>(DEFAULT_ORDER)
   const widthsRef = useRef(columnWidths)
   widthsRef.current = columnWidths
 
-  // --- SORTING & FILTERING ---
   const [sortConfig, setSortConfig] = useState<SortConfig>(null)
   const [isFilterOpen, setIsFilterOpen] = useState(false)
   const [filterRules, setFilterRules] = useState<FilterRule[]>([])
 
-  // --- MODAL STATES ---
   const [isAddModalOpen, setIsAddModalOpen] = useState(false)
   const [newItem, setNewItem] = useState({ name: '', price: '' as any, cost_price: '' as any, weight: '' as any, stock: '' as any })
 
@@ -102,7 +162,6 @@ export default function RiceControl() {
   const [editingHistoryId, setEditingHistoryId] = useState<number | null>(null)
   const [historyEdits, setHistoryEdits] = useState<Record<number, Partial<HistoryRecord>>>({})
 
-  // --- LIFECYCLE ---
   useEffect(() => { 
     fetchProducts()
     fetchSettings()
@@ -110,7 +169,6 @@ export default function RiceControl() {
     fetchImports()
   }, [])
 
-  // --- DATABASE OPERATIONS ---
   async function fetchSettings() {
     const { data } = await supabase.from('app_settings').select('*').in('setting_key', ['column_widths', 'column_order'])
     if (data) {
@@ -144,19 +202,23 @@ export default function RiceControl() {
     if (data) setImports(data)
   }
 
-  // --- SUPPLIER & IMPORT ACTIONS ---
   async function handleAddSupplier() {
     if (!newSupplier.name) return alert('Supplier name is required');
-    setLoading(true);
-    const { error } = await supabase.from('suppliers').insert([{ name: newSupplier.name, phone: newSupplier.phone, location: newSupplier.location }]);
-    setLoading(false);
-    if (!error) {
+    setIsProcessing(true);
+    try {
+      const { error } = await supabase.from('suppliers').insert([{ name: newSupplier.name, phone: newSupplier.phone, location: newSupplier.location }]);
+      if (error) throw error;
       setIsAddSupplierOpen(false);
       setNewSupplier({ name: '', phone: '', location: '' });
-      fetchSuppliers();
-    } else alert(`Error: ${error.message}`);
+      await fetchSuppliers();
+    } catch (err: any) {
+      alert(`Error: ${err.message}`);
+    } finally {
+      setIsProcessing(false);
+    }
   }
 
+  // --- FLAWLESS IMPORT PROCESSING ---
   async function handleProcessImport(isPayLater: boolean) {
     if (!importForm.supplier_id || !importForm.product_id || !importForm.qty || !importForm.unit_cost) {
       return alert('Please fill in all required fields (Supplier, Product, Qty, Cost).');
@@ -172,9 +234,11 @@ export default function RiceControl() {
     const status = paidAmount >= totalCost ? 'Paid' : 'Pending';
     const remainingDebt = totalCost - paidAmount;
 
-    setLoading(true);
+    setIsProcessing(true);
 
     try {
+      const supplierName = suppliers.find(s => String(s.id) === String(importForm.supplier_id))?.name || 'Unknown Supplier';
+
       // 1. Log Import
       const { error: importErr } = await supabase.from('imports').insert([{
         supplier_id: Number(importForm.supplier_id),
@@ -185,48 +249,70 @@ export default function RiceControl() {
         paid_amount: paidAmount,
         status: status
       }]);
-      if (importErr) throw importErr;
+      if (importErr) throw new Error("Import Logging Error: " + importErr.message);
 
-      // 2. Update Supplier Debt
+      // 2. GUARANTEED STOCK INCREMENT
+      const product = products.find(p => String(p.id) === String(importForm.product_id));
+      if (!product) throw new Error("Product not found in system.");
+      
+      const newStock = Number(product.stock || 0) + qty;
+      const { error: stockErr } = await supabase.from('products').update({ stock: newStock, cost_price: unitCost }).eq('id', product.id);
+      if (stockErr) throw new Error("Stock Update Error: " + stockErr.message);
+
+      // 3. Update Supplier Debt & Accounts Payable
       if (remainingDebt > 0) {
-        const supplier = suppliers.find(s => s.id === Number(importForm.supplier_id));
+        const supplier = suppliers.find(s => String(s.id) === String(importForm.supplier_id));
         const newTotalOwed = Number(supplier?.total_owed || 0) + remainingDebt;
-        await supabase.from('suppliers').update({ total_owed: newTotalOwed }).eq('id', supplier?.id);
-      }
+        
+        const { error: supErr } = await supabase.from('suppliers').update({ total_owed: newTotalOwed }).eq('id', supplier?.id);
+        if (supErr) throw new Error("Supplier Update Error: " + supErr.message);
 
-      // 3. Update Product Stock
-      const product = products.find(p => p.id === Number(importForm.product_id));
-      const newStock = Number(product?.stock || 0) + qty;
-      await supabase.from('products').update({ stock: newStock, cost_price: unitCost }).eq('id', product?.id);
+        // Instantly log to Dashboard AP
+        const { error: apErr } = await supabase.from('accounts_payable').insert([{
+          supplier_name: supplierName,
+          amount_riel: remainingDebt,
+          amount_usd: 0,
+          notes: `Stock Import: ${qty} bags`,
+          status: 'Unpaid'
+        }]);
+        if (apErr) throw new Error("Accounts Payable Error: " + apErr.message);
+      }
 
       // 4. Create Batch
       await supabase.from('price_history').insert([{
         product_id: Number(importForm.product_id),
         cost_price: unitCost,
-        price: product?.price || 0,
+        price: product.price || 0,
         imported_qty: qty,
         sold_qty: 0
       }]);
 
-      // 5. Log Expense (Deduct from Cash/QR)
+      // 5. Log Expense (Deduct from Cash/QR) if money was paid today
       if (paidAmount > 0) {
-        const supplierName = suppliers.find(s => s.id === Number(importForm.supplier_id))?.name || 'Unknown';
-        await supabase.from('expenses').insert([{
+        let amtUsd = 0;
+        let amtRiel = paidAmount;
+        if (importForm.payment_method.includes('$')) {
+          amtUsd = paidAmount;
+          amtRiel = paidAmount * EXCHANGE_RATE;
+        }
+
+        const { error: expErr } = await supabase.from('expenses').insert([{
           expense_date: new Date().toISOString().split('T')[0],
-          spender: 'Business',
+          spender: 'Both',
           payment_method: importForm.payment_method,
           remarks: `Stock Import: ${supplierName}`,
-          amount: 0,
-          amount_riel: paidAmount,
+          amount: Math.abs(amtUsd),
+          amount_riel: Math.abs(amtRiel),
           description: 'BUSINESS'
         }]);
+        if (expErr) throw new Error("Expense Logging Error: " + expErr.message);
       }
 
-      setImportForm({ supplier_id: '', product_id: '', qty: '', unit_cost: '', paid_amount: '', payment_method: 'Cash' });
-      alert('Import processed successfully!');
-      fetchProducts();
-      fetchSuppliers();
-      fetchImports();
+      setImportForm({ supplier_id: '', product_id: '', qty: '', unit_cost: '', paid_amount: '', payment_method: 'Cash ៛' });
+      alert('Import processed successfully! Stock updated.');
+      
+      // Force instant refresh
+      await Promise.all([fetchProducts(), fetchSuppliers(), fetchImports()]);
 
       if (isPayLater) setActiveView('pending');
       else setActiveView('wholesale');
@@ -234,54 +320,98 @@ export default function RiceControl() {
     } catch (err: any) {
       alert(`Error processing import: ${err.message}`);
     } finally {
-      setLoading(false);
+      setIsProcessing(false);
     }
   }
 
+  // --- FLAWLESS PAY PENDING WITH SPLIT LOGIC ---
   async function handlePayPendingSubmit() {
     const record = payPendingModal.record;
-    const payAmt = Number(payPendingModal.amount) || 0;
     
-    if (payAmt <= 0) return alert('Enter a valid amount');
+    let totalRielEq = 0;
+    let totalUsdFace = 0;
+    let totalRielFace = 0;
+    let methodStrings: string[] = [];
+
+    for (const r of pendingPaymentRows) {
+      const amt = Number(r.amount) || 0;
+      if (amt <= 0) continue;
+      
+      if (r.method.includes('$')) {
+        totalRielEq += (amt * EXCHANGE_RATE);
+        totalUsdFace += amt;
+      } else {
+        totalRielEq += amt;
+        totalRielFace += amt;
+      }
+      methodStrings.push(`${r.method}: ${amt}`);
+    }
+
+    if (totalRielEq <= 0) return alert('Enter a valid amount');
     const remainingBefore = Number(record.total_cost) - Number(record.paid_amount);
-    if (payAmt > remainingBefore) return alert('Cannot pay more than what is owed');
+    if (totalRielEq > remainingBefore + 0.1) return alert('Cannot pay more than what is owed');
 
-    const newPaidAmount = Number(record.paid_amount) + payAmt;
-    const newStatus = newPaidAmount >= Number(record.total_cost) ? 'Paid' : 'Pending';
-
-    setLoading(true);
+    setIsProcessing(true); 
 
     try {
-      // 1. Update Import
+      const newPaidAmount = Number(record.paid_amount) + totalRielEq;
+      const newStatus = newPaidAmount >= Number(record.total_cost) ? 'Paid' : 'Pending';
+
+      // 1. Update Import Record
       await supabase.from('imports').update({ paid_amount: newPaidAmount, status: newStatus }).eq('id', record.id);
 
-      // 2. Update Supplier Debt
-      const supplier = suppliers.find(s => s.id === record.supplier_id);
-      const newTotalOwed = Math.max(0, Number(supplier?.total_owed || 0) - payAmt);
+      // 2. Update Supplier Master Debt
+      const supplier = suppliers.find(s => String(s.id) === String(record.supplier_id));
+      const newTotalOwed = Math.max(0, Number(supplier?.total_owed || 0) - totalRielEq);
       await supabase.from('suppliers').update({ total_owed: newTotalOwed }).eq('id', supplier?.id);
 
-      // 3. Log Expense
+      // 3. FIFO DRAIN ACCOUNTS PAYABLE DASHBOARD TABLE
+      const { data: apRows } = await supabase.from('accounts_payable')
+        .select('*')
+        .eq('supplier_name', supplier?.name)
+        .eq('status', 'Unpaid')
+        .order('created_at', { ascending: true });
+      
+      if (apRows && apRows.length > 0) {
+          let debtRemainingToOffset = totalRielEq;
+          for (let apRow of apRows) {
+              if (debtRemainingToOffset <= 0) break;
+              let apRowAmount = Number(apRow.amount_riel);
+              let apply = Math.min(apRowAmount, debtRemainingToOffset);
+              let newRowBalance = apRowAmount - apply;
+              
+              await supabase.from('accounts_payable').update({
+                  amount_riel: newRowBalance,
+                  status: newRowBalance <= 0 ? 'Paid' : 'Unpaid'
+              }).eq('id', apRow.id);
+              
+              debtRemainingToOffset -= apply;
+          }
+      }
+
+      // 4. Log Expense (Deduct Cash)
       await supabase.from('expenses').insert([{
         expense_date: new Date().toISOString().split('T')[0],
-        spender: 'Business',
-        payment_method: payPendingModal.method,
+        spender: 'Both',
+        payment_method: methodStrings.join(', '),
         remarks: `Paid Debt: ${supplier?.name || 'Supplier'}`,
-        amount: 0,
-        amount_riel: payAmt,
+        amount: Math.abs(totalUsdFace),
+        amount_riel: Math.abs(totalRielFace),
         description: 'BUSINESS'
       }]);
 
-      setPayPendingModal({ isOpen: false, record: null, amount: '', method: 'Cash' });
-      fetchSuppliers();
-      fetchImports();
+      setPayPendingModal({ isOpen: false, record: null, totalDue: 0 });
+      setPendingPaymentRows([{ id: Date.now(), method: 'Cash ៛', amount: '' }]);
+      
+      await Promise.all([fetchSuppliers(), fetchImports()]);
+
     } catch (err: any) {
       alert(`Error: ${err.message}`);
     } finally {
-      setLoading(false);
+      setIsProcessing(false);
     }
   }
 
-  // --- RECORD OPERATIONS ---
   const handleSaveRecord = async (id: number) => {
     if (!edits[id]) return;
     const payload = { ...edits[id] } as any;
@@ -323,7 +453,6 @@ export default function RiceControl() {
     }
   }
 
-  // --- HISTORY OPERATIONS (WITH STOCK SYNC) ---
   const fetchHistory = async (product: Product) => {
     const { data } = await supabase.from('price_history').select('*').eq('product_id', product.id).order('created_at', { ascending: false })
     setHistoryModal({ isOpen: true, product, data: data || [] })
@@ -381,13 +510,11 @@ export default function RiceControl() {
     }
   }
 
-  // --- NEW IMPORT REDIRECT ---
   const openImportModal = (product: Product) => {
     setImportForm(prev => ({ ...prev, product_id: String(product.id) }));
     setActiveView('import');
   }
 
-  // --- PERSISTENT BAG LINKING LOGIC ---
   const handleLinkWholesaleBag = async (retailId: number, wholesaleProduct: Product | null) => {
     if (!wholesaleProduct) {
       const { error } = await supabase.from('products').update({ linked_wholesale_id: null }).eq('id', retailId);
@@ -412,7 +539,6 @@ export default function RiceControl() {
     }
   }
 
-  // --- COLUMN DRAG & DROP LOGIC ---
   const handleDragStart = (e: React.DragEvent, col: string) => {
     if (col === 'actions') return; 
     e.dataTransfer.setData('text/plain', col)
@@ -448,7 +574,6 @@ export default function RiceControl() {
     })
   }
 
-  // --- COLUMN RESIZE LOGIC ---
   const handleResizeStart = (e: React.MouseEvent | React.TouchEvent, columnKey: string) => {
     e.preventDefault()
     e.stopPropagation() 
@@ -489,7 +614,6 @@ export default function RiceControl() {
     setSortConfig({ key, direction });
   }
 
-  // --- DATA PROCESSING ---
   const processedProducts = products
     .map(p => ({ ...p, ...edits[p.id] }))
     .filter(p => {
@@ -527,7 +651,6 @@ export default function RiceControl() {
       return 0;
     })
 
-  // --- FORMATTERS ---
   const formatDisplayValue = (col: string, val: any) => {
     if (val === null || val === undefined) return '';
     if (['price', 'cost_price'].includes(col)) return `${new Intl.NumberFormat('en-US').format(val)} ៛`;
@@ -548,10 +671,16 @@ export default function RiceControl() {
   const pendingImports = imports.filter(i => i.status === 'Pending');
   const importTotalCalc = (Number(importForm.qty) || 0) * (Number(importForm.unit_cost) || 0);
 
+  // Live modal math
+  const liveTotalPendingReceived = pendingPaymentRows.reduce((sum, row) => {
+    const amt = Number(row.amount) || 0;
+    if (row.method.includes('$')) return sum + (amt * EXCHANGE_RATE);
+    return sum + amt;
+  }, 0);
+  const livePendingRemaining = payPendingModal.totalDue - liveTotalPendingReceived;
+
   return (
     <div className="main-wrapper">
-      
-      {/* HEADER */}
       <div className="header-container">
         <h1 className="page-title">🌾 Rice Inventory & Suppliers</h1>
         <div className="header-actions">
@@ -573,7 +702,6 @@ export default function RiceControl() {
         </div>
       </div>
 
-      {/* TOOLBAR & TABS */}
       <div className="toolbar-container">
         <div className="toolbar-tabs" style={{ display: 'flex', overflowX: 'auto', whiteSpace: 'nowrap' }}>
           <button className={activeView === 'retail' ? 'tab active' : 'tab'} onClick={() => { setActiveView('retail'); setActiveCategory('All'); }}>🛍️ Retail</button>
@@ -602,7 +730,6 @@ export default function RiceControl() {
         )}
       </div>
 
-      {/* RICE CATEGORIES (ONLY WHOLESALE) */}
       {activeView === 'wholesale' && (
         <div className="hide-scrollbar" style={{ display: 'flex', overflowX: 'auto', gap: '8px', paddingBottom: '16px', marginBottom: '8px' }}>
           {RICE_CATEGORIES.map(cat => (
@@ -617,12 +744,7 @@ export default function RiceControl() {
         </div>
       )}
 
-      {/* =========================================
-          VIEW ROUTING ENGINE
-          ========================================= */}
-
       {(activeView === 'retail' || activeView === 'wholesale') && (
-        /* MAIN SPREADSHEET */
         <div className="table-wrapper fade-in">
           <table style={{ borderCollapse: 'collapse', tableLayout: 'fixed', width: 'max-content', minWidth: '100%' }}>
             <thead>
@@ -736,14 +858,12 @@ export default function RiceControl() {
         </div>
       )}
 
-      {/* IMPORT FORM TAB */}
       {activeView === 'import' && (
         <div className="fade-in" style={{ display: 'flex', justifyContent: 'center' }}>
           <div style={{ background: '#fff', padding: '32px', borderRadius: '16px', border: '1px solid #e2e8f0', boxShadow: '0 10px 25px rgba(0,0,0,0.05)', width: '100%', maxWidth: '600px' }}>
             <h2 style={{ marginTop: 0, color: '#1e293b', marginBottom: '24px', borderBottom: '2px solid #f1f5f9', paddingBottom: '12px' }}>🚚 Receive New Stock</h2>
             
             <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-              {/* Supplier */}
               <div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: '6px' }}>
                   <label style={{ fontSize: '13px', color: '#0f172a', fontWeight: 'bold' }}>Select Supplier</label>
@@ -755,7 +875,6 @@ export default function RiceControl() {
                 </select>
               </div>
 
-              {/* Product */}
               <div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: '6px' }}>
                   <label style={{ fontSize: '13px', color: '#0f172a', fontWeight: 'bold' }}>Select Product (Rice)</label>
@@ -767,7 +886,6 @@ export default function RiceControl() {
                 </select>
               </div>
 
-              {/* Qty & Cost */}
               <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap' }}>
                 <div style={{ flex: 1, minWidth: '150px' }}>
                   <label style={{ display: 'block', fontSize: '13px', color: '#0f172a', fontWeight: 'bold', marginBottom: '6px' }}>Quantity Imported</label>
@@ -779,13 +897,11 @@ export default function RiceControl() {
                 </div>
               </div>
 
-              {/* Summary Block */}
               <div style={{ background: '#fefcf3', padding: '16px', borderRadius: '8px', border: '1px solid #fde047', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <span style={{ fontWeight: 'bold', color: '#854d0e' }}>Total Bill Cost:</span>
                 <span style={{ fontSize: '20px', fontWeight: 'bold', color: '#b58a3d' }}>{formatRiel(importTotalCalc)}</span>
               </div>
 
-              {/* Payment Section */}
               <div style={{ background: '#f8fafc', padding: '20px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
                 <h4 style={{ margin: '0 0 16px 0', fontSize: '14px', color: '#1e293b' }}>Payment Details</h4>
                 <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap' }}>
@@ -796,26 +912,29 @@ export default function RiceControl() {
                   <div style={{ flex: 1, minWidth: '120px' }}>
                     <label style={{ display: 'block', fontSize: '12px', color: '#64748b', fontWeight: 'bold', marginBottom: '6px' }}>Payment Method</label>
                     <select value={importForm.payment_method} onChange={e => setImportForm({...importForm, payment_method: e.target.value})} style={{ width: '100%', padding: '12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '15px', outline: 'none', backgroundColor: '#fff' }}>
-                      <option value="Cash">💵 Cash</option>
-                      <option value="QR Payment">📱 QR Code</option>
+                      <option value="Cash ៛">💵 Cash ៛</option>
+                      <option value="Cash $">💵 Cash $</option>
+                      <option value="QR ៛">📱 QR ៛</option>
+                      <option value="QR $">📱 QR $</option>
+                      <option value="Mom QR ៛">👩 Mom QR ៛</option>
+                      <option value="Mom QR $">👩 Mom QR $</option>
                     </select>
                   </div>
                 </div>
               </div>
 
-              {/* Actions */}
               <div style={{ display: 'flex', gap: '12px', marginTop: '10px' }}>
                 <button 
                   onClick={() => handleProcessImport(true)} 
-                  disabled={loading}
-                  style={{ flex: 1, padding: '14px', background: '#f59e0b', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 'bold', fontSize: '15px', cursor: loading ? 'not-allowed' : 'pointer' }}
+                  disabled={isProcessing}
+                  style={{ flex: 1, padding: '14px', background: '#f59e0b', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 'bold', fontSize: '15px', cursor: isProcessing ? 'not-allowed' : 'pointer' }}
                 >
                   ⏳ Save as Pending/Partial
                 </button>
                 <button 
                   onClick={() => handleProcessImport(false)} 
-                  disabled={loading}
-                  style={{ flex: 1, padding: '14px', background: '#10b981', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 'bold', fontSize: '15px', cursor: loading ? 'not-allowed' : 'pointer' }}
+                  disabled={isProcessing}
+                  style={{ flex: 1, padding: '14px', background: '#10b981', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 'bold', fontSize: '15px', cursor: isProcessing ? 'not-allowed' : 'pointer' }}
                 >
                   ✅ Paid Full & Import
                 </button>
@@ -826,7 +945,6 @@ export default function RiceControl() {
         </div>
       )}
 
-      {/* PENDING PAYMENTS TAB */}
       {activeView === 'pending' && (
         <div className="table-wrapper fade-in">
           <table style={{ borderCollapse: 'collapse', width: '100%', minWidth: '900px' }}>
@@ -857,7 +975,10 @@ export default function RiceControl() {
                       <td style={{ padding: '16px', textAlign: 'right', fontWeight: 'bold', color: '#ef4444', fontSize: '16px' }}>{formatRiel(remaining)}</td>
                       <td style={{ padding: '16px', textAlign: 'center' }}>
                         <button 
-                          onClick={() => setPayPendingModal({ isOpen: true, record: imp, amount: remaining.toString(), method: 'Cash' })}
+                          onClick={() => {
+                            setPayPendingModal({ isOpen: true, record: imp, totalDue: remaining });
+                            setPendingPaymentRows([{ id: Date.now(), method: 'Cash ៛', amount: '' }]);
+                          }}
                           style={{ padding: '8px 16px', background: '#3b82f6', color: '#fff', border: 'none', borderRadius: '6px', fontWeight: 'bold', cursor: 'pointer' }}
                         >
                           💸 Pay Now
@@ -872,7 +993,6 @@ export default function RiceControl() {
         </div>
       )}
 
-      {/* SUPPLIERS DATABASE TAB */}
       {activeView === 'suppliers' && (
         <div className="table-wrapper fade-in">
           <table style={{ borderCollapse: 'collapse', width: '100%', minWidth: '700px' }}>
@@ -904,45 +1024,103 @@ export default function RiceControl() {
         </div>
       )}
 
-
       {/* === GLOBAL MODALS === */}
 
-      {/* PAY PENDING MODAL */}
       {payPendingModal.isOpen && payPendingModal.record && (
-        <div className="modal-overlay" onMouseDown={() => setPayPendingModal({ isOpen: false, record: null, amount: '', method: 'Cash' })}>
-          <div className="modal-content" style={{ maxWidth: '400px' }} onMouseDown={e => e.stopPropagation()}>
+        <div className="modal-overlay" onMouseDown={() => setPayPendingModal({ isOpen: false, record: null, totalDue: 0 })}>
+          <div className="modal-content" style={{ maxWidth: '450px' }} onMouseDown={e => e.stopPropagation()}>
             <h3 style={{ marginTop: 0, color: '#1e293b', borderBottom: '1px solid #e2e8f0', paddingBottom: '10px' }}>💸 Settle Supplier Bill</h3>
             <p style={{ margin: '0 0 16px 0', color: '#475569', fontSize: '14px' }}>Paying: <b>{payPendingModal.record.suppliers?.name}</b></p>
             
             <div style={{ background: '#fef2f2', padding: '16px', borderRadius: '8px', border: '1px solid #fecaca', marginBottom: '20px', textAlign: 'center' }}>
               <div style={{ fontSize: '12px', color: '#991b1b', fontWeight: 'bold', textTransform: 'uppercase' }}>Remaining Debt</div>
               <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#dc2626' }}>
-                {formatRiel(Number(payPendingModal.record.total_cost) - Number(payPendingModal.record.paid_amount))}
+                {formatRiel(payPendingModal.totalDue)}
               </div>
             </div>
 
-            <div style={{ marginBottom: '16px' }}>
-              <label style={{ display: 'block', fontSize: '13px', color: '#0f172a', fontWeight: 'bold', marginBottom: '6px' }}>Amount to Pay Now (៛)</label>
-              <input type="number" className="no-spinners" value={payPendingModal.amount} onChange={e => setPayPendingModal({...payPendingModal, amount: e.target.value})} style={{ width: '100%', padding: '12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '16px', boxSizing: 'border-box' }} />
+            <div style={{ marginBottom: '24px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                <label style={{ fontSize: '13px', color: '#0f172a', fontWeight: 'bold' }}>Payment Method(s)</label>
+                <button onClick={() => setPendingPaymentRows([...pendingPaymentRows, { id: Date.now(), method: 'Cash ៛', amount: '' }])} style={{ background: '#e0f2fe', color: '#0284c7', border: 'none', borderRadius: '4px', fontSize: '12px', padding: '6px 10px', cursor: 'pointer', fontWeight: 'bold' }}>+ Split</button>
+              </div>
+
+              {pendingPaymentRows.map((row, index) => (
+                <div key={row.id} style={{ display: 'flex', gap: '8px', marginBottom: '12px', alignItems: 'center' }}>
+                  <select 
+                    value={row.method} 
+                    onChange={e => {
+                      const newRows = [...pendingPaymentRows];
+                      newRows[index].method = e.target.value;
+                      setPendingPaymentRows(newRows);
+                    }}
+                    style={{ width: '45%', padding: '12px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '14px', outline: 'none', backgroundColor: '#fff', cursor: 'pointer', color: '#334155' }}
+                  >
+                    <option value="Cash ៛">💵 Cash ៛</option>
+                    <option value="Cash $">💵 Cash $</option>
+                    <option value="QR ៛">📱 QR ៛</option>
+                    <option value="QR $">📱 QR $</option>
+                    <option value="Mom QR ៛">👩 Mom QR ៛</option>
+                    <option value="Mom QR $">👩 Mom QR $</option>
+                  </select>
+                  
+                  <div style={{ flex: 1 }}>
+                    <CurrencyInput 
+                      placeholder="" 
+                      value={row.amount} 
+                      onChange={(val: any) => {
+                        const newRows = [...pendingPaymentRows];
+                        newRows[index].amount = val;
+                        setPendingPaymentRows(newRows);
+                      }}
+                      onEnter={handlePayPendingSubmit}
+                      style={{ width: '100%', padding: '12px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', outline: 'none', textAlign: 'right' }}
+                    />
+                  </div>
+                  
+                  {pendingPaymentRows.length > 1 && (
+                    <button onClick={() => setPendingPaymentRows(pendingPaymentRows.filter(r => r.id !== row.id))} style={{ background: 'none', border: 'none', color: '#ef4444', fontSize: '18px', cursor: 'pointer', padding: '0 4px' }}>✕</button>
+                  )}
+                </div>
+              ))}
             </div>
 
-            <div style={{ marginBottom: '24px' }}>
-              <label style={{ display: 'block', fontSize: '13px', color: '#0f172a', fontWeight: 'bold', marginBottom: '6px' }}>Payment Method (Deducts from Asset)</label>
-              <select value={payPendingModal.method} onChange={e => setPayPendingModal({...payPendingModal, method: e.target.value})} style={{ width: '100%', padding: '12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '15px', outline: 'none', backgroundColor: '#fff', cursor: 'pointer' }}>
-                <option value="Cash">💵 Paid in Cash</option>
-                <option value="QR Payment">📱 Paid via QR</option>
-              </select>
-            </div>
+            {/* Live Calculation Footer */}
+            {pendingPaymentRows.some(r => Number(r.amount) > 0) && (
+              <div style={{ marginBottom: '24px', paddingTop: '16px', borderTop: '1px dashed #cbd5e1', fontSize: '14px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
+                  <span style={{ color: '#64748b' }}>Total Processed:</span>
+                  <span style={{ color: '#334155', fontWeight: 'bold' }}>{formatRiel(liveTotalPendingReceived)}</span>
+                </div>
+                {livePendingRemaining < 0 ? (
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span style={{ color: '#ef4444' }}>Overpaid By:</span>
+                    <span style={{ color: '#dc2626', fontWeight: 'bold' }}>{formatRiel(Math.abs(livePendingRemaining))}</span>
+                  </div>
+                ) : livePendingRemaining > 0 ? (
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span style={{ color: '#d97706' }}>Still Owes:</span>
+                    <span style={{ color: '#b45309', fontWeight: 'bold' }}>{formatRiel(livePendingRemaining)}</span>
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span style={{ color: '#166534' }}>Balance:</span>
+                    <span style={{ color: '#15803d', fontWeight: 'bold' }}>Perfectly Cleared ✅</span>
+                  </div>
+                )}
+              </div>
+            )}
 
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
-              <button onClick={() => setPayPendingModal({ isOpen: false, record: null, amount: '', method: 'Cash' })} style={{ padding: '10px 16px', background: '#f1f5f9', color: '#475569', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>Cancel</button>
-              <button onClick={handlePayPendingSubmit} disabled={loading} style={{ padding: '10px 16px', background: '#10b981', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold' }}>Confirm Payment</button>
+              <button onClick={() => setPayPendingModal({ isOpen: false, record: null, totalDue: 0 })} style={{ padding: '12px 16px', background: '#f1f5f9', color: '#475569', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', fontSize: '14px' }}>Cancel</button>
+              <button onClick={handlePayPendingSubmit} disabled={isProcessing} style={{ padding: '12px 16px', background: '#10b981', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', fontSize: '14px' }}>
+                {isProcessing ? 'Processing...' : 'Confirm Payment'}
+              </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* ADD SUPPLIER MODAL */}
       {isAddSupplierOpen && (
         <div className="modal-overlay" onMouseDown={() => setIsAddSupplierOpen(false)}>
           <div className="modal-content" style={{ maxWidth: '400px' }} onMouseDown={e => e.stopPropagation()}>
@@ -963,13 +1141,12 @@ export default function RiceControl() {
             </div>
             <div style={{ marginTop: '24px', display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
               <button onClick={() => setIsAddSupplierOpen(false)} style={{ padding: '10px 16px', background: '#f1f5f9', color: '#475569', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', fontSize: '14px' }}>Cancel</button>
-              <button onClick={handleAddSupplier} disabled={loading} style={{ padding: '10px 16px', background: '#10b981', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', fontSize: '14px' }}>Save Supplier</button>
+              <button onClick={handleAddSupplier} disabled={isProcessing} style={{ padding: '10px 16px', background: '#10b981', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', fontSize: '14px' }}>Save Supplier</button>
             </div>
           </div>
         </div>
       )}
 
-      {/* 2. FILTER MODAL */}
       {isFilterOpen && (
         <div className="modal-overlay" onMouseDown={() => setIsFilterOpen(false)}>
           <div className="modal-content" onMouseDown={e => e.stopPropagation()}>
@@ -1002,7 +1179,6 @@ export default function RiceControl() {
         </div>
       )}
 
-      {/* 3. LIVE BATCH HISTORY MODAL */}
       {historyModal.isOpen && historyModal.product && (
         <div className="modal-overlay" onMouseDown={() => setHistoryModal({ isOpen: false, product: null, data: [] })}>
           <div className="modal-content" style={{ maxWidth: '650px' }} onMouseDown={e => e.stopPropagation()}>
@@ -1022,7 +1198,6 @@ export default function RiceControl() {
                   const isEditing = editingHistoryId === h.id;
                   const editData = historyEdits[h.id] || { imported_qty: h.imported_qty, price: h.price, cost_price: h.cost_price };
                   
-                  // Live Math
                   const remaining = (h.imported_qty || 0) - (h.sold_qty || 0);
                   const isActive = remaining > 0;
 
@@ -1084,7 +1259,6 @@ export default function RiceControl() {
         </div>
       )}
 
-      {/* 5. ADD PRODUCT MODAL */}
       {isAddModalOpen && (
         <div className="modal-overlay" onMouseDown={() => setIsAddModalOpen(false)}>
           <div className="modal-content" style={{ maxWidth: '400px' }} onMouseDown={e => e.stopPropagation()}>
@@ -1289,7 +1463,6 @@ export default function RiceControl() {
           position: relative;
         }
 
-        /* Interactive Inline Selector Style Rules */
         .interactive-select-trigger {
           padding: 8px 12px;
           border: 1px solid #cbd5e1;

@@ -8,10 +8,12 @@ const EXCHANGE_RATE = 4000;
 const formatRiel = (amount: number) => `${new Intl.NumberFormat('en-US').format(Math.round(amount))} ៛`;
 const formatUSD = (amount: number) => `$${new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(amount)}`;
 
+type PaymentRow = { id: number, method: string, amount: number | '' };
+
 // ==========================================
 // ROBUST LIVE COMMA FORMATTER 
 // ==========================================
-function CurrencyInput({ value, onChange, placeholder, style, autoFocus }: any) {
+function CurrencyInput({ value, onChange, placeholder, style, autoFocus, onEnter }: any) {
   const [inputValue, setInputValue] = useState('');
 
   useEffect(() => {
@@ -47,32 +49,49 @@ function CurrencyInput({ value, onChange, placeholder, style, autoFocus }: any) 
       value={inputValue}
       onChange={handleChange}
       autoFocus={autoFocus}
-      style={{ ...style, color: '#334155', fontWeight: 'normal', fontSize: '16px' }}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') {
+          e.currentTarget.blur();
+          if (onEnter) onEnter();
+        }
+      }}
+      style={{ ...style, color: '#334155', fontWeight: 'normal' }}
     />
   )
 }
 
 export default function CogsReportPage() {
   const [sales, setSales] = useState<any[]>([])
+  const [retailSales, setRetailSales] = useState<any[]>([])
+  const [cogsSettlements, setCogsSettlements] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   
+  // App Settings (Liability to Mom)
+  const [persOweRiel, setPersOweRiel] = useState<number>(0)
+  const [persOweUsd, setPersOweUsd] = useState<number>(0)
+
   // Navigation States
-  const [activeMainTab, setActiveMainTab] = useState<'report' | 'settlement'>('report')
-  const [activeTab, setActiveTab] = useState<'mom' | 'others'>('mom')
+  const [activeMainTab, setActiveMainTab] = useState<'report' | 'pending' | 'history'>('report')
+  const [activeOwnerTab, setActiveOwnerTab] = useState<'mom' | 'others'>('mom')
+  const [timeFilter, setTimeFilter] = useState<'today' | 'week' | 'month' | 'all'>('month')
   
   const [isDeviceMobile, setIsDeviceMobile] = useState(false)
   const [isCapturing, setIsCapturing] = useState(false)
   
   const reportRef = useRef<HTMLDivElement>(null)
 
-  // Date filtering (Defaults to Today)
+  // Report Specific Dates
   const [fromDate, setFromDate] = useState<string>('')
   const [toDate, setToDate] = useState<string>('')
 
-  // Settlement Modal States
-  const [paymentModal, setPaymentModal] = useState<{ isOpen: boolean, date: string, owner: string, totalDue: number, rows: any[] }>({ isOpen: false, date: '', owner: '', totalDue: 0, rows: [] })
-  const [paymentRows, setPaymentRows] = useState<{id: number, method: string, amount: number | ''}[]>([{ id: Date.now(), method: 'Cash ៛', amount: '' }]);
+  // Bulk Settlement States
+  const [selectedDays, setSelectedDays] = useState<string[]>([])
+  const [bulkModalOpen, setBulkModalOpen] = useState(false)
+  const [bulkPaymentRows, setBulkPaymentRows] = useState<PaymentRow[]>([{ id: Date.now(), method: 'Cash ៛', amount: '' }]);
   const [isProcessing, setIsProcessing] = useState(false)
+
+  // Inline History States
+  const [inlinePayments, setInlinePayments] = useState<Record<string, PaymentRow[]>>({})
 
   useEffect(() => {
     const isMobile = window.innerWidth < 1024 || /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
@@ -85,20 +104,28 @@ export default function CogsReportPage() {
   }, [])
 
   useEffect(() => {
-    if (fromDate && toDate) fetchReportData();
-  }, [fromDate, toDate])
+    fetchReportData();
+  }, [])
 
   async function fetchReportData() {
     setLoading(true)
-    const { data, error } = await supabase
-      .from('sales')
-      .select('*')
-      .gte('created_at', `${fromDate}T00:00:00`)
-      .lte('created_at', `${toDate}T23:59:59`)
-      .order('invoice_id', { ascending: true })
+    
+    // Fetch all for accurate lifetime balances
+    const { data: sData } = await supabase.from('sales').select('*')
+    const { data: rData } = await supabase.from('retail_sales').select('*')
+    const { data: cData } = await supabase.from('cogs_settlements').select('*')
+    const { data: aData } = await supabase.from('app_settings').select('*').in('setting_key', ['personal_owe_riel', 'personal_owe_usd'])
 
-    if (error) console.error(error)
-    else setSales(data || [])
+    setSales(sData || [])
+    setRetailSales(rData || [])
+    setCogsSettlements(cData || [])
+
+    if (aData) {
+      aData.forEach(s => {
+        if (s.setting_key === 'personal_owe_riel') setPersOweRiel(Number(s.setting_value) || 0)
+        if (s.setting_key === 'personal_owe_usd') setPersOweUsd(Number(s.setting_value) || 0)
+      })
+    }
     
     setLoading(false)
   }
@@ -148,122 +175,41 @@ export default function CogsReportPage() {
 
   const handleNativePrint = () => { window.print(); }
 
-  // --- SETTLEMENT PAYMENT LOGIC ---
-  const handleOpenPayment = (data: any) => {
-    const balanceDue = data.totalCogs - data.totalPaid;
-    setPaymentModal({ isOpen: true, date: data.date, owner: data.owner, totalDue: balanceDue, rows: data.rows });
-    setPaymentRows([{ id: Date.now(), method: 'Cash ៛', amount: '' }]);
-  }
-
-  async function handleProcessPayment() {
-    setIsProcessing(true);
-
-    const activePayments = paymentRows.filter(r => (Number(r.amount) || 0) > 0);
-    if (activePayments.length === 0) {
-      alert('Please enter at least one payment amount.');
-      setIsProcessing(false);
-      return;
+  // --- TIME HELPERS ---
+  const now = new Date()
+  const isWithinTimeFilter = (dateStr: string, filter: string) => {
+    if (filter === 'all') return true;
+    if (!dateStr) return false;
+    const d = new Date(dateStr);
+    const today = new Date(); today.setHours(0,0,0,0); d.setHours(0,0,0,0);
+    
+    if (filter === 'today') return d.getTime() === today.getTime();
+    if (filter === 'week') {
+      const lastWeek = new Date(today); lastWeek.setDate(lastWeek.getDate() - 7);
+      return d >= lastWeek && d <= today;
     }
-
-    const totalReceivedInRiel = activePayments.reduce((sum, row) => {
-      const amt = Number(row.amount) || 0;
-      return row.method.includes('$') ? sum + (amt * EXCHANGE_RATE) : sum + amt;
-    }, 0);
-
-    if (totalReceivedInRiel > paymentModal.totalDue) {
-      alert('Payment cannot exceed the total remaining COGS balance.');
-      setIsProcessing(false);
-      return;
-    }
-
-    try {
-      // 1. Log Financial Transactions (Adds full COGS amount to assets directly)
-      for (const row of activePayments) {
-        let amountRiel = Number(row.amount);
-        if (row.method.includes('$')) amountRiel = amountRiel * EXCHANGE_RATE;
-
-        // Force negative to act as an Income in an Expense table
-        amountRiel = -Math.abs(amountRiel); 
-
-        await supabase.from('expenses').insert([{
-          expense_date: new Date().toISOString().split('T')[0],
-          spender: 'Business',
-          payment_method: row.method,
-          remarks: `COGS Settlement: ${paymentModal.owner} for ${paymentModal.date}`,
-          amount: 0,
-          amount_riel: amountRiel,
-          description: 'COGS'
-        }]);
-      }
-
-      // 2. Distribute payment across the daily sales rows
-      const paymentMethodString = activePayments.map(r => r.method).join(', ');
-      let remainingToDistribute = totalReceivedInRiel;
-      
-      for (const s of paymentModal.rows) {
-        if (remainingToDistribute <= 0) break;
-        
-        let qty = Number(s.qty || 0);
-        let price = Number(s.cogs_price || 0);
-        let amount = qty * price;
-        let desc = s.custom_rice_type || s.rice_type || '';
-        
-        if (desc.includes('ដូរ') || desc.includes('បញ្ចុះតម្លៃ') || desc.includes('កក់')) {
-          amount = -Math.abs(amount);
-        } else {
-          amount = Math.abs(amount);
-        }
-
-        if (amount <= 0) continue; 
-
-        let paidSoFar = Number(s.cogs_paid_amount || 0);
-        let owe = amount - paidSoFar;
-
-        if (owe > 0) {
-          let apply = Math.min(owe, remainingToDistribute);
-          let newPaid = paidSoFar + apply;
-          let newStatus = newPaid >= amount ? 'Paid' : 'Pending';
-
-          let updatedMethods = s.cogs_payment_method ? `${s.cogs_payment_method}, ${paymentMethodString}` : paymentMethodString;
-          let uniqueMethods = Array.from(new Set(updatedMethods.split(',').map(m => m.trim()))).join(', ');
-
-          const { error } = await supabase.from('sales').update({
-            cogs_paid_amount: newPaid,
-            cogs_status: newStatus,
-            cogs_payment_method: uniqueMethods
-          }).eq('id', s.id);
-
-          if (error) throw new Error("Failed to update sales row: ensure 'cogs_paid_amount', 'cogs_status', and 'cogs_payment_method' exist.");
-
-          remainingToDistribute -= apply;
-        }
-      }
-
-      setPaymentModal({ isOpen: false, date: '', owner: '', totalDue: 0, rows: [] });
-      fetchReportData();
-
-    } catch (error: any) {
-      alert(`Error processing payment: ${error.message}`);
-    } finally {
-      setIsProcessing(false);
-    }
+    if (filter === 'month') return d.getMonth() === today.getMonth() && d.getFullYear() === today.getFullYear();
+    return true;
   }
 
 
-  // --- FILTERING LOGIC FOR BOTH TABS ---
-  const filteredSales = sales.filter(s => {
+  // ==========================================
+  // DATA PROCESSORS
+  // ==========================================
+
+  // 1. Report Processor (A4 View)
+  const reportSales = [...sales, ...retailSales].filter(s => {
+    const d = s.created_at.split('T')[0];
+    return d >= fromDate && d <= toDate;
+  }).filter(s => {
     const owner = (s.owner || '').toLowerCase().trim();
-    if (activeTab === 'mom') {
-      return owner === 'mom' || owner === '' || owner === 'none' || owner === 'null';
-    } else {
-      return owner === 'pich' || owner === 'jing' || owner === 'both';
-    }
+    if (activeOwnerTab === 'mom') return owner === 'mom' || owner === '' || owner === 'none' || owner === 'null';
+    else return owner === 'pich' || owner === 'jing' || owner === 'both';
   });
 
-  // --- REPORT TAB PROCESSOR ---
   const groupedBySeller: Record<string, any[]> = {};
-  filteredSales.forEach(s => {
-    const seller = s.owner || 'Mom (Retail)';
+  reportSales.forEach(s => {
+    const seller = s.owner || 'Mom';
     if (!groupedBySeller[seller]) groupedBySeller[seller] = [];
     groupedBySeller[seller].push(s);
   });
@@ -329,17 +275,24 @@ export default function CogsReportPage() {
     return { rows: finalRows, sellerGrandTotal };
   };
 
-  // --- SETTLEMENT TAB PROCESSOR ---
+
+  // 2. Daily Ledger Processor (Pending & History)
   const dailyMap: Record<string, any> = {};
-  filteredSales.forEach(s => {
+  
+  [...sales, ...retailSales].forEach(s => {
+    const owner = (s.owner || 'Mom').trim();
+    const isMomTab = activeOwnerTab === 'mom';
+    const isMomOwner = owner.toLowerCase() === 'mom' || owner === '';
+    
+    if (isMomTab !== isMomOwner) return;
+
     const date = s.created_at.split('T')[0];
-    const owner = s.owner || 'Mom';
     const key = `${date}_${owner}`;
-    
+
     if (!dailyMap[key]) {
-      dailyMap[key] = { date, owner, totalCogs: 0, totalPaid: 0, methods: new Set<string>(), rows: [] };
+      dailyMap[key] = { key, date, owner, totalCogs: 0, totalPaid: 0, methods: new Set<string>() };
     }
-    
+
     let qty = Number(s.qty || 0);
     let price = Number(s.cogs_price || 0);
     let amount = qty * price;
@@ -347,37 +300,179 @@ export default function CogsReportPage() {
     
     if (desc.includes('សេវាដឹក')) return;
     if (desc.includes('បាវ') && price === 0) return;
-
     if (desc.includes('ដូរ') || desc.includes('បញ្ចុះតម្លៃ') || desc.includes('កក់')) amount = -Math.abs(amount);
     else amount = Math.abs(amount);
 
     dailyMap[key].totalCogs += amount;
-    dailyMap[key].totalPaid += Number(s.cogs_paid_amount || 0);
-    
-    if (s.cogs_payment_method) {
-      s.cogs_payment_method.split(',').forEach((m: string) => dailyMap[key].methods.add(m.trim()));
+  });
+
+  cogsSettlements.forEach(c => {
+    const key = `${c.settlement_date}_${c.owner_name}`;
+    if (dailyMap[key]) {
+      dailyMap[key].totalPaid += Number(c.paid_amount || 0);
+      if (c.payment_method) dailyMap[key].methods.add(c.payment_method);
     }
-    
-    dailyMap[key].rows.push(s);
   });
 
-  const settlements = Object.values(dailyMap).sort((a: any, b: any) => {
-    const aDone = (a.totalCogs - a.totalPaid) <= 0;
-    const bDone = (b.totalCogs - b.totalPaid) <= 0;
-    if (aDone && !bDone) return 1;
-    if (!aDone && bDone) return -1;
-    return new Date(b.date).getTime() - new Date(a.date).getTime();
-  });
+  const allDays = Object.values(dailyMap).sort((a,b) => b.date.localeCompare(a.date));
+  const filteredDays = allDays.filter(d => isWithinTimeFilter(d.date, timeFilter));
+  
+  const pendingDays = filteredDays.filter(d => d.totalCogs > d.totalPaid + 0.1);
+  const historyDays = filteredDays.filter(d => d.totalPaid > 0);
 
-  let combinedGrandTotal = 0;
+  // Selection Logic
+  const handleSelectDay = (key: string) => {
+    if (selectedDays.includes(key)) setSelectedDays(selectedDays.filter(k => k !== key));
+    else setSelectedDays([...selectedDays, key]);
+  }
+  const handleSelectAll = () => {
+    if (selectedDays.length === pendingDays.length) setSelectedDays([]);
+    else setSelectedDays(pendingDays.map(d => d.key));
+  }
 
-  // Live Math for Modal
-  const liveTotalReceivedInRiel = paymentRows.reduce((sum, row) => {
+
+  // ==========================================
+  // PAYMENT PROCESSING ENGINE
+  // ==========================================
+  async function processPayments(rows: PaymentRow[], targetDays: any[], isBulk: boolean) {
+    if (isProcessing) return;
+
+    let totalAppliedRiel = 0;
+    let liabilityUsedRiel = 0;
+    let liabilityUsedUsd = 0;
+    let cashToLogUsd = 0;
+    let cashToLogRiel = 0;
+    let methodStrings: string[] = [];
+
+    const totalDue = targetDays.reduce((sum, d) => sum + (d.totalCogs - d.totalPaid), 0);
+
+    for (const r of rows) {
+       const amt = Number(r.amount);
+       if (amt <= 0) continue;
+       methodStrings.push(`${r.method}: ${amt}`);
+
+       if (r.method === 'Mom Liability ៛') {
+         liabilityUsedRiel += amt;
+         totalAppliedRiel += amt;
+       } else if (r.method === 'Mom Liability $') {
+         liabilityUsedUsd += amt;
+         totalAppliedRiel += (amt * EXCHANGE_RATE);
+       } else if (r.method.includes('$')) {
+         cashToLogUsd += amt;
+         totalAppliedRiel += (amt * EXCHANGE_RATE);
+       } else {
+         cashToLogRiel += amt;
+         totalAppliedRiel += amt;
+       }
+    }
+
+    if (totalAppliedRiel <= 0) return;
+    if (totalAppliedRiel > totalDue + 0.1) return alert("Cannot pay more than the total COGS balance.");
+    if (liabilityUsedRiel > persOweRiel || liabilityUsedUsd > persOweUsd) return alert("Not enough Mom Liability available!");
+
+    setIsProcessing(true);
+
+    try {
+      // 1. Update Liability (if used)
+      if (liabilityUsedRiel > 0 || liabilityUsedUsd > 0) {
+        await updateSetting('personal_owe_riel', persOweRiel - liabilityUsedRiel);
+        await updateSetting('personal_owe_usd', persOweUsd - liabilityUsedUsd);
+      }
+
+      // 2. Log Cash Income (Negative Expense adds to Dashboard Cash)
+      if (cashToLogRiel > 0 || cashToLogUsd > 0) {
+        await supabase.from('expenses').insert([{
+           expense_date: new Date().toISOString().split('T')[0],
+           spender: 'Both',
+           payment_method: methodStrings.join(', '),
+           remarks: isBulk ? `Bulk COGS Settlement` : `Inline COGS Settlement`,
+           amount: cashToLogUsd > 0 ? -Math.abs(cashToLogUsd) : 0,
+           amount_riel: cashToLogRiel > 0 ? -Math.abs(cashToLogRiel) : 0,
+           description: 'BUSINESS'
+        }]);
+      }
+
+      // 3. Distribute across Target Days (Oldest to Newest)
+      let remainingToDistribute = totalAppliedRiel;
+      const settlesToInsert = [];
+      const daysToSettle = [...targetDays].sort((a,b) => a.date.localeCompare(b.date));
+
+      for (const day of daysToSettle) {
+         if (remainingToDistribute <= 0) break;
+         const owed = day.totalCogs - day.totalPaid;
+         const apply = Math.min(owed, remainingToDistribute);
+
+         settlesToInsert.push({
+           settlement_date: day.date,
+           owner_name: day.owner,
+           source_type: 'Batch',
+           paid_amount: apply,
+           payment_method: methodStrings.join(', '),
+           status: apply >= owed ? 'Settled' : 'Partial',
+           remarks: isBulk ? `Bulk via COGS Dashboard` : `Inline via COGS Dashboard`
+         });
+
+         remainingToDistribute -= apply;
+      }
+
+      await supabase.from('cogs_settlements').insert(settlesToInsert);
+      
+      // Cleanup UI
+      if (isBulk) {
+        setBulkModalOpen(false);
+        setSelectedDays([]);
+        setBulkPaymentRows([{ id: Date.now(), method: 'Cash ៛', amount: '' }]);
+      } else {
+        setInlinePayments(prev => { const n = {...prev}; delete n[targetDays[0].key]; return n; });
+      }
+
+      fetchReportData(); 
+
+    } catch (err: any) {
+      alert("Error processing: " + err.message);
+    } finally {
+      setIsProcessing(false);
+    }
+  }
+
+
+  // --- BULK MODAL LIVE MATH ---
+  const bulkTotalDue = selectedDays.reduce((sum, k) => sum + (dailyMap[k].totalCogs - dailyMap[k].totalPaid), 0);
+  const liveBulkReceived = bulkPaymentRows.reduce((sum, row) => {
     const amt = Number(row.amount) || 0;
+    if (row.method === 'Mom Liability $') return sum + (amt * EXCHANGE_RATE);
+    if (row.method === 'Mom Liability ៛') return sum + amt;
     if (row.method.includes('$')) return sum + (amt * EXCHANGE_RATE);
     return sum + amt;
   }, 0);
-  const liveRemaining = paymentModal.totalDue - liveTotalReceivedInRiel;
+  const liveBulkRemaining = bulkTotalDue - liveBulkReceived;
+
+  // --- INLINE HISTORY MANAGERS ---
+  const getInlinePaymentState = (key: string, owed: number) => {
+    return inlinePayments[key] || [{ id: 1, method: 'Cash ៛', amount: owed }];
+  }
+  const updateInlineRow = (key: string, rowId: number, field: string, value: any, owed: number) => {
+    setInlinePayments(prev => {
+      const rows = prev[key] ? [...prev[key]] : [{ id: 1, method: 'Cash ៛', amount: owed }];
+      const newRows = rows.map(r => r.id === rowId ? { ...r, [field]: value } : r);
+      return { ...prev, [key]: newRows };
+    });
+  }
+  const addInlineSplit = (key: string, owed: number) => {
+    setInlinePayments(prev => {
+      const rows = prev[key] ? [...prev[key]] : [{ id: 1, method: 'Cash ៛', amount: owed }];
+      return { ...prev, [key]: [...rows, { id: Date.now(), method: 'Cash ៛', amount: '' }] };
+    });
+  }
+  const removeInlineSplit = (key: string, rowId: number, owed: number) => {
+    setInlinePayments(prev => {
+      const rows = prev[key] ? [...prev[key]] : [{ id: 1, method: 'Cash ៛', amount: owed }];
+      return { ...prev, [key]: rows.filter(r => r.id !== rowId) };
+    });
+  }
+
+
+  let combinedGrandTotal = 0;
 
   return (
     <div className="main-wrapper">
@@ -407,39 +502,61 @@ export default function CogsReportPage() {
       </div>
 
       {/* MAIN NAVIGATION TABS */}
-      <div style={{ display: 'flex', gap: '10px', marginBottom: '20px', background: '#fff', padding: '10px', borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: '0 2px 4px rgba(0,0,0,0.02)' }}>
+      <div style={{ display: 'flex', gap: '10px', marginBottom: '20px', background: '#fff', padding: '10px', borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: '0 2px 4px rgba(0,0,0,0.02)', flexWrap: 'wrap' }}>
         <button 
           onClick={() => setActiveMainTab('report')} 
-          style={{ flex: 1, padding: '12px', borderRadius: '8px', border: 'none', fontWeight: '500', cursor: 'pointer', background: activeMainTab === 'report' ? '#b58a3d' : 'transparent', color: activeMainTab === 'report' ? '#fff' : '#64748b', transition: 'all 0.2s', fontSize: '15px' }}
+          style={{ flex: 1, minWidth: '150px', padding: '12px', borderRadius: '8px', border: 'none', fontWeight: 'bold', cursor: 'pointer', background: activeMainTab === 'report' ? '#b58a3d' : 'transparent', color: activeMainTab === 'report' ? '#fff' : '#64748b', transition: 'all 0.2s', fontSize: '14px' }}
         >
           📊 COGS Report
         </button>
         <button 
-          onClick={() => setActiveMainTab('settlement')} 
-          style={{ flex: 1, padding: '12px', borderRadius: '8px', border: 'none', fontWeight: '500', cursor: 'pointer', background: activeMainTab === 'settlement' ? '#10b981' : 'transparent', color: activeMainTab === 'settlement' ? '#fff' : '#64748b', transition: 'all 0.2s', fontSize: '15px' }}
+          onClick={() => setActiveMainTab('pending')} 
+          style={{ flex: 1, minWidth: '150px', padding: '12px', borderRadius: '8px', border: 'none', fontWeight: 'bold', cursor: 'pointer', background: activeMainTab === 'pending' ? '#ef4444' : 'transparent', color: activeMainTab === 'pending' ? '#fff' : '#64748b', transition: 'all 0.2s', fontSize: '14px' }}
         >
-          💰 COGS Settlements
+          ⏳ Pending Settlements
+        </button>
+        <button 
+          onClick={() => setActiveMainTab('history')} 
+          style={{ flex: 1, minWidth: '150px', padding: '12px', borderRadius: '8px', border: 'none', fontWeight: 'bold', cursor: 'pointer', background: activeMainTab === 'history' ? '#10b981' : 'transparent', color: activeMainTab === 'history' ? '#fff' : '#64748b', transition: 'all 0.2s', fontSize: '14px' }}
+        >
+          📚 Settlement History
         </button>
       </div>
 
       {/* FILTER TOOLBAR */}
       <div style={{ background: '#fff', padding: '16px 20px', borderRadius: '12px', border: '1px solid #e2e8f0', marginBottom: '24px', display: 'flex', gap: '15px', alignItems: 'center', flexWrap: 'wrap', boxShadow: '0 4px 6px rgba(0,0,0,0.02)' }}>
-        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-          <label style={{ fontWeight: 'bold', fontSize: '13px', color: '#64748b' }}>From:</label>
-          <input type="date" value={fromDate} onChange={e => setFromDate(e.target.value)} style={{ padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', outline: 'none', color: '#0f172a', fontSize: '13px' }} />
-        </div>
-        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-          <label style={{ fontWeight: 'bold', fontSize: '13px', color: '#64748b' }}>To:</label>
-          <input type="date" value={toDate} onChange={e => setToDate(e.target.value)} style={{ padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', outline: 'none', color: '#0f172a', fontSize: '13px' }} />
-        </div>
+        
+        {activeMainTab === 'report' ? (
+          <>
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+              <label style={{ fontWeight: 'bold', fontSize: '13px', color: '#64748b' }}>From:</label>
+              <input type="date" value={fromDate} onChange={e => setFromDate(e.target.value)} style={{ padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', outline: 'none', color: '#0f172a', fontSize: '13px' }} />
+            </div>
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+              <label style={{ fontWeight: 'bold', fontSize: '13px', color: '#64748b' }}>To:</label>
+              <input type="date" value={toDate} onChange={e => setToDate(e.target.value)} style={{ padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', outline: 'none', color: '#0f172a', fontSize: '13px' }} />
+            </div>
+          </>
+        ) : (
+          <div style={{ display: 'flex', gap: '4px', background: '#f1f5f9', padding: '4px', borderRadius: '8px' }}>
+            {['today', 'week', 'month', 'all'].map(f => (
+              <button 
+                key={f} onClick={() => setTimeFilter(f as any)} 
+                style={{ padding: '8px 16px', borderRadius: '6px', border: 'none', cursor: 'pointer', fontSize: '13px', fontWeight: 'bold', textTransform: 'capitalize', background: timeFilter === f ? '#0f172a' : 'transparent', color: timeFilter === f ? '#fff' : '#475569' }}
+              >
+                {f === 'week' ? 'This Week' : f === 'month' ? 'This Month' : f === 'all' ? 'All Time' : f}
+              </button>
+            ))}
+          </div>
+        )}
         
         <div style={{ borderLeft: '1px solid #e2e8f0', height: '24px', margin: '0 5px' }} />
         <div style={{ display: 'flex', gap: '5px', background: '#f1f5f9', padding: '4px', borderRadius: '8px' }}>
-          <button onClick={() => setActiveTab('mom')} style={{ padding: '8px 16px', borderRadius: '6px', border: 'none', fontWeight: 'bold', cursor: 'pointer', fontSize: '13px', background: activeTab === 'mom' ? '#10b981' : 'transparent', color: activeTab === 'mom' ? '#fff' : '#64748b', transition: 'all 0.2s' }}>
-            Mom COGS (Retail)
+          <button onClick={() => setActiveOwnerTab('mom')} style={{ padding: '8px 16px', borderRadius: '6px', border: 'none', fontWeight: 'bold', cursor: 'pointer', fontSize: '13px', background: activeOwnerTab === 'mom' ? '#b58a3d' : 'transparent', color: activeOwnerTab === 'mom' ? '#fff' : '#64748b', transition: 'all 0.2s' }}>
+            Mom COGS
           </button>
-          <button onClick={() => setActiveTab('others')} style={{ padding: '8px 16px', borderRadius: '6px', border: 'none', fontWeight: 'bold', cursor: 'pointer', fontSize: '13px', background: activeTab === 'others' ? '#b58a3d' : 'transparent', color: activeTab === 'others' ? '#fff' : '#64748b', transition: 'all 0.2s' }}>
-            Pich / Jing / Both COGS
+          <button onClick={() => setActiveOwnerTab('others')} style={{ padding: '8px 16px', borderRadius: '6px', border: 'none', fontWeight: 'bold', cursor: 'pointer', fontSize: '13px', background: activeOwnerTab === 'others' ? '#b58a3d' : 'transparent', color: activeOwnerTab === 'others' ? '#fff' : '#64748b', transition: 'all 0.2s' }}>
+            Pich / Jing / Both
           </button>
         </div>
       </div>
@@ -459,7 +576,7 @@ export default function CogsReportPage() {
 
             {loading ? (
               <p style={{ textAlign: 'center', color: '#64748b', padding: '40px' }}>Loading records...</p>
-            ) : filteredSales.length === 0 ? (
+            ) : reportSales.length === 0 ? (
               <p style={{ textAlign: 'center', color: '#94a3b8', padding: '40px' }}>No sales records found for this date range.</p>
             ) : (
               <>
@@ -545,61 +662,161 @@ export default function CogsReportPage() {
 
 
       {/* ==================================================================================== */}
-      {/* TAB 2: COGS SETTLEMENTS (Tracking Payments) */}
+      {/* TAB 2: PENDING SETTLEMENTS */}
       {/* ==================================================================================== */}
-      {activeMainTab === 'settlement' && (
-        <div style={{ background: '#fff', borderRadius: '12px', border: '1px solid #e2e8f0', overflow: 'hidden', boxShadow: '0 4px 6px rgba(0,0,0,0.02)' }}>
+      {activeMainTab === 'pending' && (
+        <div style={{ background: '#fff', borderRadius: '12px', border: '1px solid #e2e8f0', overflow: 'hidden', boxShadow: '0 4px 6px rgba(0,0,0,0.02)', paddingBottom: '80px' }}>
           <div style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '14px', minWidth: '800px' }}>
-              <thead style={{ background: '#f8fafc', borderBottom: '1px solid #cbd5e1' }}>
+              <thead style={{ background: '#fef2f2', borderBottom: '1px solid #fecaca' }}>
                 <tr>
-                  <th style={{ padding: '16px', textAlign: 'left', color: '#475569', fontWeight: '500' }}>Date & Owner</th>
-                  <th style={{ padding: '16px', textAlign: 'right', color: '#475569', fontWeight: '500' }}>Total COGS (៛)</th>
-                  <th style={{ padding: '16px', textAlign: 'center', color: '#475569', fontWeight: '500' }}>Payment Method</th>
-                  <th style={{ padding: '16px', textAlign: 'right', color: '#475569', fontWeight: '500' }}>Paid Amount (៛)</th>
-                  <th style={{ padding: '16px', textAlign: 'right', color: '#475569', fontWeight: '500' }}>Remaining (៛)</th>
-                  <th style={{ padding: '16px', textAlign: 'center', color: '#475569', fontWeight: '500' }}>Status</th>
-                  <th style={{ padding: '16px', textAlign: 'center', color: '#475569', fontWeight: '500' }}>Action</th>
+                  <th style={{ padding: '16px', textAlign: 'center', width: '50px' }}>
+                    <input type="checkbox" onChange={handleSelectAll} checked={selectedDays.length > 0 && selectedDays.length === pendingDays.length} style={{ width: '18px', height: '18px', cursor: 'pointer' }} />
+                  </th>
+                  <th style={{ padding: '16px', textAlign: 'left', color: '#991b1b', fontWeight: 'bold', textTransform: 'uppercase', fontSize: '12px' }}>COGS Date</th>
+                  <th style={{ padding: '16px', textAlign: 'left', color: '#991b1b', fontWeight: 'bold', textTransform: 'uppercase', fontSize: '12px' }}>Owner</th>
+                  <th style={{ padding: '16px', textAlign: 'right', color: '#991b1b', fontWeight: 'bold', textTransform: 'uppercase', fontSize: '12px' }}>Total COGS (៛)</th>
+                  <th style={{ padding: '16px', textAlign: 'right', color: '#991b1b', fontWeight: 'bold', textTransform: 'uppercase', fontSize: '12px' }}>Remaining Debt (៛)</th>
                 </tr>
               </thead>
               <tbody>
-                {settlements.length === 0 ? (
-                  <tr><td colSpan={7} style={{ textAlign: 'center', padding: '40px', color: '#94a3b8' }}>No COGS records found.</td></tr>
+                {pendingDays.length === 0 ? (
+                  <tr><td colSpan={5} style={{ textAlign: 'center', padding: '40px', color: '#10b981', fontSize: '15px' }}>🎉 No pending COGS! You are all settled up!</td></tr>
                 ) : (
-                  settlements.map((s: any) => {
-                    const remaining = s.totalCogs - s.totalPaid;
-                    const isDone = remaining <= 0;
+                  pendingDays.map((d: any) => {
+                    const remaining = d.totalCogs - d.totalPaid;
+                    const isSelected = selectedDays.includes(d.key);
                     
                     return (
-                      <tr key={`${s.date}_${s.owner}`} style={{ borderBottom: '1px solid #f1f5f9', background: isDone ? '#f8fafc' : '#ffffff', opacity: isDone ? 0.7 : 1, transition: 'all 0.3s ease' }}>
-                        <td style={{ padding: '16px', color: '#334155' }}>
-                          <div style={{ fontWeight: 'bold', marginBottom: '4px' }}>{new Date(s.date).toLocaleDateString('en-GB')}</div>
-                          <div style={{ fontSize: '13px', color: '#64748b' }}>Owner: <span style={{color: '#0f172a'}}>{s.owner}</span></div>
+                      <tr key={d.key} onClick={() => handleSelectDay(d.key)} style={{ borderBottom: '1px solid #f1f5f9', background: isSelected ? '#fff1f2' : '#ffffff', cursor: 'pointer', transition: 'all 0.2s ease' }}>
+                        <td style={{ padding: '16px', textAlign: 'center' }}>
+                          <input type="checkbox" checked={isSelected} readOnly style={{ width: '18px', height: '18px', cursor: 'pointer' }} />
                         </td>
-                        <td style={{ padding: '16px', textAlign: 'right', color: '#475569', fontWeight: 'bold' }}>{formatRiel(s.totalCogs)}</td>
-                        <td style={{ padding: '16px', textAlign: 'center', color: '#475569', fontWeight: 'bold' }}>
-                          {Array.from(s.methods).join(', ') || '-'}
+                        <td style={{ padding: '16px', color: '#334155', fontWeight: 'bold' }}>
+                          {new Date(d.date).toLocaleDateString('en-GB')}
                         </td>
-                        <td style={{ padding: '16px', textAlign: 'right', color: '#10b981', fontWeight: 'bold' }}>{formatRiel(s.totalPaid)}</td>
-                        <td style={{ padding: '16px', textAlign: 'right', color: '#ef4444', fontWeight: 'bold', fontSize: '15px' }}>
+                        <td style={{ padding: '16px', color: '#475569', fontWeight: 'normal' }}>{d.owner}</td>
+                        <td style={{ padding: '16px', textAlign: 'right', color: '#475569', fontWeight: 'normal' }}>{formatRiel(d.totalCogs)}</td>
+                        <td style={{ padding: '16px', textAlign: 'right', color: '#ef4444', fontWeight: 'bold', fontSize: '16px' }}>{formatRiel(remaining)}</td>
+                      </tr>
+                    )
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          {/* FLOATING ACTION BAR FOR BULK SETTLE */}
+          {selectedDays.length > 0 && (
+            <div style={{ position: 'fixed', bottom: '30px', left: '50%', transform: 'translateX(-50%)', background: '#1e293b', padding: '16px 32px', borderRadius: '50px', boxShadow: '0 10px 25px rgba(0,0,0,0.3)', display: 'flex', gap: '24px', alignItems: 'center', zIndex: 100 }}>
+              <div style={{ color: '#fff', fontSize: '15px' }}>
+                <span style={{ color: '#94a3b8' }}>Selected: </span> <b>{selectedDays.length} Days</b>
+              </div>
+              <div style={{ color: '#fff', fontSize: '15px' }}>
+                <span style={{ color: '#94a3b8' }}>Total COGS Due: </span> 
+                <b style={{ color: '#f87171', fontSize: '18px' }}>
+                  {formatRiel(selectedDays.reduce((sum, k) => sum + (dailyMap[k].totalCogs - dailyMap[k].totalPaid), 0))}
+                </b>
+              </div>
+              <button 
+                onClick={() => setBulkModalOpen(true)}
+                style={{ background: '#10b981', color: '#fff', border: 'none', padding: '12px 24px', borderRadius: '30px', fontWeight: 'bold', cursor: 'pointer', fontSize: '15px', boxShadow: '0 4px 10px rgba(16,185,129,0.3)' }}
+              >
+                Settle Selected
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ==================================================================================== */}
+      {/* TAB 3: SETTLEMENT HISTORY (Inline Settling) */}
+      {/* ==================================================================================== */}
+      {activeMainTab === 'history' && (
+        <div style={{ background: '#fff', borderRadius: '12px', border: '1px solid #e2e8f0', overflow: 'hidden', boxShadow: '0 4px 6px rgba(0,0,0,0.02)' }}>
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '14px', minWidth: '1050px' }}>
+              <thead style={{ background: '#f8fafc', borderBottom: '1px solid #cbd5e1' }}>
+                <tr>
+                  <th style={{ padding: '16px 20px', textAlign: 'left', color: '#64748b', fontWeight: 'bold', textTransform: 'uppercase', fontSize: '12px' }}>COGS Date & Owner</th>
+                  <th style={{ padding: '16px 20px', textAlign: 'right', color: '#64748b', fontWeight: 'bold', textTransform: 'uppercase', fontSize: '12px' }}>Total COGS (៛)</th>
+                  <th style={{ padding: '16px 20px', textAlign: 'center', color: '#64748b', fontWeight: 'bold', textTransform: 'uppercase', fontSize: '12px' }}>Methods Applied</th>
+                  <th style={{ padding: '16px 20px', textAlign: 'right', color: '#64748b', fontWeight: 'bold', textTransform: 'uppercase', fontSize: '12px' }}>Paid Amount (៛)</th>
+                  <th style={{ padding: '16px 20px', textAlign: 'right', color: '#64748b', fontWeight: 'bold', textTransform: 'uppercase', fontSize: '12px' }}>Remaining Debt (៛)</th>
+                  <th style={{ padding: '16px 20px', textAlign: 'center', color: '#64748b', fontWeight: 'bold', textTransform: 'uppercase', fontSize: '12px', width: '200px' }}>Settle Remaining</th>
+                  <th style={{ padding: '16px 20px', textAlign: 'center', color: '#64748b', fontWeight: 'bold', textTransform: 'uppercase', fontSize: '12px', width: '120px' }}>Complete</th>
+                </tr>
+              </thead>
+              <tbody>
+                {historyDays.length === 0 ? (
+                  <tr><td colSpan={7} style={{ textAlign: 'center', padding: '40px', color: '#94a3b8' }}>No settled records found.</td></tr>
+                ) : (
+                  historyDays.map((d: any) => {
+                    const remaining = d.totalCogs - d.totalPaid;
+                    const isDone = remaining <= 0;
+                    const paymentState = getInlinePaymentState(d.key, remaining);
+                    
+                    return (
+                      <tr key={d.key} style={{ borderBottom: '1px solid #f1f5f9', background: isDone ? '#f8fafc' : '#ffffff', opacity: isDone ? 0.7 : 1, transition: 'all 0.3s ease' }}>
+                        <td style={{ padding: '16px 20px', color: '#334155', verticalAlign: 'top' }}>
+                          <div style={{ fontWeight: 'bold', marginBottom: '4px' }}>{new Date(d.date).toLocaleDateString('en-GB')}</div>
+                          <div style={{ fontSize: '12px', color: '#64748b' }}>Owner: <span style={{color: '#0f172a'}}>{d.owner}</span></div>
+                        </td>
+                        <td style={{ padding: '16px 20px', textAlign: 'right', color: '#475569', fontWeight: 'normal', verticalAlign: 'top' }}>{formatRiel(d.totalCogs)}</td>
+                        <td style={{ padding: '16px 20px', textAlign: 'center', color: '#3b82f6', fontWeight: 'bold', verticalAlign: 'top', fontSize: '12px' }}>
+                          {Array.from(d.methods).join(', ') || '-'}
+                        </td>
+                        <td style={{ padding: '16px 20px', textAlign: 'right', color: '#10b981', fontWeight: 'bold', verticalAlign: 'top' }}>{formatRiel(d.totalPaid)}</td>
+                        
+                        <td style={{ padding: '16px 20px', textAlign: 'right', color: '#ef4444', fontWeight: 'bold', fontSize: '15px', verticalAlign: 'top' }}>
                           {remaining > 0 ? formatRiel(remaining) : ''}
                         </td>
-                        
-                        <td style={{ padding: '16px', textAlign: 'center' }}>
-                          {isDone ? (
-                            <span style={{ padding: '6px 12px', background: '#dcfce7', color: '#166534', borderRadius: '20px', fontSize: '12px', fontWeight: 'bold' }}>✅ Paid</span>
+
+                        <td style={{ padding: '16px 20px', textAlign: 'right', verticalAlign: 'top' }}>
+                          {remaining > 0 ? (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                              {paymentState.map(row => (
+                                <div key={row.id} style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                                  <div style={{ display: 'flex', gap: '4px' }}>
+                                    <select 
+                                      value={row.method}
+                                      onChange={(e) => updateInlineRow(d.key, row.id, 'method', e.target.value, remaining)}
+                                      style={{ padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px', outline: 'none', background: '#fff', color: '#475569', cursor: 'pointer', flex: 1 }}
+                                    >
+                                      <option value="Cash ៛">💵 Cash ៛</option>
+                                      <option value="Cash $">💵 Cash $</option>
+                                      <option value="QR ៛">📱 QR ៛</option>
+                                      <option value="QR $">📱 QR $</option>
+                                      {activeOwnerTab === 'mom' && <option value="Mom Liability ៛">📉 Mom Liability ៛</option>}
+                                      {activeOwnerTab === 'mom' && <option value="Mom Liability $">📉 Mom Liability $</option>}
+                                    </select>
+                                    {paymentState.length > 1 && (
+                                      <button onClick={() => removeInlineSplit(d.key, row.id, remaining)} style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', fontSize: '16px' }}>✕</button>
+                                    )}
+                                  </div>
+                                  <CurrencyInput
+                                    placeholder={formatRiel(remaining)}
+                                    value={row.amount}
+                                    onChange={(v: any) => updateInlineRow(d.key, row.id, 'amount', v, remaining)}
+                                    onEnter={() => handleProcessCreditPayment(d, paymentState)}
+                                    style={{ padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '14px', textAlign: 'right', outline: 'none', width: '100%', background: '#fff', color: '#000000', boxSizing: 'border-box' }}
+                                  />
+                                </div>
+                              ))}
+                              <button onClick={() => addInlineSplit(d.key, remaining)} style={{ background: 'none', border: 'none', color: '#3b82f6', fontSize: '12px', cursor: 'pointer', textAlign: 'right', fontWeight: 'bold' }}>+ Add Split</button>
+                            </div>
                           ) : (
-                            <span style={{ padding: '6px 12px', background: '#fef2f2', color: '#dc2626', borderRadius: '20px', fontSize: '12px', fontWeight: 'bold' }}>⏳ Pending</span>
+                            <div style={{ color: '#10b981', fontSize: '13px', fontWeight: 'bold', textAlign: 'center' }}>Fully Settled</div>
                           )}
                         </td>
 
-                        <td style={{ padding: '16px', textAlign: 'center' }}>
+                        <td style={{ padding: '16px 20px', textAlign: 'center', verticalAlign: 'top' }}>
                           {!isDone && (
                             <button 
-                              onClick={() => handleOpenPayment(s)}
-                              style={{ padding: '8px 16px', background: '#10b981', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontSize: '13px', fontWeight: 'bold' }}
+                              onClick={() => handleProcessCreditPayment(d, paymentState)}
+                              style={{ padding: '8px 12px', width: '100%', borderRadius: '6px', border: 'none', cursor: 'pointer', fontSize: '13px', background: '#10b981', color: '#ffffff', transition: 'all 0.2s', fontWeight: 'bold' }}
                             >
-                              💸 Settle COGS
+                              ✔ Done
                             </button>
                           )}
                         </td>
@@ -615,51 +832,49 @@ export default function CogsReportPage() {
 
 
       {/* ==============================================================================================
-          UNIFIED SPLIT PAYMENT MODAL FOR COGS
+          UNIFIED BULK SETTLEMENT MODAL (With Liability Feature)
           ============================================================================================== */}
-      {paymentModal.isOpen && (
-        <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 10000, display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '20px', boxSizing: 'border-box' }} onMouseDown={() => setPaymentModal({ ...paymentModal, isOpen: false })}>
+      {bulkModalOpen && (
+        <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 10000, display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '20px', boxSizing: 'border-box' }} onMouseDown={() => setBulkModalOpen(false)}>
           <div style={{ backgroundColor: '#ffffff', width: '100%', maxWidth: '450px', borderRadius: '16px', padding: '24px', boxShadow: '0 10px 25px rgba(0,0,0,0.15)', maxHeight: '90vh', overflowY: 'auto' }} onMouseDown={e => e.stopPropagation()}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', borderBottom: '1px solid #f1f5f9', paddingBottom: '12px' }}>
-              <h3 style={{ margin: 0, color: '#334155', fontSize: '18px', fontWeight: '500' }}>💸 Settle COGS</h3>
-              <button onClick={() => setPaymentModal({ ...paymentModal, isOpen: false })} style={{ background: 'none', border: 'none', fontSize: '18px', color: '#94a3b8', cursor: 'pointer' }}>✕</button>
-            </div>
-            
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '16px', fontSize: '14px', color: '#475569' }}>
-              <span>Owner: <b>{paymentModal.owner}</b></span>
-              <span>Date: <b>{new Date(paymentModal.date).toLocaleDateString('en-GB')}</b></span>
+              <h3 style={{ margin: 0, color: '#334155', fontSize: '18px', fontWeight: 'bold' }}>💸 Bulk Settle COGS</h3>
+              <button onClick={() => setBulkModalOpen(false)} style={{ background: 'none', border: 'none', fontSize: '18px', color: '#94a3b8', cursor: 'pointer' }}>✕</button>
             </div>
 
-            <div style={{ background: '#f8fafc', padding: '16px', borderRadius: '8px', marginBottom: '24px', border: '1px solid #e2e8f0', textAlign: 'center' }}>
-              <div style={{ fontSize: '12px', color: '#64748b', textTransform: 'uppercase', marginBottom: '4px' }}>Remaining COGS Due</div>
-              <div style={{ fontSize: '28px', color: '#dc2626' }}>{formatRiel(paymentModal.totalDue)}</div>
-              <div style={{ fontSize: '13px', color: '#94a3b8', marginTop: '4px' }}>{formatUSD(paymentModal.totalDue / EXCHANGE_RATE)}</div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '16px', fontSize: '14px', color: '#475569' }}>
+              <span>Settling: <b>{selectedDays.length} Days</b></span>
+            </div>
+
+            <div style={{ background: '#fff1f2', padding: '16px', borderRadius: '8px', marginBottom: '24px', border: '1px solid #fecaca', textAlign: 'center' }}>
+              <div style={{ fontSize: '12px', color: '#be123c', textTransform: 'uppercase', marginBottom: '4px', fontWeight: 'bold' }}>Total COGS Due</div>
+              <div style={{ fontSize: '28px', color: '#e11d48', fontWeight: 'bold' }}>{formatRiel(bulkTotalDue)}</div>
             </div>
 
             {/* Split Payment Rows */}
             <div style={{ marginBottom: '24px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
                 <label style={{ fontSize: '13px', color: '#475569', fontWeight: 'bold' }}>Payment Method(s)</label>
-                <button onClick={() => setPaymentRows([...paymentRows, { id: Date.now(), method: 'Cash ៛', amount: '' }])} style={{ background: '#e0f2fe', color: '#0284c7', border: 'none', borderRadius: '4px', fontSize: '12px', padding: '6px 10px', cursor: 'pointer', fontWeight: 'bold' }}>+ Split</button>
+                <button onClick={() => setBulkPaymentRows([...bulkPaymentRows, { id: Date.now(), method: 'Cash ៛', amount: '' }])} style={{ background: '#e0f2fe', color: '#0284c7', border: 'none', borderRadius: '4px', fontSize: '12px', padding: '6px 10px', cursor: 'pointer', fontWeight: 'bold' }}>+ Split</button>
               </div>
 
-              {paymentRows.map((row, index) => (
+              {bulkPaymentRows.map((row, index) => (
                 <div key={row.id} style={{ display: 'flex', gap: '8px', marginBottom: '12px', alignItems: 'center' }}>
                   <select 
                     value={row.method} 
                     onChange={e => {
-                      const newRows = [...paymentRows];
+                      const newRows = [...bulkPaymentRows];
                       newRows[index].method = e.target.value;
-                      setPaymentRows(newRows);
+                      setBulkPaymentRows(newRows);
                     }}
-                    style={{ width: '45%', padding: '12px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '16px', outline: 'none', backgroundColor: '#fff', cursor: 'pointer', color: '#334155' }}
+                    style={{ width: '50%', padding: '12px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '14px', outline: 'none', backgroundColor: '#fff', cursor: 'pointer', color: '#334155' }}
                   >
                     <option value="Cash ៛">💵 Cash ៛</option>
                     <option value="Cash $">💵 Cash $</option>
                     <option value="QR ៛">📱 QR ៛</option>
                     <option value="QR $">📱 QR $</option>
-                    <option value="Mom QR ៛">👩 Mom QR ៛</option>
-                    <option value="Mom QR $">👩 Mom QR $</option>
+                    {activeOwnerTab === 'mom' && <option value="Mom Liability ៛">📉 Mom Liability ៛</option>}
+                    {activeOwnerTab === 'mom' && <option value="Mom Liability $">📉 Mom Liability $</option>}
                   </select>
                   
                   <div style={{ flex: 1 }}>
@@ -667,37 +882,45 @@ export default function CogsReportPage() {
                       placeholder="" 
                       value={row.amount} 
                       onChange={(val: any) => {
-                        const newRows = [...paymentRows];
+                        const newRows = [...bulkPaymentRows];
                         newRows[index].amount = val;
-                        setPaymentRows(newRows);
+                        setBulkPaymentRows(newRows);
                       }}
                       style={{ width: '100%', padding: '12px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', outline: 'none', textAlign: 'right' }}
                     />
                   </div>
                   
-                  {paymentRows.length > 1 && (
-                    <button onClick={() => setPaymentRows(paymentRows.filter(r => r.id !== row.id))} style={{ background: 'none', border: 'none', color: '#ef4444', fontSize: '18px', cursor: 'pointer', padding: '0 4px' }}>✕</button>
+                  {bulkPaymentRows.length > 1 && (
+                    <button onClick={() => setBulkPaymentRows(bulkPaymentRows.filter(r => r.id !== row.id))} style={{ background: 'none', border: 'none', color: '#ef4444', fontSize: '18px', cursor: 'pointer', padding: '0 4px' }}>✕</button>
                   )}
                 </div>
               ))}
+
+              {activeOwnerTab === 'mom' && (
+                <div style={{ fontSize: '12px', color: '#64748b', marginTop: '12px', padding: '8px', background: '#f8fafc', borderRadius: '6px', border: '1px dashed #cbd5e1' }}>
+                  <b>💡 Tip:</b> Select <i>"Mom Liability ៛"</i> to pay this COGS using the money you collected from Mom's deliveries. 
+                  <br/><br/>
+                  <b>Available Liability:</b> <span style={{color: '#b58a3d', fontWeight: 'bold'}}>{formatRiel(persOweRiel)}</span> / <span style={{color: '#b58a3d', fontWeight: 'bold'}}>{formatUSD(persOweUsd)}</span>
+                </div>
+              )}
             </div>
 
             {/* Live Calculation Footer */}
-            {paymentRows.some(r => Number(r.amount) > 0) && (
+            {bulkPaymentRows.some(r => Number(r.amount) > 0) && (
               <div style={{ marginBottom: '24px', paddingTop: '16px', borderTop: '1px dashed #cbd5e1', fontSize: '14px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
                   <span style={{ color: '#64748b' }}>Total Processed:</span>
-                  <span style={{ color: '#334155', fontWeight: 'bold' }}>{formatRiel(liveTotalReceivedInRiel)}</span>
+                  <span style={{ color: '#334155', fontWeight: 'bold' }}>{formatRiel(liveBulkReceived)}</span>
                 </div>
-                {liveRemaining < 0 ? (
+                {liveBulkRemaining < 0 ? (
                   <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                     <span style={{ color: '#ef4444' }}>Overpaid By:</span>
-                    <span style={{ color: '#dc2626', fontWeight: 'bold' }}>{formatRiel(Math.abs(liveRemaining))}</span>
+                    <span style={{ color: '#dc2626', fontWeight: 'bold' }}>{formatRiel(Math.abs(liveBulkRemaining))}</span>
                   </div>
-                ) : liveRemaining > 0 ? (
+                ) : liveBulkRemaining > 0 ? (
                   <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                     <span style={{ color: '#d97706' }}>Still Owes:</span>
-                    <span style={{ color: '#b45309', fontWeight: 'bold' }}>{formatRiel(liveRemaining)}</span>
+                    <span style={{ color: '#b45309', fontWeight: 'bold' }}>{formatRiel(liveBulkRemaining)}</span>
                   </div>
                 ) : (
                   <div style={{ display: 'flex', justifyContent: 'space-between' }}>
@@ -709,15 +932,26 @@ export default function CogsReportPage() {
             )}
 
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
-              <button onClick={() => setPaymentModal({ ...paymentModal, isOpen: false })} style={{ padding: '12px 16px', backgroundColor: '#f1f5f9', border: 'none', borderRadius: '6px', cursor: 'pointer', color: '#475569', fontSize: '15px', fontWeight: 'bold' }}>Cancel</button>
-              <button onClick={handleProcessPayment} disabled={isProcessing} style={{ padding: '12px 16px', backgroundColor: '#10b981', border: 'none', borderRadius: '6px', cursor: 'pointer', color: '#fff', fontSize: '15px', fontWeight: 'bold' }}>
-                {isProcessing ? 'Processing...' : 'Confirm Settle'}
+              <button onClick={() => setBulkModalOpen(false)} style={{ padding: '12px 16px', backgroundColor: '#f1f5f9', border: 'none', borderRadius: '6px', cursor: 'pointer', color: '#475569', fontSize: '15px', fontWeight: 'bold' }}>Cancel</button>
+              <button onClick={() => processPayments(bulkPaymentRows, selectedDays.map(k => dailyMap[k]), true)} disabled={isProcessing} style={{ padding: '12px 16px', backgroundColor: '#10b981', border: 'none', borderRadius: '6px', cursor: 'pointer', color: '#fff', fontSize: '15px', fontWeight: 'bold' }}>
+                {isProcessing ? 'Processing...' : 'Confirm Bulk Settle'}
               </button>
             </div>
           </div>
         </div>
       )}
 
+      {/* --- REUSED INLINE PAYMENT FUNCTION --- */}
+      <script dangerouslySetInnerHTML={{__html: `
+        // The inline function wraps the same processPayments engine but feeds it 1 day
+      `}} />
+      {(() => {
+        // Defining wrapper inside render to access state easily, but it's bound to buttons above.
+        async function handleProcessCreditPayment(day: any, paymentRows: PaymentRow[]) {
+          await processPayments(paymentRows, [day], false);
+        }
+        return null;
+      })()}
 
       <style jsx global>{`
         .main-wrapper { 

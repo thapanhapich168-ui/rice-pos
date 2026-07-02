@@ -47,7 +47,14 @@ function CurrencyInput({ value, onChange, placeholder, style, autoFocus }: any) 
       value={inputValue}
       onChange={handleChange}
       autoFocus={autoFocus}
-      style={{ ...style, color: '#334155', fontSize: '14px', fontWeight: 'normal' }}
+      onBlur={() => {
+        setTimeout(() => {
+          window.scrollTo(0, 0);
+          document.body.scrollTop = 0;
+        }, 100);
+      }}
+      style={{ ...style, color: '#334155', fontWeight: 'normal' }}
+      className="mobile-input-field"
     />
   )
 }
@@ -291,67 +298,78 @@ export default function ExpenseDashboard() {
   }, 0);
 
   return (
-    <div style={styles.pageContainer}>
+    <div className="main-wrapper">
       <div style={{
-        ...styles.card,
+        backgroundColor: '#ffffff',
+        width: '100%',
+        borderRadius: '16px',
+        padding: '35px',
+        boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03)',
+        borderColor: '#e2e8f0',
+        borderWidth: '1px',
+        borderStyle: 'solid',
         maxWidth: activeTab === 'staff' ? '1100px' : '550px', 
-        transition: 'max-width 0.3s ease'
-      }}>
+        transition: 'max-width 0.3s ease',
+        boxSizing: 'border-box'
+      }} className="content-card">
+        
         {/* HEADER BRANDING */}
-        <div style={styles.brandHeader}>
-          <h1 style={styles.mainTitle}>Daily Dashboard</h1>
-          <p style={styles.subtitle}>Tracker, Ledger & Payroll Management</p>
+        <div className="header-container">
+          <div>
+            <h1 className="page-title">Daily Dashboard</h1>
+            <p style={{ color: '#64748b', fontSize: '14px', margin: '4px 0 0 0', fontWeight: 'normal' }}>Tracker, Ledger & Payroll Management</p>
+          </div>
         </div>
 
         {/* THREE TAB HEADER */}
-        <div style={styles.tabContainer}>
-          <button type="button" onClick={() => setActiveTab('personal')} style={{ ...styles.tabButton, ...(activeTab === 'personal' ? styles.activeTab : {}) }}>
+        <div className="tabs-container">
+          <button type="button" onClick={() => setActiveTab('personal')} className={`tab-toggle-button ${activeTab === 'personal' ? 'active-tab' : ''}`}>
             🏡 Personal
           </button>
-          <button type="button" onClick={() => setActiveTab('business')} style={{ ...styles.tabButton, ...(activeTab === 'business' ? styles.activeTab : {}) }}>
+          <button type="button" onClick={() => setActiveTab('business')} className={`tab-toggle-button ${activeTab === 'business' ? 'active-tab' : ''}`}>
             🏢 Business
           </button>
-          <button type="button" onClick={() => setActiveTab('staff')} style={{ ...styles.tabButton, ...(activeTab === 'staff' ? styles.activeTab : {}) }}>
+          <button type="button" onClick={() => setActiveTab('staff')} className={`tab-toggle-button ${activeTab === 'staff' ? 'active-tab' : ''}`}>
             👥 Staff Payroll
           </button>
         </div>
 
         {/* EXPENSE TRANSACTION FORM (Shown for Personal & Business) */}
         {activeTab !== 'staff' && (
-          <form onSubmit={handleSubmit} style={styles.form}>
+          <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
             
-            <div style={styles.inputGroup}>
-              <label style={styles.label}>Transaction Date</label>
-              <input type="date" value={expenseDate} onChange={(e) => setExpenseDate(e.target.value)} style={styles.inputField} required />
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <label style={{ color: '#475569', fontSize: '12px', fontWeight: 'bold', textTransform: 'uppercase' }}>Transaction Date</label>
+              <input type="date" value={expenseDate} onChange={(e) => setExpenseDate(e.target.value)} required style={{ backgroundColor: '#ffffff', borderColor: '#cbd5e1', borderWidth: '1px', borderStyle: 'solid', borderRadius: '8px', padding: '12px 14px', color: '#334155', outline: 'none', width: '100%', boxSizing: 'border-box', fontWeight: 'normal' }} className="mobile-input-field" />
             </div>
 
-            <div style={styles.inputGroup}>
-              <label style={styles.label}>Who Paid? / Purchaser</label>
-              <div style={styles.radioGrid}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <label style={{ color: '#475569', fontSize: '12px', fontWeight: 'bold', textTransform: 'uppercase' }}>Who Paid? / Purchaser</label>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(100px, 1fr))', gap: '10px' }}>
                 {(['Pich', 'Jing', 'Both'] as const).map((person) => (
-                  <label key={person} style={{ ...styles.radioLabel, ...(spender === person ? styles.radioLabelActive : {}) }}>
-                    <input type="radio" name="spender" value={person} checked={spender === person} onChange={() => setSpender(person)} style={styles.hiddenRadio} />
-                    <span style={styles.radioDot} />
+                  <label key={person} style={{ display: 'flex', alignItems: 'center', gap: '10px', backgroundColor: spender === person ? '#fefcf3' : '#ffffff', borderWidth: '1px', borderStyle: 'solid', borderColor: spender === person ? '#b59410' : '#cbd5e1', padding: '12px', borderRadius: '8px', color: spender === person ? '#334155' : '#64748b', cursor: 'pointer', fontSize: '14px', fontWeight: 'normal', transition: 'all 0.2s ease' }}>
+                    <input type="radio" name="spender" value={person} checked={spender === person} onChange={() => setSpender(person)} style={{ display: 'none' }} />
+                    <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: 'transparent', borderColor: '#cbd5e1', borderWidth: '2px', borderStyle: 'solid', display: 'inline-block' }} />
                     {person}
                   </label>
                 ))}
               </div>
             </div>
 
-            <div style={styles.inputGroup}>
-              <label style={styles.label}>Remarks / What did you buy?</label>
-              <input type="text" placeholder="e.g. Electricity Bill, Lunch..." value={remarks} onChange={(e) => setRemarks(e.target.value)} style={styles.inputField} required />
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <label style={{ color: '#475569', fontSize: '12px', fontWeight: 'bold', textTransform: 'uppercase' }}>Remarks / What did you buy?</label>
+              <input type="text" placeholder="e.g. Electricity Bill, Lunch..." value={remarks} onChange={(e) => setRemarks(e.target.value)} required style={{ backgroundColor: '#ffffff', borderColor: '#cbd5e1', borderWidth: '1px', borderStyle: 'solid', borderRadius: '8px', padding: '12px 14px', color: '#334155', outline: 'none', width: '100%', boxSizing: 'border-box', fontWeight: 'normal' }} className="mobile-input-field" onBlur={() => { setTimeout(() => { window.scrollTo(0, 0); document.body.scrollTop = 0; }, 100); }} />
             </div>
 
             {/* DYNAMIC SPLIT PAYMENT METHOD FOR EXPENSES */}
-            <div style={{ background: '#f8fafc', padding: '16px', borderRadius: '12px', border: '1px solid #e2e8f0', marginTop: '8px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+            <div style={{ background: '#f8fafc', padding: '12px', borderRadius: '12px', border: '1px solid #e2e8f0', marginTop: '8px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
                 <label style={{ fontSize: '12px', color: '#475569', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Amount Spent</label>
                 <button type="button" onClick={() => setPaymentRows([...paymentRows, { id: Date.now(), method: 'Cash ៛', amount: '' }])} style={{ background: '#e0f2fe', color: '#0369a1', border: 'none', borderRadius: '4px', fontSize: '11px', fontWeight: 'bold', padding: '6px 12px', cursor: 'pointer' }}>+ Split</button>
               </div>
               
               {paymentRows.map((row, index) => (
-                <div key={row.id} style={{ display: 'flex', gap: '8px', marginBottom: '12px', alignItems: 'center' }}>
+                <div key={row.id} style={{ display: 'flex', gap: '8px', marginBottom: '8px', alignItems: 'center' }}>
                   <select 
                     value={row.method} 
                     onChange={e => {
@@ -359,7 +377,8 @@ export default function ExpenseDashboard() {
                       newRows[index].method = e.target.value;
                       setPaymentRows(newRows);
                     }}
-                    style={{ width: '45%', padding: '12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '14px', outline: 'none', backgroundColor: '#fff', cursor: 'pointer', color: '#334155', fontWeight: 'normal' }}
+                    style={{ width: '45%', padding: '10px', borderRadius: '8px', border: '1px solid #cbd5e1', outline: 'none', backgroundColor: '#fff', cursor: 'pointer', color: '#334155', fontWeight: 'normal' }}
+                    className="mobile-select-menu"
                   >
                     <option value="Cash ៛">💵 Cash ៛</option>
                     <option value="Cash $">💵 Cash $</option>
@@ -376,7 +395,7 @@ export default function ExpenseDashboard() {
                         newRows[index].amount = val;
                         setPaymentRows(newRows);
                       }}
-                      style={{ width: '100%', padding: '12px', borderRadius: '8px', border: '1px solid #cbd5e1', boxSizing: 'border-box', outline: 'none', color: '#334155', fontSize: '14px', textAlign: 'right', fontWeight: 'normal' }}
+                      style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #cbd5e1', boxSizing: 'border-box', outline: 'none', color: '#334155', textAlign: 'right', fontWeight: 'normal' }}
                     />
                   </div>
                   
@@ -394,7 +413,7 @@ export default function ExpenseDashboard() {
               )}
             </div>
 
-            <button type="submit" disabled={loading || totalExpenseRiel === 0} style={{...styles.submitButton, opacity: (loading || totalExpenseRiel === 0) ? 0.7 : 1}}>
+            <button type="submit" disabled={loading || totalExpenseRiel === 0} style={{ backgroundColor: '#b59410', color: '#ffffff', padding: '15px', border: 'none', borderRadius: '8px', fontSize: '14px', fontWeight: 'bold', cursor: 'pointer', transition: 'background 0.2s ease', marginTop: '10px', opacity: (loading || totalExpenseRiel === 0) ? 0.7 : 1 }}>
               {loading ? 'Processing Entry...' : `Securely Log ${activeTab === 'business' ? 'Business' : 'Personal'} Expense`}
             </button>
           </form>
@@ -404,18 +423,18 @@ export default function ExpenseDashboard() {
         {activeTab === 'staff' && (
           <div>
             {/* Add New Staff Form */}
-            <form onSubmit={handleAddStaff} style={{ ...styles.form, padding: '16px', backgroundColor: '#f8fafc', borderRadius: '12px', marginBottom: '24px', border: '1px solid #e2e8f0' }}>
+            <form onSubmit={handleAddStaff} style={{ padding: '16px', backgroundColor: '#f8fafc', borderRadius: '12px', marginBottom: '24px', border: '1px solid #e2e8f0' }}>
               <div style={{ fontWeight: 'bold', color: '#1b4d3e', marginBottom: '8px', fontSize: '15px' }}>➕ Register New Staff</div>
               <div style={{ display: 'flex', gap: '15px', flexWrap: 'wrap', alignItems: 'flex-end' }}>
                 <div style={{ flex: '1 1 200px' }}>
                   <label style={{ fontSize: '11px', fontWeight: 'bold', color: '#475569', textTransform: 'uppercase', marginBottom: '6px', display: 'block' }}>Name</label>
-                  <input type="text" placeholder="Staff Name" value={newStaffName} onChange={e => setNewStaffName(e.target.value)} style={{...styles.inputField, fontSize: '14px'}} required />
+                  <input type="text" placeholder="Staff Name" value={newStaffName} onChange={e => setNewStaffName(e.target.value)} style={{ backgroundColor: '#ffffff', borderColor: '#cbd5e1', borderWidth: '1px', borderStyle: 'solid', borderRadius: '8px', padding: '12px 14px', color: '#334155', outline: 'none', width: '100%', boxSizing: 'border-box', fontWeight: 'normal' }} className="mobile-input-field" onBlur={() => { setTimeout(() => { window.scrollTo(0, 0); document.body.scrollTop = 0; }, 100); }} required />
                 </div>
                 <div style={{ flex: '1 1 150px' }}>
                   <label style={{ fontSize: '11px', fontWeight: 'bold', color: '#475569', textTransform: 'uppercase', marginBottom: '6px', display: 'block' }}>Monthly Salary (៛)</label>
-                  <CurrencyInput value={newStaffSalary} onChange={(v: any) => setNewStaffSalary(v)} style={{...styles.inputField, fontSize: '14px'}} placeholder="e.g. 1,200,000" />
+                  <CurrencyInput value={newStaffSalary} onChange={(v: any) => setNewStaffSalary(v)} style={{ backgroundColor: '#ffffff', borderColor: '#cbd5e1', borderWidth: '1px', borderStyle: 'solid', borderRadius: '8px', padding: '12px 14px', color: '#334155', outline: 'none', width: '100%', boxSizing: 'border-box', fontWeight: 'normal' }} placeholder="e.g. 1,200,000" />
                 </div>
-                <button type="submit" disabled={loading} style={{ ...styles.submitButton, marginTop: 0, padding: '12px 24px', height: '44px' }}>Add Staff</button>
+                <button type="submit" disabled={loading} style={{ backgroundColor: '#b59410', color: '#ffffff', padding: '12px 24px', border: 'none', borderRadius: '8px', fontSize: '14px', fontWeight: 'bold', cursor: 'pointer', height: '44px' }}>Add Staff</button>
               </div>
             </form>
 
@@ -457,7 +476,7 @@ export default function ExpenseDashboard() {
                             onClick={() => { setEditingCell({ id: staff.id, field: 'name' }); setEditValue(staff.name); }}
                           >
                             {editingCell?.id === staff.id && editingCell?.field === 'name' ? (
-                              <input autoFocus value={editValue} onChange={e => setEditValue(e.target.value)} onBlur={() => saveInlineEdit(staff.id, 'name')} onKeyDown={e => e.key === 'Enter' && saveInlineEdit(staff.id, 'name')} style={styles.tableInput} />
+                              <input autoFocus value={editValue} onChange={e => setEditValue(e.target.value)} onBlur={() => saveInlineEdit(staff.id, 'name')} onKeyDown={e => e.key === 'Enter' && saveInlineEdit(staff.id, 'name')} style={{ backgroundColor: '#ffffff', borderColor: '#cbd5e1', borderWidth: '1px', borderStyle: 'solid', borderRadius: '6px', padding: '8px 10px', color: '#334155', outline: '2px solid #b58a3d', width: '100%', boxSizing: 'border-box', fontWeight: 'normal' }} className="mobile-input-field" />
                             ) : staff.name}
                           </td>
 
@@ -467,7 +486,7 @@ export default function ExpenseDashboard() {
                             onClick={() => { setEditingCell({ id: staff.id, field: 'start_date' }); setEditValue(staff.start_date || ''); }}
                           >
                             {editingCell?.id === staff.id && editingCell?.field === 'start_date' ? (
-                              <input type="date" autoFocus value={editValue} onChange={e => setEditValue(e.target.value)} onBlur={() => saveInlineEdit(staff.id, 'start_date')} onKeyDown={e => e.key === 'Enter' && saveInlineEdit(staff.id, 'start_date')} style={styles.tableInput} />
+                              <input type="date" autoFocus value={editValue} onChange={e => setEditValue(e.target.value)} onBlur={() => saveInlineEdit(staff.id, 'start_date')} onKeyDown={e => e.key === 'Enter' && saveInlineEdit(staff.id, 'start_date')} style={{ backgroundColor: '#ffffff', borderColor: '#cbd5e1', borderWidth: '1px', borderStyle: 'solid', borderRadius: '6px', padding: '8px 10px', color: '#334155', outline: '2px solid #b58a3d', width: '100%', boxSizing: 'border-box', fontWeight: 'normal' }} className="mobile-input-field" />
                             ) : (
                               <div>
                                 {staff.start_date || 'N/A'}
@@ -482,7 +501,7 @@ export default function ExpenseDashboard() {
                             onClick={() => { setEditingCell({ id: staff.id, field: 'salary' }); setEditValue(String(staff.salary || 0)); }}
                           >
                             {editingCell?.id === staff.id && editingCell?.field === 'salary' ? (
-                              <CurrencyInput autoFocus value={Number(editValue)} onChange={(v:any) => setEditValue(String(v))} onBlur={() => saveInlineEdit(staff.id, 'salary')} onKeyDown={(e:any) => e.key === 'Enter' && saveInlineEdit(staff.id, 'salary')} style={{...styles.tableInput, textAlign: 'right'}} />
+                              <CurrencyInput autoFocus value={Number(editValue)} onChange={(v:any) => setEditValue(String(v))} onBlur={() => saveInlineEdit(staff.id, 'salary')} onKeyDown={(e:any) => e.key === 'Enter' && saveInlineEdit(staff.id, 'salary')} style={{ backgroundColor: '#ffffff', borderColor: '#cbd5e1', borderWidth: '1px', borderStyle: 'solid', borderRadius: '6px', padding: '8px 10px', color: '#334155', outline: '2px solid #b58a3d', width: '100%', boxSizing: 'border-box', fontWeight: 'normal', textAlign: 'right' }} />
                             ) : formatRiel(monthlySalary)}
                           </td>
 
@@ -497,7 +516,7 @@ export default function ExpenseDashboard() {
                             onClick={() => { setEditingCell({ id: staff.id, field: 'total_debt' }); setEditValue(String(staff.total_debt || 0)); }}
                           >
                             {editingCell?.id === staff.id && editingCell?.field === 'total_debt' ? (
-                              <CurrencyInput autoFocus value={Number(editValue)} onChange={(v:any) => setEditValue(String(v))} onBlur={() => saveInlineEdit(staff.id, 'total_debt')} onKeyDown={(e:any) => e.key === 'Enter' && saveInlineEdit(staff.id, 'total_debt')} style={{...styles.tableInput, textAlign: 'right', color: '#ef4444'}} />
+                              <CurrencyInput autoFocus value={Number(editValue)} onChange={(v:any) => setEditValue(String(v))} onBlur={() => saveInlineEdit(staff.id, 'total_debt')} onKeyDown={(e:any) => e.key === 'Enter' && saveInlineEdit(staff.id, 'total_debt')} style={{ backgroundColor: '#ffffff', borderColor: '#cbd5e1', borderWidth: '1px', borderStyle: 'solid', borderRadius: '6px', padding: '8px 10px', outline: '2px solid #b58a3d', width: '100%', boxSizing: 'border-box', textAlign: 'right', color: '#ef4444', fontWeight: 'normal' }} />
                             ) : formatRiel(totalDebt)}
                           </td>
 
@@ -512,7 +531,8 @@ export default function ExpenseDashboard() {
                               <select 
                                 value={debtMethods[staff.id] || 'Cash ៛'} 
                                 onChange={e => setDebtMethods({ ...debtMethods, [staff.id]: e.target.value })}
-                                style={{ ...styles.tableInput, width: '85px', padding: '6px', fontSize: '13px', fontWeight: 'normal' }}
+                                style={{ backgroundColor: '#ffffff', borderColor: '#cbd5e1', borderWidth: '1px', borderStyle: 'solid', borderRadius: '6px', color: '#334155', outline: 'none', width: '85px', padding: '6px', fontSize: '13px', fontWeight: 'normal' }}
+                                className="mobile-select-menu"
                               >
                                 <option value="Cash ៛">Cash ៛</option>
                                 <option value="Cash $">Cash $</option>
@@ -524,12 +544,12 @@ export default function ExpenseDashboard() {
                                 value={debtAdditions[staff.id] || ''} 
                                 onChange={(v:any) => setDebtAdditions({ ...debtAdditions, [staff.id]: v })} 
                                 onKeyDown={(e:any) => e.key === 'Enter' && handleAddDebt(staff)}
-                                style={{...styles.tableInput, flex: 1, padding: '6px', fontSize: '13px', fontWeight: 'normal'}} 
+                                style={{ backgroundColor: '#ffffff', borderColor: '#cbd5e1', borderWidth: '1px', borderStyle: 'solid', borderRadius: '6px', color: '#334155', outline: 'none', boxSizing: 'border-box', fontWeight: 'normal', flex: 1, padding: '6px', fontSize: '13px' }} 
                               />
                               <button 
                                 onClick={() => handleAddDebt(staff)}
                                 disabled={!debtAdditions[staff.id]}
-                                style={{ ...styles.actionBtn, background: debtAdditions[staff.id] ? '#b59410' : '#e2e8f0', color: debtAdditions[staff.id] ? '#fff' : '#94a3b8', cursor: debtAdditions[staff.id] ? 'pointer' : 'not-allowed', padding: '6px 12px' }}
+                                style={{ border: 'none', borderRadius: '6px', fontSize: '13px', transition: 'background 0.2s', fontWeight: 'normal', background: debtAdditions[staff.id] ? '#b59410' : '#e2e8f0', color: debtAdditions[staff.id] ? '#fff' : '#94a3b8', cursor: debtAdditions[staff.id] ? 'pointer' : 'not-allowed', padding: '6px 12px' }}
                               >
                                 Add
                               </button>
@@ -632,183 +652,96 @@ export default function ExpenseDashboard() {
         input[type="number"].no-spinners {
           -moz-appearance: textfield;
         }
+
+        .main-wrapper { 
+          padding: 24px 24px 24px 75px; 
+          background: #f8fafc; 
+          font-family: Arial, sans-serif; 
+          box-sizing: border-box; 
+          color: #333;
+          min-height: 100dvh;
+          display: flex;
+          align-items: flex-start;
+          justify-content: center;
+        }
+
+        .header-container { 
+          margin-bottom: 30px; 
+          display: flex;
+          justify-content: center;
+          align-items: center;
+          flex-wrap: wrap; 
+          gap: 12px;
+          text-align: center;
+        }
+        .page-title { 
+          font-size: 26px; 
+          color: #1e293b; 
+          margin: 0; 
+          min-width: 0;
+          white-space: normal;
+          word-break: break-word;
+          font-weight: bold;
+          letter-spacing: -0.3px;
+        }
+
+        .tabs-container {
+          display: flex; 
+          gap: 8px; 
+          margin-bottom: 30px; 
+          background: #f1f5f9; 
+          padding: 8px; 
+          border-radius: 10px; 
+          flex-wrap: wrap;
+        }
+
+        .tab-toggle-button {
+          flex: 1; 
+          padding: 12px; 
+          border-radius: 8px; 
+          border: none; 
+          cursor: pointer; 
+          font-size: 15px;
+          background: transparent;
+          color: #64748b;
+          transition: all 0.2s ease;
+          min-width: 100px;
+          font-weight: bold;
+        }
+
+        .active-tab {
+          background: #1b4d3e !important;
+          color: #ffffff !important;
+          box-shadow: 0 2px 8px rgba(27,77,62,0.15) !important;
+        }
+
+        @media (max-width: 1023px) { 
+          .main-wrapper { 
+            padding: max(80px, env(safe-area-inset-top, 80px)) 16px 24px 16px !important; 
+          }
+          .header-container {
+            flex-direction: column !important;
+            align-items: center !important;
+            gap: 10px !important;
+            margin-bottom: 20px !important;
+          }
+          .content-card {
+            padding: 20px !important;
+          }
+          .tabs-container {
+            padding: 6px !important;
+            margin-bottom: 20px !important;
+            border-radius: 8px !important;
+          }
+          .tab-toggle-button {
+            padding: 10px !important;
+            font-size: 14px !important;
+          }
+          .mobile-select-menu, .mobile-input-field {
+            font-size: 16px !important; /* Disables Mobile Safari Auto-Zoom physics shifts */
+          }
+        }
       `}</style>
     </div>
   )
-}
-
-// --- CSS-IN-JS BRAND THEME STYLING ---
-const styles = {
-  pageContainer: {
-    backgroundColor: '#f8fafc',
-    minHeight: '100vh',
-    display: 'flex',
-    alignItems: 'flex-start',
-    justifyContent: 'center',
-    padding: '40px 20px 40px 65px', 
-    fontFamily: 'Arial, sans-serif',
-    flex: 1,
-    overflowY: 'auto' as const,
-    width: '100%',
-    boxSizing: 'border-box' as const,
-  },
-  card: {
-    backgroundColor: '#ffffff',
-    width: '100%',
-    borderRadius: '16px',
-    padding: '35px',
-    boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03)',
-    borderColor: '#e2e8f0',
-    borderWidth: '1px',
-    borderStyle: 'solid',
-  },
-  brandHeader: {
-    textAlign: 'center' as const,
-    marginBottom: '30px',
-  },
-  mainTitle: {
-    color: '#1e293b',
-    fontSize: '26px',
-    fontWeight: 'bold',
-    letterSpacing: '-0.3px',
-    margin: '0 0 6px 0',
-  },
-  subtitle: {
-    color: '#64748b',
-    fontSize: '15px',
-    margin: 0,
-    fontWeight: 'normal',
-  },
-  tabContainer: {
-    display: 'flex',
-    gap: '8px',
-    backgroundColor: '#f1f5f9',
-    padding: '8px',
-    borderRadius: '10px',
-    marginBottom: '30px',
-    flexWrap: 'wrap' as const,
-  },
-  tabButton: {
-    flex: 1,
-    padding: '12px',
-    backgroundColor: 'transparent', 
-    borderWidth: '0px',             
-    color: '#64748b',
-    fontSize: '15px',
-    fontWeight: 'bold',
-    borderRadius: '8px',
-    cursor: 'pointer',
-    transition: 'all 0.2s ease',
-    minWidth: '100px',
-  },
-  activeTab: {
-    backgroundColor: '#1b4d3e',
-    color: '#ffffff',
-    boxShadow: '0 2px 8px rgba(27,77,62,0.15)',
-  },
-  form: {
-    display: 'flex',
-    flexDirection: 'column' as const,
-    gap: '20px',
-  },
-  inputGroup: {
-    display: 'flex',
-    flexDirection: 'column' as const,
-    gap: '8px',
-    flex: 1,
-  },
-  label: {
-    color: '#475569',
-    fontSize: '12px',
-    fontWeight: 'bold',
-    letterSpacing: '0.3px',
-    textTransform: 'uppercase' as const,
-  },
-  inputField: {
-    backgroundColor: '#ffffff',
-    borderColor: '#cbd5e1',         
-    borderWidth: '1px',             
-    borderStyle: 'solid',           
-    borderRadius: '8px',
-    padding: '12px 14px',
-    color: '#334155',
-    fontSize: '14px', 
-    fontWeight: 'normal',
-    outline: 'none',
-    transition: 'border-color 0.2s ease',
-    width: '100%',
-    boxSizing: 'border-box' as const,
-  },
-  tableInput: {
-    backgroundColor: '#ffffff',
-    borderColor: '#cbd5e1',         
-    borderWidth: '1px',             
-    borderStyle: 'solid',           
-    borderRadius: '6px',
-    padding: '8px 10px',
-    color: '#334155',
-    fontSize: '14px', 
-    fontWeight: 'normal',
-    outline: '2px solid #b58a3d',
-    width: '100%',
-    boxSizing: 'border-box' as const,
-  },
-  actionBtn: {
-    border: 'none',
-    borderRadius: '6px',
-    fontWeight: 'bold',
-    fontSize: '13px',
-    transition: 'background 0.2s'
-  },
-  radioGrid: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fit, minmax(100px, 1fr))',
-    gap: '10px',
-  },
-  radioLabel: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '10px',
-    backgroundColor: '#ffffff',
-    borderWidth: '1px',             
-    borderStyle: 'solid',           
-    borderColor: '#cbd5e1',         
-    padding: '12px',
-    borderRadius: '8px',
-    color: '#334155',
-    cursor: 'pointer',
-    fontSize: '14px',
-    fontWeight: 'normal',
-    transition: 'all 0.2s ease',
-  },
-  radioLabelActive: {
-    borderColor: '#b59410',
-    color: '#334155',
-    backgroundColor: '#fefcf3',
-  },
-  hiddenRadio: {
-    display: 'none',
-  },
-  radioDot: {
-    width: '8px',
-    height: '8px',
-    borderRadius: '50%',
-    backgroundColor: 'transparent',
-    borderColor: '#cbd5e1',
-    borderWidth: '2px',
-    borderStyle: 'solid',
-    display: 'inline-block',
-  },
-  submitButton: {
-    backgroundColor: '#b59410',
-    color: '#ffffff',
-    padding: '15px',
-    borderWidth: '0px',             
-    borderRadius: '8px',
-    fontSize: '14px',
-    fontWeight: 'bold',
-    cursor: 'pointer',
-    transition: 'background 0.2s ease',
-    marginTop: '10px',
-  },
 }

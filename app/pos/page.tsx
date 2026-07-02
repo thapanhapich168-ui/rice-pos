@@ -66,7 +66,7 @@ const t = {
 // ==========================================
 // ROBUST LIVE COMMA FORMATTER (Stateless Display)
 // ==========================================
-function CurrencyInput({ value, onChange, placeholder, style, autoFocus }: any) {
+function CurrencyInput({ value, onChange, placeholder, style, autoFocus, className, onFocus }: any) {
   const [inputValue, setInputValue] = useState('');
 
   useEffect(() => {
@@ -102,8 +102,16 @@ function CurrencyInput({ value, onChange, placeholder, style, autoFocus }: any) 
       placeholder={placeholder}
       value={inputValue}
       onChange={handleChange}
+      onFocus={onFocus}
       autoFocus={autoFocus}
-      style={{ ...style, color: '#0f172a' }}
+      onBlur={() => {
+        setTimeout(() => {
+          window.scrollTo(0, 0);
+          document.body.scrollTop = 0;
+        }, 100);
+      }}
+      style={{ ...style, color: '#334155' }}
+      className={className || "mobile-input-field"}
     />
   )
 }
@@ -142,10 +150,17 @@ function CartInput({ value, onChange, isQty, fontSize = '14px' }: { value: numbe
       inputMode="decimal"
       value={inputValue}
       onChange={handleChange}
+      onBlur={() => {
+        setTimeout(() => {
+          window.scrollTo(0, 0);
+          document.body.scrollTop = 0;
+        }, 100);
+      }}
       style={{ 
         width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', 
-        fontSize: fontSize, fontWeight: 'normal', color: '#0f172a', backgroundColor: '#ffffff', outline: 'none', textAlign: 'center'
+        fontSize: fontSize, fontWeight: 'normal', color: '#334155', backgroundColor: '#ffffff', outline: 'none', textAlign: 'center'
       }}
+      className="mobile-input-field"
     />
   )
 }
@@ -176,8 +191,8 @@ export default function POSPage() {
   // ==========================================
   // DYNAMIC PAYMENT ROWS
   // ==========================================
-  const [paymentRows, setPaymentRows] = useState<{id: number, method: string, amount: number | ''}[]>([
-    { id: Date.now(), method: 'Cash ៛', amount: '' }
+  const [paymentRows, setPaymentRows] = useState<{id: number, method: string, amount: number | '', isAuto?: boolean}[]>([
+    { id: Date.now(), method: 'Cash ៛', amount: '', isAuto: true }
   ]);
 
   const [isCreateCustomerModalOpen, setIsCreateCustomerModalOpen] = useState(false)
@@ -204,6 +219,36 @@ export default function POSPage() {
   const [editingInvoiceId, setEditingInvoiceId] = useState<string | null>(null)
   
   const invoiceRef = useRef<HTMLDivElement>(null)
+
+  // IOS SAFARI SCROLL FIX
+  const resetScroll = () => {
+    setTimeout(() => {
+      window.scrollTo(0, 0);
+      document.body.scrollTop = 0;
+      if (document.documentElement) document.documentElement.scrollTop = 0;
+    }, 50);
+  };
+
+  const totalRiel = cart.reduce((sum, item) => {
+    const isReturn = item.custom_name.includes('ដូរ');
+    const itemTotal = Number(item.custom_price_riel) * Number(item.quantity);
+    return isReturn ? sum - Math.abs(itemTotal) : sum + itemTotal;
+  }, 0);
+
+  const totalUSD = totalRiel / EXCHANGE_RATE; 
+
+  // Auto-sync the payment row with totalRiel if it is in Auto mode
+  useEffect(() => {
+    setPaymentRows(prev => {
+      if (prev.length === 1 && prev[0].isAuto) {
+        const newAmount = totalRiel === 0 ? '' : totalRiel;
+        if (prev[0].amount !== newAmount) {
+          return [{ ...prev[0], amount: newAmount }];
+        }
+      }
+      return prev;
+    });
+  }, [totalRiel]);
 
   // Live Date and Time
   useEffect(() => {
@@ -297,7 +342,7 @@ export default function POSPage() {
           await document.fonts.ready;
           const isMobile = window.innerWidth < 1024;
           
-          // Double-pass rendering trick for iOS Safari (Forces elements/images to strictly render first)
+          // Double-pass rendering trick for iOS Safari
           if (isMobile) {
             await htmlToImage.toPng(invoiceRef.current!, { pixelRatio: 0.5, backgroundColor: '#ffffff' });
           }
@@ -455,6 +500,7 @@ export default function POSPage() {
     const { error } = await supabase.from('products').update({ name: editCardForm.name, price: parsedPrice }).eq('id', id);
     if (!error) {
       setEditingCardId(null);
+      resetScroll();
       loadProductsAndSettings();
     } else alert("Error saving: " + error.message);
   }
@@ -492,14 +538,6 @@ export default function POSPage() {
     return splits;
   }
 
-  const totalRiel = cart.reduce((sum, item) => {
-    const isReturn = item.custom_name.includes('ដូរ');
-    const itemTotal = Number(item.custom_price_riel) * Number(item.quantity);
-    return isReturn ? sum - Math.abs(itemTotal) : sum + itemTotal;
-  }, 0)
-
-  const totalUSD = totalRiel / EXCHANGE_RATE; 
-
   const orderedProducts = [...products].sort((a, b) => {
     const idxA = productOrder.indexOf(a.id);
     const idxB = productOrder.indexOf(b.id);
@@ -533,7 +571,6 @@ export default function POSPage() {
   const isSimpleCustomer = !selectedCustomer || ['walk-in', 'walk in', 'mom'].includes((selectedCustomer.name || '').toLowerCase());
   const showPaymentSelector = activeTab === 'retail' || isSimpleCustomer;
 
-  // Calculate live multi-currency totals
   const liveTotalReceivedInRiel = paymentRows.reduce((sum, row) => {
     const amt = Number(row.amount) || 0;
     if (row.method.includes('$')) return sum + (amt * EXCHANGE_RATE);
@@ -556,6 +593,15 @@ export default function POSPage() {
     return [...normalItems, ...specialItems, ...negativeItems, ...serviceItems];
   }
 
+  function cancelEditMode() {
+    setEditingInvoiceId(null);
+    setCart([]);
+    setSelectedCustomerId('');
+    setCartCustomerNameOverride('');
+    setPaymentRows([{ id: Date.now(), method: 'Cash ៛', amount: '', isAuto: true }]);
+    window.history.replaceState({}, document.title, window.location.pathname);
+  }
+
   // --- REWRITTEN CHECKOUT: DB MULTI-ROW SPLIT ENGINE & ASSET LOGGING ---
   async function confirmCheckout() {
     if (cart.length === 0) return alert(lang === 'kh' ? 'សូមជ្រើសរើសទំនិញក្នុងកន្ត្រក!' : 'Cart is empty');
@@ -568,33 +614,79 @@ export default function POSPage() {
       const currentTotalRiel = totalRiel;
       const finalCustomerName = cartCustomerNameOverride.trim() || 'Walk-in';
 
-      // Combine payment methods string
-      const activePayments = paymentRows.filter(r => (Number(r.amount) || 0) > 0);
-      let finalPaymentMethod = 'Pending';
+      // 1. Resolve Effective Splits
+      // FIX: Only consider entered payments if the payment selector is actually visible.
+      // If it's a non-walkin wholesale customer, payment selector is hidden, so activePayments = []
+      const activePayments = showPaymentSelector ? paymentRows.filter(r => (Number(r.amount) || 0) > 0) : [];
       
-      if (showPaymentSelector) {
-        if (activePayments.length > 0) {
-          finalPaymentMethod = activePayments.map(r => `${r.method}: ${r.amount}`).join(', ');
-        } else if (isSimpleCustomer) {
-           finalPaymentMethod = 'Cash ៛'; // Fallback for quick walkin
+      const actualTotalReceived = showPaymentSelector ? liveTotalReceivedInRiel : 0;
+      const actualRemaining = currentTotalRiel - actualTotalReceived;
+
+      let effectiveSplits: { method: string, amount: number, paid: number }[] = [];
+
+      // If no payments were entered (either because it's a delivery, or user left it blank)
+      if (activePayments.length === 0) {
+        if (!isSimpleCustomer) {
+          // Delivery Customer - Force to Unpaid/Debt
+          effectiveSplits.push({ method: 'Unpaid / Debt', amount: currentTotalRiel, paid: 0 });
+        } else {
+          // Walk-in Customer - Defaults to full cash payment
+          effectiveSplits.push({ method: 'Cash ៛', amount: currentTotalRiel, paid: 0 });
         }
+      } else if (actualRemaining > 0) {
+        // Partial Payment (Debt exists)
+        activePayments.forEach(p => {
+            let amt = Number(p.amount);
+            if (p.method.includes('$')) amt *= EXCHANGE_RATE;
+            effectiveSplits.push({ method: p.method, amount: amt, paid: amt });
+        });
+        effectiveSplits.push({ method: 'Unpaid / Debt', amount: actualRemaining, paid: 0 });
+      } else {
+        // Overpaid or exact
+        let totalPaidRiel = actualTotalReceived;
+        activePayments.forEach(p => {
+            let amt = Number(p.amount);
+            if (p.method.includes('$')) amt *= EXCHANGE_RATE;
+            const ratio = totalPaidRiel > 0 ? (amt / totalPaidRiel) : 0;
+            effectiveSplits.push({ method: p.method, amount: currentTotalRiel * ratio, paid: amt });
+        });
       }
+
+      // Fallback safeguard
+      if (effectiveSplits.length === 0) effectiveSplits.push({ method: 'Cash ៛', amount: currentTotalRiel, paid: 0 });
 
       if (activeTab === 'retail') {
         const retailTxId = `RET-${Date.now().toString().slice(-6)}`;
-        const retailRows = currentCart.map(item => ({
-          transaction_id: retailTxId,
-          rice_type: item.name,
-          custom_rice_type: item.custom_name !== item.name ? item.custom_name : null,
-          qty: item.quantity,
-          price_per_bag: item.custom_price_riel,
-          cogs_price: item.cost_price || 0
-        }));
+        const retailRows = [];
 
-        await supabase.from('retail_sales').insert(retailRows);
+        for (let sIdx = 0; sIdx < effectiveSplits.length; sIdx++) {
+           const split = effectiveSplits[sIdx];
+           const ratio = currentTotalRiel !== 0 ? (split.amount / currentTotalRiel) : (1 / effectiveSplits.length);
+           const splitTxId = effectiveSplits.length > 1 ? `${retailTxId}-${sIdx + 1}` : retailTxId;
 
+           for (const item of currentCart) {
+              retailRows.push({
+                 transaction_id: splitTxId,
+                 rice_type: item.name,
+                 custom_rice_type: item.custom_name !== item.name ? item.custom_name : null,
+                 qty: item.quantity,
+                 price_per_bag: Math.round(item.custom_price_riel * ratio),
+                 cogs_price: Math.round((item.cost_price || 0) * ratio),
+                 payment_method: split.method
+              });
+           }
+        }
+
+        const { error: retailErr } = await supabase.from('retail_sales').insert(retailRows);
+        if (retailErr) throw new Error(`Retail Error: ${retailErr.message}`);
+
+        // Aggregate stock deductions safely
+        const stockUpdates: Record<number, number> = {};
         for (const item of currentCart) {
-          await supabase.from('products').update({ stock: item.stock - item.quantity }).eq('id', item.product_id);
+            stockUpdates[item.product_id] = (stockUpdates[item.product_id] || item.stock) - item.quantity;
+        }
+        for (const [prodId, newStock] of Object.entries(stockUpdates)) {
+            await supabase.from('products').update({ stock: newStock }).eq('id', prodId);
         }
 
       } else {
@@ -603,9 +695,10 @@ export default function POSPage() {
         const finalLocation = selectedCustomer?.location || '';
         const finalPhone = selectedCustomer?.phone || '';
         
-        const saleRows = [];
-        let invoiceTotalSales = 0;
-        let invoiceTotalCogs = 0;
+        // Wholesale Pre-Processing (FIFO & Stock Eval)
+        const baseSaleRows = [];
+        const stockUpdates: Record<number, number> = {}; 
+        const fifoUpdates: Record<number, number> = {}; 
 
         for (const item of currentCart) {
           const isReturn = item.custom_name.includes('ដូរ');
@@ -614,82 +707,101 @@ export default function POSPage() {
           const finalQty = isReturn ? -Math.abs(item.quantity) : item.quantity;
           
           if (isReturn || isBypass || editingInvoiceId) {
-            let actualUnitCogs = item.cost_price || 0;
-            let actualTotalCogs = actualUnitCogs * finalQty; 
-            
-            saleRows.push({
-              invoice_id: displayInvoiceNo, product_id: item.product_id, customer_name: finalCustomerName, rice_type: item.name,
+            baseSaleRows.push({
+              product_id: item.product_id, customer_name: finalCustomerName, rice_type: item.name,
               custom_rice_type: item.custom_name !== item.name ? item.custom_name : null, qty: finalQty, price_per_bag: item.custom_price_riel,
-              cogs_price: actualUnitCogs, owner: finalOwner
+              cogs_price: item.cost_price || 0, owner: finalOwner
             });
-            invoiceTotalSales += Number(item.custom_price_riel) * finalQty;
-            invoiceTotalCogs += actualTotalCogs;
-
           } else if (item.selected_batch_id) {
             const specificBatch = activeBatches[item.product_id]?.find(b => b.id === item.selected_batch_id);
-            let actualUnitCogs = specificBatch ? specificBatch.cost_price : (item.cost_price || 0);
-            let actualTotalCogs = actualUnitCogs * finalQty;
-
-            saleRows.push({
-              invoice_id: displayInvoiceNo, product_id: item.product_id, customer_name: finalCustomerName, rice_type: item.name,
+            baseSaleRows.push({
+              product_id: item.product_id, customer_name: finalCustomerName, rice_type: item.name,
               custom_rice_type: item.custom_name !== item.name ? item.custom_name : null, qty: finalQty, price_per_bag: item.custom_price_riel,
-              cogs_price: actualUnitCogs, owner: finalOwner
+              cogs_price: specificBatch ? specificBatch.cost_price : (item.cost_price || 0), owner: finalOwner
             });
-            invoiceTotalSales += Number(item.custom_price_riel) * finalQty;
-            invoiceTotalCogs += actualTotalCogs;
-
-            if (specificBatch && !editingInvoiceId && !isBypass) {
-              await supabase.from('price_history').update({ sold_qty: (specificBatch.sold_qty || 0) + finalQty }).eq('id', specificBatch.id);
+            if (specificBatch) {
+                fifoUpdates[specificBatch.id] = (fifoUpdates[specificBatch.id] || specificBatch.sold_qty || 0) + finalQty;
             }
           } else {
             const splits = await getFIFOSplits(item.product_id, finalQty, item.cost_price || 0);
             for (const split of splits) {
-              saleRows.push({
-                invoice_id: displayInvoiceNo, product_id: item.product_id, customer_name: finalCustomerName, rice_type: item.name,
+              baseSaleRows.push({
+                product_id: item.product_id, customer_name: finalCustomerName, rice_type: item.name,
                 custom_rice_type: item.custom_name !== item.name ? item.custom_name : null, qty: split.qty, price_per_bag: item.custom_price_riel,
                 cogs_price: split.cogs_price, owner: finalOwner
               });
-              invoiceTotalSales += Number(item.custom_price_riel) * split.qty;
-              invoiceTotalCogs += split.cogs_price * split.qty;
-
-              if (split.batch_id && !editingInvoiceId && !isBypass) {
-                await supabase.from('price_history').update({ sold_qty: split.current_sold + split.qty }).eq('id', split.batch_id);
+              if (split.batch_id) {
+                fifoUpdates[split.batch_id] = (fifoUpdates[split.batch_id] || split.current_sold) + split.qty;
               }
             }
           }
 
           if (!editingInvoiceId && !isBypass) {
-            await supabase.from('products').update({ stock: item.stock - finalQty }).eq('id', item.product_id);
+            stockUpdates[item.product_id] = (stockUpdates[item.product_id] || item.stock) - finalQty;
           }
         }
 
+        // Apply Effective Splits logic to Base Rows
+        const finalSaleRows = [];
+        const finalSummaries = [];
         const combinedRiceTypes = currentCart.map(item => `${item.custom_name} (x${item.quantity})`).join(', ');
-        const invoiceTotalProfit = invoiceTotalSales - invoiceTotalCogs;
 
-        let calculatedBalanceDue = 0;
-        if (liveTotalReceivedInRiel > 0) {
-          calculatedBalanceDue = Math.max(0, invoiceTotalSales - liveTotalReceivedInRiel);
-        } else {
-          calculatedBalanceDue = isSimpleCustomer ? 0 : invoiceTotalSales; 
+        for (let sIdx = 0; sIdx < effectiveSplits.length; sIdx++) {
+           const split = effectiveSplits[sIdx];
+           const ratio = currentTotalRiel !== 0 ? (split.amount / currentTotalRiel) : (1 / effectiveSplits.length);
+           const splitTxId = effectiveSplits.length > 1 ? `${displayInvoiceNo}-${sIdx + 1}` : displayInvoiceNo;
+
+           let splitSalesSum = 0;
+           let splitCogsSum = 0;
+
+           for (const baseRow of baseSaleRows) {
+              const proratedPrice = Math.round(baseRow.price_per_bag * ratio);
+              const proratedCogs = Math.round(baseRow.cogs_price * ratio);
+
+              finalSaleRows.push({
+                 ...baseRow,
+                 invoice_id: splitTxId,
+                 price_per_bag: proratedPrice,
+                 cogs_price: proratedCogs,
+                 payment_method: split.method
+              });
+              splitSalesSum += proratedPrice * baseRow.qty;
+              splitCogsSum += proratedCogs * baseRow.qty;
+           }
+
+           finalSummaries.push({
+              invoice_id: splitTxId,
+              customer_name: finalCustomerName,
+              owner: finalOwner,
+              rice_types: combinedRiceTypes,
+              total_sales: splitSalesSum,
+              total_cogs: splitCogsSum,
+              total_profit: splitSalesSum - splitCogsSum,
+              delivery_status: (split.method === 'Unpaid / Debt' && !isSimpleCustomer) ? 'Pending' : 'Delivered',
+              payment_method: split.method,
+              balance_due: split.method === 'Unpaid / Debt' ? splitSalesSum : 0,
+              customer_location: finalLocation
+           });
         }
-
-        const summaryRow = {
-          invoice_id: displayInvoiceNo, customer_name: finalCustomerName, owner: finalOwner, rice_types: combinedRiceTypes,
-          total_sales: invoiceTotalSales, total_cogs: invoiceTotalCogs, total_profit: invoiceTotalProfit,
-          delivery_status: isSimpleCustomer ? 'Delivered' : 'Pending', payment_method: finalPaymentMethod,
-          balance_due: calculatedBalanceDue, customer_location: finalLocation
-        };
 
         if (editingInvoiceId) {
-          await supabase.from('sales').delete().eq('invoice_id', editingInvoiceId);
-          await supabase.from('invoice_summaries').delete().eq('invoice_id', editingInvoiceId);
+          await supabase.from('sales').delete().like('invoice_id', `${editingInvoiceId}%`);
+          await supabase.from('invoice_summaries').delete().like('invoice_id', `${editingInvoiceId}%`);
         }
 
-        const { error: salesErr } = await supabase.from('sales').insert(saleRows);
+        const { error: salesErr } = await supabase.from('sales').insert(finalSaleRows);
         if (salesErr) throw new Error(`Failed to save to Sales table: ${salesErr.message}`);
 
-        const { error: summaryErr } = await supabase.from('invoice_summaries').insert([summaryRow]);
+        const { error: summaryErr } = await supabase.from('invoice_summaries').insert(finalSummaries);
         if (summaryErr) throw new Error(`Failed to save to Summaries table: ${summaryErr.message}`);
+
+        // Commit stock and FIFO updates
+        for (const [prodId, newStock] of Object.entries(stockUpdates)) {
+           await supabase.from('products').update({ stock: newStock }).eq('id', prodId);
+        }
+        for (const [batchId, newSold] of Object.entries(fifoUpdates)) {
+           await supabase.from('price_history').update({ sold_qty: newSold }).eq('id', batchId);
+        }
 
         const currentDate = new Date();
         setCompletedSale({
@@ -731,12 +843,12 @@ export default function POSPage() {
           total: currentTotalRiel, 
           receivedRiel: cRiel + qRiel, 
           receivedUsd: cUsd + qUsd, 
-          totalReceivedInRiel: liveTotalReceivedInRiel,
-          change: liveRemaining < 0 ? Math.abs(liveRemaining) : 0, 
+          totalReceivedInRiel: actualTotalReceived,
+          change: actualRemaining < 0 ? Math.abs(actualRemaining) : 0, 
           type: activeTab, 
-          isCashless: liveTotalReceivedInRiel === 0, 
+          isCashless: actualTotalReceived === 0, 
           items: currentCart,
-          isDebt: liveRemaining > 0
+          isDebt: actualRemaining > 0
         });
       } else {
         if (activeTab === 'wholesale' && !isSimpleCustomer) {
@@ -751,7 +863,7 @@ export default function POSPage() {
       alert(`System Error: ${err.message || err}`);
     } finally {
       setIsProcessing(false);
-      setPaymentRows([{ id: Date.now(), method: 'Cash ៛', amount: '' }]);
+      setPaymentRows([{ id: Date.now(), method: 'Cash ៛', amount: '', isAuto: true }]);
     }
   }
 
@@ -798,18 +910,20 @@ export default function POSPage() {
   const currentT = t[lang] || t['en'];
   const sortedCart = [...cart].sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0));
 
-  // Payment Row UI Renderer (Used in Desktop sidebar and Mobile Tray)
+  // Payment Row UI Renderer
   const renderPaymentSection = (isMobileCart: boolean = false) => {
     if (!showPaymentSelector) return null;
     return (
-      <div style={{ marginBottom: '14px', background: '#f8fafc', padding: '12px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-          <label style={{ fontSize: '11px', color: '#64748b', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Amount Received</label>
-          <button onClick={() => setPaymentRows([...paymentRows, { id: Date.now(), method: 'Cash ៛', amount: '' }])} style={{ background: '#e0f2fe', color: '#0284c7', border: 'none', borderRadius: '4px', fontSize: '11px', fontWeight: 'bold', padding: '4px 8px', cursor: 'pointer' }}>+ Split</button>
+      <div style={{ marginBottom: '8px', background: '#f8fafc', padding: '10px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1 }}>
+            <span style={{ fontSize: '11px', color: '#64748b', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Receive</span>
+            <button onClick={() => setPaymentRows([...paymentRows, { id: Date.now(), method: 'Cash ៛', amount: '', isAuto: false }])} style={{ background: '#e0f2fe', color: '#0284c7', border: 'none', borderRadius: '4px', fontSize: '10px', fontWeight: 'bold', padding: '4px 8px', cursor: 'pointer' }}>+ Split</button>
+          </div>
         </div>
         
         {paymentRows.map((row, index) => (
-          <div key={row.id} style={{ display: 'flex', gap: '8px', marginBottom: '8px', alignItems: 'center' }}>
+          <div key={row.id} style={{ display: 'flex', gap: '6px', marginBottom: '6px', alignItems: 'center' }}>
             <select 
               value={row.method} 
               onChange={e => {
@@ -817,7 +931,8 @@ export default function POSPage() {
                 newRows[index].method = e.target.value;
                 setPaymentRows(newRows);
               }}
-              style={{ width: '45%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: isMobileCart ? '16px' : '14px', fontWeight: 'normal', outline: 'none', backgroundColor: '#fff', cursor: 'pointer', color: '#0f172a' }}
+              style={{ width: '45%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: isMobileCart ? '16px' : '13px', fontWeight: 'normal', outline: 'none', backgroundColor: '#fff', cursor: 'pointer', color: '#0f172a' }}
+              className="mobile-select-menu"
             >
               <option value="Cash ៛">💵 Cash ៛</option>
               <option value="Cash $">💵 Cash $</option>
@@ -830,36 +945,46 @@ export default function POSPage() {
             <div style={{ flex: 1 }}>
               <CurrencyInput 
                 placeholder="" 
-                value={row.amount} 
+                value={row.amount}
+                onFocus={() => {
+                  if (row.isAuto) {
+                    const newRows = [...paymentRows];
+                    newRows[index].amount = '';
+                    newRows[index].isAuto = false;
+                    setPaymentRows(newRows);
+                  }
+                }}
                 onChange={(val: any) => {
                   const newRows = [...paymentRows];
                   newRows[index].amount = val;
+                  newRows[index].isAuto = false;
                   setPaymentRows(newRows);
                 }}
-                style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', outline: 'none', color: '#0f172a', fontWeight: 'normal', fontSize: isMobileCart ? '16px' : '14px', textAlign: 'right' }}
+                style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', outline: 'none', color: '#0f172a', fontWeight: 'normal', fontSize: isMobileCart ? '16px' : '14px', textAlign: 'right' }}
+                className="mobile-input-field"
               />
             </div>
             
             {paymentRows.length > 1 && (
-              <button onClick={() => setPaymentRows(paymentRows.filter(r => r.id !== row.id))} style={{ background: 'none', border: 'none', color: '#ef4444', fontSize: '18px', cursor: 'pointer', padding: '0 4px' }}>✕</button>
+              <button onClick={() => setPaymentRows(paymentRows.filter(r => r.id !== row.id))} style={{ background: 'none', border: 'none', color: '#ef4444', fontSize: '16px', cursor: 'pointer', padding: '0 4px' }}>✕</button>
             )}
           </div>
         ))}
 
         {paymentRows.some(r => Number(r.amount) > 0) && (
-          <div style={{ marginTop: '12px', paddingTop: '12px', borderTop: '1px dashed #cbd5e1', fontSize: '13px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
-              <span style={{ color: '#64748b' }}>Total Received:</span>
-              <span style={{ fontWeight: 'bold', color: '#0f172a' }}>{formatRielFromNative(liveTotalReceivedInRiel)}</span>
+          <div style={{ marginTop: '8px', paddingTop: '8px', borderTop: '1px dashed #cbd5e1', fontSize: '13px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div style={{ display: 'flex', gap: '4px', color: '#64748b' }}>
+              <span>Total:</span>
+              <span style={{ fontWeight: 'normal', color: '#334155' }}>{formatRielFromNative(liveTotalReceivedInRiel)}</span>
             </div>
             {liveRemaining < 0 ? (
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ color: '#ef4444', fontWeight: 'bold' }}>Change Due:</span>
+              <div style={{ display: 'flex', gap: '4px' }}>
+                <span style={{ color: '#ef4444', fontWeight: 'bold' }}>Change:</span>
                 <span style={{ fontWeight: 'bold', color: '#dc2626' }}>{formatRielFromNative(Math.abs(liveRemaining))}</span>
               </div>
             ) : liveRemaining > 0 ? (
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ color: '#b45309', fontWeight: 'bold' }}>Owe / Debt:</span>
+              <div style={{ display: 'flex', gap: '4px' }}>
+                <span style={{ color: '#b45309', fontWeight: 'bold' }}>Debt:</span>
                 <span style={{ fontWeight: 'bold', color: '#d97706' }}>{formatRielFromNative(liveRemaining)}</span>
               </div>
             ) : null}
@@ -877,20 +1002,27 @@ export default function POSPage() {
         
         <div className="main-wrapper" style={{ flex: 1 }}>
           <div className="header-container">
-            <div style={{ display: 'flex', alignItems: 'baseline', gap: '12px', flexWrap: 'wrap' }}>
-              <h1 className="page-title">{editingInvoiceId ? `✏️ Editing: ${editingInvoiceId}` : `🛒 ${currentT.title}`}</h1>
-              <span style={{ fontSize: '14px', color: '#64748b' }}>
-                {currentTime.toLocaleDateString('en-GB')} {currentTime.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
-              </span>
+            <div className="header-left">
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap', justifyContent: 'center' }}>
+                <h1 className="page-title">{editingInvoiceId ? `✏️ Editing: ${editingInvoiceId}` : `🛒 ${currentT.title}`}</h1>
+                {editingInvoiceId && (
+                  <button onClick={cancelEditMode} style={{ padding: '6px 12px', backgroundColor: '#fee2e2', color: '#dc2626', border: '1px solid #fecaca', borderRadius: '8px', cursor: 'pointer', fontSize: '13px', fontWeight: 'bold' }}>
+                    Cancel Edit
+                  </button>
+                )}
+              </div>
+              <div className="date-time-badge">
+                📅 {currentTime.toLocaleDateString('en-GB')} &nbsp; ⏰ {currentTime.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
+              </div>
             </div>
-            <div style={{ backgroundColor: '#f4f1ea', borderRadius: '20px', padding: '2px' }}>
-              <button onClick={() => setLang('en')} style={{ border: 'none', backgroundColor: lang === 'en' ? '#b58a3d' : 'transparent', color: lang === 'en' ? '#fff' : '#6b582f', padding: '6px 12px', borderRadius: '18px', fontWeight: 'bold', cursor: 'pointer', fontSize: '12px' }}>EN</button>
-              <button onClick={() => setLang('kh')} style={{ border: 'none', backgroundColor: lang === 'kh' ? '#b58a3d' : 'transparent', color: lang === 'kh' ? '#fff' : '#6b582f', padding: '6px 12px', borderRadius: '18px', fontWeight: 'bold', cursor: 'pointer', fontSize: '12px' }}>KH</button>
+            <div style={{ backgroundColor: '#e2e8f0', borderRadius: '20px', padding: '3px' }}>
+              <button onClick={() => setLang('en')} style={{ border: 'none', backgroundColor: lang === 'en' ? '#0f172a' : 'transparent', color: lang === 'en' ? '#fff' : '#475569', padding: '6px 14px', borderRadius: '18px', fontWeight: 'bold', cursor: 'pointer', fontSize: '13px', transition: 'all 0.2s ease' }}>EN</button>
+              <button onClick={() => setLang('kh')} style={{ border: 'none', backgroundColor: lang === 'kh' ? '#0f172a' : 'transparent', color: lang === 'kh' ? '#fff' : '#475569', padding: '6px 14px', borderRadius: '18px', fontWeight: 'bold', cursor: 'pointer', fontSize: '13px', transition: 'all 0.2s ease' }}>KH</button>
             </div>
           </div>
 
           <div className="pos-tools-area" style={{ marginBottom: '24px' }}>
-            <div style={{ display: 'flex', gap: '12px', marginBottom: '16px', flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', gap: '12px', marginBottom: '16px', flexWrap: 'wrap', width: '100%' }}>
               <button onClick={() => { setActiveTab('retail'); setSelectedCustomerId(''); setCustomerSearchTerm(''); }} style={{ flex: 1, padding: '12px', borderRadius: '8px', border: 'none', fontWeight: 'bold', cursor: 'pointer', backgroundColor: activeTab === 'retail' ? '#b58a3d' : '#fff', color: activeTab === 'retail' ? '#ffffff' : '#6b582f', borderBottom: activeTab === 'retail' ? 'none' : '1px solid #e2e8f0', minWidth: '120px' }}>{currentT.retail}</button>
               <button onClick={() => { 
                 setActiveTab('wholesale');
@@ -901,8 +1033,8 @@ export default function POSPage() {
               }} style={{ flex: 1, padding: '12px', borderRadius: '8px', border: 'none', fontWeight: 'bold', cursor: 'pointer', backgroundColor: activeTab === 'wholesale' ? '#b58a3d' : '#fff', color: activeTab === 'wholesale' ? '#ffffff' : '#6b582f', borderBottom: activeTab === 'wholesale' ? 'none' : '1px solid #e2e8f0', minWidth: '120px' }}>{currentT.wholesale}</button>
             </div>
 
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px', alignItems: 'flex-start' }}>
-              <input type="text" placeholder={currentT.searchPlaceholder} value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} style={{ flex: 1, minWidth: '240px', padding: '10px 14px', borderRadius: '6px', border: '1px solid #dcd7cc', outline: 'none', fontSize: '16px', color: '#333333', backgroundColor: '#ffffff' }} />
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px', alignItems: 'flex-start', width: '100%' }}>
+              <input type="text" placeholder={currentT.searchPlaceholder} value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} style={{ flex: 1, minWidth: '240px', padding: '10px 14px', borderRadius: '6px', border: '1px solid #dcd7cc', outline: 'none', fontSize: '16px', color: '#334155', backgroundColor: '#ffffff' }} className="mobile-input-field" />
               
               {activeTab === 'wholesale' && (
                 <div style={{ flex: 1, minWidth: '300px', position: 'relative' }}>
@@ -928,9 +1060,9 @@ export default function POSPage() {
             </div>
 
             {activeTab !== 'retail' && (
-              <div className="hide-scrollbar" style={{ display: 'flex', overflowX: 'auto', gap: '8px', paddingBottom: '4px', marginTop: '16px' }}>
+              <div className="hide-scrollbar" style={{ display: 'flex', overflowX: 'auto', gap: '8px', paddingBottom: '4px', marginTop: '16px', width: '100%' }}>
                 {RICE_CATEGORIES.map(cat => (
-                  <button key={cat} onClick={() => setActiveCategory(cat)} style={{ padding: '6px 14px', borderRadius: '20px', border: activeCategory === cat ? 'none' : '1px solid #dcd7cc', backgroundColor: activeCategory === cat ? '#b58a3d' : '#ffffff', color: activeCategory === cat ? '#fff' : '#6b582f', fontWeight: 'bold', cursor: 'pointer', fontSize: '13px', whiteSpace: 'nowrap' }}>{cat === 'All' ? (lang === 'kh' ? 'ទាំងអស់' : 'All') : cat}</button>
+                  <button key={cat} onClick={() => setActiveCategory(cat)} style={{ padding: '6px 14px', borderRadius: '20px', border: activeCategory === cat ? 'none' : '1px solid #cbd5e1', backgroundColor: activeCategory === cat ? '#b58a3d' : '#ffffff', color: activeCategory === cat ? '#fff' : '#475569', cursor: 'pointer', fontSize: '13px', whiteSpace: 'nowrap' }}>{cat === 'All' ? (lang === 'kh' ? 'ទាំងអស់' : 'All') : cat}</button>
                 ))}
               </div>
             )}
@@ -938,24 +1070,24 @@ export default function POSPage() {
 
           <div className="pos-grid-area">
             {filteredProducts.length === 0 ? (
-              <div style={{ textAlign: 'center', padding: '40px', color: '#8a7650' }}>{currentT.noProducts}</div>
+              <div style={{ textAlign: 'center', padding: '40px', color: '#64748b' }}>{currentT.noProducts}</div>
             ) : (
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: '16px' }}>
                 {filteredProducts.map((p) => (
-                  <div key={p.id} draggable={editingCardId !== p.id} onDragStart={(e) => handleProductDragStart(e, p.id)} onDragOver={handleProductDragOver} onDrop={(e) => handleProductDrop(e, p.id)} onMouseEnter={() => setHoveredCardId(p.id)} onMouseLeave={() => setHoveredCardId(null)} onClick={() => handleProductClick(p)} style={{ border: '1px solid #eadeca', borderRadius: '10px', padding: '14px', cursor: editingCardId === p.id ? 'default' : 'pointer', backgroundColor: '#ffffff', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', minHeight: '100px', transition: 'transform 0.1s', boxShadow: '0 2px 4px rgba(0,0,0,0.02)', position: 'relative' }} onMouseDown={e => { if(editingCardId !== p.id) e.currentTarget.style.transform = 'scale(0.97)'; }} onMouseUp={e => e.currentTarget.style.transform = 'scale(1)'}>
+                  <div key={p.id} draggable={editingCardId !== p.id} onDragStart={(e) => handleProductDragStart(e, p.id)} onDragOver={handleProductDragOver} onDrop={(e) => handleProductDrop(e, p.id)} onMouseEnter={() => setHoveredCardId(p.id)} onMouseLeave={() => setHoveredCardId(null)} onClick={() => handleProductClick(p)} style={{ border: '1px solid #e2e8f0', borderRadius: '10px', padding: '14px', cursor: editingCardId === p.id ? 'default' : 'pointer', backgroundColor: '#ffffff', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', minHeight: '100px', transition: 'transform 0.1s', boxShadow: '0 2px 4px rgba(0,0,0,0.02)', position: 'relative' }} onMouseDown={e => { if(editingCardId !== p.id) e.currentTarget.style.transform = 'scale(0.97)'; }} onMouseUp={e => e.currentTarget.style.transform = 'scale(1)'}>
                     {editingCardId === p.id ? (
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', height: '100%' }} onClick={e => e.stopPropagation()}>
-                        <input autoFocus value={editCardForm.name} onChange={e => setEditCardForm({...editCardForm, name: e.target.value})} style={{ padding: '4px 6px', border: '1px solid #b58a3d', borderRadius: '4px', outline: 'none', width: '100%', boxSizing: 'border-box', color: '#333333', backgroundColor: '#ffffff', fontSize: '16px' }} />
-                        <input type="number" value={editCardForm.price} onChange={e => setEditCardForm({...editCardForm, price: e.target.value})} style={{ padding: '4px 6px', border: '1px solid #b58a3d', borderRadius: '4px', outline: 'none', width: '100%', boxSizing: 'border-box', color: '#333333', backgroundColor: '#ffffff', fontSize: '16px' }} />
+                        <input autoFocus value={editCardForm.name} onChange={e => setEditCardForm({...editCardForm, name: e.target.value})} onBlur={resetScroll} style={{ padding: '4px 6px', border: '1px solid #b58a3d', borderRadius: '4px', outline: 'none', width: '100%', boxSizing: 'border-box', color: '#334155', backgroundColor: '#ffffff', fontSize: '16px' }} className="mobile-input-field" />
+                        <input type="text" inputMode="decimal" value={editCardForm.price} onChange={e => setEditCardForm({...editCardForm, price: e.target.value})} onBlur={resetScroll} style={{ padding: '4px 6px', border: '1px solid #b58a3d', borderRadius: '4px', outline: 'none', width: '100%', boxSizing: 'border-box', color: '#334155', backgroundColor: '#ffffff', fontSize: '16px' }} className="mobile-input-field" />
                         <div style={{ display: 'flex', gap: '6px', marginTop: 'auto' }}>
-                          <button onClick={(e) => { e.stopPropagation(); saveCardEdit(p.id); }} style={{ flex: 1, backgroundColor: '#10b981', color: 'white', border: 'none', padding: '4px', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}>✅</button>
-                          <button onClick={(e) => { e.stopPropagation(); setEditingCardId(null); }} style={{ flex: 1, backgroundColor: '#ef4444', color: 'white', border: 'none', padding: '4px', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}>❌</button>
+                          <button onClick={(e) => { e.stopPropagation(); saveCardEdit(p.id); }} style={{ flex: 1, backgroundColor: '#10b981', color: 'white', border: 'none', padding: '4px', borderRadius: '4px', cursor: 'pointer', fontWeight: 'normal' }}>✅</button>
+                          <button onClick={(e) => { e.stopPropagation(); setEditingCardId(null); resetScroll(); }} style={{ flex: 1, backgroundColor: '#ef4444', color: 'white', border: 'none', padding: '4px', borderRadius: '4px', cursor: 'pointer', fontWeight: 'normal' }}>❌</button>
                         </div>
                       </div>
                     ) : (
                       <>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                          <div style={{ fontWeight: 'bold', fontSize: '14px', color: '#4a3b1b', marginBottom: '8px' }}>{p.name}</div>
+                          <div style={{ fontSize: '14px', color: '#334155', marginBottom: '8px' }}>{p.name}</div>
                           <button 
                             onClick={(e) => { e.preventDefault(); e.stopPropagation(); setEditingCardId(p.id); setEditCardForm({ name: p.name, price: String(p.price) }); }} 
                             onTouchStart={(e) => e.stopPropagation()}
@@ -964,16 +1096,16 @@ export default function POSPage() {
                             title="Edit Product"
                           >✏️</button>
                         </div>
-                        <div style={{ borderTop: '1px dashed #f4f1ea', paddingTop: '8px', marginTop: 'auto', position: 'relative', minHeight: activeTab === 'wholesale' ? '35px' : 'auto' }}>
-                          <div style={{ fontWeight: 'bold', fontSize: '14px', color: '#b58a3d' }}>
+                        <div style={{ borderTop: '1px dashed #f1f5f9', paddingTop: '8px', marginTop: 'auto', position: 'relative', minHeight: activeTab === 'wholesale' ? '35px' : 'auto' }}>
+                          <div style={{ fontSize: '14px', color: '#b58a3d' }}>
                             {formatRielSymbol(activeTab === 'retail' ? (p.price || 0) : (p.cost_price || 0))}
                           </div>
-                          {(activeTab === 'wholesale') && <div style={{ fontSize: '11px', marginTop: '4px', color: Number(p.stock) < 5 ? '#dc2626' : '#10b981', fontWeight: 'bold' }}>📦 {currentT.stock}: {p.stock}</div>}
+                          {(activeTab === 'wholesale') && <div style={{ fontSize: '11px', marginTop: '4px', color: Number(p.stock) < 5 ? '#dc2626' : '#10b981' }}>📦 {currentT.stock}: {p.stock}</div>}
                           
                           {(activeTab === 'wholesale') && (
                             <button 
                               onClick={(e) => { e.stopPropagation(); setExchangeModal({ isOpen: true, product: p, consumedKg: '' }); }}
-                              style={{ position: 'absolute', bottom: '-4px', right: '-4px', background: '#fee2e2', color: '#ef4444', border: '1px solid #fecaca', borderRadius: '6px', padding: '4px 8px', fontSize: '14px', fontWeight: 'bold', cursor: 'pointer' }}
+                              style={{ position: 'absolute', bottom: '-4px', right: '-4px', background: '#fef2f2', color: '#ef4444', border: '1px solid #fecaca', borderRadius: '6px', padding: '4px 8px', fontSize: '14px', cursor: 'pointer' }}
                               title="Exchange / Return"
                             >
                               🔄
@@ -993,22 +1125,21 @@ export default function POSPage() {
       {/* ==============================================================================================
           DESKTOP SIDEBAR CART
           ============================================================================================== */}
-      <div className="desktop-cart-panel" style={{ width: '380px', backgroundColor: '#ffffff', borderLeft: '1px solid #e5e7eb', display: 'flex', flexDirection: 'column', height: '100vh', position: 'sticky', top: 0 }}>
-        <div style={{ paddingTop: '16px', paddingRight: '20px', paddingBottom: '16px', paddingLeft: '20px', borderBottom: '1px solid #f3f4f6', backgroundColor: '#fcfbfa', flexShrink: 0 }}>
-          <h2 style={{ fontSize: '16px', margin: 0, fontWeight: 'bold', color: '#4a3b1b' }}>{currentT.cartTitle} ({cart.length})</h2>
+      <div className="desktop-cart-panel" style={{ width: '400px', backgroundColor: '#ffffff', borderLeft: '1px solid #e5e7eb', display: 'flex', flexDirection: 'column', height: '100dvh', position: 'sticky', top: 0 }}>
+        <div style={{ paddingTop: '16px', paddingRight: '20px', paddingBottom: '16px', paddingLeft: '20px', borderBottom: '1px solid #f1f5f9', backgroundColor: '#f8fafc', flexShrink: 0 }}>
+          <h2 style={{ fontSize: '16px', margin: 0, fontWeight: 'bold', color: '#334155' }}>{currentT.cartTitle} ({cart.length})</h2>
         </div>
         
         <div style={{ flex: 1, overflowY: 'auto', paddingTop: '16px', paddingRight: '16px', paddingBottom: '16px', paddingLeft: '16px' }}>
           
           {activeTab === 'wholesale' && selectedCustomerId && (
-            <div style={{ background: '#f8fafc', padding: '12px', borderRadius: '8px', border: '1px solid #e2e8f0', marginBottom: '16px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              <div style={{ fontSize: '11px', fontWeight: 'bold', color: '#8a7650', textTransform: 'uppercase', letterSpacing: '0.5px' }}>📄 Invoice Customizer</div>
-              <input type="text" placeholder="Invoice Name Override..." value={cartCustomerNameOverride} onChange={e => setCartCustomerNameOverride(e.target.value)} style={{ width: '100%', padding: '10px', fontSize: '14px', fontWeight: 'normal', borderRadius: '6px', border: '1px solid #cbd5e1', outline: 'none', color: '#0f172a' }} />
+            <div style={{ background: '#f8fafc', padding: '10px', borderRadius: '8px', border: '1px solid #e2e8f0', marginBottom: '16px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+              <input type="text" placeholder="Invoice Name Override..." value={cartCustomerNameOverride} onChange={e => setCartCustomerNameOverride(e.target.value)} style={{ width: '100%', padding: '8px 10px', fontSize: '13px', fontWeight: 'normal', borderRadius: '4px', border: '1px solid #cbd5e1', outline: 'none', color: '#334155' }} className="mobile-input-field" />
             </div>
           )}
 
           {sortedCart.length === 0 ? (
-            <div style={{ textAlign: 'center', marginTop: '40px', color: '#9c8a6c' }}>{currentT.emptyCart}</div>
+            <div style={{ textAlign: 'center', marginTop: '40px', color: '#94a3b8' }}>{currentT.emptyCart}</div>
           ) : (
             sortedCart.map((item) => {
               const isReturn = item.custom_name.includes('ដូរ');
@@ -1016,10 +1147,10 @@ export default function POSPage() {
               const isSpecial = isReturn || isCharge;
 
               return (
-                <div key={item.id} style={{ backgroundColor: isReturn ? '#fef2f2' : isCharge ? '#fffbeb' : '#ffffff', borderRadius: '8px', padding: '12px', marginBottom: '12px', border: `1px solid ${isReturn ? '#fecaca' : isCharge ? '#fde68a' : '#e2e8f0'}`, position: 'relative', boxShadow: '0 2px 4px rgba(0,0,0,0.02)' }}>
-                  <button onClick={() => removeFromCart(item.id)} style={{ position: 'absolute', top: '8px', right: '8px', background: '#fee2e2', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: '14px', width: '24px', height: '24px', borderRadius: '50%', zIndex: 5, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>✕</button>
+                <div key={item.id} style={{ backgroundColor: isReturn ? '#fef2f2' : isCharge ? '#fffbeb' : '#ffffff', borderRadius: '8px', padding: '10px', marginBottom: '10px', border: `1px solid ${isReturn ? '#fecaca' : isCharge ? '#fde68a' : '#e2e8f0'}`, position: 'relative', boxShadow: '0 2px 4px rgba(0,0,0,0.02)' }}>
+                  <button onClick={() => removeFromCart(item.id)} style={{ position: 'absolute', top: '6px', right: '6px', background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', fontSize: '14px', zIndex: 5 }}>✕</button>
 
-                  <div style={{ display: 'flex', alignItems: 'center', marginBottom: '10px', paddingRight: '28px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', marginBottom: '8px', paddingRight: '20px' }}>
                     <input 
                       type="text" 
                       value={item.custom_name} 
@@ -1027,16 +1158,17 @@ export default function POSPage() {
                       placeholder="Item Name"
                       readOnly={isSpecial}
                       style={{ 
-                        fontWeight: 'normal', fontSize: '14px', color: isReturn ? '#dc2626' : isCharge ? '#b45309' : '#0f172a', 
-                        flex: 1, border: 'none', background: 'transparent', outline: 'none', padding: 0
+                        fontSize: '13px', color: isReturn ? '#dc2626' : isCharge ? '#b45309' : '#334155', 
+                        flex: 1, border: 'none', background: 'transparent', outline: 'none', padding: '2px 0'
                       }} 
+                      className="mobile-input-field"
                     />
                     
                     {!isSpecial && activeTab === 'wholesale' && (
                       <select
                         value={item.selected_batch_id || 'AUTO'}
                         onChange={(e) => updateCartItem(item.id, 'selected_batch_id', e.target.value === 'AUTO' ? null : Number(e.target.value))}
-                        style={{ marginLeft: '8px', padding: '2px 4px', background: '#fefcf3', border: '1px solid #eadeca', borderRadius: '4px', fontSize: '11px', fontWeight: 'bold', color: '#b58a3d', outline: 'none', cursor: 'pointer', maxWidth: '90px' }}
+                        style={{ marginLeft: '8px', padding: '2px 4px', background: '#f8fafc', border: '1px solid #cbd5e1', borderRadius: '4px', fontSize: '11px', color: '#b58a3d', outline: 'none', cursor: 'pointer', maxWidth: '90px' }}
                       >
                         <option value="AUTO">▼ Auto</option>
                         {activeBatches[item.product_id]?.map((b: any) => {
@@ -1047,14 +1179,14 @@ export default function POSPage() {
                     )}
                   </div>
                   
-                  <div style={{ display: 'flex', gap: '12px', alignItems: 'flex-end' }}>
+                  <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-end' }}>
                     <div style={{ flex: 1 }}>
-                      <span style={{ display: 'block', fontSize: '11px', fontWeight: 'bold', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '6px' }}>{currentT.unitPrice}</span>
-                      <CartInput fontSize="14px" value={item.custom_price_riel} onChange={(v) => updateCartItem(item.id, 'custom_price_riel', v)} isQty={false} />
+                      <span style={{ display: 'block', fontSize: '10px', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '4px' }}>{currentT.unitPrice} (៛)</span>
+                      <CartInput value={item.custom_price_riel} onChange={(v) => updateCartItem(item.id, 'custom_price_riel', v)} isQty={false} fontSize="13px" />
                     </div>
                     <div style={{ flex: 1 }}>
-                      <span style={{ display: 'block', fontSize: '11px', fontWeight: 'bold', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '6px' }}>{currentT.quantity}</span>
-                      <CartInput fontSize="14px" value={item.quantity} onChange={(v) => updateCartItem(item.id, 'quantity', v)} isQty={true} />
+                      <span style={{ display: 'block', fontSize: '10px', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '4px' }}>{currentT.quantity}</span>
+                      <CartInput value={item.quantity} onChange={(v) => updateCartItem(item.id, 'quantity', v)} isQty={true} fontSize="13px" />
                     </div>
                   </div>
                 </div>
@@ -1063,14 +1195,14 @@ export default function POSPage() {
           )}
         </div>
         
-        <div style={{ position: 'sticky', bottom: 0, paddingTop: '16px', paddingRight: '20px', paddingBottom: '16px', paddingLeft: '20px', borderTop: '1px solid #e5e7eb', backgroundColor: '#fcfbfa', flexShrink: 0, zIndex: 10, boxShadow: '0 -4px 10px rgba(0,0,0,0.02)' }}>
+        <div style={{ position: 'sticky', bottom: 0, paddingTop: '12px', paddingRight: '20px', paddingBottom: '16px', paddingLeft: '20px', borderTop: '1px solid #e2e8f0', backgroundColor: '#f8fafc', flexShrink: 0, zIndex: 10, boxShadow: '0 -4px 10px rgba(0,0,0,0.02)' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '4px' }}>
-            <span style={{ fontSize: '14px', fontWeight: 'bold', color: '#4a3b1b' }}>{currentT.totalKhmer}</span>
-            <span style={{ fontSize: '20px', fontWeight: 'bold', color: totalRiel < 0 ? '#ef4444' : '#b58a3d' }}>{formatRielFromNative(totalRiel)}</span>
+            <span style={{ fontSize: '13px', color: '#334155' }}>{currentT.totalKhmer}</span>
+            <span style={{ fontSize: '18px', fontWeight: 'bold', color: totalRiel < 0 ? '#ef4444' : '#b58a3d' }}>{formatRielFromNative(totalRiel)}</span>
           </div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '14px' }}>
-            <span style={{ fontSize: '11px', color: '#8a7650' }}>{currentT.totalUsd}</span>
-            <span style={{ fontSize: '14px', fontWeight: 'bold', color: '#4a3b1b' }}>{formatUSD(totalUSD)}</span>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '10px' }}>
+            <span style={{ fontSize: '11px', color: '#64748b' }}>{currentT.totalUsd}</span>
+            <span style={{ fontSize: '13px', color: '#475569' }}>{formatUSD(totalUSD)}</span>
           </div>
 
           {renderPaymentSection(false)}
@@ -1080,13 +1212,13 @@ export default function POSPage() {
             disabled={cart.length === 0 || isProcessing} 
             style={{ 
               width: '100%', 
-              padding: '16px', 
-              backgroundColor: (cart.length === 0 || isProcessing) ? '#e5e7eb' : '#10b981', 
-              color: (cart.length === 0 || isProcessing) ? '#9ca3af' : '#ffffff', 
+              padding: '14px', 
+              backgroundColor: (cart.length === 0 || isProcessing) ? '#e2e8f0' : '#10b981', 
+              color: (cart.length === 0 || isProcessing) ? '#64748b' : '#ffffff', 
               border: 'none', 
               borderRadius: '8px', 
               fontWeight: 'bold', 
-              fontSize: '16px',
+              fontSize: '15px',
               cursor: (cart.length === 0 || isProcessing) ? 'not-allowed' : 'pointer',
               boxShadow: '0 4px 6px rgba(16, 185, 129, 0.2)'
             }}
@@ -1098,7 +1230,7 @@ export default function POSPage() {
 
 
       {/* ==============================================================================================
-          MOBILE CART TRAY (CENTERED POPUP)
+          MOBILE CART TRAY (BOTTOM SHEET)
           ============================================================================================== */}
       {cart.length > 0 && !isMobileCartOpen && !completedSale && !saleSummary && (
         <div className="mobile-fab" onClick={() => setIsMobileCartOpen(true)}>
@@ -1108,25 +1240,31 @@ export default function POSPage() {
       )}
 
       {isMobileCartOpen && (
-        <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(4px)', zIndex: 1000, display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '20px', boxSizing: 'border-box' }} onMouseDown={() => setIsMobileCartOpen(false)}>
+        <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(0,0,0,0.4)', zIndex: 999, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}>
+          {/* Top spacer to close modal when clicking outside */}
+          <div style={{ flex: 1 }} onClick={() => setIsMobileCartOpen(false)}></div>
           
-          <div style={{ width: '100%', maxWidth: '450px', maxHeight: '75vh', backgroundColor: '#ffffff', borderRadius: '20px', display: 'flex', flexDirection: 'column', position: 'relative', boxShadow: '0 10px 30px rgba(0,0,0,0.2)' }} onMouseDown={e => e.stopPropagation()}>
-            
-            <div style={{ padding: '20px', borderBottom: '1px solid #e5e7eb', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
-              <h3 style={{ margin: 0, color: '#4a3b1b', fontSize: '18px' }}>{currentT.cartTitle} ({cart.length})</h3>
-              <button onClick={() => setIsMobileCartOpen(false)} style={{ background: '#f1f5f9', border: 'none', fontSize: '16px', width: '32px', height: '32px', borderRadius: '50%', color: '#475569', fontWeight: 'bold' }}>✕</button>
+          <div style={{ width: '100%', height: '85vh', backgroundColor: '#ffffff', borderTopLeftRadius: '20px', borderTopRightRadius: '20px', display: 'flex', flexDirection: 'column', position: 'relative', boxShadow: '0 -10px 25px rgba(0,0,0,0.1)' }}>
+            {/* Grab Handle */}
+            <div style={{ width: '100%', display: 'flex', justifyContent: 'center', paddingTop: '12px', paddingBottom: '8px' }}>
+              <div style={{ width: '40px', height: '5px', backgroundColor: '#cbd5e1', borderRadius: '10px' }}></div>
+            </div>
+
+            <div style={{ paddingRight: '20px', paddingBottom: '12px', paddingLeft: '20px', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
+              <h3 style={{ margin: 0, color: '#334155', fontSize: '16px' }}>{currentT.cartTitle} ({cart.length})</h3>
+              <button onClick={() => setIsMobileCartOpen(false)} style={{ background: '#f1f5f9', border: 'none', fontSize: '14px', width: '28px', height: '28px', borderRadius: '50%', color: '#475569' }}>✕</button>
             </div>
             
-            <div style={{ flex: 1, overflowY: 'auto', padding: '20px' }}>
+            <div style={{ flex: 1, overflowY: 'auto', paddingTop: '16px', paddingRight: '20px', paddingBottom: '20px', paddingLeft: '20px' }}>
               {activeTab === 'wholesale' && selectedCustomerId && (
-                <div style={{ background: '#f8fafc', padding: '12px', borderRadius: '8px', border: '1px solid #e2e8f0', marginBottom: '16px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                  <div style={{ fontSize: '11px', fontWeight: 'bold', color: '#8a7650', textTransform: 'uppercase' }}>📄 Invoice Customizer</div>
+                <div style={{ background: '#f8fafc', padding: '10px', borderRadius: '8px', border: '1px solid #e2e8f0', marginBottom: '16px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
                   <input 
                     type="text" 
                     placeholder="Invoice Name Override..." 
                     value={cartCustomerNameOverride} 
                     onChange={e => setCartCustomerNameOverride(e.target.value)} 
-                    style={{ width: '100%', padding: '10px', fontSize: '16px', fontWeight: 'normal', borderRadius: '6px', border: '1px solid #cbd5e1', outline: 'none', color: '#0f172a' }} 
+                    style={{ width: '100%', padding: '10px', fontSize: '14px', borderRadius: '6px', border: '1px solid #cbd5e1', outline: 'none', color: '#334155' }} 
+                    className="mobile-input-field"
                   />
                 </div>
               )}
@@ -1137,10 +1275,10 @@ export default function POSPage() {
                 const isSpecial = isReturn || isCharge;
 
                 return (
-                  <div key={item.id} style={{ backgroundColor: isReturn ? '#fef2f2' : isCharge ? '#fffbeb' : '#ffffff', borderRadius: '12px', padding: '16px', marginBottom: '12px', border: `1px solid ${isReturn ? '#fecaca' : isCharge ? '#fde68a' : '#e2e8f0'}`, position: 'relative', boxShadow: '0 2px 4px rgba(0,0,0,0.02)' }}>
-                    <button onClick={() => removeFromCart(item.id)} style={{ position: 'absolute', top: '12px', right: '12px', background: '#fee2e2', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: '14px', width: '28px', height: '28px', borderRadius: '50%', zIndex: 5, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>✕</button>
+                  <div key={item.id} style={{ backgroundColor: isReturn ? '#fef2f2' : isCharge ? '#fffbeb' : '#ffffff', borderRadius: '12px', padding: '12px', marginBottom: '10px', border: `1px solid ${isReturn ? '#fecaca' : isCharge ? '#fde68a' : '#e2e8f0'}`, position: 'relative', boxShadow: '0 2px 4px rgba(0,0,0,0.02)' }}>
+                    <button onClick={() => removeFromCart(item.id)} style={{ position: 'absolute', top: '10px', right: '10px', background: '#fee2e2', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: '12px', width: '24px', height: '24px', borderRadius: '50%', zIndex: 5, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>✕</button>
                     
-                    <div style={{ display: 'flex', alignItems: 'center', marginBottom: '12px', paddingRight: '30px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', marginBottom: '10px', paddingRight: '30px' }}>
                       <input 
                         type="text" 
                         value={item.custom_name} 
@@ -1148,25 +1286,20 @@ export default function POSPage() {
                         placeholder="Item Name"
                         readOnly={isSpecial}
                         style={{ 
-                          fontWeight: 'normal', 
-                          fontSize: '16px', 
-                          color: isReturn ? '#dc2626' : isCharge ? '#b45309' : '#0f172a', 
-                          flex: 1, 
-                          border: 'none',
-                          background: 'transparent', 
-                          outline: 'none',
-                          padding: 0
+                          fontSize: '14px', color: isReturn ? '#dc2626' : isCharge ? '#b45309' : '#334155', 
+                          flex: 1, border: 'none', background: 'transparent', outline: 'none', padding: 0
                         }} 
+                        className="mobile-input-field"
                       />
                     </div>
 
-                    <div style={{ display: 'flex', gap: '12px', alignItems: 'flex-end' }}>
+                    <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-end' }}>
                       <div style={{ flex: 1 }}>
-                        <span style={{ display: 'block', fontSize: '11px', fontWeight: 'bold', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '6px' }}>{currentT.unitPrice}</span>
+                        <span style={{ display: 'block', fontSize: '10px', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '4px' }}>{currentT.unitPrice}</span>
                         <CartInput fontSize="16px" value={item.custom_price_riel} onChange={(v) => updateCartItem(item.id, 'custom_price_riel', v)} isQty={false} />
                       </div>
                       <div style={{ flex: 1 }}>
-                        <span style={{ display: 'block', fontSize: '11px', fontWeight: 'bold', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '6px' }}>{currentT.quantity}</span>
+                        <span style={{ display: 'block', fontSize: '10px', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '4px' }}>{currentT.quantity}</span>
                         <CartInput fontSize="16px" value={item.quantity} onChange={(v) => updateCartItem(item.id, 'quantity', v)} isQty={true} />
                       </div>
                     </div>
@@ -1175,15 +1308,15 @@ export default function POSPage() {
               })}
             </div>
             
-            {/* Mobile Footer Area inside Modal */}
-            <div style={{ padding: '20px', borderTop: '1px solid #e5e7eb', backgroundColor: '#ffffff', borderBottomLeftRadius: '20px', borderBottomRightRadius: '20px', flexShrink: 0 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
-                <span style={{ fontWeight: 'bold', fontSize: '16px', color: '#475569' }}>{currentT.totalKhmer}</span>
-                <span style={{ fontWeight: 'bold', color: totalRiel < 0 ? '#ef4444' : '#b58a3d', fontSize: '22px' }}>{formatRielFromNative(totalRiel)}</span>
+            {/* Mobile Footer Area - Account for Safe Area Bottom */}
+            <div style={{ padding: '12px 20px calc(12px + env(safe-area-inset-bottom, 12px)) 20px', borderTop: '1px solid #e2e8f0', backgroundColor: '#f8fafc', boxShadow: '0 -4px 10px rgba(0,0,0,0.05)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                <span style={{ fontSize: '14px', color: '#475569' }}>{currentT.totalKhmer}</span>
+                <span style={{ fontWeight: 'bold', color: totalRiel < 0 ? '#ef4444' : '#b58a3d', fontSize: '20px' }}>{formatRielFromNative(totalRiel)}</span>
               </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '16px' }}>
-                <span style={{ fontSize: '13px', color: '#94a3b8' }}>{currentT.totalUsd}</span>
-                <span style={{ fontWeight: 'bold', color: '#64748b', fontSize: '14px' }}>{formatUSD(totalUSD)}</span>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '12px' }}>
+                <span style={{ fontSize: '12px', color: '#94a3b8' }}>{currentT.totalUsd}</span>
+                <span style={{ color: '#64748b', fontSize: '13px' }}>{formatUSD(totalUSD)}</span>
               </div>
               
               {renderPaymentSection(true)}
@@ -1193,13 +1326,13 @@ export default function POSPage() {
                 disabled={cart.length === 0 || isProcessing} 
                 style={{ 
                   width: '100%', 
-                  padding: '16px', 
-                  backgroundColor: (cart.length === 0 || isProcessing) ? '#e5e7eb' : '#10b981', 
-                  color: (cart.length === 0 || isProcessing) ? '#9ca3af' : '#ffffff', 
+                  padding: '14px', 
+                  backgroundColor: (cart.length === 0 || isProcessing) ? '#e2e8f0' : '#10b981', 
+                  color: (cart.length === 0 || isProcessing) ? '#64748b' : '#ffffff', 
                   border: 'none', 
-                  borderRadius: '12px', 
+                  borderRadius: '10px', 
                   fontWeight: 'bold', 
-                  fontSize: '18px', 
+                  fontSize: '16px', 
                   cursor: (cart.length === 0 || isProcessing) ? 'not-allowed' : 'pointer',
                   boxShadow: '0 4px 12px rgba(16, 185, 129, 0.25)'
                 }}
@@ -1225,6 +1358,7 @@ export default function POSPage() {
                 value={customerSearchTerm} 
                 onChange={e => setCustomerSearchTerm(e.target.value)} 
                 style={{ flex: 1, padding: '8px', border: '1px solid transparent', fontSize: '16px', outline: 'none', color: '#0f172a', backgroundColor: 'transparent' }} 
+                className="mobile-input-field"
               />
               <button onClick={() => setIsCustomerModalOpen(false)} style={{ background: 'none', border: 'none', fontSize: '20px', color: '#94a3b8', cursor: 'pointer', padding: '0 8px' }}>✕</button>
             </div>
@@ -1264,16 +1398,16 @@ export default function POSPage() {
       {isCreateCustomerModalOpen && (
         <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 9999, display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '20px', boxSizing: 'border-box' }}>
           <div style={{ backgroundColor: '#ffffff', width: '100%', maxWidth: '400px', borderRadius: '12px', padding: '24px', boxShadow: '0 10px 25px rgba(0,0,0,0.15)' }}>
-            <h3 style={{ margin: '0 0 16px 0', color: '#4a3b1b', borderBottom: '1px solid #f3f4f6', paddingBottom: '10px' }}>Create New Customer</h3>
+            <h3 style={{ margin: '0 0 16px 0', color: '#334155', borderBottom: '1px solid #f1f5f9', paddingBottom: '10px', fontSize: '18px' }}>Create New Customer</h3>
             
             <div style={{ marginBottom: '16px' }}>
-              <label style={{ display: 'block', fontSize: '12px', fontWeight: 'bold', color: '#8a7650', marginBottom: '4px' }}>Name</label>
-              <input type="text" value={newCustomerForm.name} onChange={(e) => setNewCustomerForm({...newCustomerForm, name: e.target.value})} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #dcd7cc', boxSizing: 'border-box', color: '#0f172a', backgroundColor: '#ffffff', fontSize: '16px' }} />
+              <label style={{ display: 'block', fontSize: '12px', color: '#64748b', marginBottom: '4px' }}>Name</label>
+              <input type="text" value={newCustomerForm.name} onChange={(e) => setNewCustomerForm({...newCustomerForm, name: e.target.value})} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', color: '#334155', backgroundColor: '#ffffff' }} className="mobile-input-field" />
             </div>
 
             <div style={{ marginBottom: '16px' }}>
-              <label style={{ display: 'block', fontSize: '12px', fontWeight: 'bold', color: '#8a7650', marginBottom: '4px' }}>Account Owner</label>
-              <select value={newCustomerForm.owner} onChange={(e) => setNewCustomerForm({...newCustomerForm, owner: e.target.value})} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #dcd7cc', boxSizing: 'border-box', color: '#0f172a', backgroundColor: '#ffffff', outline: 'none', fontSize: '16px' }}>
+              <label style={{ display: 'block', fontSize: '12px', color: '#64748b', marginBottom: '4px' }}>Account Owner</label>
+              <select value={newCustomerForm.owner} onChange={(e) => setNewCustomerForm({...newCustomerForm, owner: e.target.value})} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', color: '#334155', backgroundColor: '#ffffff', outline: 'none' }} className="mobile-select-menu">
                 <option value="">-- Select --</option>
                 <option value="Pich">Pich</option>
                 <option value="Jing">Jing</option>
@@ -1283,8 +1417,8 @@ export default function POSPage() {
             </div>
 
             <div style={{ marginBottom: '16px' }}>
-              <label style={{ display: 'block', fontSize: '12px', fontWeight: 'bold', color: '#8a7650', marginBottom: '4px' }}>Customer Type</label>
-              <select value={newCustomerForm.type} onChange={(e) => setNewCustomerForm({...newCustomerForm, type: e.target.value})} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #dcd7cc', boxSizing: 'border-box', color: '#0f172a', backgroundColor: '#ffffff', outline: 'none', fontSize: '16px' }}>
+              <label style={{ display: 'block', fontSize: '12px', color: '#64748b', marginBottom: '4px' }}>Customer Type</label>
+              <select value={newCustomerForm.type} onChange={(e) => setNewCustomerForm({...newCustomerForm, type: e.target.value})} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', color: '#334155', backgroundColor: '#ffffff', outline: 'none' }} className="mobile-select-menu">
                 <option value="">-- Select --</option>
                 <option value="ហូប">ហូប</option>
                 <option value="លក់បាយ">លក់បាយ</option>
@@ -1294,18 +1428,18 @@ export default function POSPage() {
             </div>
 
             <div style={{ marginBottom: '16px' }}>
-              <label style={{ display: 'block', fontSize: '12px', fontWeight: 'bold', color: '#8a7650', marginBottom: '4px' }}>Location</label>
-              <input type="text" value={newCustomerForm.location} onChange={(e) => setNewCustomerForm({...newCustomerForm, location: e.target.value})} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #dcd7cc', boxSizing: 'border-box', color: '#0f172a', backgroundColor: '#ffffff', fontSize: '16px' }} />
+              <label style={{ display: 'block', fontSize: '12px', color: '#64748b', marginBottom: '4px' }}>Location</label>
+              <input type="text" value={newCustomerForm.location} onChange={(e) => setNewCustomerForm({...newCustomerForm, location: e.target.value})} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', color: '#334155', backgroundColor: '#ffffff' }} className="mobile-input-field" />
             </div>
             
             <div style={{ marginBottom: '24px' }}>
-              <label style={{ display: 'block', fontSize: '12px', fontWeight: 'bold', color: '#8a7650', marginBottom: '4px' }}>Phone Number</label>
-              <input type="text" value={newCustomerForm.phone} onChange={(e) => setNewCustomerForm({...newCustomerForm, phone: e.target.value})} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #dcd7cc', boxSizing: 'border-box', color: '#0f172a', backgroundColor: '#ffffff', fontSize: '16px' }} />
+              <label style={{ display: 'block', fontSize: '12px', color: '#64748b', marginBottom: '4px' }}>Phone Number</label>
+              <input type="text" value={newCustomerForm.phone} onChange={(e) => setNewCustomerForm({...newCustomerForm, phone: e.target.value})} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', color: '#334155', backgroundColor: '#ffffff' }} className="mobile-input-field" />
             </div>
             
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
-              <button onClick={() => setIsCreateCustomerModalOpen(false)} style={{ padding: '10px 16px', backgroundColor: '#f4f1ea', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', color: '#6b582f', fontSize: '14px' }}>Cancel</button>
-              <button onClick={handleCreateCustomer} style={{ padding: '10px 16px', backgroundColor: '#10b981', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', color: '#fff', fontSize: '14px' }}>Save Customer</button>
+              <button onClick={() => setIsCreateCustomerModalOpen(false)} style={{ padding: '10px 16px', backgroundColor: '#f1f5f9', border: 'none', borderRadius: '6px', cursor: 'pointer', color: '#64748b', fontSize: '14px' }}>Cancel</button>
+              <button onClick={handleCreateCustomer} style={{ padding: '10px 16px', backgroundColor: '#10b981', border: 'none', borderRadius: '6px', cursor: 'pointer', color: '#fff', fontSize: '14px' }}>Save Customer</button>
             </div>
           </div>
         </div>
@@ -1315,31 +1449,32 @@ export default function POSPage() {
       {exchangeModal.isOpen && exchangeModal.product && (
         <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 10000, display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '20px', boxSizing: 'border-box' }} onMouseDown={() => setExchangeModal({ isOpen: false, product: null, consumedKg: '' })}>
           <div style={{ backgroundColor: '#ffffff', width: '100%', maxWidth: '400px', borderRadius: '12px', padding: '24px', boxShadow: '0 10px 25px rgba(0,0,0,0.15)' }} onMouseDown={e => e.stopPropagation()}>
-            <h3 style={{ margin: '0 0 16px 0', color: '#4a3b1b', borderBottom: '1px solid #f3f4f6', paddingBottom: '10px' }}>🔄 Exchange / Return Bag</h3>
+            <h3 style={{ margin: '0 0 16px 0', color: '#334155', borderBottom: '1px solid #f1f5f9', paddingBottom: '10px', fontSize: '18px' }}>🔄 Exchange / Return Bag</h3>
             
             <div style={{ marginBottom: '16px' }}>
-              <label style={{ display: 'block', fontSize: '12px', fontWeight: 'bold', color: '#8a7650', marginBottom: '4px' }}>Product to Return</label>
-              <div style={{ padding: '10px', backgroundColor: '#f8fafc', border: '1px solid #cbd5e1', borderRadius: '6px', fontWeight: 'bold', color: '#0f172a' }}>{exchangeModal.product.name}</div>
+              <label style={{ display: 'block', fontSize: '12px', color: '#64748b', marginBottom: '4px' }}>Product to Return</label>
+              <div style={{ padding: '10px', backgroundColor: '#f8fafc', border: '1px solid #cbd5e1', borderRadius: '6px', color: '#334155' }}>{exchangeModal.product.name}</div>
             </div>
 
             <div style={{ marginBottom: '24px' }}>
-              <label style={{ display: 'block', fontSize: '12px', fontWeight: 'bold', color: '#8a7650', marginBottom: '4px' }}>How many kg were consumed?</label>
+              <label style={{ display: 'block', fontSize: '12px', color: '#64748b', marginBottom: '4px' }}>How many kg were consumed?</label>
               <CurrencyInput
                 autoFocus
                 placeholder="e.g. 15"
                 value={exchangeModal.consumedKg}
                 onChange={(v: any) => setExchangeModal({ ...exchangeModal, consumedKg: v })}
-                style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #dcd7cc', boxSizing: 'border-box', color: '#0f172a', backgroundColor: '#ffffff', fontWeight: 'normal', fontSize: '16px' }}
+                style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', backgroundColor: '#ffffff' }}
+                className="mobile-input-field"
               />
-              <p style={{ fontSize: '11px', color: '#64748b', marginTop: '6px', lineHeight: 1.4 }}>
+              <p style={{ fontSize: '11px', color: '#94a3b8', marginTop: '6px', lineHeight: 1.4 }}>
                 * Enter 0 if the bag is fully intact and unopened.<br/>
                 * The consumed amount will be added to the cart and properly tracked for profit.
               </p>
             </div>
 
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
-              <button onClick={() => setExchangeModal({ isOpen: false, product: null, consumedKg: '' })} style={{ padding: '10px 16px', backgroundColor: '#f4f1ea', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', color: '#6b582f', fontSize: '14px' }}>Cancel</button>
-              <button onClick={handleConfirmExchange} style={{ padding: '10px 16px', backgroundColor: '#ef4444', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', color: '#fff', fontSize: '14px' }}>Confirm Return</button>
+              <button onClick={() => setExchangeModal({ isOpen: false, product: null, consumedKg: '' })} style={{ padding: '10px 16px', backgroundColor: '#f1f5f9', border: 'none', borderRadius: '6px', cursor: 'pointer', color: '#64748b', fontSize: '14px' }}>Cancel</button>
+              <button onClick={handleConfirmExchange} style={{ padding: '10px 16px', backgroundColor: '#ef4444', border: 'none', borderRadius: '6px', cursor: 'pointer', color: '#fff', fontSize: '14px' }}>Confirm Return</button>
             </div>
           </div>
         </div>
@@ -1347,26 +1482,26 @@ export default function POSPage() {
 
       {/* MOBILE PRODUCT ADD POPUP */}
       {selectedMobileProduct && (
-        <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 9999, display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '20px', boxSizing: 'border-box' }}>
-          <div style={{ backgroundColor: '#ffffff', width: '100%', maxWidth: '400px', borderRadius: '12px', padding: '24px', boxShadow: '0 10px 25px rgba(0,0,0,0.15)' }}>
-            <h3 style={{ margin: '0 0 16px 0', color: '#4a3b1b', borderBottom: '1px solid #f3f4f6', paddingBottom: '10px' }}>{currentT.mobileModalTitle}</h3>
+        <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 9999, display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '20px', boxSizing: 'border-box' }} onMouseDown={() => setSelectedMobileProduct(null)}>
+          <div style={{ backgroundColor: '#ffffff', width: '100%', maxWidth: '400px', borderRadius: '12px', padding: '24px', boxShadow: '0 10px 25px rgba(0,0,0,0.15)' }} onMouseDown={e => e.stopPropagation()}>
+            <h3 style={{ margin: '0 0 16px 0', color: '#334155', borderBottom: '1px solid #f1f5f9', paddingBottom: '10px', fontSize: '18px' }}>{currentT.mobileModalTitle}</h3>
             <div style={{ marginBottom: '16px' }}>
-              <label style={{ display: 'block', fontSize: '12px', fontWeight: 'bold', color: '#8a7650', marginBottom: '4px' }}>Product Identifier</label>
-              <input type="text" value={mobileName} onChange={(e) => setMobileName(e.target.value)} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #dcd7cc', boxSizing: 'border-box', color: '#0f172a', backgroundColor: '#ffffff', fontSize: '16px', fontWeight: 'normal' }} />
+              <label style={{ display: 'block', fontSize: '12px', color: '#64748b', marginBottom: '4px' }}>Product Identifier</label>
+              <input type="text" value={mobileName} onChange={(e) => setMobileName(e.target.value)} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', color: '#334155', backgroundColor: '#ffffff' }} className="mobile-input-field" />
             </div>
             <div style={{ display: 'flex', gap: '12px', marginBottom: '20px' }}>
               <div style={{ flex: 1 }}>
-                <label style={{ display: 'block', fontSize: '12px', fontWeight: 'normal', color: '#8a7650', marginBottom: '4px' }}>Price (៛)</label>
-                <CurrencyInput value={mobilePrice} onChange={(v: any) => setMobilePrice(v)} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #dcd7cc', boxSizing: 'border-box', color: '#0f172a', backgroundColor: '#ffffff', fontWeight: 'normal', fontSize: '16px' }} />
+                <label style={{ display: 'block', fontSize: '12px', color: '#64748b', marginBottom: '4px' }}>Price (៛)</label>
+                <CurrencyInput value={mobilePrice} onChange={(v: any) => setMobilePrice(v)} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', color: '#334155', backgroundColor: '#ffffff' }} className="mobile-input-field" />
               </div>
               <div style={{ flex: 1 }}>
-                <label style={{ display: 'block', fontSize: '12px', fontWeight: 'normal', color: '#8a7650', marginBottom: '4px' }}>Quantity</label>
-                <CurrencyInput value={mobileQty} onChange={(v: any) => setMobileQty(v)} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #dcd7cc', boxSizing: 'border-box', color: '#0f172a', backgroundColor: '#ffffff', fontWeight: 'normal', fontSize: '16px' }} />
+                <label style={{ display: 'block', fontSize: '12px', color: '#64748b', marginBottom: '4px' }}>Quantity</label>
+                <CurrencyInput value={mobileQty} onChange={(v: any) => setMobileQty(v)} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', color: '#334155', backgroundColor: '#ffffff' }} className="mobile-input-field" />
               </div>
             </div>
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
-              <button onClick={() => setSelectedMobileProduct(null)} style={{ padding: '10px 16px', backgroundColor: '#f4f1ea', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', color: '#6b582f', fontSize: '14px' }}>{currentT.cancel}</button>
-              <button onClick={handleAddMobileProductToCart} style={{ padding: '10px 16px', backgroundColor: '#b58a3d', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', color: '#fff', fontSize: '14px' }}>{currentT.add}</button>
+              <button onClick={() => setSelectedMobileProduct(null)} style={{ padding: '10px 16px', backgroundColor: '#f1f5f9', border: 'none', borderRadius: '6px', cursor: 'pointer', color: '#64748b', fontSize: '14px' }}>{currentT.cancel}</button>
+              <button onClick={handleAddMobileProductToCart} style={{ padding: '10px 16px', backgroundColor: '#b58a3d', border: 'none', borderRadius: '6px', cursor: 'pointer', color: '#fff', fontSize: '14px' }}>{currentT.add}</button>
             </div>
           </div>
         </div>
@@ -1377,56 +1512,56 @@ export default function POSPage() {
       {saleSummary && (
         <div className="modal-overlay" style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(0,0,0,0.85)', zIndex: 10005, display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '20px', boxSizing: 'border-box' }}>
           <div className="modal-content" style={{ backgroundColor: '#ffffff', width: '100%', maxWidth: '400px', borderRadius: '16px', padding: '30px', boxShadow: '0 10px 25px rgba(0,0,0,0.2)' }}>
-            <h2 style={{ marginTop: 0, color: saleSummary.isDebt ? '#d97706' : '#10b981', fontSize: '24px', marginBottom: '8px', textAlign: 'center' }}>
+            <h2 style={{ marginTop: 0, color: saleSummary.isDebt ? '#d97706' : '#10b981', fontSize: '20px', marginBottom: '8px', textAlign: 'center' }}>
               {saleSummary.isCashless ? 'Sale Recorded! ✅' : saleSummary.isDebt ? 'Partial Payment Logged ⏳' : 'Sale Complete! ✅'}
             </h2>
               
             <div style={{ background: '#f8fafc', padding: '24px', borderRadius: '12px', margin: '20px 0', border: '1px solid #e2e8f0' }}>
               {saleSummary.isCashless ? (
                 <>
-                  <div style={{ fontSize: '13px', color: '#64748b', marginBottom: '12px', textTransform: 'uppercase', fontWeight: 'bold', textAlign: 'center' }}>Items Description Formula</div>
+                  <div style={{ fontSize: '11px', color: '#64748b', marginBottom: '12px', textTransform: 'uppercase', textAlign: 'center' }}>Items Description Formula</div>
                   <div style={{ maxHeight: '150px', overflowY: 'auto', marginBottom: '12px' }}>
                     {saleSummary.items?.map((item: any, idx: number) => (
-                      <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px', fontSize: '14px', color: '#334155' }}>
+                      <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px', fontSize: '13px', color: '#334155' }}>
                         <span>{item.custom_name}</span>
-                        <span style={{ fontWeight: 'bold' }}>x{item.quantity}</span>
+                        <span>x{item.quantity}</span>
                       </div>
                     ))}
                   </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px dashed #cbd5e1', paddingTop: '16px', marginTop: '16px', fontSize: '16px' }}>
-                    <span style={{ color: '#64748b', fontWeight: 'bold' }}>Total Sale:</span>
-                    <span style={{ color: saleSummary.total < 0 ? '#ef4444' : '#10b981', fontWeight: 'bold' }}>{formatRielFromNative(saleSummary.total)}</span>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px dashed #cbd5e1', paddingTop: '16px', marginTop: '16px', fontSize: '14px' }}>
+                    <span style={{ color: '#64748b' }}>Total Sale:</span>
+                    <span style={{ color: saleSummary.total < 0 ? '#ef4444' : '#10b981' }}>{formatRielFromNative(saleSummary.total)}</span>
                   </div>
                 </>
               ) : (
                 <>
                   {saleSummary.change > 0 && (
                     <>
-                      <div style={{ fontSize: '14px', color: '#64748b', marginBottom: '4px', textTransform: 'uppercase', fontWeight: 'bold', textAlign: 'center' }}>Change Due</div>
-                      <div style={{ fontSize: '36px', fontWeight: 'bold', color: '#ef4444', marginBottom: '16px', textAlign: 'center' }}>{formatRielFromNative(saleSummary.change)}</div>
+                      <div style={{ fontSize: '12px', color: '#64748b', marginBottom: '4px', textTransform: 'uppercase', textAlign: 'center' }}>Change Due</div>
+                      <div style={{ fontSize: '32px', color: '#ef4444', marginBottom: '16px', textAlign: 'center' }}>{formatRielFromNative(saleSummary.change)}</div>
                     </>
                   )}
 
                   {saleSummary.isDebt && (
                     <>
-                      <div style={{ fontSize: '14px', color: '#64748b', marginBottom: '4px', textTransform: 'uppercase', fontWeight: 'bold', textAlign: 'center' }}>Remaining Debt</div>
-                      <div style={{ fontSize: '36px', fontWeight: 'bold', color: '#d97706', marginBottom: '16px', textAlign: 'center' }}>{formatRielFromNative(saleSummary.total - saleSummary.totalReceivedInRiel)}</div>
+                      <div style={{ fontSize: '12px', color: '#64748b', marginBottom: '4px', textTransform: 'uppercase', textAlign: 'center' }}>Remaining Debt</div>
+                      <div style={{ fontSize: '32px', color: '#d97706', marginBottom: '16px', textAlign: 'center' }}>{formatRielFromNative(saleSummary.total - saleSummary.totalReceivedInRiel)}</div>
                     </>
                   )}
                     
-                  <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px dashed #cbd5e1', paddingTop: '16px', fontSize: '14px' }}>
-                    <span style={{ color: '#64748b', fontWeight: 'bold' }}>Total Due:</span>
-                    <span style={{ color: '#0f172a', fontWeight: 'bold' }}>{formatRielFromNative(saleSummary.total)}</span>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px dashed #cbd5e1', paddingTop: '16px', fontSize: '13px' }}>
+                    <span style={{ color: '#64748b' }}>Total Due:</span>
+                    <span style={{ color: '#334155' }}>{formatRielFromNative(saleSummary.total)}</span>
                   </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '8px', fontSize: '14px' }}>
-                    <span style={{ color: '#64748b', fontWeight: 'bold' }}>Total Received:</span>
-                    <span style={{ color: '#0f172a', fontWeight: 'bold' }}>{formatRielFromNative(saleSummary.totalReceivedInRiel)}</span>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '8px', fontSize: '13px' }}>
+                    <span style={{ color: '#64748b' }}>Total Received:</span>
+                    <span style={{ color: '#334155' }}>{formatRielFromNative(saleSummary.totalReceivedInRiel)}</span>
                   </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '4px', fontSize: '12px', color: '#64748b' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '4px', fontSize: '12px', color: '#94a3b8' }}>
                     <span>↳ Cash:</span>
                     <span>{formatRielFromNative(saleSummary.receivedRiel)}</span>
                   </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '4px', fontSize: '12px', color: '#64748b' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '4px', fontSize: '12px', color: '#94a3b8' }}>
                     <span>↳ QR:</span>
                     <span>{formatRielFromNative(saleSummary.receivedUsd)}</span>
                   </div>
@@ -1435,17 +1570,17 @@ export default function POSPage() {
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-              <button onClick={() => { setSaleSummary(null); setCompletedSale(null); setPreviewImageUrl(null); setShowInvoicePreview(false); }} style={{ width: '100%', padding: '16px', background: '#ef4444', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', fontSize: '16px' }}>
-                 ❌ Close
+              <button onClick={() => { setSaleSummary(null); setCompletedSale(null); setPreviewImageUrl(null); setShowInvoicePreview(false); }} style={{ width: '100%', padding: '16px', background: '#f1f5f9', color: '#475569', border: 'none', borderRadius: '8px', cursor: 'pointer', fontSize: '14px' }}>
+                 Close
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* FINAL INVISIBLE DOM CAPTURE AREA - Positioned fixed to viewport to guarantee mobile HTML-to-Image rendering! */}
+      {/* FINAL INVISIBLE DOM CAPTURE AREA */}
       {completedSale && showInvoicePreview && (
-        <div style={{ position: 'fixed', top: '-5000px', left: 0, zIndex: -100, opacity: 1, pointerEvents: 'none' }}>
+        <div style={{ position: 'absolute', top: '-10000px', left: '-10000px', zIndex: -1 }}>
           <div id="invoice-capture-area" ref={invoiceRef} style={{ width: '794px', height: '559px', backgroundColor: '#ffffff', position: 'relative', margin: 0, padding: '19px', boxSizing: 'border-box', fontFamily: "'Noto Sans Khmer', Arial, sans-serif", fontSize: '12.8px', color: '#000000', overflow: 'hidden' }}>
             <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Khmer&display=swap" rel="stylesheet" crossOrigin="anonymous" />
             
@@ -1578,22 +1713,22 @@ export default function POSPage() {
         <div className="invoice-modal-overlay" style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(0,0,0,0.85)', zIndex: 10006, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
           
           <div className="invoice-controls" style={{ display: 'flex', justifyContent: 'space-between', width: '100%', maxWidth: '850px', marginBottom: '16px', padding: '0 20px' }}>
-            <button onClick={() => { setShowInvoicePreview(false); setCompletedSale(null); setPreviewImageUrl(null); }} style={{ backgroundColor: '#dc2626', color: '#fff', border: 'none', padding: '10px 20px', borderRadius: '8px', fontSize: '16px', fontWeight: 'bold', cursor: 'pointer' }}>{currentT.close}</button>
+            <button onClick={() => { setShowInvoicePreview(false); setCompletedSale(null); setPreviewImageUrl(null); }} style={{ backgroundColor: '#dc2626', color: '#fff', border: 'none', padding: '10px 20px', borderRadius: '8px', fontSize: '16px', cursor: 'pointer' }}>{currentT.close}</button>
             
             <div className="desktop-controls" style={{ display: 'none', gap: '10px' }}>
-              <button onClick={handleDesktopDownloadPNG} disabled={!previewImageUrl} style={{ backgroundColor: '#f59e0b', color: '#fff', border: 'none', padding: '10px 20px', borderRadius: '8px', fontSize: '16px', fontWeight: 'bold', cursor: 'pointer' }}>{currentT.openInvoice}</button>
-              <button onClick={handleNativePrint} style={{ backgroundColor: '#3b82f6', color: '#fff', border: 'none', padding: '10px 20px', borderRadius: '8px', fontSize: '16px', fontWeight: 'bold', cursor: 'pointer' }}>🖨️ Print / PDF</button>
+              <button onClick={handleDesktopDownloadPNG} disabled={!previewImageUrl} style={{ backgroundColor: '#f59e0b', color: '#fff', border: 'none', padding: '10px 20px', borderRadius: '8px', fontSize: '16px', cursor: 'pointer' }}>{currentT.openInvoice}</button>
+              <button onClick={handleNativePrint} style={{ backgroundColor: '#3b82f6', color: '#fff', border: 'none', padding: '10px 20px', borderRadius: '8px', fontSize: '16px', cursor: 'pointer' }}>🖨️ Print / PDF</button>
             </div>
 
             <div className="mobile-controls" style={{ display: 'flex', gap: '10px' }}>
-              <button onClick={handleMobileShare} disabled={!previewImageUrl} style={{ backgroundColor: '#3b82f6', color: '#fff', border: 'none', padding: '10px 16px', borderRadius: '8px', fontSize: '14px', fontWeight: 'bold', cursor: 'pointer' }}>{currentT.shareInvoice}</button>
-              <button onClick={handleNativePrint} style={{ backgroundColor: '#10b981', color: '#fff', border: 'none', padding: '10px 16px', borderRadius: '8px', fontSize: '14px', fontWeight: 'bold', cursor: 'pointer' }}>🖨️ Print</button>
+              <button onClick={handleMobileShare} disabled={!previewImageUrl} style={{ backgroundColor: '#3b82f6', color: '#fff', border: 'none', padding: '10px 16px', borderRadius: '8px', fontSize: '14px', cursor: 'pointer' }}>{currentT.shareInvoice}</button>
+              <button onClick={handleNativePrint} style={{ backgroundColor: '#10b981', color: '#fff', border: 'none', padding: '10px 16px', borderRadius: '8px', fontSize: '14px', cursor: 'pointer' }}>🖨️ Print</button>
             </div>
           </div>
 
           <div className="invoice-preview-container" style={{ width: '100%', maxWidth: '850px', padding: '0 10px', display: 'flex', justifyContent: 'center' }}>
             {isGeneratingPreview || !previewImageUrl ? (
-              <div style={{ padding: '40px', backgroundColor: '#fff', borderRadius: '8px', color: '#4a3b1b', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <div style={{ padding: '40px', backgroundColor: '#fff', borderRadius: '8px', color: '#334155', display: 'flex', alignItems: 'center', gap: '12px' }}>
                 <span style={{ fontSize: '24px' }}>⏳</span> Generating High-Resolution Invoice...
               </div>
             ) : (
@@ -1603,25 +1738,57 @@ export default function POSPage() {
         </div>
       )}
 
-      <style dangerouslySetInnerHTML={{ __html: `
+      <style jsx global>{`
+        input, select, button, textarea {
+          font-family: inherit;
+          font-variant-numeric: tabular-nums lining-nums;
+        }
+        
+        body {
+          font-variant-numeric: tabular-nums lining-nums;
+        }
+
         .main-wrapper { 
           padding: 24px 24px 24px 75px; 
           background: #f8fafc; 
           font-family: Arial, sans-serif; 
           box-sizing: border-box; 
           color: #333;
+          min-height: 100dvh;
         }
         .header-container { 
           margin-bottom: 24px; 
           display: flex;
           justify-content: space-between;
           align-items: center;
+          flex-wrap: wrap; 
+          gap: 12px;
+        }
+        .header-left {
+          display: flex;
+          flex-direction: row;
+          align-items: center;
+          gap: 16px;
         }
         .page-title { 
           font-size: 24px; 
-          font-weight: bold; 
-          color: #4a3b1b; 
+          color: #8a7650; 
           margin: 0; 
+          font-weight: 800;
+          letter-spacing: -0.5px;
+          min-width: 0;
+          white-space: normal;
+          word-break: break-word;
+        }
+        .date-time-badge {
+          display: inline-block;
+          padding: 6px 14px;
+          background-color: #f1f5f9;
+          color: #3b82f6;
+          border-radius: 20px;
+          font-size: 13px;
+          font-weight: 700;
+          border: 1px solid #e2e8f0;
         }
 
         input[type="text"].no-spinners::-webkit-inner-spin-button,
@@ -1659,14 +1826,22 @@ export default function POSPage() {
         @media (max-width: 1023px) { 
           .desktop-controls { display: none !important; }
           .desktop-cart-panel { display: none !important; }
+          
           .main-wrapper { 
-            padding: 85px 16px 140px 16px !important; 
+            padding: max(80px, env(safe-area-inset-top, 80px)) 16px 140px 16px !important; 
             min-height: auto;
           }
           .header-container {
             flex-direction: column !important;
-            align-items: flex-start !important;
-            gap: 12px !important;
+            align-items: center !important;
+            gap: 16px !important;
+            margin-bottom: 24px !important;
+          }
+          .header-left {
+            flex-direction: column !important;
+            align-items: center;
+            text-align: center;
+            gap: 6px;
           }
           .mobile-fab {
             display: flex !important; 
@@ -1684,8 +1859,11 @@ export default function POSPage() {
             z-index: 998; 
             cursor: pointer;
           }
+          .mobile-input-field, .mobile-select-menu {
+            font-size: 16px !important; /* Neutralizes Safari Zoom */
+          }
         }
-      `}} />
+      `}</style>
     </div>
   )
 }

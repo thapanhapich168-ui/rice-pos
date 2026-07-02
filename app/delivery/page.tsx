@@ -6,16 +6,17 @@ import { supabase } from '@/lib/supabaseClient'
 const EXCHANGE_RATE = 4000;
 
 const formatRiel = (amount: number) => `${new Intl.NumberFormat('en-US').format(Math.round(amount))} ៛`;
-const formatUSD = (amount: number) => `$${new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(amount)}`;
+
+type PaymentRow = { id: number, method: string, amount: number | '' };
 
 // ==========================================
-// ROBUST LIVE COMMA FORMATTER 
+// ROBUST LIVE COMMA FORMATTER (With Enter Support)
 // ==========================================
-function CurrencyInput({ value, onChange, placeholder, style, autoFocus }: any) {
+function CurrencyInput({ value, onChange, placeholder, style, autoFocus, onEnter, onBlurCustom }: any) {
   const [inputValue, setInputValue] = useState('');
 
   useEffect(() => {
-    if (value === '' || value === 0) {
+    if (value === '' || value === undefined) {
       setInputValue('');
     } else {
       const parsed = parseFloat(inputValue.replace(/,/g, ''));
@@ -27,7 +28,6 @@ function CurrencyInput({ value, onChange, placeholder, style, autoFocus }: any) 
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     let raw = e.target.value.replace(/[^0-9.]/g, '');
-    
     const parts = raw.split('.');
     if (parts.length > 2) raw = parts[0] + '.' + parts.slice(1).join('');
 
@@ -48,7 +48,21 @@ function CurrencyInput({ value, onChange, placeholder, style, autoFocus }: any) 
       value={inputValue}
       onChange={handleChange}
       autoFocus={autoFocus}
-      style={{ ...style, color: '#334155', fontWeight: 'normal', fontSize: '16px' }}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') {
+          e.currentTarget.blur();
+          if (onEnter) onEnter();
+        }
+      }}
+      onBlur={() => {
+        if (onBlurCustom) onBlurCustom();
+        setTimeout(() => {
+          window.scrollTo(0, 0);
+          document.body.scrollTop = 0;
+        }, 100);
+      }}
+      style={{ ...style, color: '#000000', fontWeight: 'normal' }}
+      className="mobile-input-field"
     />
   )
 }
@@ -58,22 +72,9 @@ export default function DeliveryPage() {
   const [loading, setLoading] = useState(true)
   const [activeTab, setActiveTab] = useState<'delivery' | 'credit'>('delivery')
   
-  // Unified Split Payment Modal State
-  const [paymentModal, setPaymentModal] = useState<{ 
-    isOpen: boolean, 
-    mode: 'single' | 'batch', 
-    record: any, 
-    customerName: string, 
-    totalDue: number, 
-    invoices: any[] 
-  }>({ 
-    isOpen: false, mode: 'single', record: null, customerName: '', totalDue: 0, invoices: [] 
-  })
-
-  // Dynamic Payment Rows for the Modal
-  const [paymentRows, setPaymentRows] = useState<{id: number, method: string, amount: number | ''}[]>([
-    { id: Date.now(), method: 'Cash ៛', amount: '' }
-  ]);
+  // DYNAMIC SPLIT PAYMENT STATES
+  const [inlinePayments, setInlinePayments] = useState<Record<string, PaymentRow[]>>({})
+  const [creditPayments, setCreditPayments] = useState<Record<string, PaymentRow[]>>({})
 
   const [isProcessing, setIsProcessing] = useState(false);
 
@@ -105,88 +106,232 @@ export default function DeliveryPage() {
     }
   }
 
-  // --- OPEN PAYMENT MODAL ---
-  const handleOpenPayment = (mode: 'single' | 'batch', data: any) => {
-    if (mode === 'single') {
-      const balanceDue = Number(data.balance_due) || 0;
-      setPaymentModal({ isOpen: true, mode: 'single', record: data, customerName: data.customer_name, totalDue: balanceDue, invoices: [data] });
-    } else {
-      setPaymentModal({ isOpen: true, mode: 'batch', record: null, customerName: data.name, totalDue: data.totalOwed, invoices: data.invoices });
-    }
-    setPaymentRows([{ id: Date.now(), method: 'Cash ៛', amount: '' }]);
+  // --- SPLIT STATE MANAGERS (INLINE) ---
+  const getInlinePaymentState = (invId: string, balanceDue: number) => {
+    return inlinePayments[invId] || [{ id: 1, method: 'Cash ៛', amount: balanceDue }];
   }
 
-  // --- PROCESS SPLIT PAYMENT ---
-  async function handleProcessPayment() {
+  const updateInlineRow = (invId: string, rowId: number, field: string, value: any, balanceDue: number) => {
+    setInlinePayments(prev => {
+      const rows = prev[invId] ? [...prev[invId]] : [{ id: 1, method: 'Cash ៛', amount: balanceDue }];
+      const newRows = rows.map(r => r.id === rowId ? { ...r, [field]: value } : r);
+      return { ...prev, [invId]: newRows };
+    });
+  }
+
+  const addInlineSplit = (invId: string, balanceDue: number) => {
+    setInlinePayments(prev => {
+      const rows = prev[invId] ? [...prev[invId]] : [{ id: 1, method: 'Cash ៛', amount: balanceDue }];
+      return { ...prev, [invId]: [...rows, { id: Date.now(), method: 'Cash ៛', amount: '' }] };
+    });
+  }
+
+  const removeInlineSplit = (invId: string, rowId: number, balanceDue: number) => {
+    setInlinePayments(prev => {
+      const rows = prev[invId] ? [...prev[invId]] : [{ id: 1, method: 'Cash ៛', amount: balanceDue }];
+      return { ...prev, [invId]: rows.filter(r => r.id !== rowId) };
+    });
+  }
+
+  // --- PROCESS INLINE DELIVERY PAYMENT ---
+  async function handleInlineProcess(d: any, rows: PaymentRow[]) {
+    if (isProcessing) return;
+
+    let totalRielEq = 0;
+    let totalUsdFace = 0;
+    let totalRielFace = 0;
+    let methodStrings: string[] = [];
+
+    for (const r of rows) {
+      const amt = Number(r.amount) || 0;
+      if (amt <= 0) continue;
+      
+      if (r.method.includes('$')) {
+        totalRielEq += (amt * EXCHANGE_RATE);
+        totalUsdFace += amt;
+      } else {
+        totalRielEq += amt;
+        totalRielFace += amt;
+      }
+      methodStrings.push(`${r.method}: ${amt}`);
+    }
+
+    if (totalRielEq <= 0) return;
+    if (totalRielEq > d.balance_due + 0.1) return alert('Cannot pay more than the balance due.');
+
     setIsProcessing(true);
 
-    const activePayments = paymentRows.filter(r => (Number(r.amount) || 0) > 0);
-    if (activePayments.length === 0) {
-      alert('Please enter at least one payment amount.');
-      setIsProcessing(false);
-      return;
-    }
-
-    const totalReceivedInRiel = activePayments.reduce((sum, row) => {
-      const amt = Number(row.amount) || 0;
-      return row.method.includes('$') ? sum + (amt * EXCHANGE_RATE) : sum + amt;
-    }, 0);
-
-    if (totalReceivedInRiel > paymentModal.totalDue) {
-      alert('Payment cannot exceed the total remaining balance.');
-      setIsProcessing(false);
-      return;
-    }
-
-    const invoiceIds = paymentModal.invoices.map(inv => inv.invoice_id);
-    const paymentMethodString = activePayments.map(r => `${r.method}: ${r.amount}`).join(', ');
-
     try {
-      // 1. Log Financial Transactions (One row per payment method used)
-      for (const row of activePayments) {
-        let amountRiel = Number(row.amount);
-        if (row.method.includes('$')) amountRiel = amountRiel * EXCHANGE_RATE;
+      const validSpender = ['Pich', 'Jing'].includes(d.owner) ? d.owner : 'Both';
 
-        await supabase.from('expenses').insert([{
-          expense_date: new Date().toISOString().split('T')[0],
-          spender: 'Business',
-          payment_method: row.method, // Cash ៛, QR $, Mom QR $, etc.
-          remarks: `Payment from ${paymentModal.customerName} (Inv: ${invoiceIds.length > 1 ? 'Multiple' : invoiceIds[0]})`,
-          amount: 0,
-          amount_riel: amountRiel,
-          description: 'BUSINESS'
-        }]);
-      }
+      const { error: expError } = await supabase.from('expenses').insert([{
+        expense_date: new Date().toISOString().split('T')[0],
+        spender: validSpender,
+        payment_method: methodStrings.join(', '),
+        remarks: `Payment from ${d.customer_name} (Inv: ${d.invoice_id})`,
+        amount: totalUsdFace > 0 ? -Math.abs(totalUsdFace) : 0,
+        amount_riel: totalRielFace > 0 ? -Math.abs(totalRielFace) : 0,
+        description: 'BUSINESS'
+      }]);
 
-      // 2. Distribute payment across invoices (simplest logic: mark them paid if exact, or distribute if partial)
-      // For simplicity in a batch scenario, we reduce the balance sequentially
-      let remainingPaymentToDistribute = totalReceivedInRiel;
+      if (expError) throw new Error("Failed to log income: " + expError.message);
+
+      const newBalance = d.balance_due - totalRielEq;
+      let newPaymentMethodStr = d.payment_method;
       
-      for (const inv of paymentModal.invoices) {
-        if (remainingPaymentToDistribute <= 0) break;
-        
-        let invBalance = Number(inv.balance_due) || 0;
-        let amountToApply = Math.min(invBalance, remainingPaymentToDistribute);
-        let newBalance = invBalance - amountToApply;
+      newPaymentMethodStr = d.payment_method && d.payment_method !== '-' && d.payment_method !== 'Unpaid / Debt'
+          ? `${d.payment_method}, ${methodStrings.join(', ')}`
+          : methodStrings.join(', ');
 
-        let finalStatus = newBalance <= 0 ? 'Delivered' : 'Pending';
+      const isDone = newBalance <= 0;
 
-        await supabase.from('invoice_summaries')
-          .update({ 
-            balance_due: newBalance, 
-            payment_method: paymentMethodString,
-            delivery_status: paymentModal.mode === 'single' ? inv.delivery_status : finalStatus 
-          })
-          .eq('invoice_id', inv.invoice_id);
+      setDeliveries(prev => prev.map(inv => inv.invoice_id === d.invoice_id ? {
+        ...inv,
+        balance_due: newBalance,
+        payment_method: newPaymentMethodStr,
+        is_done: isDone,
+        delivery_status: isDone ? 'Delivered' : d.delivery_status
+      } : inv));
+      
+      setInlinePayments(prev => { const n = {...prev}; delete n[d.invoice_id]; return n; });
 
-        remainingPaymentToDistribute -= amountToApply;
-      }
-
-      setPaymentModal({ isOpen: false, mode: 'single', record: null, customerName: '', totalDue: 0, invoices: [] });
-      fetchDeliveries();
+      await supabase.from('invoice_summaries')
+        .update({
+            balance_due: newBalance,
+            payment_method: newPaymentMethodStr,
+            is_done: isDone,
+            delivery_status: isDone ? 'Delivered' : d.delivery_status
+        })
+        .eq('invoice_id', d.invoice_id);
 
     } catch (error: any) {
       alert(`Error processing payment: ${error.message}`);
+      fetchDeliveries(); 
+    } finally {
+      setIsProcessing(false);
+    }
+  }
+
+  // --- SPLIT STATE MANAGERS (CREDIT) ---
+  const getCreditPaymentState = (uniqueKey: string, totalOwed: number) => {
+    return creditPayments[uniqueKey] || [{ id: 1, method: 'Cash ៛', amount: totalOwed }];
+  }
+
+  const updateCreditRow = (uniqueKey: string, rowId: number, field: string, value: any, totalOwed: number) => {
+    setCreditPayments(prev => {
+      const rows = prev[uniqueKey] ? [...prev[uniqueKey]] : [{ id: 1, method: 'Cash ៛', amount: totalOwed }];
+      const newRows = rows.map(r => r.id === rowId ? { ...r, [field]: value } : r);
+      return { ...prev, [uniqueKey]: newRows };
+    });
+  }
+
+  const addCreditSplit = (uniqueKey: string, totalOwed: number) => {
+    setCreditPayments(prev => {
+      const rows = prev[uniqueKey] ? [...prev[uniqueKey]] : [{ id: 1, method: 'Cash ៛', amount: totalOwed }];
+      return { ...prev, [uniqueKey]: [...rows, { id: Date.now(), method: 'Cash ៛', amount: '' }] };
+    });
+  }
+
+  const removeCreditSplit = (uniqueKey: string, rowId: number, totalOwed: number) => {
+    setCreditPayments(prev => {
+      const rows = prev[uniqueKey] ? [...prev[uniqueKey]] : [{ id: 1, method: 'Cash ៛', amount: totalOwed }];
+      return { ...prev, [uniqueKey]: rows.filter(r => r.id !== rowId) };
+    });
+  }
+
+  // --- PROCESS CREDIT PAYMENT ---
+  async function handleProcessCreditPayment(debtor: any, rows: PaymentRow[]) {
+    if (isProcessing) return;
+
+    let totalRielEq = 0;
+    let totalUsdFace = 0;
+    let totalRielFace = 0;
+    let methodStrings: string[] = [];
+
+    for (const r of rows) {
+      const amt = Number(r.amount) || 0;
+      if (amt <= 0) continue;
+      
+      if (r.method.includes('$')) {
+        totalRielEq += (amt * EXCHANGE_RATE);
+        totalUsdFace += amt;
+      } else {
+        totalRielEq += amt;
+        totalRielFace += amt;
+      }
+      methodStrings.push(`${r.method}: ${amt}`);
+    }
+
+    if (totalRielEq <= 0) return;
+    if (totalRielEq > debtor.totalOwed + 0.1) return alert('Cannot pay more than the total remaining debt.');
+
+    setIsProcessing(true);
+
+    try {
+      const validSpender = ['Pich', 'Jing'].includes(debtor.owner) ? debtor.owner : 'Both';
+
+      const { error: expError } = await supabase.from('expenses').insert([{
+        expense_date: new Date().toISOString().split('T')[0],
+        spender: validSpender,
+        payment_method: methodStrings.join(', '),
+        remarks: `Payment from ${debtor.name} (${debtor.invoices.length} Invoices)`,
+        amount: totalUsdFace > 0 ? -Math.abs(totalUsdFace) : 0,
+        amount_riel: totalRielFace > 0 ? -Math.abs(totalRielFace) : 0,
+        description: 'BUSINESS'
+      }]);
+
+      if (expError) throw new Error("Failed to log income: " + expError.message);
+
+      let remainingToDistribute = totalRielEq;
+      const updatedInvoices = [];
+      
+      for (const inv of debtor.invoices) {
+        if (remainingToDistribute <= 0) break;
+        
+        let invBalance = Number(inv.balance_due) || 0;
+        let amountToApply = Math.min(invBalance, remainingToDistribute);
+        let newBalance = invBalance - amountToApply;
+
+        let newPaymentMethodStr = inv.payment_method;
+        const appliedStr = methodStrings.length === 1 ? `${rows[0].method}: ${amountToApply}` : `Split Payment applied: ${amountToApply}`;
+
+        if (inv.payment_method && inv.payment_method !== '-' && inv.payment_method !== 'Unpaid / Debt') {
+           newPaymentMethodStr = `${inv.payment_method}, ${appliedStr}`;
+        } else {
+           newPaymentMethodStr = appliedStr;
+        }
+
+        updatedInvoices.push({
+          invoice_id: inv.invoice_id,
+          balance_due: newBalance,
+          payment_method: newPaymentMethodStr,
+          is_done: newBalance <= 0,
+          delivery_status: newBalance <= 0 ? 'Delivered' : inv.delivery_status
+        });
+
+        remainingToDistribute -= amountToApply;
+      }
+
+      const uniqueKey = `${debtor.owner}_${debtor.name}`;
+      
+      setDeliveries(prev => prev.map(d => {
+        const matched = updatedInvoices.find(u => u.invoice_id === d.invoice_id);
+        return matched ? { ...d, ...matched } : d;
+      }));
+      setCreditPayments(prev => { const n = {...prev}; delete n[uniqueKey]; return n; });
+
+      for (const u of updatedInvoices) {
+        await supabase.from('invoice_summaries').update({
+          balance_due: u.balance_due,
+          payment_method: u.payment_method,
+          is_done: u.is_done,
+          delivery_status: u.delivery_status
+        }).eq('invoice_id', u.invoice_id);
+      }
+
+    } catch (error: any) {
+      alert(`Error settling account: ${error.message}`);
+      fetchDeliveries();
     } finally {
       setIsProcessing(false);
     }
@@ -203,8 +348,7 @@ export default function DeliveryPage() {
     return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
   });
 
-  // Group Debtors by Owner -> Customer (Fixed Strict Typing)
-  const debtorsMap = deliveries.reduce((acc: Record<string, any>, curr: any) => {
+  const debtorsMap = deliveries.reduce((acc: any, curr: any) => {
     const balance = Number(curr.balance_due) || 0;
     if (balance > 0) {
       let owner = (curr.owner || '').trim();
@@ -214,22 +358,32 @@ export default function DeliveryPage() {
       const key = `${owner}___${curr.customer_name}`; 
       
       if (!acc[key]) {
-        acc[key] = { name: curr.customer_name, owner: owner, totalOwed: 0, invoices: [] };
+        acc[key] = { 
+          name: curr.customer_name, 
+          owner: owner, 
+          totalOwed: 0, 
+          invoices: [],
+          oldestDate: curr.created_at 
+        };
       }
+      
       acc[key].totalOwed += balance;
       acc[key].invoices.push(curr);
+      
+      if (new Date(curr.created_at) < new Date(acc[key].oldestDate)) {
+         acc[key].oldestDate = curr.created_at;
+      }
     }
     return acc;
-  }, {} as Record<string, any>);
+  }, {});
 
   const debtorsList = Object.values(debtorsMap).sort((a: any, b: any) => b.totalOwed - a.totalOwed);
 
-  // Group Debtors List by Owner (Fixed Strict Typing)
-  const groupedDebtors = debtorsList.reduce((acc: Record<string, any[]>, curr: any) => {
+  const groupedDebtors = debtorsList.reduce((acc: any, curr: any) => {
     if (!acc[curr.owner]) acc[curr.owner] = [];
     acc[curr.owner].push(curr);
     return acc;
-  }, {} as Record<string, any[]>);
+  }, {});
 
   const ownerOrder = ['Pich', 'Jing', 'Both', 'Mom', 'Unassigned'];
   const activeOwners = Object.keys(groupedDebtors).sort((a, b) => {
@@ -240,133 +394,130 @@ export default function DeliveryPage() {
     return idxA - idxB;
   });
 
-
-  // --- LIVE MATH FOR MODAL ---
-  const liveTotalReceivedInRiel = paymentRows.reduce((sum, row) => {
-    const amt = Number(row.amount) || 0;
-    if (row.method.includes('$')) return sum + (amt * EXCHANGE_RATE);
-    return sum + amt;
-  }, 0);
-
-  const liveRemaining = paymentModal.totalDue - liveTotalReceivedInRiel;
-
-  return (
-    <div className="main-wrapper" style={{ padding: '24px 24px 24px 75px', background: '#f8fafc', minHeight: '100vh', fontFamily: 'Arial, sans-serif' }}>
-      
-      {/* HEADER */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
-        <h1 style={{ fontSize: '24px', fontWeight: '500', color: '#334155', margin: 0 }}>🚚 Delivery & Credit Hub</h1>
-      </div>
-
-      {/* TABS */}
-      <div style={{ display: 'flex', gap: '10px', marginBottom: '20px', background: '#fff', padding: '10px', borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: '0 2px 4px rgba(0,0,0,0.02)' }}>
-        <button 
-          onClick={() => setActiveTab('delivery')} 
-          style={{ flex: 1, padding: '12px', borderRadius: '8px', border: 'none', fontWeight: '500', cursor: 'pointer', background: activeTab === 'delivery' ? '#3b82f6' : 'transparent', color: activeTab === 'delivery' ? '#fff' : '#64748b', transition: 'all 0.2s', fontSize: '15px' }}
-        >
-          📦 Delivery Queue
-        </button>
-        <button 
-          onClick={() => setActiveTab('credit')} 
-          style={{ flex: 1, padding: '12px', borderRadius: '8px', border: 'none', fontWeight: '500', cursor: 'pointer', background: activeTab === 'credit' ? '#ef4444' : 'transparent', color: activeTab === 'credit' ? '#fff' : '#64748b', transition: 'all 0.2s', fontSize: '15px' }}
-        >
-          💰 Accounts Receivable ({debtorsList.length})
-        </button>
-      </div>
-
-      {loading ? (
-        <div style={{ textAlign: 'center', padding: '40px', color: '#94a3b8' }}>Loading records...</div>
-      ) : activeTab === 'delivery' ? (
-        
-        /* DELIVERY TAB VIEW */
-        <div style={{ background: '#fff', borderRadius: '12px', border: '1px solid #e2e8f0', overflow: 'hidden', boxShadow: '0 4px 6px rgba(0,0,0,0.02)' }}>
+  function sidebarContent() {
+    if (loading) {
+      return <div style={{ textAlign: 'center', padding: '40px', color: '#94a3b8', fontSize: '14px', fontWeight: '500' }}>Loading records...</div>;
+    }
+    
+    if (activeTab === 'delivery') {
+      return (
+        <div style={{ background: '#fff', borderRadius: '16px', border: '1px solid #f1f5f9', overflow: 'hidden', boxShadow: '0 4px 20px rgba(0,0,0,0.03)' }}>
           <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '14px', minWidth: '1000px' }}>
-              <thead style={{ background: '#f8fafc', borderBottom: '1px solid #cbd5e1' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '14px', minWidth: '1050px' }}>
+              <thead style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0' }}>
                 <tr>
-                  <th style={{ padding: '16px', textAlign: 'center', color: '#475569', width: '130px', fontWeight: '500' }}>Delivery Status</th>
-                  <th style={{ padding: '16px', textAlign: 'left', color: '#475569', fontWeight: '500' }}>Date & INV</th>
-                  <th style={{ padding: '16px', textAlign: 'left', color: '#475569', fontWeight: '500' }}>Customer & Location</th>
-                  <th style={{ padding: '16px', textAlign: 'left', color: '#475569', width: '25%', fontWeight: '500' }}>Items Ordered</th>
-                  <th style={{ padding: '16px', textAlign: 'right', color: '#475569', fontWeight: '500' }}>Total Sale (៛)</th>
-                  <th style={{ padding: '16px', textAlign: 'center', color: '#475569', fontWeight: '500' }}>Payment</th>
-                  <th style={{ padding: '16px', textAlign: 'center', color: '#475569', width: '120px', fontWeight: '500' }}>Complete</th>
+                  <th style={{ padding: '16px 20px', textAlign: 'left', color: '#64748b', fontWeight: 'bold', textTransform: 'uppercase', fontSize: '12px', letterSpacing: '0.5px' }}>Date & INV</th>
+                  <th style={{ padding: '16px 20px', textAlign: 'left', color: '#64748b', fontWeight: 'bold', textTransform: 'uppercase', fontSize: '12px', letterSpacing: '0.5px' }}>Customer</th>
+                  <th style={{ padding: '16px 20px', textAlign: 'left', color: '#64748b', fontWeight: 'bold', textTransform: 'uppercase', fontSize: '12px', letterSpacing: '0.5px', width: '25%' }}>Items Ordered</th>
+                  <th style={{ padding: '16px 20px', textAlign: 'right', color: '#64748b', fontWeight: 'bold', textTransform: 'uppercase', fontSize: '12px', letterSpacing: '0.5px' }}>Total (៛)</th>
+                  <th style={{ padding: '16px 20px', textAlign: 'center', color: '#64748b', fontWeight: 'bold', textTransform: 'uppercase', fontSize: '12px', letterSpacing: '0.5px' }}>Status</th>
+                  <th style={{ padding: '16px 20px', textAlign: 'center', color: '#64748b', fontWeight: 'bold', textTransform: 'uppercase', fontSize: '12px', letterSpacing: '0.5px', width: '160px' }}>Payment Method</th>
+                  <th style={{ padding: '16px 20px', textAlign: 'right', color: '#64748b', fontWeight: 'bold', textTransform: 'uppercase', fontSize: '12px', letterSpacing: '0.5px', width: '180px' }}>Pay Amount (៛)</th>
+                  <th style={{ padding: '16px 20px', textAlign: 'center', color: '#64748b', fontWeight: 'bold', textTransform: 'uppercase', fontSize: '12px', letterSpacing: '0.5px', width: '120px' }}>Complete</th>
                 </tr>
               </thead>
               <tbody>
                 {sortedDeliveries.length === 0 ? (
-                  <tr><td colSpan={7} style={{ textAlign: 'center', padding: '40px', color: '#94a3b8' }}>No active wholesale deliveries.</td></tr>
+                  <tr><td colSpan={8} style={{ textAlign: 'center', padding: '60px', color: '#94a3b8', fontSize: '15px' }}>No active wholesale deliveries.</td></tr>
                 ) : (
                   sortedDeliveries.map((d: any) => {
                     const isDone = isFullyComplete(d);
                     const totalSale = Number(d.total_sales) || 0;
                     const balanceDue = Number(d.balance_due) || 0;
+                    const paymentState = getInlinePaymentState(d.invoice_id, balanceDue);
                     
                     return (
-                      <tr key={d.invoice_id} style={{ borderBottom: '1px solid #f1f5f9', background: isDone ? '#f8fafc' : '#ffffff', opacity: isDone ? 0.7 : 1, transition: 'all 0.3s ease' }}>
-                        
-                        {/* 1. DELIVERY STATUS BUTTON */}
-                        <td style={{ padding: '16px', textAlign: 'center' }}>
-                          <button 
-                            onClick={() => updateInvoiceField(d.invoice_id, 'delivery_status', d.delivery_status === 'Pending' ? 'Delivered' : 'Pending')}
-                            style={{
-                              padding: '8px 0', width: '100%', borderRadius: '6px', border: '1px solid', fontSize: '13px', cursor: 'pointer',
-                              background: d.delivery_status === 'Pending' ? '#fff5f5' : '#f0fdf4',
-                              color: d.delivery_status === 'Pending' ? '#dc2626' : '#166534',
-                              borderColor: d.delivery_status === 'Pending' ? '#fecaca' : '#bbf7d0',
-                              transition: 'background 0.2s'
-                            }}
-                          >
-                            {d.delivery_status === 'Pending' ? '🔴 Pending' : '🟢 Delivered'}
-                          </button>
+                      <tr key={d.invoice_id} style={{ borderBottom: '1px solid #f1f5f9', background: isDone ? '#f8fafc' : '#ffffff', opacity: isDone ? 0.6 : 1, transition: 'all 0.3s ease' }}>
+                        <td style={{ padding: '16px 20px', color: '#475569', fontSize: '14px', verticalAlign: 'top', fontWeight: 'normal' }}>
+                          <div style={{ color: '#3b82f6', marginBottom: '4px' }}>{d.invoice_id}</div>
+                          <div style={{ fontSize: '12px' }}>{new Date(d.created_at).toLocaleDateString('en-GB')}</div>
                         </td>
-
-                        {/* 2. DATE & INV */}
-                        <td style={{ padding: '16px', color: '#64748b', fontSize: '13px' }}>
-                          <div style={{ color: '#334155', marginBottom: '4px' }}>{d.invoice_id}</div>
-                          {new Date(d.created_at).toLocaleDateString('en-GB')}
-                        </td>
-
-                        {/* 3. CUSTOMER */}
-                        <td style={{ padding: '16px' }}>
+                        <td style={{ padding: '16px 20px', verticalAlign: 'top', fontWeight: 'normal' }}>
                           <div style={{ color: '#334155', fontSize: '15px', marginBottom: '4px' }}>{d.customer_name}</div>
                           <div style={{ color: '#64748b', fontSize: '12px' }}>📍 {d.customer_location || 'No location'}</div>
                         </td>
-
-                        {/* 4. ITEMS */}
-                        <td style={{ padding: '16px', color: '#475569', lineHeight: '1.6' }}>{d.rice_types}</td>
+                        <td style={{ padding: '16px 20px', color: '#475569', lineHeight: '1.6', fontSize: '13px', verticalAlign: 'top', fontWeight: 'normal' }}>{d.rice_types}</td>
                         
-                        {/* 5. TOTAL SALE */}
-                        <td style={{ padding: '16px', textAlign: 'right', color: '#b58a3d', fontSize: '15px' }}>
-                          {formatRiel(totalSale)}
+                        <td style={{ padding: '16px 20px', textAlign: 'right', color: '#000000', fontSize: '15px', verticalAlign: 'top', fontWeight: 'normal' }}>{formatRiel(totalSale)}</td>
+                        
+                        <td style={{ padding: '16px 20px', textAlign: 'center', verticalAlign: 'top' }}>
+                          <button 
+                            onClick={() => updateInvoiceField(d.invoice_id, 'delivery_status', d.delivery_status === 'Pending' ? 'Delivered' : 'Pending')}
+                            style={{
+                              padding: '6px 12px', borderRadius: '20px', border: 'none', fontSize: '13px', fontWeight: 'normal', cursor: 'pointer',
+                              background: d.delivery_status === 'Pending' ? '#fef3c7' : '#dcfce7',
+                              color: d.delivery_status === 'Pending' ? '#d97706' : '#15803d',
+                              transition: 'all 0.2s', display: 'flex', alignItems: 'center', gap: '6px', width: '100px', justifyContent: 'center', margin: '0 auto'
+                            }}
+                          >
+                            {d.delivery_status === 'Pending' ? '🟡 Pending' : '🟢 Delivered'}
+                          </button>
                         </td>
 
-                        {/* 6. PAYMENT / RECEIVE */}
-                        <td style={{ padding: '16px', textAlign: 'center' }}>
+                        {/* PAYMENT METHOD COLUMN */}
+                        <td style={{ padding: '16px 20px', textAlign: 'center', verticalAlign: 'top' }}>
                           {balanceDue > 0 ? (
-                            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px' }}>
-                              <button 
-                                onClick={() => handleOpenPayment('single', d)}
-                                style={{ padding: '8px 12px', background: '#e0f2fe', color: '#0369a1', border: '1px solid #bae6fd', borderRadius: '6px', cursor: 'pointer', fontSize: '13px', width: '100%' }}
-                              >
-                                + Receive Payment
-                              </button>
-                              <div style={{ fontSize: '12px', color: '#ef4444' }}>Owes: {formatRiel(balanceDue)}</div>
-                            </div>
+                             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                               {paymentState.map((row) => (
+                                 <select 
+                                   key={row.id}
+                                   value={row.method}
+                                   onChange={(e) => updateInlineRow(d.invoice_id, row.id, 'method', e.target.value, balanceDue)}
+                                   style={{ padding: '10px 12px', borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '14px', outline: 'none', backgroundColor: '#fff', color: '#475569', cursor: 'pointer', width: '100%', fontWeight: 'normal', height: '40px', boxSizing: 'border-box' }}
+                                 >
+                                    <option value="Cash ៛">💵 Cash ៛</option>
+                                    <option value="Cash $">💵 Cash $</option>
+                                    <option value="QR ៛">📱 QR ៛</option>
+                                    <option value="QR $">📱 QR $</option>
+                                    <option value="Mom QR ៛">👩 Mom QR ៛</option>
+                                    <option value="Mom QR $">👩 Mom QR $</option>
+                                 </select>
+                               ))}
+                               <button onClick={() => addInlineSplit(d.invoice_id, balanceDue)} style={{ background: 'none', border: 'none', color: '#3b82f6', fontSize: '12px', cursor: 'pointer', textAlign: 'left', fontWeight: 'bold' }}>+ Add Split</button>
+                             </div>
                           ) : (
-                            <div style={{ color: '#10b981', fontSize: '13px' }}>Paid in Full ✅</div>
+                            <div style={{ color: '#475569', fontSize: '13px', fontWeight: 'normal' }}>{d.payment_method}</div>
                           )}
                         </td>
 
-                        {/* 7. MANUAL DONE BUTTON */}
-                        <td style={{ padding: '16px', textAlign: 'center' }}>
+                        {/* PAY AMOUNT COLUMN */}
+                        <td style={{ padding: '16px 20px', textAlign: 'right', verticalAlign: 'top' }}>
+                          {balanceDue > 0 ? (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                              {paymentState.map((row) => (
+                                <div key={row.id} style={{ display: 'flex', alignItems: 'center', gap: '6px', height: '40px' }}>
+                                  <CurrencyInput
+                                    placeholder={formatRiel(balanceDue)}
+                                    value={row.amount}
+                                    onChange={(v: any) => updateInlineRow(d.invoice_id, row.id, 'amount', v, balanceDue)}
+                                    onEnter={() => handleInlineProcess(d, paymentState)}
+                                    style={{ padding: '10px 12px', borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '14px', textAlign: 'right', outline: 'none', width: '100%', backgroundColor: '#fff', color: '#000000', fontWeight: 'normal', height: '100%', boxSizing: 'border-box' }}
+                                  />
+                                  {paymentState.length > 1 && (
+                                    <button onClick={() => removeInlineSplit(d.invoice_id, row.id, balanceDue)} style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', fontSize: '16px', padding: '0 4px' }}>✕</button>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <div style={{ color: '#10b981', fontSize: '14px', fontWeight: 'normal' }}>Paid & Done ✅</div>
+                          )}
+                        </td>
+
+                        <td style={{ padding: '16px 20px', textAlign: 'center', verticalAlign: 'top' }}>
                           <button 
-                            onClick={() => updateInvoiceField(d.invoice_id, 'is_done', !d.is_done)}
+                            onClick={() => {
+                              if (balanceDue > 0) {
+                                handleInlineProcess(d, paymentState);
+                              } else {
+                                updateInvoiceField(d.invoice_id, 'is_done', !d.is_done);
+                              }
+                            }}
                             style={{
-                              padding: '8px 0', width: '100%', borderRadius: '6px', border: 'none', cursor: 'pointer', fontSize: '13px',
+                              padding: '8px 12px', width: '100%', borderRadius: '6px', border: 'none', cursor: 'pointer', fontSize: '13px',
                               background: isDone ? '#e2e8f0' : '#10b981',
                               color: isDone ? '#475569' : '#ffffff',
-                              transition: 'all 0.2s'
+                              transition: 'all 0.2s', fontWeight: 'normal', height: '40px'
                             }}
                           >
                             {isDone ? 'Undo' : '✔ Done'}
@@ -381,185 +532,249 @@ export default function DeliveryPage() {
             </table>
           </div>
         </div>
+      );
+    }
 
-      ) : (
-
-        /* ACCOUNTS RECEIVABLE (OWE) TAB VIEW */
-        <div style={{ background: '#fff', borderRadius: '12px', border: '1px solid #e2e8f0', overflow: 'hidden', boxShadow: '0 4px 6px rgba(0,0,0,0.02)' }}>
-          <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '14px', minWidth: '700px' }}>
-              <thead style={{ background: '#fff1f2', borderBottom: '1px solid #fecaca' }}>
-                <tr>
-                  <th style={{ padding: '16px', textAlign: 'left', color: '#991b1b', fontWeight: '500' }}>Customer Name</th>
-                  <th style={{ padding: '16px', textAlign: 'center', color: '#991b1b', fontWeight: '500' }}>Unpaid Invoices</th>
-                  <th style={{ padding: '16px', textAlign: 'right', color: '#991b1b', fontWeight: '500' }}>Total Debt (៛)</th>
-                  <th style={{ padding: '16px', textAlign: 'center', color: '#991b1b', fontWeight: '500' }}>Actions</th>
-                </tr>
-              </thead>
-              
-              {activeOwners.length === 0 ? (
-                <tbody><tr><td colSpan={4} style={{ textAlign: 'center', padding: '40px', color: '#10b981', fontSize: '16px' }}>🎉 All customers are fully paid up!</td></tr></tbody>
-              ) : (
-                activeOwners.map(ownerName => {
-                  const list = groupedDebtors[ownerName];
-                  const ownerTotalOwed = list.reduce((sum: number, d: any) => sum + d.totalOwed, 0);
-
-                  return (
-                    <tbody key={ownerName}>
-                      {/* Owner Sub-header Row */}
-                      <tr style={{ background: '#f8fafc' }}>
-                        <td colSpan={2} style={{ padding: '12px 16px', color: '#334155', fontSize: '14px', borderBottom: '1px solid #e2e8f0' }}>
-                          👤 Owner: <b>{ownerName}</b>
-                        </td>
-                        <td style={{ padding: '12px 16px', textAlign: 'right', color: '#ef4444', fontSize: '15px', borderBottom: '1px solid #e2e8f0' }}>
-                          {formatRiel(ownerTotalOwed)}
-                        </td>
-                        <td style={{ borderBottom: '1px solid #e2e8f0' }}></td>
-                      </tr>
-
-                      {/* Customer Rows mapped underneath their Owner */}
-                      {list.map((debtor: any) => (
-                        <tr key={`${debtor.owner}_${debtor.name}`} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                          <td style={{ padding: '16px', color: '#334155', fontSize: '16px', paddingLeft: '32px' }}>↳ {debtor.name}</td>
-                          <td style={{ padding: '16px', textAlign: 'center', color: '#64748b' }}>
-                            <span style={{ color: '#334155' }}>{debtor.invoices.length}</span> Invoices
-                            <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '4px' }}>
-                              ({debtor.invoices.map((i: any) => String(i.invoice_id).split('-')[1] || i.invoice_id).join(', ')})
+    return (
+      <div style={{ background: '#fff', borderRadius: '16px', border: '1px solid #f1f5f9', overflow: 'hidden', boxShadow: '0 4px 20px rgba(0,0,0,0.03)' }}>
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '14px', minWidth: '950px' }}>
+            <thead style={{ background: '#fff1f2', borderBottom: '1px solid #ffe4e6' }}>
+              <tr>
+                <th style={{ padding: '16px 20px', textAlign: 'left', color: '#be123c', fontWeight: 'bold', textTransform: 'uppercase', fontSize: '12px', letterSpacing: '0.5px' }}>Date</th>
+                <th style={{ padding: '16px 20px', textAlign: 'left', color: '#be123c', fontWeight: 'bold', textTransform: 'uppercase', fontSize: '12px', letterSpacing: '0.5px' }}>Owner</th>
+                <th style={{ padding: '16px 20px', textAlign: 'left', color: '#be123c', fontWeight: 'bold', textTransform: 'uppercase', fontSize: '12px', letterSpacing: '0.5px' }}>Customer Name</th>
+                <th style={{ padding: '16px 20px', textAlign: 'right', color: '#be123c', fontWeight: 'bold', textTransform: 'uppercase', fontSize: '12px', letterSpacing: '0.5px' }}>Remaining Debt (៛)</th>
+                <th style={{ padding: '16px 20px', textAlign: 'center', color: '#be123c', fontWeight: 'bold', textTransform: 'uppercase', fontSize: '12px', letterSpacing: '0.5px', width: '160px' }}>Method</th>
+                <th style={{ padding: '16px 20px', textAlign: 'right', color: '#be123c', fontWeight: 'bold', textTransform: 'uppercase', fontSize: '12px', letterSpacing: '0.5px', width: '180px' }}>Pay Amount (៛)</th>
+                <th style={{ padding: '16px 20px', textAlign: 'center', color: '#be123c', fontWeight: 'bold', textTransform: 'uppercase', fontSize: '12px', letterSpacing: '0.5px', width: '120px' }}>Complete</th>
+              </tr>
+            </thead>
+            {activeOwners.length === 0 ? (
+              <tbody><tr><td colSpan={7} style={{ textAlign: 'center', padding: '60px', color: '#10b981', fontSize: '15px', fontWeight: 'normal' }}>🎉 All customers are fully paid up!</td></tr></tbody>
+            ) : (
+              activeOwners.map(ownerName => {
+                const list = groupedDebtors[ownerName];
+                const ownerTotalOwed = list.reduce((sum: number, d: any) => sum + d.totalOwed, 0);
+                return (
+                  <tbody key={ownerName}>
+                    <tr style={{ background: '#f8fafc' }}>
+                      <td colSpan={3} style={{ padding: '14px 20px', color: '#334155', fontSize: '14px', borderBottom: '1px solid #e2e8f0', fontWeight: 'normal' }}>
+                        👤 Owner: {ownerName}
+                      </td>
+                      <td style={{ padding: '14px 20px', textAlign: 'right', color: '#000000', fontSize: '15px', borderBottom: '1px solid #e2e8f0', fontWeight: 'normal' }}>
+                        {formatRiel(ownerTotalOwed)}
+                      </td>
+                      <td colSpan={3} style={{ borderBottom: '1px solid #e2e8f0' }}></td>
+                    </tr>
+                    {list.map((debtor: any) => {
+                      const uniqueKey = `${debtor.owner}_${debtor.name}`;
+                      const paymentState = getCreditPaymentState(uniqueKey, debtor.totalOwed);
+                      
+                      return (
+                        <tr key={uniqueKey} style={{ borderBottom: '1px solid #f1f5f9', background: '#ffffff', transition: 'background 0.2s ease' }}>
+                          <td style={{ padding: '20px', color: '#64748b', fontSize: '14px', verticalAlign: 'top', fontWeight: 'normal' }}>
+                            {new Date(debtor.oldestDate).toLocaleDateString('en-GB')}
+                            <div style={{ fontSize: '12px', color: '#94a3b8', marginTop: '4px' }}>Oldest Invoice</div>
+                          </td>
+                          <td style={{ padding: '20px', color: '#475569', fontSize: '15px', verticalAlign: 'top', fontWeight: 'normal' }}>
+                            {debtor.owner}
+                          </td>
+                          <td style={{ padding: '20px', color: '#334155', fontSize: '15px', verticalAlign: 'top', fontWeight: 'normal' }}>
+                            {debtor.name}
+                            <div style={{ fontSize: '13px', color: '#64748b', marginTop: '4px' }}>
+                              {debtor.invoices.length} Unpaid Invoice(s)
                             </div>
                           </td>
-                          <td style={{ padding: '16px', textAlign: 'right', color: '#ef4444', fontSize: '16px' }}>
+                          <td style={{ padding: '20px', textAlign: 'right', color: '#000000', fontSize: '16px', verticalAlign: 'top', fontWeight: 'normal' }}>
                             {formatRiel(debtor.totalOwed)}
                           </td>
-                          <td style={{ padding: '16px', textAlign: 'center' }}>
+                          
+                          <td style={{ padding: '20px', textAlign: 'center', verticalAlign: 'top' }}>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                              {paymentState.map(row => (
+                                <select 
+                                  key={row.id}
+                                  value={row.method}
+                                  onChange={(e) => updateCreditRow(uniqueKey, row.id, 'method', e.target.value, debtor.totalOwed)}
+                                  style={{ padding: '10px 12px', borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '14px', outline: 'none', backgroundColor: '#fff', color: '#475569', cursor: 'pointer', width: '100%', fontWeight: 'normal', height: '40px', boxSizing: 'border-box' }}
+                                >
+                                   <option value="Cash ៛">💵 Cash ៛</option>
+                                   <option value="Cash $">💵 Cash $</option>
+                                   <option value="QR ៛">📱 QR ៛</option>
+                                   <option value="QR $">📱 QR $</option>
+                                   <option value="Mom QR ៛">👩 Mom QR ៛</option>
+                                   <option value="Mom QR $">👩 Mom QR $</option>
+                                </select>
+                              ))}
+                              <button onClick={() => addCreditSplit(uniqueKey, debtor.totalOwed)} style={{ background: 'none', border: 'none', color: '#3b82f6', fontSize: '12px', cursor: 'pointer', textAlign: 'left', fontWeight: 'bold' }}>+ Add Split</button>
+                            </div>
+                          </td>
+
+                          <td style={{ padding: '20px', textAlign: 'right', verticalAlign: 'top' }}>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                              {paymentState.map(row => (
+                                <div key={row.id} style={{ display: 'flex', alignItems: 'center', gap: '6px', height: '40px' }}>
+                                  <CurrencyInput
+                                    placeholder={formatRiel(debtor.totalOwed)}
+                                    value={row.amount}
+                                    onChange={(v: any) => updateCreditRow(uniqueKey, row.id, 'amount', v, debtor.totalOwed)}
+                                    onEnter={() => handleProcessCreditPayment(debtor, paymentState)}
+                                    style={{ padding: '10px 12px', borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '15px', textAlign: 'right', outline: 'none', width: '100%', backgroundColor: '#fff', color: '#000000', fontWeight: 'normal', height: '100%', boxSizing: 'border-box' }}
+                                  />
+                                  {paymentState.length > 1 && (
+                                    <button onClick={() => removeCreditSplit(uniqueKey, row.id, debtor.totalOwed)} style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', fontSize: '16px', padding: '0 4px' }}>✕</button>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          </td>
+
+                          <td style={{ padding: '20px', textAlign: 'center', verticalAlign: 'top' }}>
                             <button 
-                              onClick={() => handleOpenPayment('batch', debtor)}
-                              style={{ padding: '10px 16px', background: '#10b981', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', transition: 'all 0.2s', fontSize: '14px' }}
+                              onClick={() => handleProcessCreditPayment(debtor, paymentState)}
+                              style={{
+                                padding: '8px 12px', width: '100%', borderRadius: '6px', border: 'none', cursor: 'pointer', fontSize: '13px',
+                                background: '#10b981', color: '#ffffff', transition: 'all 0.2s', fontWeight: 'normal', height: '40px'
+                              }}
                             >
-                              💸 Settle Account
+                              ✔ Done
                             </button>
                           </td>
                         </tr>
-                      ))}
-                    </tbody>
-                  );
-                })
-              )}
-            </table>
-          </div>
-        </div>
-      )}
-
-      {/* ==============================================================================================
-          UNIFIED SPLIT PAYMENT MODAL
-          ============================================================================================== */}
-      {paymentModal.isOpen && (
-        <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 10000, display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '20px', boxSizing: 'border-box' }} onMouseDown={() => setPaymentModal({ ...paymentModal, isOpen: false })}>
-          <div style={{ backgroundColor: '#ffffff', width: '100%', maxWidth: '450px', borderRadius: '16px', padding: '24px', boxShadow: '0 10px 25px rgba(0,0,0,0.15)', maxHeight: '90vh', overflowY: 'auto' }} onMouseDown={e => e.stopPropagation()}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', borderBottom: '1px solid #f1f5f9', paddingBottom: '12px' }}>
-              <h3 style={{ margin: 0, color: '#334155', fontSize: '18px', fontWeight: '500' }}>💸 Receive Payment</h3>
-              <button onClick={() => setPaymentModal({ ...paymentModal, isOpen: false })} style={{ background: 'none', border: 'none', fontSize: '18px', color: '#94a3b8', cursor: 'pointer' }}>✕</button>
-            </div>
-            
-            <p style={{ margin: '0 0 16px 0', fontSize: '14px', color: '#475569' }}>
-              Customer: <b>{paymentModal.customerName}</b>
-            </p>
-
-            <div style={{ background: '#f8fafc', padding: '16px', borderRadius: '8px', marginBottom: '20px', border: '1px solid #e2e8f0', textAlign: 'center' }}>
-              <div style={{ fontSize: '12px', color: '#64748b', textTransform: 'uppercase', marginBottom: '4px' }}>Total Amount Due</div>
-              <div style={{ fontSize: '28px', color: '#dc2626' }}>{formatRiel(paymentModal.totalDue)}</div>
-              <div style={{ fontSize: '13px', color: '#94a3b8', marginTop: '4px' }}>{formatUSD(paymentModal.totalDue / EXCHANGE_RATE)}</div>
-            </div>
-
-            {/* Split Payment Rows */}
-            <div style={{ marginBottom: '24px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-                <label style={{ fontSize: '13px', color: '#475569' }}>Payment Method(s)</label>
-                <button onClick={() => setPaymentRows([...paymentRows, { id: Date.now(), method: 'Cash ៛', amount: '' }])} style={{ background: '#e0f2fe', color: '#0284c7', border: 'none', borderRadius: '4px', fontSize: '12px', padding: '6px 10px', cursor: 'pointer' }}>+ Split</button>
-              </div>
-
-              {paymentRows.map((row, index) => (
-                <div key={row.id} style={{ display: 'flex', gap: '8px', marginBottom: '12px', alignItems: 'center' }}>
-                  <select 
-                    value={row.method} 
-                    onChange={e => {
-                      const newRows = [...paymentRows];
-                      newRows[index].method = e.target.value;
-                      setPaymentRows(newRows);
-                    }}
-                    style={{ width: '45%', padding: '12px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '16px', outline: 'none', backgroundColor: '#fff', cursor: 'pointer', color: '#334155' }}
-                  >
-                    <option value="Cash ៛">💵 Cash ៛</option>
-                    <option value="Cash $">💵 Cash $</option>
-                    <option value="QR ៛">📱 QR ៛</option>
-                    <option value="QR $">📱 QR $</option>
-                    <option value="Mom QR ៛">👩 Mom QR ៛</option>
-                    <option value="Mom QR $">👩 Mom QR $</option>
-                  </select>
-                  
-                  <div style={{ flex: 1 }}>
-                    <CurrencyInput 
-                      placeholder="Amount..." 
-                      value={row.amount} 
-                      onChange={(val: any) => {
-                        const newRows = [...paymentRows];
-                        newRows[index].amount = val;
-                        setPaymentRows(newRows);
-                      }}
-                      style={{ width: '100%', padding: '12px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', outline: 'none', textAlign: 'right' }}
-                    />
-                  </div>
-                  
-                  {paymentRows.length > 1 && (
-                    <button onClick={() => setPaymentRows(paymentRows.filter(r => r.id !== row.id))} style={{ background: 'none', border: 'none', color: '#ef4444', fontSize: '18px', cursor: 'pointer', padding: '0 4px' }}>✕</button>
-                  )}
-                </div>
-              ))}
-            </div>
-
-            {/* Live Calculation Footer */}
-            {paymentRows.some(r => Number(r.amount) > 0) && (
-              <div style={{ marginBottom: '24px', paddingTop: '16px', borderTop: '1px dashed #cbd5e1', fontSize: '14px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
-                  <span style={{ color: '#64748b' }}>Total Received:</span>
-                  <span style={{ color: '#334155' }}>{formatRiel(liveTotalReceivedInRiel)}</span>
-                </div>
-                {liveRemaining < 0 ? (
-                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <span style={{ color: '#ef4444' }}>Change to Return:</span>
-                    <span style={{ color: '#dc2626' }}>{formatRiel(Math.abs(liveRemaining))}</span>
-                  </div>
-                ) : liveRemaining > 0 ? (
-                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <span style={{ color: '#d97706' }}>Still Owes:</span>
-                    <span style={{ color: '#b45309' }}>{formatRiel(liveRemaining)}</span>
-                  </div>
-                ) : (
-                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <span style={{ color: '#166534' }}>Balance:</span>
-                    <span style={{ color: '#15803d' }}>Perfectly Paid ✅</span>
-                  </div>
-                )}
-              </div>
+                      )
+                    })}
+                  </tbody>
+                );
+              })
             )}
-
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
-              <button onClick={() => setPaymentModal({ ...paymentModal, isOpen: false })} style={{ padding: '12px 16px', backgroundColor: '#f1f5f9', border: 'none', borderRadius: '6px', cursor: 'pointer', color: '#475569', fontSize: '15px' }}>Cancel</button>
-              <button onClick={handleProcessPayment} disabled={isProcessing} style={{ padding: '12px 16px', backgroundColor: '#10b981', border: 'none', borderRadius: '6px', cursor: 'pointer', color: '#fff', fontSize: '15px' }}>
-                {isProcessing ? 'Processing...' : 'Confirm Payment'}
-              </button>
-            </div>
-          </div>
+          </table>
         </div>
-      )}
+      </div>
+    );
+  }
 
-      {/* GLOBAL CSS FOR INPUTS */}
-      <style dangerouslySetInnerHTML={{ __html: `
+  return (
+    <>
+      <div className="main-wrapper">
+        <div className="header-container">
+          <h1 className="page-title">🚚 Delivery & Credit Hub</h1>
+        </div>
+
+        <div className="tabs-container">
+          <button onClick={() => setActiveTab('delivery')} className={`tab-toggle-button ${activeTab === 'delivery' ? 'active-tab' : ''}`}>📦 Delivery Queue</button>
+          <button onClick={() => setActiveTab('credit')} className={`tab-toggle-button ${activeTab === 'credit' ? 'active-tab' : ''}`}>💰 Accounts Credit ({debtorsList.length})</button>
+        </div>
+
+        {sidebarContent()}
+      </div>
+
+      <style jsx global>{`
+        input, select, button, textarea {
+          font-family: inherit;
+          font-variant-numeric: tabular-nums lining-nums;
+        }
+
+        body {
+          font-variant-numeric: tabular-nums lining-nums;
+        }
+
+        .main-wrapper { 
+          padding: 24px 24px 24px 75px; 
+          background: #f8fafc; 
+          font-family: Arial, sans-serif; 
+          box-sizing: border-box; 
+          color: #333;
+          min-height: 100dvh;
+        }
+
+        .header-container { 
+          margin-bottom: 24px; 
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          flex-wrap: wrap;
+          gap: 12px;
+        }
+
+        .page-title { 
+          font-size: 24px; 
+          color: #334155; 
+          margin: 0; 
+          font-weight: 600;
+          letter-spacing: -0.5px;
+        }
+
+        .tabs-container {
+          display: flex; 
+          gap: 8px; 
+          margin-bottom: 24px; 
+          background: #fff; 
+          padding: 6px; 
+          border-radius: 12px; 
+          border: 1px solid #f1f5f9;
+          box-shadow: 0 2px 10px rgba(0,0,0,0.02);
+          flex-wrap: wrap;
+          max-width: 500px;
+        }
+
+        .tab-toggle-button {
+          flex: 1; 
+          padding: 12px; 
+          border-radius: 8px; 
+          border: none; 
+          font-weight: 500; 
+          cursor: pointer; 
+          font-size: 14px;
+          background: transparent;
+          color: #64748b;
+          transition: all 0.2s ease;
+          white-space: nowrap;
+          min-width: 120px;
+        }
+
+        .active-tab {
+          background: #b58a3d !important;
+          color: #ffffff !important;
+          font-weight: 600 !important;
+          box-shadow: 0 4px 10px rgba(181, 138, 61, 0.2);
+        }
+
         input[type="text"].no-spinners::-webkit-inner-spin-button,
         input[type="text"].no-spinners::-webkit-outer-spin-button {
           -webkit-appearance: none;
           margin: 0;
         }
-      `}} />
-    </div>
-  )
+
+        .mobile-input-field:focus, .mobile-select-menu:focus {
+          border-color: #94a3b8 !important;
+          box-shadow: 0 0 0 2px rgba(148, 163, 184, 0.2);
+        }
+
+        @media (max-width: 1023px) { 
+          .main-wrapper { 
+            padding: max(80px, env(safe-area-inset-top, 80px)) 16px 24px 16px !important; 
+          }
+          .header-container {
+            flex-direction: column !important;
+            align-items: flex-start !important;
+            gap: 10px !important;
+            margin-bottom: 20px !important;
+          }
+          .tabs-container {
+            padding: 4px !important;
+            margin-bottom: 20px !important;
+            max-width: 100%;
+          }
+          .tab-toggle-button {
+            padding: 10px !important;
+            font-size: 13px !important;
+          }
+          .mobile-select-menu, .mobile-input-field {
+            font-size: 16px !important; 
+          }
+        }
+      `}</style>
+    </>
+  );
 }
