@@ -187,6 +187,9 @@ export default function POSPage() {
 
   const [cartCustomerNameOverride, setCartCustomerNameOverride] = useState('')
 
+  // ==========================================
+  // DYNAMIC PAYMENT ROWS
+  // ==========================================
   const [paymentRows, setPaymentRows] = useState<{id: number, method: string, amount: number | '', isAuto?: boolean}[]>([
     { id: Date.now(), method: 'Cash ៛', amount: '', isAuto: true }
   ]);
@@ -212,6 +215,7 @@ export default function POSPage() {
   
   const invoiceRef = useRef<HTMLDivElement>(null)
 
+  // IOS SAFARI SCROLL FIX
   const resetScroll = () => {
     setTimeout(() => {
       window.scrollTo(0, 0);
@@ -228,6 +232,7 @@ export default function POSPage() {
 
   const totalUSD = totalRiel / EXCHANGE_RATE; 
 
+  // Auto-sync the payment row with totalRiel if it is in Auto mode
   useEffect(() => {
     setPaymentRows(prev => {
       if (prev.length === 1 && prev[0].isAuto) {
@@ -240,6 +245,7 @@ export default function POSPage() {
     });
   }, [totalRiel]);
 
+  // 15-SECOND AUTO DISMISS FOR SALE SUMMARY POPUP
   useEffect(() => {
     if (saleSummary) {
       const timer = setTimeout(() => {
@@ -250,6 +256,7 @@ export default function POSPage() {
     }
   }, [saleSummary]);
 
+  // 15-SECOND AUTO DISMISS FOR INVOICE PREVIEW
   useEffect(() => {
     if (showInvoicePreview) {
       const timer = setTimeout(() => {
@@ -339,11 +346,13 @@ export default function POSPage() {
     }
   }, [activeTab, customers]) 
 
+  // Mobile Invoice Generation Engine (Waits to ensure HD logos load before capture)
   useEffect(() => {
     if (completedSale && invoiceRef.current && !previewImageUrl && showInvoicePreview) {
       const timer = setTimeout(async () => {
         try {
           await document.fonts.ready;
+          // Wait 800ms to guarantee logos/qr are fetched completely in DOM before capture
           await new Promise(r => setTimeout(r, 800));
 
           const isMobile = window.innerWidth < 1024;
@@ -571,8 +580,6 @@ export default function POSPage() {
     return sum + amt;
   }, 0);
 
-  const liveRemaining = totalRiel - liveTotalReceivedInRiel;
-
   const getCategorizedItems = (cartItems: any[]) => {
     let normalItems: any[] = [], specialItems: any[] = [], negativeItems: any[] = [], serviceItems: any[] = [];
     cartItems.forEach(item => {
@@ -596,6 +603,7 @@ export default function POSPage() {
     window.history.replaceState({}, document.title, window.location.pathname);
   }
 
+  // --- REWRITTEN CHECKOUT: DB MULTI-ROW SPLIT ENGINE & ASSET LOGGING ---
   async function confirmCheckout() {
     if (cart.length === 0) return alert(lang === 'kh' ? 'សូមជ្រើសរើសទំនិញក្នុងកន្ត្រក!' : 'Cart is empty');
     if (activeTab === 'wholesale' && !selectedCustomerId) return alert(lang === 'kh' ? 'សូមជ្រើសរើសអតិថិជនសម្រាប់ដុំ!' : 'Please select a customer for wholesale');
@@ -789,6 +797,7 @@ export default function POSPage() {
         });
       }
 
+      // Show Summary OR Invoice logic based on rules
       let cRiel = 0, qRiel = 0, cUsd = 0, qUsd = 0;
       activePayments.forEach(r => {
         if (r.method === 'Cash ៛') cRiel += Number(r.amount);
@@ -798,10 +807,12 @@ export default function POSPage() {
       });
 
       if (activeTab === 'wholesale' && !isSimpleCustomer) {
+        // Wholesale, Not Walk-in: Show Invoice, NO Summary
         setIsGeneratingPreview(true);
         setShowInvoicePreview(true);
         setSaleSummary(null);
       } else {
+        // Retail OR Wholesale Walk-in: Show Summary, NO Invoice
         setShowInvoicePreview(false);
         setSaleSummary({ 
           total: currentTotalRiel, 
@@ -945,7 +956,7 @@ export default function POSPage() {
   }
 
   return (
-    <div className="pos-layout-wrapper" style={{ display: 'flex', width: '100%', backgroundColor: '#ffffff', boxSizing: 'border-box', minHeight: '100dvh' }}>
+    <div className="pos-layout-wrapper" style={{ display: 'flex', width: '100%', backgroundColor: '#ffffff', boxSizing: 'border-box' }}>
       
       {/* PRELOAD IMAGES TO FIX SAFARI MOBILE BLANK LOGO ISSUE */}
       <div style={{ width: 0, height: 0, overflow: 'hidden', position: 'absolute', opacity: 0 }}>
@@ -955,7 +966,7 @@ export default function POSPage() {
       </div>
 
       {/* SELECTION ENGINE VIEW GRID PANEL */}
-      <div className="pos-main-engine hide-scrollbar" style={{ flex: 1, display: 'flex', flexDirection: 'column', backgroundColor: '#f8fafc', minWidth: 0, height: 'auto', overflowY: 'visible' }}>
+      <div className="pos-main-engine hide-scrollbar" style={{ flex: 1, display: 'flex', flexDirection: 'column', backgroundColor: '#f8fafc', minWidth: 0 }}>
         
         <div className="main-wrapper" style={{ flex: 1 }}>
           <div className="header-container">
@@ -1058,7 +1069,7 @@ export default function POSPage() {
       {/* ==============================================================================================
           DESKTOP SIDEBAR CART
           ============================================================================================== */}
-      <div className="desktop-cart-panel" style={{ width: '400px', backgroundColor: '#ffffff', borderLeft: '1px solid #e5e7eb', display: 'flex', flexDirection: 'column', position: 'sticky', top: '80px', height: 'calc(100vh - 80px)' }}>
+      <div className="desktop-cart-panel" style={{ width: '400px', backgroundColor: '#ffffff', borderLeft: '1px solid #e5e7eb', display: 'flex', flexDirection: 'column', position: 'sticky', top: '0px', height: '100vh' }}>
         <div style={{ paddingTop: '16px', paddingRight: '20px', paddingBottom: '16px', paddingLeft: '20px', borderBottom: '1px solid #f1f5f9', backgroundColor: '#f8fafc', flexShrink: 0 }}>
           <h2 style={{ fontSize: '16px', margin: 0, fontWeight: 'bold', color: '#334155' }}>{currentT.cartTitle} ({cart.length})</h2>
         </div>
@@ -1128,7 +1139,7 @@ export default function POSPage() {
           )}
         </div>
         
-        <div style={{ paddingTop: '12px', paddingRight: '20px', paddingBottom: '16px', paddingLeft: '20px', borderTop: '1px solid #e2e8f0', backgroundColor: '#f8fafc', flexShrink: 0, zIndex: 10, boxShadow: '0 -4px 10px rgba(0,0,0,0.02)' }}>
+        <div style={{ position: 'sticky', bottom: 0, paddingTop: '12px', paddingRight: '20px', paddingBottom: '16px', paddingLeft: '20px', borderTop: '1px solid #e2e8f0', backgroundColor: '#f8fafc', flexShrink: 0, zIndex: 10, boxShadow: '0 -4px 10px rgba(0,0,0,0.02)' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '4px' }}>
             <span style={{ fontSize: '13px', color: '#334155' }}>{currentT.totalKhmer}</span>
             <span style={{ fontSize: '18px', fontWeight: 'bold', color: totalRiel < 0 ? '#ef4444' : '#b58a3d' }}>{formatRielFromNative(totalRiel)}</span>
@@ -1176,7 +1187,7 @@ export default function POSPage() {
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.4)', zIndex: 9999, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}>
           <div style={{ flex: 1 }} onClick={() => setIsMobileCartOpen(false)}></div>
           
-          <div style={{ width: '100%', maxHeight: '85dvh', backgroundColor: '#ffffff', borderTopLeftRadius: '20px', borderTopRightRadius: '20px', display: 'flex', flexDirection: 'column', position: 'relative', boxShadow: '0 -10px 25px rgba(0,0,0,0.1)' }}>
+          <div style={{ width: '100%', maxHeight: '85%', backgroundColor: '#ffffff', borderTopLeftRadius: '20px', borderTopRightRadius: '20px', display: 'flex', flexDirection: 'column', position: 'relative', boxShadow: '0 -10px 25px rgba(0,0,0,0.1)' }}>
             <div style={{ width: '100%', display: 'flex', justifyContent: 'center', paddingTop: '12px', paddingBottom: '8px', flexShrink: 0 }}>
               <div style={{ width: '40px', height: '5px', backgroundColor: '#cbd5e1', borderRadius: '10px' }}></div>
             </div>
@@ -1239,7 +1250,7 @@ export default function POSPage() {
               })}
             </div>
             
-            <div style={{ padding: '12px 20px calc(80px + env(safe-area-inset-bottom, 20px)) 20px', borderTop: '1px solid #e2e8f0', backgroundColor: '#f8fafc', boxShadow: '0 -4px 10px rgba(0,0,0,0.05)', flexShrink: 0 }}>
+            <div style={{ padding: '12px 20px calc(24px + env(safe-area-inset-bottom, 12px)) 20px', borderTop: '1px solid #e2e8f0', backgroundColor: '#f8fafc', boxShadow: '0 -4px 10px rgba(0,0,0,0.05)', flexShrink: 0 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
                 <span style={{ fontSize: '14px', color: '#475569' }}>{currentT.totalKhmer}</span>
                 <span style={{ fontWeight: 'bold', color: totalRiel < 0 ? '#ef4444' : '#b58a3d', fontSize: '20px' }}>{formatRielFromNative(totalRiel)}</span>
@@ -1640,7 +1651,6 @@ export default function POSPage() {
           font-family: Arial, sans-serif; 
           box-sizing: border-box; 
           color: #333;
-          min-height: 100dvh;
         }
         .header-container { 
           margin-bottom: 24px; 
@@ -1704,8 +1714,8 @@ export default function POSPage() {
           .desktop-cart-panel { display: none !important; }
           
           .main-wrapper { 
-            /* Safely clears the hamburger icon without a massive gap */
-            padding: max(70px, env(safe-area-inset-top, 70px)) 16px 140px 16px !important; 
+            /* Properly stacks clearance ON TOP of the Safari notch safe-area */
+            padding: calc(70px + env(safe-area-inset-top, 0px)) 16px 140px 16px !important; 
             min-height: auto;
           }
           .header-container {
