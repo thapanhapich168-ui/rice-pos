@@ -130,6 +130,11 @@ export default function CogsReportPage() {
     setLoading(false)
   }
 
+  // 🚀 FIXED: Added missing updateSetting function
+  async function updateSetting(key: string, val: number) {
+    await supabase.from('app_settings').upsert({ setting_key: key, setting_value: val }, { onConflict: 'setting_key' })
+  }
+
   // --- IMAGE EXPORT LOGIC ---
   const handleDownload = async () => {
     if (!reportRef.current) return;
@@ -191,7 +196,6 @@ export default function CogsReportPage() {
     if (filter === 'month') return d.getMonth() === today.getMonth() && d.getFullYear() === today.getFullYear();
     return true;
   }
-
 
   // ==========================================
   // DATA PROCESSORS
@@ -275,7 +279,6 @@ export default function CogsReportPage() {
     return { rows: finalRows, sellerGrandTotal };
   };
 
-
   // 2. Daily Ledger Processor (Pending & History)
   const dailyMap: Record<string, any> = {};
   
@@ -329,7 +332,6 @@ export default function CogsReportPage() {
     if (selectedDays.length === pendingDays.length) setSelectedDays([]);
     else setSelectedDays(pendingDays.map(d => d.key));
   }
-
 
   // ==========================================
   // PAYMENT PROCESSING ENGINE
@@ -435,6 +437,10 @@ export default function CogsReportPage() {
     }
   }
 
+  // --- Inline Payment Wrapper ---
+  async function handleProcessCreditPayment(day: any, paymentRows: PaymentRow[]) {
+    await processPayments(paymentRows, [day], false);
+  }
 
   // --- BULK MODAL LIVE MATH ---
   const bulkTotalDue = selectedDays.reduce((sum, k) => sum + (dailyMap[k].totalCogs - dailyMap[k].totalPaid), 0);
@@ -470,7 +476,6 @@ export default function CogsReportPage() {
       return { ...prev, [key]: rows.filter(r => r.id !== rowId) };
     });
   }
-
 
   let combinedGrandTotal = 0;
 
@@ -560,7 +565,6 @@ export default function CogsReportPage() {
           </button>
         </div>
       </div>
-
 
       {/* ==================================================================================== */}
       {/* TAB 1: COGS REPORT (Original A4 View) */}
@@ -659,7 +663,6 @@ export default function CogsReportPage() {
           </div>
         </div>
       )}
-
 
       {/* ==================================================================================== */}
       {/* TAB 2: PENDING SETTLEMENTS */}
@@ -830,7 +833,6 @@ export default function CogsReportPage() {
         </div>
       )}
 
-
       {/* ==============================================================================================
           UNIFIED BULK SETTLEMENT MODAL (With Liability Feature)
           ============================================================================================== */}
@@ -940,18 +942,6 @@ export default function CogsReportPage() {
           </div>
         </div>
       )}
-
-      {/* --- REUSED INLINE PAYMENT FUNCTION --- */}
-      <script dangerouslySetInnerHTML={{__html: `
-        // The inline function wraps the same processPayments engine but feeds it 1 day
-      `}} />
-      {(() => {
-        // Defining wrapper inside render to access state easily, but it's bound to buttons above.
-        async function handleProcessCreditPayment(day: any, paymentRows: PaymentRow[]) {
-          await processPayments(paymentRows, [day], false);
-        }
-        return null;
-      })()}
 
       <style jsx global>{`
         .main-wrapper { 
