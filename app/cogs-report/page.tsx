@@ -69,6 +69,7 @@ export default function CogsReportPage() {
   // App Settings (Liability to Mom)
   const [persOweRiel, setPersOweRiel] = useState<number>(0)
   const [persOweUsd, setPersOweUsd] = useState<number>(0)
+  const [liveMomLiability, setLiveMomLiability] = useState<number>(0) // 🚀 LIVE SYNC FIX
 
   // Navigation States
   const [activeMainTab, setActiveMainTab] = useState<'report' | 'pending' | 'history'>('report')
@@ -115,22 +116,61 @@ export default function CogsReportPage() {
     const { data: rData } = await supabase.from('retail_sales').select('*')
     const { data: cData } = await supabase.from('cogs_settlements').select('*')
     const { data: aData } = await supabase.from('app_settings').select('*').in('setting_key', ['personal_owe_riel', 'personal_owe_usd'])
+    const { data: invData } = await supabase.from('invoice_summaries').select('*')
+    const { data: expData } = await supabase.from('expenses').select('*')
 
     setSales(sData || [])
     setRetailSales(rData || [])
     setCogsSettlements(cData || [])
 
+    // 🚀 FIXED: LIVE DASHBOARD LIABILITY SYNC ENGINE
+    let momCollectedRiel = 0;
+    let momPaidOutRiel = 0;
+
+    (rData || []).forEach((r: any) => {
+      const owner = (r.owner || '').toLowerCase().trim();
+      const isMom = owner === 'mom' || owner === '' || owner === 'none' || owner === 'null';
+      if (isMom) {
+        momCollectedRiel += Number(r.qty || 0) * Number(r.price_per_bag || 0);
+      }
+    });
+
+    (invData || []).forEach((inv: any) => {
+      const owner = (inv.owner || '').toLowerCase().trim();
+      const isMom = owner === 'mom' || owner === '' || owner === 'none' || owner === 'null';
+      if (isMom) {
+        const owed = Number(inv.balance_due || 0);
+        const totalSale = Number(inv.total_sales || 0);
+        const actuallyPaid = totalSale - owed;
+        if (actuallyPaid > 0) momCollectedRiel += actuallyPaid;
+      }
+    });
+
+    (expData || []).forEach((e: any) => {
+      const amtRiel = Number(e.amount_riel || 0);
+      if (amtRiel > 0 && (e.remarks || '').toLowerCase().includes("settled mom's account liability")) {
+         momPaidOutRiel += Math.abs(amtRiel);
+      }
+    });
+
+    let baseOweRiel = 0;
+    let baseOweUsd = 0;
     if (aData) {
       aData.forEach(s => {
-        if (s.setting_key === 'personal_owe_riel') setPersOweRiel(Number(s.setting_value) || 0)
-        if (s.setting_key === 'personal_owe_usd') setPersOweUsd(Number(s.setting_value) || 0)
-      })
+        if (s.setting_key === 'personal_owe_riel') baseOweRiel = Number(s.setting_value) || 0;
+        if (s.setting_key === 'personal_owe_usd') baseOweUsd = Number(s.setting_value) || 0;
+      });
     }
+    
+    setPersOweRiel(baseOweRiel);
+    setPersOweUsd(baseOweUsd);
+
+    const liveLiabilityRiel = Math.max(0, baseOweRiel + (baseOweUsd * EXCHANGE_RATE) + momCollectedRiel - momPaidOutRiel);
+    setLiveMomLiability(liveLiabilityRiel);
     
     setLoading(false)
   }
 
-  // 🚀 FIXED: Added missing updateSetting function
   async function updateSetting(key: string, val: number) {
     await supabase.from('app_settings').upsert({ setting_key: key, setting_value: val }, { onConflict: 'setting_key' })
   }
@@ -370,7 +410,10 @@ export default function CogsReportPage() {
 
     if (totalAppliedRiel <= 0) return;
     if (totalAppliedRiel > totalDue + 0.1) return alert("Cannot pay more than the total COGS balance.");
-    if (liabilityUsedRiel > persOweRiel || liabilityUsedUsd > persOweUsd) return alert("Not enough Mom Liability available!");
+    
+    // 🚀 FIXED: PROPER LIABILITY BOUNDARY CHECK AGAINST LIVE DATA
+    const liabilityUsedRielEq = liabilityUsedRiel + (liabilityUsedUsd * EXCHANGE_RATE);
+    if (liabilityUsedRielEq > liveMomLiability + 0.1) return alert("Not enough Mom Liability available!");
 
     setIsProcessing(true);
 
@@ -902,7 +945,7 @@ export default function CogsReportPage() {
                 <div style={{ fontSize: '12px', color: '#64748b', marginTop: '12px', padding: '8px', background: '#f8fafc', borderRadius: '6px', border: '1px dashed #cbd5e1' }}>
                   <b>💡 Tip:</b> Select <i>"Mom Liability ៛"</i> to pay this COGS using the money you collected from Mom's deliveries. 
                   <br/><br/>
-                  <b>Available Liability:</b> <span style={{color: '#b58a3d', fontWeight: 'bold'}}>{formatRiel(persOweRiel)}</span> / <span style={{color: '#b58a3d', fontWeight: 'bold'}}>{formatUSD(persOweUsd)}</span>
+                  <b>Available Liability:</b> <span style={{color: '#b58a3d', fontWeight: 'bold'}}>{formatRiel(liveMomLiability)}</span> / <span style={{color: '#b58a3d', fontWeight: 'bold'}}>{formatUSD(liveMomLiability / EXCHANGE_RATE)}</span>
                 </div>
               )}
             </div>

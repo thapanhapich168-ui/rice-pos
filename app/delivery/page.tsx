@@ -61,8 +61,8 @@ function CurrencyInput({ value, onChange, placeholder, style, autoFocus, onEnter
           document.body.scrollTop = 0;
         }, 100);
       }}
-      style={style}
-      className="input-field no-spinners"
+      style={{ ...style, color: '#000000', fontWeight: 'normal' }}
+      className="mobile-input-field"
     />
   )
 }
@@ -283,6 +283,7 @@ export default function DeliveryPage() {
       if (expError) throw new Error("Failed to log income: " + expError.message);
 
       let remainingToDistribute = totalRielEq;
+      // 🚀 FIX: Explicitly typed to any[] to satisfy Vercel's strict compiler
       const updatedInvoices: any[] = [];
       
       for (const inv of debtor.invoices) {
@@ -348,8 +349,7 @@ export default function DeliveryPage() {
     return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
   });
 
-  // 🚀 FIXED TYPE INFERENCE FOR VERCEL COMPILER
-  const debtorsMap: Record<string, any> = deliveries.reduce((acc: Record<string, any>, curr: any) => {
+  const debtorsMap = deliveries.reduce((acc: any, curr: any) => {
     const balance = Number(curr.balance_due) || 0;
     if (balance > 0) {
       let owner = (curr.owner || '').trim();
@@ -376,16 +376,15 @@ export default function DeliveryPage() {
       }
     }
     return acc;
-  }, {} as Record<string, any>);
+  }, {});
 
   const debtorsList = Object.values(debtorsMap).sort((a: any, b: any) => b.totalOwed - a.totalOwed);
 
-  // 🚀 FIXED TYPE INFERENCE FOR VERCEL COMPILER
-  const groupedDebtors: Record<string, any[]> = debtorsList.reduce((acc: Record<string, any[]>, curr: any) => {
+  const groupedDebtors = debtorsList.reduce((acc: any, curr: any) => {
     if (!acc[curr.owner]) acc[curr.owner] = [];
     acc[curr.owner].push(curr);
     return acc;
-  }, {} as Record<string, any[]>);
+  }, {});
 
   const ownerOrder = ['Pich', 'Jing', 'Both', 'Mom', 'Unassigned'];
   const activeOwners = Object.keys(groupedDebtors).sort((a, b) => {
@@ -398,274 +397,385 @@ export default function DeliveryPage() {
 
   function sidebarContent() {
     if (loading) {
-      return <div style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>Loading records...</div>;
+      return <div style={{ textAlign: 'center', padding: '40px', color: '#94a3b8', fontSize: '14px', fontWeight: '500' }}>Loading records...</div>;
     }
     
     if (activeTab === 'delivery') {
       return (
-        <div className="table-container fade-in">
-          <table className="universal-table">
-            <thead>
-              <tr>
-                <th>Date & INV</th>
-                <th>Customer</th>
-                <th style={{ width: '25%' }}>Items Ordered</th>
-                <th style={{ textAlign: 'right' }}>Total (៛)</th>
-                <th style={{ textAlign: 'center' }}>Status</th>
-                <th style={{ textAlign: 'center', width: '160px' }}>Payment Method</th>
-                <th style={{ textAlign: 'right', width: '180px' }}>Pay Amount (៛)</th>
-                <th style={{ textAlign: 'center', width: '120px' }}>Complete</th>
-              </tr>
-            </thead>
-            <tbody>
-              {sortedDeliveries.length === 0 ? (
-                <tr><td colSpan={8} style={{ textAlign: 'center', padding: '60px', color: 'var(--text-muted)' }}>No active wholesale deliveries.</td></tr>
-              ) : (
-                sortedDeliveries.map((d: any) => {
-                  const isDone = isFullyComplete(d);
-                  const totalSale = Number(d.total_sales) || 0;
-                  const balanceDue = Number(d.balance_due) || 0;
-                  const paymentState = getInlinePaymentState(d.invoice_id, balanceDue);
-                  
-                  return (
-                    <tr key={d.invoice_id} style={{ opacity: isDone ? 0.6 : 1, transition: 'all 0.3s ease' }}>
-                      <td style={{ verticalAlign: 'top' }}>
-                        <div style={{ color: '#3b82f6', marginBottom: '4px', fontWeight: 'bold' }}>{d.invoice_id}</div>
-                        <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{new Date(d.created_at).toLocaleDateString('en-GB')}</div>
-                      </td>
-                      <td style={{ verticalAlign: 'top' }}>
-                        <div style={{ fontWeight: 'bold', marginBottom: '4px' }}>{d.customer_name}</div>
-                        <div style={{ color: 'var(--text-muted)', fontSize: '12px' }}>📍 {d.customer_location || 'No location'}</div>
-                      </td>
-                      <td style={{ lineHeight: '1.6', fontSize: '13px', verticalAlign: 'top' }}>{d.rice_types}</td>
-                      
-                      <td style={{ textAlign: 'right', verticalAlign: 'top', fontWeight: 'bold' }}>{formatRiel(totalSale)}</td>
-                      
-                      <td style={{ textAlign: 'center', verticalAlign: 'top' }}>
-                        {d.delivery_status === 'Pending' ? (
+        <div style={{ background: '#fff', borderRadius: '16px', border: '1px solid #f1f5f9', overflow: 'hidden', boxShadow: '0 4px 20px rgba(0,0,0,0.03)' }}>
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '14px', minWidth: '1050px' }}>
+              <thead style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0' }}>
+                <tr>
+                  <th style={{ padding: '16px 20px', textAlign: 'left', color: '#64748b', fontWeight: 'bold', textTransform: 'uppercase', fontSize: '12px', letterSpacing: '0.5px' }}>Date & INV</th>
+                  <th style={{ padding: '16px 20px', textAlign: 'left', color: '#64748b', fontWeight: 'bold', textTransform: 'uppercase', fontSize: '12px', letterSpacing: '0.5px' }}>Customer</th>
+                  <th style={{ padding: '16px 20px', textAlign: 'left', color: '#64748b', fontWeight: 'bold', textTransform: 'uppercase', fontSize: '12px', letterSpacing: '0.5px', width: '25%' }}>Items Ordered</th>
+                  <th style={{ padding: '16px 20px', textAlign: 'right', color: '#64748b', fontWeight: 'bold', textTransform: 'uppercase', fontSize: '12px', letterSpacing: '0.5px' }}>Total (៛)</th>
+                  <th style={{ padding: '16px 20px', textAlign: 'center', color: '#64748b', fontWeight: 'bold', textTransform: 'uppercase', fontSize: '12px', letterSpacing: '0.5px' }}>Status</th>
+                  <th style={{ padding: '16px 20px', textAlign: 'center', color: '#64748b', fontWeight: 'bold', textTransform: 'uppercase', fontSize: '12px', letterSpacing: '0.5px', width: '160px' }}>Payment Method</th>
+                  <th style={{ padding: '16px 20px', textAlign: 'right', color: '#64748b', fontWeight: 'bold', textTransform: 'uppercase', fontSize: '12px', letterSpacing: '0.5px', width: '180px' }}>Pay Amount (៛)</th>
+                  <th style={{ padding: '16px 20px', textAlign: 'center', color: '#64748b', fontWeight: 'bold', textTransform: 'uppercase', fontSize: '12px', letterSpacing: '0.5px', width: '120px' }}>Complete</th>
+                </tr>
+              </thead>
+              <tbody>
+                {sortedDeliveries.length === 0 ? (
+                  <tr><td colSpan={8} style={{ textAlign: 'center', padding: '60px', color: '#94a3b8', fontSize: '15px' }}>No active wholesale deliveries.</td></tr>
+                ) : (
+                  sortedDeliveries.map((d: any) => {
+                    const isDone = isFullyComplete(d);
+                    const totalSale = Number(d.total_sales) || 0;
+                    const balanceDue = Number(d.balance_due) || 0;
+                    const paymentState = getInlinePaymentState(d.invoice_id, balanceDue);
+                    
+                    return (
+                      <tr key={d.invoice_id} style={{ borderBottom: '1px solid #f1f5f9', background: isDone ? '#f8fafc' : '#ffffff', opacity: isDone ? 0.6 : 1, transition: 'all 0.3s ease' }}>
+                        <td style={{ padding: '16px 20px', color: '#475569', fontSize: '14px', verticalAlign: 'top', fontWeight: 'normal' }}>
+                          <div style={{ color: '#3b82f6', marginBottom: '4px' }}>{d.invoice_id}</div>
+                          <div style={{ fontSize: '12px' }}>{new Date(d.created_at).toLocaleDateString('en-GB')}</div>
+                        </td>
+                        <td style={{ padding: '16px 20px', verticalAlign: 'top', fontWeight: 'normal' }}>
+                          <div style={{ color: '#334155', fontSize: '15px', marginBottom: '4px' }}>{d.customer_name}</div>
+                          <div style={{ color: '#64748b', fontSize: '12px' }}>📍 {d.customer_location || 'No location'}</div>
+                        </td>
+                        <td style={{ padding: '16px 20px', color: '#475569', lineHeight: '1.6', fontSize: '13px', verticalAlign: 'top', fontWeight: 'normal' }}>{d.rice_types}</td>
+                        
+                        <td style={{ padding: '16px 20px', textAlign: 'right', color: '#000000', fontSize: '15px', verticalAlign: 'top', fontWeight: 'normal' }}>{formatRiel(totalSale)}</td>
+                        
+                        <td style={{ padding: '16px 20px', textAlign: 'center', verticalAlign: 'top' }}>
                           <button 
-                            onClick={() => updateInvoiceField(d.invoice_id, 'delivery_status', 'Delivered')}
-                            className="btn"
-                            style={{ background: '#fef3c7', color: '#d97706', width: '100px' }}
+                            onClick={() => updateInvoiceField(d.invoice_id, 'delivery_status', d.delivery_status === 'Pending' ? 'Delivered' : 'Pending')}
+                            style={{
+                              padding: '6px 12px', borderRadius: '20px', border: 'none', fontSize: '13px', fontWeight: 'normal', cursor: 'pointer',
+                              background: d.delivery_status === 'Pending' ? '#fef3c7' : '#dcfce7',
+                              color: d.delivery_status === 'Pending' ? '#d97706' : '#15803d',
+                              transition: 'all 0.2s', display: 'flex', alignItems: 'center', gap: '6px', width: '100px', justifyContent: 'center', margin: '0 auto'
+                            }}
                           >
-                            🟡 Pending
+                            {d.delivery_status === 'Pending' ? '🟡 Pending' : '🟢 Delivered'}
                           </button>
-                        ) : (
+                        </td>
+
+                        {/* PAYMENT METHOD COLUMN */}
+                        <td style={{ padding: '16px 20px', textAlign: 'center', verticalAlign: 'top' }}>
+                          {balanceDue > 0 ? (
+                             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                               {paymentState.map((row) => (
+                                 <select 
+                                   key={row.id}
+                                   value={row.method}
+                                   onChange={(e) => updateInlineRow(d.invoice_id, row.id, 'method', e.target.value, balanceDue)}
+                                   style={{ padding: '10px 12px', borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '14px', outline: 'none', backgroundColor: '#fff', color: '#475569', cursor: 'pointer', width: '100%', fontWeight: 'normal', height: '40px', boxSizing: 'border-box' }}
+                                 >
+                                    <option value="Cash ៛">💵 Cash ៛</option>
+                                    <option value="Cash $">💵 Cash $</option>
+                                    <option value="QR ៛">📱 QR ៛</option>
+                                    <option value="QR $">📱 QR $</option>
+                                    <option value="Mom QR ៛">👩 Mom QR ៛</option>
+                                    <option value="Mom QR $">👩 Mom QR $</option>
+                                 </select>
+                               ))}
+                               <button onClick={() => addInlineSplit(d.invoice_id, balanceDue)} style={{ background: 'none', border: 'none', color: '#3b82f6', fontSize: '12px', cursor: 'pointer', textAlign: 'left', fontWeight: 'bold' }}>+ Add Split</button>
+                             </div>
+                          ) : (
+                            <div style={{ color: '#475569', fontSize: '13px', fontWeight: 'normal' }}>{d.payment_method}</div>
+                          )}
+                        </td>
+
+                        {/* PAY AMOUNT COLUMN */}
+                        <td style={{ padding: '16px 20px', textAlign: 'right', verticalAlign: 'top' }}>
+                          {balanceDue > 0 ? (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                              {paymentState.map((row) => (
+                                <div key={row.id} style={{ display: 'flex', alignItems: 'center', gap: '6px', height: '40px' }}>
+                                  <CurrencyInput
+                                    placeholder={formatRiel(balanceDue)}
+                                    value={row.amount}
+                                    onChange={(v: any) => updateInlineRow(d.invoice_id, row.id, 'amount', v, balanceDue)}
+                                    onEnter={() => handleInlineProcess(d, paymentState)}
+                                    style={{ padding: '10px 12px', borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '14px', textAlign: 'right', outline: 'none', width: '100%', backgroundColor: '#fff', color: '#000000', fontWeight: 'normal', height: '100%', boxSizing: 'border-box' }}
+                                  />
+                                  {paymentState.length > 1 && (
+                                    <button onClick={() => removeInlineSplit(d.invoice_id, row.id, balanceDue)} style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', fontSize: '16px', padding: '0 4px' }}>✕</button>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <div style={{ color: '#10b981', fontSize: '14px', fontWeight: 'normal' }}>Paid & Done ✅</div>
+                          )}
+                        </td>
+
+                        <td style={{ padding: '16px 20px', textAlign: 'center', verticalAlign: 'top' }}>
                           <button 
-                            onClick={() => updateInvoiceField(d.invoice_id, 'delivery_status', 'Pending')}
-                            className="btn"
-                            style={{ background: '#dcfce7', color: '#15803d', width: '100px' }}
+                            onClick={() => {
+                              if (balanceDue > 0) {
+                                handleInlineProcess(d, paymentState);
+                              } else {
+                                updateInvoiceField(d.invoice_id, 'is_done', !d.is_done);
+                              }
+                            }}
+                            style={{
+                              padding: '8px 12px', width: '100%', borderRadius: '6px', border: 'none', cursor: 'pointer', fontSize: '13px',
+                              background: isDone ? '#e2e8f0' : '#10b981',
+                              color: isDone ? '#475569' : '#ffffff',
+                              transition: 'all 0.2s', fontWeight: 'normal', height: '40px'
+                            }}
                           >
-                            🟢 Delivered
+                            {isDone ? 'Undo' : '✔ Done'}
                           </button>
-                        )}
-                      </td>
+                        </td>
 
-                      {/* PAYMENT METHOD COLUMN */}
-                      <td style={{ textAlign: 'center', verticalAlign: 'top' }}>
-                        {balanceDue > 0 ? (
-                           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                             {paymentState.map((row) => (
-                               <select 
-                                 key={row.id}
-                                 value={row.method}
-                                 onChange={(e) => updateInlineRow(d.invoice_id, row.id, 'method', e.target.value, balanceDue)}
-                                 className="input-field"
-                                 style={{ height: '40px' }}
-                               >
-                                  <option value="Cash ៛">💵 Cash ៛</option>
-                                  <option value="Cash $">💵 Cash $</option>
-                                  <option value="QR ៛">📱 QR ៛</option>
-                                  <option value="QR $">📱 QR $</option>
-                                  <option value="Mom QR ៛">👩 Mom QR ៛</option>
-                                  <option value="Mom QR $">👩 Mom QR $</option>
-                               </select>
-                             ))}
-                             <button onClick={() => addInlineSplit(d.invoice_id, balanceDue)} style={{ background: 'none', border: 'none', color: '#3b82f6', fontSize: '12px', cursor: 'pointer', textAlign: 'left', fontWeight: 'bold' }}>+ Add Split</button>
-                           </div>
-                        ) : (
-                          <div style={{ color: 'var(--text-muted)', fontSize: '13px' }}>{d.payment_method}</div>
-                        )}
-                      </td>
-
-                      {/* PAY AMOUNT COLUMN */}
-                      <td style={{ textAlign: 'right', verticalAlign: 'top' }}>
-                        {balanceDue > 0 ? (
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                            {paymentState.map((row) => (
-                              <div key={row.id} style={{ display: 'flex', alignItems: 'center', gap: '6px', height: '40px' }}>
-                                <CurrencyInput
-                                  placeholder={formatRiel(balanceDue)}
-                                  value={row.amount}
-                                  onChange={(v: any) => updateInlineRow(d.invoice_id, row.id, 'amount', v, balanceDue)}
-                                  onEnter={() => handleInlineProcess(d, paymentState)}
-                                  style={{ textAlign: 'right', height: '100%' }}
-                                />
-                                {paymentState.length > 1 && (
-                                  <button onClick={() => removeInlineSplit(d.invoice_id, row.id, balanceDue)} style={{ background: 'none', border: 'none', color: 'var(--danger-red)', cursor: 'pointer', fontSize: '16px', padding: '0 4px' }}>✕</button>
-                                )}
-                              </div>
-                            ))}
-                          </div>
-                        ) : (
-                          <div style={{ color: 'var(--primary-green)', fontSize: '14px', fontWeight: 'bold' }}>Paid & Done ✅</div>
-                        )}
-                      </td>
-
-                      <td style={{ textAlign: 'center', verticalAlign: 'top' }}>
-                        <button 
-                          onClick={() => {
-                            if (balanceDue > 0) {
-                              handleInlineProcess(d, paymentState);
-                            } else {
-                              updateInvoiceField(d.invoice_id, 'is_done', !d.is_done);
-                            }
-                          }}
-                          className={`btn ${isDone ? 'btn-outline' : 'btn-success'}`}
-                          style={{ width: '100%', height: '40px' }}
-                        >
-                          {isDone ? 'Undo' : '✔ Done'}
-                        </button>
-                      </td>
-
-                    </tr>
-                  )
-                })
-              )}
-            </tbody>
-          </table>
+                      </tr>
+                    )
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
       );
     }
 
     return (
-      <div className="table-container fade-in">
-        <table className="universal-table">
-          <thead>
-            <tr>
-              <th>Date</th>
-              <th>Owner</th>
-              <th>Customer Name</th>
-              <th style={{ textAlign: 'right' }}>Remaining Debt (៛)</th>
-              <th style={{ textAlign: 'center', width: '160px' }}>Method</th>
-              <th style={{ textAlign: 'right', width: '180px' }}>Pay Amount (៛)</th>
-              <th style={{ textAlign: 'center', width: '120px' }}>Complete</th>
-            </tr>
-          </thead>
-          {activeOwners.length === 0 ? (
-            <tbody><tr><td colSpan={7} style={{ textAlign: 'center', padding: '60px', color: 'var(--primary-green)', fontSize: '15px', fontWeight: 'bold' }}>🎉 All customers are fully paid up!</td></tr></tbody>
-          ) : (
-            activeOwners.map(ownerName => {
-              const list = groupedDebtors[ownerName];
-              const ownerTotalOwed = list.reduce((sum: number, d: any) => sum + d.totalOwed, 0);
-              return (
-                <tbody key={ownerName}>
-                  <tr style={{ background: 'var(--bg-surface)' }}>
-                    <td colSpan={3} style={{ fontWeight: 'bold', color: 'var(--text-muted)' }}>
-                      👤 Owner: <span style={{color: 'var(--text-main)'}}>{ownerName}</span>
-                    </td>
-                    <td style={{ textAlign: 'right', fontWeight: 'bold', color: 'var(--primary-gold)' }}>
-                      {formatRiel(ownerTotalOwed)}
-                    </td>
-                    <td colSpan={3}></td>
-                  </tr>
-                  {list.map((debtor: any) => {
-                    const uniqueKey = `${debtor.owner}_${debtor.name}`;
-                    const paymentState = getCreditPaymentState(uniqueKey, debtor.totalOwed);
-                    
-                    return (
-                      <tr key={uniqueKey} style={{ transition: 'background 0.2s ease' }}>
-                        <td style={{ verticalAlign: 'top' }}>
-                          <div style={{ fontWeight: 'bold' }}>{new Date(debtor.oldestDate).toLocaleDateString('en-GB')}</div>
-                          <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>Oldest Invoice</div>
-                        </td>
-                        <td style={{ verticalAlign: 'top' }}>
-                          {debtor.owner}
-                        </td>
-                        <td style={{ verticalAlign: 'top' }}>
-                          <div style={{ fontWeight: 'bold' }}>{debtor.name}</div>
-                          <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>
-                            {debtor.invoices.length} Unpaid Invoice(s)
-                          </div>
-                        </td>
-                        <td style={{ textAlign: 'right', fontWeight: 'bold', fontSize: '15px', verticalAlign: 'top' }}>
-                          {formatRiel(debtor.totalOwed)}
-                        </td>
-                        
-                        <td style={{ textAlign: 'center', verticalAlign: 'top' }}>
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                            {paymentState.map(row => (
-                              <select 
-                                key={row.id}
-                                value={row.method}
-                                onChange={(e) => updateCreditRow(uniqueKey, row.id, 'method', e.target.value, debtor.totalOwed)}
-                                className="input-field"
-                                style={{ height: '40px' }}
-                              >
-                                 <option value="Cash ៛">💵 Cash ៛</option>
-                                 <option value="Cash $">💵 Cash $</option>
-                                 <option value="QR ៛">📱 QR ៛</option>
-                                 <option value="QR $">📱 QR $</option>
-                                 <option value="Mom QR ៛">👩 Mom QR ៛</option>
-                                 <option value="Mom QR $">👩 Mom QR $</option>
-                              </select>
-                            ))}
-                            <button onClick={() => addCreditSplit(uniqueKey, debtor.totalOwed)} style={{ background: 'none', border: 'none', color: '#3b82f6', fontSize: '12px', cursor: 'pointer', textAlign: 'left', fontWeight: 'bold' }}>+ Add Split</button>
-                          </div>
-                        </td>
+      <div style={{ background: '#fff', borderRadius: '16px', border: '1px solid #f1f5f9', overflow: 'hidden', boxShadow: '0 4px 20px rgba(0,0,0,0.03)' }}>
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '14px', minWidth: '950px' }}>
+            <thead style={{ background: '#fff1f2', borderBottom: '1px solid #ffe4e6' }}>
+              <tr>
+                <th style={{ padding: '16px 20px', textAlign: 'left', color: '#be123c', fontWeight: 'bold', textTransform: 'uppercase', fontSize: '12px', letterSpacing: '0.5px' }}>Date</th>
+                <th style={{ padding: '16px 20px', textAlign: 'left', color: '#be123c', fontWeight: 'bold', textTransform: 'uppercase', fontSize: '12px', letterSpacing: '0.5px' }}>Owner</th>
+                <th style={{ padding: '16px 20px', textAlign: 'left', color: '#be123c', fontWeight: 'bold', textTransform: 'uppercase', fontSize: '12px', letterSpacing: '0.5px' }}>Customer Name</th>
+                <th style={{ padding: '16px 20px', textAlign: 'right', color: '#be123c', fontWeight: 'bold', textTransform: 'uppercase', fontSize: '12px', letterSpacing: '0.5px' }}>Remaining Debt (៛)</th>
+                <th style={{ padding: '16px 20px', textAlign: 'center', color: '#be123c', fontWeight: 'bold', textTransform: 'uppercase', fontSize: '12px', letterSpacing: '0.5px', width: '160px' }}>Method</th>
+                <th style={{ padding: '16px 20px', textAlign: 'right', color: '#be123c', fontWeight: 'bold', textTransform: 'uppercase', fontSize: '12px', letterSpacing: '0.5px', width: '180px' }}>Pay Amount (៛)</th>
+                <th style={{ padding: '16px 20px', textAlign: 'center', color: '#be123c', fontWeight: 'bold', textTransform: 'uppercase', fontSize: '12px', letterSpacing: '0.5px', width: '120px' }}>Complete</th>
+              </tr>
+            </thead>
+            {activeOwners.length === 0 ? (
+              <tbody><tr><td colSpan={7} style={{ textAlign: 'center', padding: '60px', color: '#10b981', fontSize: '15px', fontWeight: 'normal' }}>🎉 All customers are fully paid up!</td></tr></tbody>
+            ) : (
+              activeOwners.map(ownerName => {
+                const list = groupedDebtors[ownerName];
+                const ownerTotalOwed = list.reduce((sum: number, d: any) => sum + d.totalOwed, 0);
+                return (
+                  <tbody key={ownerName}>
+                    <tr style={{ background: '#f8fafc' }}>
+                      <td colSpan={3} style={{ padding: '14px 20px', color: '#334155', fontSize: '14px', borderBottom: '1px solid #e2e8f0', fontWeight: 'normal' }}>
+                        👤 Owner: {ownerName}
+                      </td>
+                      <td style={{ padding: '14px 20px', textAlign: 'right', color: '#000000', fontSize: '15px', borderBottom: '1px solid #e2e8f0', fontWeight: 'normal' }}>
+                        {formatRiel(ownerTotalOwed)}
+                      </td>
+                      <td colSpan={3} style={{ borderBottom: '1px solid #e2e8f0' }}></td>
+                    </tr>
+                    {list.map((debtor: any) => {
+                      const uniqueKey = `${debtor.owner}_${debtor.name}`;
+                      const paymentState = getCreditPaymentState(uniqueKey, debtor.totalOwed);
+                      
+                      return (
+                        <tr key={uniqueKey} style={{ borderBottom: '1px solid #f1f5f9', background: '#ffffff', transition: 'background 0.2s ease' }}>
+                          <td style={{ padding: '20px', color: '#64748b', fontSize: '14px', verticalAlign: 'top', fontWeight: 'normal' }}>
+                            {new Date(debtor.oldestDate).toLocaleDateString('en-GB')}
+                            <div style={{ fontSize: '12px', color: '#94a3b8', marginTop: '4px' }}>Oldest Invoice</div>
+                          </td>
+                          <td style={{ padding: '20px', color: '#475569', fontSize: '15px', verticalAlign: 'top', fontWeight: 'normal' }}>
+                            {debtor.owner}
+                          </td>
+                          <td style={{ padding: '20px', color: '#334155', fontSize: '15px', verticalAlign: 'top', fontWeight: 'normal' }}>
+                            {debtor.name}
+                            <div style={{ fontSize: '13px', color: '#64748b', marginTop: '4px' }}>
+                              {debtor.invoices.length} Unpaid Invoice(s)
+                            </div>
+                          </td>
+                          <td style={{ padding: '20px', textAlign: 'right', color: '#000000', fontSize: '16px', verticalAlign: 'top', fontWeight: 'normal' }}>
+                            {formatRiel(debtor.totalOwed)}
+                          </td>
+                          
+                          <td style={{ padding: '20px', textAlign: 'center', verticalAlign: 'top' }}>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                              {paymentState.map(row => (
+                                <select 
+                                  key={row.id}
+                                  value={row.method}
+                                  onChange={(e) => updateCreditRow(uniqueKey, row.id, 'method', e.target.value, debtor.totalOwed)}
+                                  style={{ padding: '10px 12px', borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '14px', outline: 'none', backgroundColor: '#fff', color: '#475569', cursor: 'pointer', width: '100%', fontWeight: 'normal', height: '40px', boxSizing: 'border-box' }}
+                                >
+                                   <option value="Cash ៛">💵 Cash ៛</option>
+                                   <option value="Cash $">💵 Cash $</option>
+                                   <option value="QR ៛">📱 QR ៛</option>
+                                   <option value="QR $">📱 QR $</option>
+                                   <option value="Mom QR ៛">👩 Mom QR ៛</option>
+                                   <option value="Mom QR $">👩 Mom QR $</option>
+                                </select>
+                              ))}
+                              <button onClick={() => addCreditSplit(uniqueKey, debtor.totalOwed)} style={{ background: 'none', border: 'none', color: '#3b82f6', fontSize: '12px', cursor: 'pointer', textAlign: 'left', fontWeight: 'bold' }}>+ Add Split</button>
+                            </div>
+                          </td>
 
-                        <td style={{ textAlign: 'right', verticalAlign: 'top' }}>
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                            {paymentState.map(row => (
-                              <div key={row.id} style={{ display: 'flex', alignItems: 'center', gap: '6px', height: '40px' }}>
-                                <CurrencyInput
-                                  placeholder={formatRiel(debtor.totalOwed)}
-                                  value={row.amount}
-                                  onChange={(v: any) => updateCreditRow(uniqueKey, row.id, 'amount', v, debtor.totalOwed)}
-                                  onEnter={() => handleProcessCreditPayment(debtor, paymentState)}
-                                  style={{ textAlign: 'right', height: '100%' }}
-                                />
-                                {paymentState.length > 1 && (
-                                  <button onClick={() => removeCreditSplit(uniqueKey, row.id, debtor.totalOwed)} style={{ background: 'none', border: 'none', color: 'var(--danger-red)', cursor: 'pointer', fontSize: '16px', padding: '0 4px' }}>✕</button>
-                                )}
-                              </div>
-                            ))}
-                          </div>
-                        </td>
+                          <td style={{ padding: '20px', textAlign: 'right', verticalAlign: 'top' }}>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                              {paymentState.map(row => (
+                                <div key={row.id} style={{ display: 'flex', alignItems: 'center', gap: '6px', height: '40px' }}>
+                                  <CurrencyInput
+                                    placeholder={formatRiel(debtor.totalOwed)}
+                                    value={row.amount}
+                                    onChange={(v: any) => updateCreditRow(uniqueKey, row.id, 'amount', v, debtor.totalOwed)}
+                                    onEnter={() => handleProcessCreditPayment(debtor, paymentState)}
+                                    style={{ padding: '10px 12px', borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '15px', textAlign: 'right', outline: 'none', width: '100%', backgroundColor: '#fff', color: '#000000', fontWeight: 'normal', height: '100%', boxSizing: 'border-box' }}
+                                  />
+                                  {paymentState.length > 1 && (
+                                    <button onClick={() => removeCreditSplit(uniqueKey, row.id, debtor.totalOwed)} style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', fontSize: '16px', padding: '0 4px' }}>✕</button>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          </td>
 
-                        <td style={{ textAlign: 'center', verticalAlign: 'top' }}>
-                          <button 
-                            onClick={() => handleProcessCreditPayment(debtor, paymentState)}
-                            className="btn btn-success"
-                            style={{ width: '100%', height: '40px' }}
-                          >
-                            ✔ Done
-                          </button>
-                        </td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              );
-            })
-          )}
-        </table>
+                          <td style={{ padding: '20px', textAlign: 'center', verticalAlign: 'top' }}>
+                            <button 
+                              onClick={() => handleProcessCreditPayment(debtor, paymentState)}
+                              style={{
+                                padding: '8px 12px', width: '100%', borderRadius: '6px', border: 'none', cursor: 'pointer', fontSize: '13px',
+                                background: '#10b981', color: '#ffffff', transition: 'all 0.2s', fontWeight: 'normal', height: '40px'
+                              }}
+                            >
+                              ✔ Done
+                            </button>
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                );
+              })
+            )}
+          </table>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="main-wrapper">
-      <div className="header-container">
-        <h1 className="page-title">🚚 Delivery & Credit Hub</h1>
+    <>
+      <div className="main-wrapper">
+        <div className="header-container">
+          <h1 className="page-title">🚚 Delivery & Credit Hub</h1>
+        </div>
+
+        <div className="tabs-container">
+          <button onClick={() => setActiveTab('delivery')} className={`tab-toggle-button ${activeTab === 'delivery' ? 'active-tab' : ''}`}>📦 Delivery Queue</button>
+          <button onClick={() => setActiveTab('credit')} className={`tab-toggle-button ${activeTab === 'credit' ? 'active-tab' : ''}`}>💰 Accounts Credit ({debtorsList.length})</button>
+        </div>
+
+        {sidebarContent()}
       </div>
 
-      <div className="tab-container">
-        <button onClick={() => setActiveTab('delivery')} className={`tab-btn ${activeTab === 'delivery' ? 'active-gold' : ''}`}>📦 Delivery Queue</button>
-        <button onClick={() => setActiveTab('credit')} className={`tab-btn ${activeTab === 'credit' ? 'active-gold' : ''}`}>💰 Accounts Credit ({debtorsList.length})</button>
-      </div>
+      <style jsx global>{`
+        input, select, button, textarea {
+          font-family: inherit;
+          font-variant-numeric: tabular-nums lining-nums;
+        }
 
-      {sidebarContent()}
-    </div>
+        body {
+          font-variant-numeric: tabular-nums lining-nums;
+        }
+
+        .main-wrapper { 
+          padding: 24px 24px 24px 75px; 
+          background: #f8fafc; 
+          font-family: Arial, sans-serif; 
+          box-sizing: border-box; 
+          color: #333;
+          min-height: 100dvh;
+        }
+
+        .header-container { 
+          margin-bottom: 24px; 
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          flex-wrap: wrap;
+          gap: 12px;
+        }
+
+        .page-title { 
+          font-size: 24px; 
+          color: #334155; 
+          margin: 0; 
+          font-weight: 600;
+          letter-spacing: -0.5px;
+        }
+
+        .tabs-container {
+          display: flex; 
+          gap: 8px; 
+          margin-bottom: 24px; 
+          background: #fff; 
+          padding: 6px; 
+          border-radius: 12px; 
+          border: 1px solid #f1f5f9;
+          box-shadow: 0 2px 10px rgba(0,0,0,0.02);
+          flex-wrap: wrap;
+          max-width: 500px;
+        }
+
+        .tab-toggle-button {
+          flex: 1; 
+          padding: 12px; 
+          border-radius: 8px; 
+          border: none; 
+          font-weight: 500; 
+          cursor: pointer; 
+          font-size: 14px;
+          background: transparent;
+          color: #64748b;
+          transition: all 0.2s ease;
+          white-space: nowrap;
+          min-width: 120px;
+        }
+
+        .active-tab {
+          background: #b58a3d !important;
+          color: #ffffff !important;
+          font-weight: 600 !important;
+          box-shadow: 0 4px 10px rgba(181, 138, 61, 0.2);
+        }
+
+        input[type="text"].no-spinners::-webkit-inner-spin-button,
+        input[type="text"].no-spinners::-webkit-outer-spin-button {
+          -webkit-appearance: none;
+          margin: 0;
+        }
+
+        .mobile-input-field:focus, .mobile-select-menu:focus {
+          border-color: #94a3b8 !important;
+          box-shadow: 0 0 0 2px rgba(148, 163, 184, 0.2);
+        }
+
+        @media (max-width: 1023px) { 
+          .main-wrapper { 
+            padding: max(80px, env(safe-area-inset-top, 80px)) 16px 24px 16px !important; 
+          }
+          .header-container {
+            flex-direction: column !important;
+            align-items: flex-start !important;
+            gap: 10px !important;
+            margin-bottom: 20px !important;
+          }
+          .tabs-container {
+            padding: 4px !important;
+            margin-bottom: 20px !important;
+            max-width: 100%;
+          }
+          .tab-toggle-button {
+            padding: 10px !important;
+            font-size: 13px !important;
+          }
+          .mobile-select-menu, .mobile-input-field {
+            font-size: 16px !important; 
+          }
+        }
+      `}</style>
+    </>
   );
 }
