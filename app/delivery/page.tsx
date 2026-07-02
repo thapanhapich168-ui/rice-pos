@@ -283,7 +283,8 @@ export default function DeliveryPage() {
       if (expError) throw new Error("Failed to log income: " + expError.message);
 
       let remainingToDistribute = totalRielEq;
-      const updatedInvoices = [];
+      // 🚀 FIX: Explicitly typed to any[] to satisfy Vercel's strict compiler
+      const updatedInvoices: any[] = [];
       
       for (const inv of debtor.invoices) {
         if (remainingToDistribute <= 0) break;
