@@ -13,8 +13,8 @@ const MAIN_KEYWORDS = ['មិញ', 'ខុន', 'ខ្ញី', 'ម្លិ�
 const formatRiel = (amount: number) => `${new Intl.NumberFormat('en-US').format(Math.round(amount))} ៛`;
 const formatUSD = (amount: number) => `$${new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(amount)}`;
 
-// Translations Dictionary (RESTORED KHMER BLOCK)
-const t: Record<'en' | 'kh', any> = {
+// Translations Dictionary
+const t = {
   en: {
     title: "Point of Sale",
     retail: "🛍️ Retail (1kg)",
@@ -30,13 +30,13 @@ const t: Record<'en' | 'kh', any> = {
     totalKhmer: "Total Due:",
     totalUsd: "Total in USD:",
     checkout: "Checkout",
-    mobileModalTitle: "Adjust Item Properties",
-    cancel: "Cancel",
-    add: "Add to Cart",
     successTitle: "Invoice Ready",
     openInvoice: "💾 Download Image",
     shareInvoice: "📤 Share / Save",
-    close: "Close Window"
+    close: "Close Window",
+    mobileModalTitle: "Adjust Item Properties",
+    cancel: "Cancel",
+    add: "Add to Cart"
   },
   kh: {
     title: "អង្គរ រេឌឌៀន រ៉ាយស៍",
@@ -53,13 +53,13 @@ const t: Record<'en' | 'kh', any> = {
     totalKhmer: "សរុបរួម:",
     totalUsd: "សរុបជាដុល្លារ:",
     checkout: "ចាត់ចែងការទូទាត់",
-    mobileModalTitle: "កែសម្រួលព័ត៌មានទំនិញ",
-    cancel: "បោះបង់",
-    add: "បញ្ចូលទៅកន្ត្រក",
     successTitle: "វិក្កយបត្រត្រូវបានបង្កើតជោគជ័យ!",
     openInvoice: "💾 ទាញយកវិក្កយបត្រ",
     shareInvoice: "📤 ចែករំលែក / រក្សាទុក",
-    close: "បិទផ្ទាំង"
+    close: "បិទផ្ទាំង",
+    mobileModalTitle: "កែសម្រួលព័ត៌មានទំនិញ",
+    cancel: "បោះបង់",
+    add: "បញ្ចូលទៅកន្ត្រក"
   }
 };
 
@@ -186,6 +186,7 @@ export default function POSPage() {
   const [isCustomerModalOpen, setIsCustomerModalOpen] = useState(false) 
 
   const [cartCustomerNameOverride, setCartCustomerNameOverride] = useState('')
+  const [currentTime, setCurrentTime] = useState(new Date())
 
   // ==========================================
   // DYNAMIC PAYMENT ROWS
@@ -245,28 +246,11 @@ export default function POSPage() {
     });
   }, [totalRiel]);
 
-  // 15-SECOND AUTO DISMISS FOR SALE SUMMARY POPUP
+  // Live Date and Time
   useEffect(() => {
-    if (saleSummary) {
-      const timer = setTimeout(() => {
-        setSaleSummary(null);
-        setCompletedSale(null);
-      }, 15000);
-      return () => clearTimeout(timer);
-    }
-  }, [saleSummary]);
-
-  // 15-SECOND AUTO DISMISS FOR INVOICE PREVIEW
-  useEffect(() => {
-    if (showInvoicePreview) {
-      const timer = setTimeout(() => {
-        setShowInvoicePreview(false);
-        setCompletedSale(null);
-        setPreviewImageUrl(null);
-      }, 15000);
-      return () => clearTimeout(timer);
-    }
-  }, [showInvoicePreview]);
+    const timer = setInterval(() => setCurrentTime(new Date()), 1000);
+    return () => clearInterval(timer);
+  }, []);
 
   useEffect(() => {
     const checkDeviceType = () => {
@@ -346,23 +330,21 @@ export default function POSPage() {
     }
   }, [activeTab, customers]) 
 
-  // Mobile Invoice Generation Engine (Waits to ensure HD logos load before capture)
+  // Mobile Invoice Generation Engine
   useEffect(() => {
     if (completedSale && invoiceRef.current && !previewImageUrl && showInvoicePreview) {
       const timer = setTimeout(async () => {
         try {
           await document.fonts.ready;
-          // Wait 800ms to guarantee logos/qr are fetched completely in DOM
+          // Wait 800ms to guarantee logos/qr are fetched completely in DOM before capture
           await new Promise(r => setTimeout(r, 800));
 
           const isMobile = window.innerWidth < 1024;
           
-          // Prime the canvas
           if (isMobile) {
             await htmlToImage.toPng(invoiceRef.current!, { pixelRatio: 1, backgroundColor: '#ffffff' });
           }
           
-          // High-Res Capture
           const dataUrl = await htmlToImage.toPng(invoiceRef.current!, { 
             pixelRatio: 3, 
             backgroundColor: '#ffffff' 
@@ -379,6 +361,29 @@ export default function POSPage() {
       return () => clearTimeout(timer);
     }
   }, [completedSale, previewImageUrl, showInvoicePreview])
+
+  // 15-SECOND AUTO DISMISS FOR SALE SUMMARY POPUP
+  useEffect(() => {
+    if (saleSummary) {
+      const timer = setTimeout(() => {
+        setSaleSummary(null);
+        setCompletedSale(null);
+      }, 15000);
+      return () => clearTimeout(timer);
+    }
+  }, [saleSummary]);
+
+  // 15-SECOND AUTO DISMISS FOR INVOICE PREVIEW
+  useEffect(() => {
+    if (showInvoicePreview) {
+      const timer = setTimeout(() => {
+        setShowInvoicePreview(false);
+        setCompletedSale(null);
+        setPreviewImageUrl(null);
+      }, 15000);
+      return () => clearTimeout(timer);
+    }
+  }, [showInvoicePreview]);
 
   async function loadProductsAndSettings() {
     const { data: prodData } = await supabase.from('products').select('*').order('id', { ascending: true })
@@ -801,7 +806,7 @@ export default function POSPage() {
         });
       }
 
-      // Show Summary OR Invoice logic
+      // Show Summary OR Invoice logic based on rules
       let cRiel = 0, qRiel = 0, cUsd = 0, qUsd = 0;
       activePayments.forEach(r => {
         if (r.method === 'Cash ៛') cRiel += Number(r.amount);
@@ -896,73 +901,16 @@ export default function POSPage() {
   const currentT = t[lang] || t['en'];
   const sortedCart = [...cart].sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0));
 
-  // Payment Row UI Renderer
-  const renderPaymentSection = (isMobileCart: boolean = false) => {
-    if (!showPaymentSelector) return null;
-    return (
-      <div style={{ marginBottom: '8px', background: '#f8fafc', padding: '10px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1 }}>
-            <span style={{ fontSize: '11px', color: '#64748b', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Receive</span>
-            <button onClick={() => setPaymentRows([...paymentRows, { id: Date.now(), method: 'Cash ៛', amount: '', isAuto: false }])} style={{ background: '#e0f2fe', color: '#0284c7', border: 'none', borderRadius: '4px', fontSize: '10px', fontWeight: 'bold', padding: '4px 8px', cursor: 'pointer' }}>+ Split</button>
-          </div>
-        </div>
-        
-        {paymentRows.map((row, index) => (
-          <div key={row.id} style={{ display: 'flex', gap: '6px', marginBottom: '6px', alignItems: 'center' }}>
-            <select 
-              value={row.method} 
-              onChange={e => {
-                const newRows = [...paymentRows];
-                newRows[index].method = e.target.value;
-                setPaymentRows(newRows);
-              }}
-              style={{ width: '45%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: isMobileCart ? '16px' : '13px', fontWeight: 'normal', outline: 'none', backgroundColor: '#fff', cursor: 'pointer', color: '#0f172a' }}
-              className="mobile-select-menu"
-            >
-              <option value="Cash ៛">💵 Cash ៛</option>
-              <option value="Cash $">💵 Cash $</option>
-              <option value="QR ៛">📱 QR ៛</option>
-              <option value="QR $">📱 QR $</option>
-              <option value="Mom QR ៛">👩 Mom QR ៛</option>
-              <option value="Mom QR $">👩 Mom QR $</option>
-            </select>
-            
-            <div style={{ flex: 1 }}>
-              <CurrencyInput 
-                placeholder="" 
-                value={row.amount}
-                onFocus={() => {
-                  if (row.isAuto) {
-                    const newRows = [...paymentRows];
-                    newRows[index].amount = '';
-                    newRows[index].isAuto = false;
-                    setPaymentRows(newRows);
-                  }
-                }}
-                onChange={(val: any) => {
-                  const newRows = [...paymentRows];
-                  newRows[index].amount = val;
-                  newRows[index].isAuto = false;
-                  setPaymentRows(newRows);
-                }}
-                style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', outline: 'none', color: '#0f172a', fontWeight: 'normal', fontSize: isMobileCart ? '16px' : '14px', textAlign: 'right' }}
-                className="mobile-input-field"
-              />
-            </div>
-            
-            {paymentRows.length > 1 && (
-              <button onClick={() => setPaymentRows(paymentRows.filter(r => r.id !== row.id))} style={{ background: 'none', border: 'none', color: '#ef4444', fontSize: '16px', cursor: 'pointer', padding: '0 4px' }}>✕</button>
-            )}
-          </div>
-        ))}
-      </div>
-    )
-  }
-
   return (
     <div className="pos-layout-wrapper" style={{ display: 'flex', height: '100dvh', overflow: 'hidden', width: '100%', backgroundColor: '#ffffff', boxSizing: 'border-box' }}>
       
+      {/* PRELOAD IMAGES TO FIX SAFARI MOBILE BLANK LOGO ISSUE */}
+      <div style={{ width: 0, height: 0, overflow: 'hidden', position: 'absolute', opacity: 0 }}>
+        <img src="https://i.imgur.com/s0hg3MQ.png" crossOrigin="anonymous" alt="preload" />
+        <img src="https://i.imgur.com/Guk0hVe.png" crossOrigin="anonymous" alt="preload" />
+        <img src="https://i.imgur.com/XUsrp9D.png" crossOrigin="anonymous" alt="preload" />
+      </div>
+
       {/* SELECTION ENGINE VIEW GRID PANEL */}
       <div className="pos-main-engine hide-scrollbar" style={{ flex: 1, display: 'flex', flexDirection: 'column', backgroundColor: '#f8fafc', minWidth: 0, height: '100%', overflowY: 'auto' }}>
         
@@ -1137,7 +1085,7 @@ export default function POSPage() {
           )}
         </div>
         
-        <div style={{ paddingTop: '12px', paddingRight: '20px', paddingBottom: '16px', paddingLeft: '20px', borderTop: '1px solid #e2e8f0', backgroundColor: '#f8fafc', flexShrink: 0, zIndex: 10, boxShadow: '0 -4px 10px rgba(0,0,0,0.02)' }}>
+        <div style={{ position: 'sticky', bottom: 0, paddingTop: '12px', paddingRight: '20px', paddingBottom: '16px', paddingLeft: '20px', borderTop: '1px solid #e2e8f0', backgroundColor: '#f8fafc', flexShrink: 0, zIndex: 10, boxShadow: '0 -4px 10px rgba(0,0,0,0.02)' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '4px' }}>
             <span style={{ fontSize: '13px', color: '#334155' }}>{currentT.totalKhmer}</span>
             <span style={{ fontSize: '18px', fontWeight: 'bold', color: totalRiel < 0 ? '#ef4444' : '#b58a3d' }}>{formatRielFromNative(totalRiel)}</span>
@@ -1147,7 +1095,66 @@ export default function POSPage() {
             <span style={{ fontSize: '13px', color: '#475569' }}>{formatUSD(totalUSD)}</span>
           </div>
 
-          {renderPaymentSection(false)}
+          {/* Desktop Payment Selector */}
+          {showPaymentSelector && (
+            <div style={{ marginBottom: '8px', background: '#f8fafc', padding: '10px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1 }}>
+                  <span style={{ fontSize: '11px', color: '#64748b', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Receive</span>
+                  <button onClick={() => setPaymentRows([...paymentRows, { id: Date.now(), method: 'Cash ៛', amount: '', isAuto: false }])} style={{ background: '#e0f2fe', color: '#0284c7', border: 'none', borderRadius: '4px', fontSize: '10px', fontWeight: 'bold', padding: '4px 8px', cursor: 'pointer' }}>+ Split</button>
+                </div>
+              </div>
+              
+              {paymentRows.map((row, index) => (
+                <div key={row.id} style={{ display: 'flex', gap: '6px', marginBottom: '6px', alignItems: 'center' }}>
+                  <select 
+                    value={row.method} 
+                    onChange={e => {
+                      const newRows = [...paymentRows];
+                      newRows[index].method = e.target.value;
+                      setPaymentRows(newRows);
+                    }}
+                    style={{ width: '45%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px', fontWeight: 'normal', outline: 'none', backgroundColor: '#fff', cursor: 'pointer', color: '#0f172a' }}
+                    className="mobile-select-menu"
+                  >
+                    <option value="Cash ៛">💵 Cash ៛</option>
+                    <option value="Cash $">💵 Cash $</option>
+                    <option value="QR ៛">📱 QR ៛</option>
+                    <option value="QR $">📱 QR $</option>
+                    <option value="Mom QR ៛">👩 Mom QR ៛</option>
+                    <option value="Mom QR $">👩 Mom QR $</option>
+                  </select>
+                  
+                  <div style={{ flex: 1 }}>
+                    <CurrencyInput 
+                      placeholder="" 
+                      value={row.amount}
+                      onFocus={() => {
+                        if (row.isAuto) {
+                          const newRows = [...paymentRows];
+                          newRows[index].amount = '';
+                          newRows[index].isAuto = false;
+                          setPaymentRows(newRows);
+                        }
+                      }}
+                      onChange={(val: any) => {
+                        const newRows = [...paymentRows];
+                        newRows[index].amount = val;
+                        newRows[index].isAuto = false;
+                        setPaymentRows(newRows);
+                      }}
+                      style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', outline: 'none', color: '#0f172a', fontWeight: 'normal', fontSize: '14px', textAlign: 'right' }}
+                      className="mobile-input-field"
+                    />
+                  </div>
+                  
+                  {paymentRows.length > 1 && (
+                    <button onClick={() => setPaymentRows(paymentRows.filter(r => r.id !== row.id))} style={{ background: 'none', border: 'none', color: '#ef4444', fontSize: '16px', cursor: 'pointer', padding: '0 4px' }}>✕</button>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
           
           <button 
             onClick={confirmCheckout} 
@@ -1185,7 +1192,7 @@ export default function POSPage() {
         <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(0,0,0,0.4)', zIndex: 999, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}>
           <div style={{ flex: 1 }} onClick={() => setIsMobileCartOpen(false)}></div>
           
-          <div style={{ width: '100%', height: '85dvh', backgroundColor: '#ffffff', borderTopLeftRadius: '20px', borderTopRightRadius: '20px', display: 'flex', flexDirection: 'column', position: 'relative', boxShadow: '0 -10px 25px rgba(0,0,0,0.1)' }}>
+          <div style={{ width: '100%', maxHeight: '85dvh', backgroundColor: '#ffffff', borderTopLeftRadius: '20px', borderTopRightRadius: '20px', display: 'flex', flexDirection: 'column', position: 'relative', boxShadow: '0 -10px 25px rgba(0,0,0,0.1)' }}>
             <div style={{ width: '100%', display: 'flex', justifyContent: 'center', paddingTop: '12px', paddingBottom: '8px', flexShrink: 0 }}>
               <div style={{ width: '40px', height: '5px', backgroundColor: '#cbd5e1', borderRadius: '10px' }}></div>
             </div>
@@ -1248,7 +1255,8 @@ export default function POSPage() {
               })}
             </div>
             
-            <div style={{ padding: '12px 20px calc(12px + env(safe-area-inset-bottom, 12px)) 20px', borderTop: '1px solid #e2e8f0', backgroundColor: '#f8fafc', boxShadow: '0 -4px 10px rgba(0,0,0,0.05)', flexShrink: 0 }}>
+            {/* SAFARI BOTTOM OVERLAP FIX: explicitly pushed up via padding */}
+            <div style={{ padding: '12px 20px calc(90px + env(safe-area-inset-bottom, 20px)) 20px', borderTop: '1px solid #e2e8f0', backgroundColor: '#f8fafc', boxShadow: '0 -4px 10px rgba(0,0,0,0.05)', flexShrink: 0 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
                 <span style={{ fontSize: '14px', color: '#475569' }}>{currentT.totalKhmer}</span>
                 <span style={{ fontWeight: 'bold', color: totalRiel < 0 ? '#ef4444' : '#b58a3d', fontSize: '20px' }}>{formatRielFromNative(totalRiel)}</span>
@@ -1258,7 +1266,66 @@ export default function POSPage() {
                 <span style={{ color: '#64748b', fontSize: '13px' }}>{formatUSD(totalUSD)}</span>
               </div>
               
-              {renderPaymentSection(true)}
+              {/* Mobile Payment Selector */}
+              {showPaymentSelector && (
+                <div style={{ marginBottom: '8px', background: '#f8fafc', padding: '10px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1 }}>
+                      <span style={{ fontSize: '11px', color: '#64748b', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Receive</span>
+                      <button onClick={() => setPaymentRows([...paymentRows, { id: Date.now(), method: 'Cash ៛', amount: '', isAuto: false }])} style={{ background: '#e0f2fe', color: '#0284c7', border: 'none', borderRadius: '4px', fontSize: '10px', fontWeight: 'bold', padding: '4px 8px', cursor: 'pointer' }}>+ Split</button>
+                    </div>
+                  </div>
+                  
+                  {paymentRows.map((row, index) => (
+                    <div key={row.id} style={{ display: 'flex', gap: '6px', marginBottom: '6px', alignItems: 'center' }}>
+                      <select 
+                        value={row.method} 
+                        onChange={e => {
+                          const newRows = [...paymentRows];
+                          newRows[index].method = e.target.value;
+                          setPaymentRows(newRows);
+                        }}
+                        style={{ width: '45%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '16px', fontWeight: 'normal', outline: 'none', backgroundColor: '#fff', cursor: 'pointer', color: '#0f172a' }}
+                        className="mobile-select-menu"
+                      >
+                        <option value="Cash ៛">💵 Cash ៛</option>
+                        <option value="Cash $">💵 Cash $</option>
+                        <option value="QR ៛">📱 QR ៛</option>
+                        <option value="QR $">📱 QR $</option>
+                        <option value="Mom QR ៛">👩 Mom QR ៛</option>
+                        <option value="Mom QR $">👩 Mom QR $</option>
+                      </select>
+                      
+                      <div style={{ flex: 1 }}>
+                        <CurrencyInput 
+                          placeholder="" 
+                          value={row.amount}
+                          onFocus={() => {
+                            if (row.isAuto) {
+                              const newRows = [...paymentRows];
+                              newRows[index].amount = '';
+                              newRows[index].isAuto = false;
+                              setPaymentRows(newRows);
+                            }
+                          }}
+                          onChange={(val: any) => {
+                            const newRows = [...paymentRows];
+                            newRows[index].amount = val;
+                            newRows[index].isAuto = false;
+                            setPaymentRows(newRows);
+                          }}
+                          style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', outline: 'none', color: '#0f172a', fontWeight: 'normal', fontSize: '16px', textAlign: 'right' }}
+                          className="mobile-input-field"
+                        />
+                      </div>
+                      
+                      {paymentRows.length > 1 && (
+                        <button onClick={() => setPaymentRows(paymentRows.filter(r => r.id !== row.id))} style={{ background: 'none', border: 'none', color: '#ef4444', fontSize: '16px', cursor: 'pointer', padding: '0 4px' }}>✕</button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
 
               <button 
                 onClick={confirmCheckout} 
@@ -1466,7 +1533,7 @@ export default function POSPage() {
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
               <button onClick={() => { setSaleSummary(null); setCompletedSale(null); setPreviewImageUrl(null); }} style={{ width: '100%', padding: '16px', background: '#f1f5f9', color: '#475569', border: 'none', borderRadius: '8px', cursor: 'pointer', fontSize: '14px' }}>
-                 Close
+                 Close Window
               </button>
             </div>
           </div>
@@ -1475,7 +1542,7 @@ export default function POSPage() {
 
       {/* FINAL INVISIBLE DOM CAPTURE AREA (STRICTLY BACKGROUND) */}
       {completedSale && (
-        <div style={{ position: 'absolute', top: '-10000px', left: '-10000px', zIndex: -1 }}>
+        <div style={{ position: 'absolute', top: 0, left: 0, zIndex: -1000, opacity: 0, pointerEvents: 'none' }}>
           <div id="invoice-capture-area" ref={invoiceRef} style={{ width: '794px', height: '559px', backgroundColor: '#ffffff', position: 'relative', margin: 0, padding: '19px', boxSizing: 'border-box', fontFamily: "'Noto Sans Khmer', Arial, sans-serif", fontSize: '12.8px', color: '#000000', overflow: 'hidden' }}>
             <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Khmer&display=swap" rel="stylesheet" crossOrigin="anonymous" />
             
@@ -1608,15 +1675,15 @@ export default function POSPage() {
         <div className="invoice-modal-overlay" style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(0,0,0,0.85)', zIndex: 10006, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
           
           <div className="invoice-controls" style={{ display: 'flex', justifyContent: 'space-between', width: '100%', maxWidth: '850px', marginBottom: '16px', padding: '0 20px' }}>
-            <button onClick={() => { setShowInvoicePreview(false); setCompletedSale(null); setPreviewImageUrl(null); }} style={{ backgroundColor: '#dc2626', color: '#fff', border: 'none', padding: '10px 20px', borderRadius: '8px', fontSize: '16px', cursor: 'pointer' }}>{currentT.close}</button>
+            <button onClick={() => { setShowInvoicePreview(false); setCompletedSale(null); setPreviewImageUrl(null); }} style={{ backgroundColor: '#dc2626', color: '#fff', border: 'none', padding: '10px 20px', borderRadius: '8px', fontSize: '16px', cursor: 'pointer' }}>❌ Close Window</button>
             
             <div className="desktop-controls" style={{ display: 'none', gap: '10px' }}>
-              <button onClick={handleDesktopDownloadPNG} disabled={!previewImageUrl} style={{ backgroundColor: '#f59e0b', color: '#fff', border: 'none', padding: '10px 20px', borderRadius: '8px', fontSize: '16px', cursor: 'pointer' }}>{currentT.openInvoice}</button>
+              <button onClick={handleDesktopDownloadPNG} disabled={!previewImageUrl} style={{ backgroundColor: '#f59e0b', color: '#fff', border: 'none', padding: '10px 20px', borderRadius: '8px', fontSize: '16px', cursor: 'pointer' }}>💾 Download Image</button>
               <button onClick={handleNativePrint} style={{ backgroundColor: '#3b82f6', color: '#fff', border: 'none', padding: '10px 20px', borderRadius: '8px', fontSize: '16px', cursor: 'pointer' }}>🖨️ Print / PDF</button>
             </div>
 
             <div className="mobile-controls" style={{ display: 'flex', gap: '10px' }}>
-              <button onClick={handleMobileShare} disabled={!previewImageUrl} style={{ backgroundColor: '#3b82f6', color: '#fff', border: 'none', padding: '10px 16px', borderRadius: '8px', fontSize: '14px', cursor: 'pointer' }}>{currentT.shareInvoice}</button>
+              <button onClick={handleMobileShare} disabled={!previewImageUrl} style={{ backgroundColor: '#3b82f6', color: '#fff', border: 'none', padding: '10px 16px', borderRadius: '8px', fontSize: '14px', cursor: 'pointer' }}>📤 Share / Save</button>
               <button onClick={handleNativePrint} style={{ backgroundColor: '#10b981', color: '#fff', border: 'none', padding: '10px 16px', borderRadius: '8px', fontSize: '14px', cursor: 'pointer' }}>🖨️ Print</button>
             </div>
           </div>
@@ -1720,13 +1787,14 @@ export default function POSPage() {
             flex-direction: column !important;
             align-items: flex-start !important;
             gap: 16px !important;
+            margin-top: 60px !important; /* Pushes the title down past the hamburger menu */
             margin-bottom: 24px !important;
           }
           .header-left {
             flex-direction: column !important;
-            align-items: flex-start;
-            text-align: left;
-            gap: 6px;
+            align-items: flex-start !important;
+            text-align: left !important;
+            gap: 6px !important;
           }
           .mobile-fab {
             display: flex !important; 
