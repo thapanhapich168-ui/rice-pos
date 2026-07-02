@@ -13,8 +13,8 @@ const MAIN_KEYWORDS = ['មិញ', 'ខុន', 'ខ្ញី', 'ម្លិ�
 const formatRiel = (amount: number) => `${new Intl.NumberFormat('en-US').format(Math.round(amount))} ៛`;
 const formatUSD = (amount: number) => `$${new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(amount)}`;
 
-// Translations Dictionary
-const t = {
+// Translations Dictionary (RESTORED KHMER BLOCK)
+const t: Record<'en' | 'kh', any> = {
   en: {
     title: "Point of Sale",
     retail: "🛍️ Retail (1kg)",
@@ -32,7 +32,34 @@ const t = {
     checkout: "Checkout",
     mobileModalTitle: "Adjust Item Properties",
     cancel: "Cancel",
-    add: "Add to Cart"
+    add: "Add to Cart",
+    successTitle: "Invoice Ready",
+    openInvoice: "💾 Download Image",
+    shareInvoice: "📤 Share / Save",
+    close: "Close Window"
+  },
+  kh: {
+    title: "អង្គរ រេឌឌៀន រ៉ាយស៍",
+    retail: "🛍️ លក់រាយ (1kg)",
+    wholesale: "🌾 លក់ដុំ (50kg)",
+    searchPlaceholder: "🔍 ស្វែងរកឈ្មោះទំនិញ...",
+    selectCustomer: "🔍 ស្វែងរកអតិថិជនដុំ...",
+    noProducts: "មិនមានទំនិញស្វែងរកឡើយ",
+    stock: "ស្តុកសល់",
+    cartTitle: "🛒 កន្ត្រកទំនិញ",
+    emptyCart: "មិនមានទំនិញក្នុងកន្ត្រកឡើយ",
+    unitPrice: "តម្លៃឯកតា",
+    quantity: "បរិមាណ",
+    totalKhmer: "សរុបរួម:",
+    totalUsd: "សរុបជាដុល្លារ:",
+    checkout: "ចាត់ចែងការទូទាត់",
+    mobileModalTitle: "កែសម្រួលព័ត៌មានទំនិញ",
+    cancel: "បោះបង់",
+    add: "បញ្ចូលទៅកន្ត្រក",
+    successTitle: "វិក្កយបត្រត្រូវបានបង្កើតជោគជ័យ!",
+    openInvoice: "💾 ទាញយកវិក្កយបត្រ",
+    shareInvoice: "📤 ចែករំលែក / រក្សាទុក",
+    close: "បិទផ្ទាំង"
   }
 };
 
@@ -1638,13 +1665,15 @@ export default function POSPage() {
           align-items: center;
           gap: 16px;
         }
-
-        /* UPDATED PAGE TITLE TO MATCH COGS REPORT */
         .page-title { 
           font-size: 24px; 
-          font-weight: bold; 
           color: #4a3b1b; 
           margin: 0; 
+          font-weight: bold;
+          letter-spacing: -0.5px;
+          min-width: 0;
+          white-space: normal;
+          word-break: break-word;
         }
 
         input[type="text"].no-spinners::-webkit-inner-spin-button,
