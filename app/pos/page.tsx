@@ -336,7 +336,6 @@ export default function POSPage() {
       const timer = setTimeout(async () => {
         try {
           await document.fonts.ready;
-          // Wait 800ms to guarantee logos/qr are fetched completely in DOM before capture
           await new Promise(r => setTimeout(r, 800));
 
           const isMobile = window.innerWidth < 1024;
@@ -586,8 +585,6 @@ export default function POSPage() {
     if (row.method.includes('$')) return sum + (amt * EXCHANGE_RATE);
     return sum + amt;
   }, 0);
-
-  const liveRemaining = totalRiel - liveTotalReceivedInRiel;
 
   const getCategorizedItems = (cartItems: any[]) => {
     let normalItems: any[] = [], specialItems: any[] = [], negativeItems: any[] = [], serviceItems: any[] = [];
@@ -901,6 +898,70 @@ export default function POSPage() {
   const currentT = t[lang] || t['en'];
   const sortedCart = [...cart].sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0));
 
+  // Payment Row UI Renderer
+  const renderPaymentSection = (isMobileCart: boolean = false) => {
+    if (!showPaymentSelector) return null;
+    return (
+      <div style={{ marginBottom: '8px', background: '#f8fafc', padding: '10px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1 }}>
+            <span style={{ fontSize: '11px', color: '#64748b', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Receive</span>
+            <button onClick={() => setPaymentRows([...paymentRows, { id: Date.now(), method: 'Cash ៛', amount: '', isAuto: false }])} style={{ background: '#e0f2fe', color: '#0284c7', border: 'none', borderRadius: '4px', fontSize: '10px', fontWeight: 'bold', padding: '4px 8px', cursor: 'pointer' }}>+ Split</button>
+          </div>
+        </div>
+        
+        {paymentRows.map((row, index) => (
+          <div key={row.id} style={{ display: 'flex', gap: '6px', marginBottom: '6px', alignItems: 'center' }}>
+            <select 
+              value={row.method} 
+              onChange={e => {
+                const newRows = [...paymentRows];
+                newRows[index].method = e.target.value;
+                setPaymentRows(newRows);
+              }}
+              style={{ width: '45%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: isMobileCart ? '16px' : '13px', fontWeight: 'normal', outline: 'none', backgroundColor: '#fff', cursor: 'pointer', color: '#0f172a' }}
+              className="mobile-select-menu"
+            >
+              <option value="Cash ៛">💵 Cash ៛</option>
+              <option value="Cash $">💵 Cash $</option>
+              <option value="QR ៛">📱 QR ៛</option>
+              <option value="QR $">📱 QR $</option>
+              <option value="Mom QR ៛">👩 Mom QR ៛</option>
+              <option value="Mom QR $">👩 Mom QR $</option>
+            </select>
+            
+            <div style={{ flex: 1 }}>
+              <CurrencyInput 
+                placeholder="" 
+                value={row.amount}
+                onFocus={() => {
+                  if (row.isAuto) {
+                    const newRows = [...paymentRows];
+                    newRows[index].amount = '';
+                    newRows[index].isAuto = false;
+                    setPaymentRows(newRows);
+                  }
+                }}
+                onChange={(val: any) => {
+                  const newRows = [...paymentRows];
+                  newRows[index].amount = val;
+                  newRows[index].isAuto = false;
+                  setPaymentRows(newRows);
+                }}
+                style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', outline: 'none', color: '#0f172a', fontWeight: 'normal', fontSize: isMobileCart ? '16px' : '14px', textAlign: 'right' }}
+                className="mobile-input-field"
+              />
+            </div>
+            
+            {paymentRows.length > 1 && (
+              <button onClick={() => setPaymentRows(paymentRows.filter(r => r.id !== row.id))} style={{ background: 'none', border: 'none', color: '#ef4444', fontSize: '16px', cursor: 'pointer', padding: '0 4px' }}>✕</button>
+            )}
+          </div>
+        ))}
+      </div>
+    )
+  }
+
   return (
     <div className="pos-layout-wrapper" style={{ display: 'flex', height: '100dvh', overflow: 'hidden', width: '100%', backgroundColor: '#ffffff', boxSizing: 'border-box' }}>
       
@@ -1085,7 +1146,7 @@ export default function POSPage() {
           )}
         </div>
         
-        <div style={{ position: 'sticky', bottom: 0, paddingTop: '12px', paddingRight: '20px', paddingBottom: '16px', paddingLeft: '20px', borderTop: '1px solid #e2e8f0', backgroundColor: '#f8fafc', flexShrink: 0, zIndex: 10, boxShadow: '0 -4px 10px rgba(0,0,0,0.02)' }}>
+        <div style={{ paddingTop: '12px', paddingRight: '20px', paddingBottom: '16px', paddingLeft: '20px', borderTop: '1px solid #e2e8f0', backgroundColor: '#f8fafc', flexShrink: 0, zIndex: 10, boxShadow: '0 -4px 10px rgba(0,0,0,0.02)' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '4px' }}>
             <span style={{ fontSize: '13px', color: '#334155' }}>{currentT.totalKhmer}</span>
             <span style={{ fontSize: '18px', fontWeight: 'bold', color: totalRiel < 0 ? '#ef4444' : '#b58a3d' }}>{formatRielFromNative(totalRiel)}</span>
@@ -1095,66 +1156,7 @@ export default function POSPage() {
             <span style={{ fontSize: '13px', color: '#475569' }}>{formatUSD(totalUSD)}</span>
           </div>
 
-          {/* Desktop Payment Selector */}
-          {showPaymentSelector && (
-            <div style={{ marginBottom: '8px', background: '#f8fafc', padding: '10px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1 }}>
-                  <span style={{ fontSize: '11px', color: '#64748b', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Receive</span>
-                  <button onClick={() => setPaymentRows([...paymentRows, { id: Date.now(), method: 'Cash ៛', amount: '', isAuto: false }])} style={{ background: '#e0f2fe', color: '#0284c7', border: 'none', borderRadius: '4px', fontSize: '10px', fontWeight: 'bold', padding: '4px 8px', cursor: 'pointer' }}>+ Split</button>
-                </div>
-              </div>
-              
-              {paymentRows.map((row, index) => (
-                <div key={row.id} style={{ display: 'flex', gap: '6px', marginBottom: '6px', alignItems: 'center' }}>
-                  <select 
-                    value={row.method} 
-                    onChange={e => {
-                      const newRows = [...paymentRows];
-                      newRows[index].method = e.target.value;
-                      setPaymentRows(newRows);
-                    }}
-                    style={{ width: '45%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px', fontWeight: 'normal', outline: 'none', backgroundColor: '#fff', cursor: 'pointer', color: '#0f172a' }}
-                    className="mobile-select-menu"
-                  >
-                    <option value="Cash ៛">💵 Cash ៛</option>
-                    <option value="Cash $">💵 Cash $</option>
-                    <option value="QR ៛">📱 QR ៛</option>
-                    <option value="QR $">📱 QR $</option>
-                    <option value="Mom QR ៛">👩 Mom QR ៛</option>
-                    <option value="Mom QR $">👩 Mom QR $</option>
-                  </select>
-                  
-                  <div style={{ flex: 1 }}>
-                    <CurrencyInput 
-                      placeholder="" 
-                      value={row.amount}
-                      onFocus={() => {
-                        if (row.isAuto) {
-                          const newRows = [...paymentRows];
-                          newRows[index].amount = '';
-                          newRows[index].isAuto = false;
-                          setPaymentRows(newRows);
-                        }
-                      }}
-                      onChange={(val: any) => {
-                        const newRows = [...paymentRows];
-                        newRows[index].amount = val;
-                        newRows[index].isAuto = false;
-                        setPaymentRows(newRows);
-                      }}
-                      style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', outline: 'none', color: '#0f172a', fontWeight: 'normal', fontSize: '14px', textAlign: 'right' }}
-                      className="mobile-input-field"
-                    />
-                  </div>
-                  
-                  {paymentRows.length > 1 && (
-                    <button onClick={() => setPaymentRows(paymentRows.filter(r => r.id !== row.id))} style={{ background: 'none', border: 'none', color: '#ef4444', fontSize: '16px', cursor: 'pointer', padding: '0 4px' }}>✕</button>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
+          {renderPaymentSection(false)}
           
           <button 
             onClick={confirmCheckout} 
@@ -1189,10 +1191,10 @@ export default function POSPage() {
       )}
 
       {isMobileCartOpen && (
-        <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(0,0,0,0.4)', zIndex: 999, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}>
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.4)', zIndex: 9999, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}>
           <div style={{ flex: 1 }} onClick={() => setIsMobileCartOpen(false)}></div>
           
-          <div style={{ width: '100%', maxHeight: '85dvh', backgroundColor: '#ffffff', borderTopLeftRadius: '20px', borderTopRightRadius: '20px', display: 'flex', flexDirection: 'column', position: 'relative', boxShadow: '0 -10px 25px rgba(0,0,0,0.1)' }}>
+          <div style={{ width: '100%', height: '85%', backgroundColor: '#ffffff', borderTopLeftRadius: '20px', borderTopRightRadius: '20px', display: 'flex', flexDirection: 'column', position: 'relative', boxShadow: '0 -10px 25px rgba(0,0,0,0.1)' }}>
             <div style={{ width: '100%', display: 'flex', justifyContent: 'center', paddingTop: '12px', paddingBottom: '8px', flexShrink: 0 }}>
               <div style={{ width: '40px', height: '5px', backgroundColor: '#cbd5e1', borderRadius: '10px' }}></div>
             </div>
@@ -1255,8 +1257,7 @@ export default function POSPage() {
               })}
             </div>
             
-            {/* SAFARI BOTTOM OVERLAP FIX: explicitly pushed up via padding */}
-            <div style={{ padding: '12px 20px calc(90px + env(safe-area-inset-bottom, 20px)) 20px', borderTop: '1px solid #e2e8f0', backgroundColor: '#f8fafc', boxShadow: '0 -4px 10px rgba(0,0,0,0.05)', flexShrink: 0 }}>
+            <div style={{ padding: '12px 20px calc(24px + env(safe-area-inset-bottom, 12px)) 20px', borderTop: '1px solid #e2e8f0', backgroundColor: '#f8fafc', boxShadow: '0 -4px 10px rgba(0,0,0,0.05)', flexShrink: 0 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
                 <span style={{ fontSize: '14px', color: '#475569' }}>{currentT.totalKhmer}</span>
                 <span style={{ fontWeight: 'bold', color: totalRiel < 0 ? '#ef4444' : '#b58a3d', fontSize: '20px' }}>{formatRielFromNative(totalRiel)}</span>
@@ -1266,66 +1267,7 @@ export default function POSPage() {
                 <span style={{ color: '#64748b', fontSize: '13px' }}>{formatUSD(totalUSD)}</span>
               </div>
               
-              {/* Mobile Payment Selector */}
-              {showPaymentSelector && (
-                <div style={{ marginBottom: '8px', background: '#f8fafc', padding: '10px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1 }}>
-                      <span style={{ fontSize: '11px', color: '#64748b', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Receive</span>
-                      <button onClick={() => setPaymentRows([...paymentRows, { id: Date.now(), method: 'Cash ៛', amount: '', isAuto: false }])} style={{ background: '#e0f2fe', color: '#0284c7', border: 'none', borderRadius: '4px', fontSize: '10px', fontWeight: 'bold', padding: '4px 8px', cursor: 'pointer' }}>+ Split</button>
-                    </div>
-                  </div>
-                  
-                  {paymentRows.map((row, index) => (
-                    <div key={row.id} style={{ display: 'flex', gap: '6px', marginBottom: '6px', alignItems: 'center' }}>
-                      <select 
-                        value={row.method} 
-                        onChange={e => {
-                          const newRows = [...paymentRows];
-                          newRows[index].method = e.target.value;
-                          setPaymentRows(newRows);
-                        }}
-                        style={{ width: '45%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '16px', fontWeight: 'normal', outline: 'none', backgroundColor: '#fff', cursor: 'pointer', color: '#0f172a' }}
-                        className="mobile-select-menu"
-                      >
-                        <option value="Cash ៛">💵 Cash ៛</option>
-                        <option value="Cash $">💵 Cash $</option>
-                        <option value="QR ៛">📱 QR ៛</option>
-                        <option value="QR $">📱 QR $</option>
-                        <option value="Mom QR ៛">👩 Mom QR ៛</option>
-                        <option value="Mom QR $">👩 Mom QR $</option>
-                      </select>
-                      
-                      <div style={{ flex: 1 }}>
-                        <CurrencyInput 
-                          placeholder="" 
-                          value={row.amount}
-                          onFocus={() => {
-                            if (row.isAuto) {
-                              const newRows = [...paymentRows];
-                              newRows[index].amount = '';
-                              newRows[index].isAuto = false;
-                              setPaymentRows(newRows);
-                            }
-                          }}
-                          onChange={(val: any) => {
-                            const newRows = [...paymentRows];
-                            newRows[index].amount = val;
-                            newRows[index].isAuto = false;
-                            setPaymentRows(newRows);
-                          }}
-                          style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', outline: 'none', color: '#0f172a', fontWeight: 'normal', fontSize: '16px', textAlign: 'right' }}
-                          className="mobile-input-field"
-                        />
-                      </div>
-                      
-                      {paymentRows.length > 1 && (
-                        <button onClick={() => setPaymentRows(paymentRows.filter(r => r.id !== row.id))} style={{ background: 'none', border: 'none', color: '#ef4444', fontSize: '16px', cursor: 'pointer', padding: '0 4px' }}>✕</button>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )}
+              {renderPaymentSection(true)}
 
               <button 
                 onClick={confirmCheckout} 
@@ -1349,6 +1291,7 @@ export default function POSPage() {
           </div>
         </div>
       )}
+
 
       {/* CUSTOMER SEARCH MODAL (No-Zoom, Pop-up Style) */}
       {isCustomerModalOpen && (
@@ -1675,15 +1618,15 @@ export default function POSPage() {
         <div className="invoice-modal-overlay" style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(0,0,0,0.85)', zIndex: 10006, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
           
           <div className="invoice-controls" style={{ display: 'flex', justifyContent: 'space-between', width: '100%', maxWidth: '850px', marginBottom: '16px', padding: '0 20px' }}>
-            <button onClick={() => { setShowInvoicePreview(false); setCompletedSale(null); setPreviewImageUrl(null); }} style={{ backgroundColor: '#dc2626', color: '#fff', border: 'none', padding: '10px 20px', borderRadius: '8px', fontSize: '16px', cursor: 'pointer' }}>❌ Close Window</button>
+            <button onClick={() => { setShowInvoicePreview(false); setCompletedSale(null); setPreviewImageUrl(null); }} style={{ backgroundColor: '#dc2626', color: '#fff', border: 'none', padding: '10px 20px', borderRadius: '8px', fontSize: '16px', cursor: 'pointer' }}>❌ {currentT.close}</button>
             
             <div className="desktop-controls" style={{ display: 'none', gap: '10px' }}>
-              <button onClick={handleDesktopDownloadPNG} disabled={!previewImageUrl} style={{ backgroundColor: '#f59e0b', color: '#fff', border: 'none', padding: '10px 20px', borderRadius: '8px', fontSize: '16px', cursor: 'pointer' }}>💾 Download Image</button>
+              <button onClick={handleDesktopDownloadPNG} disabled={!previewImageUrl} style={{ backgroundColor: '#f59e0b', color: '#fff', border: 'none', padding: '10px 20px', borderRadius: '8px', fontSize: '16px', cursor: 'pointer' }}>💾 {currentT.openInvoice}</button>
               <button onClick={handleNativePrint} style={{ backgroundColor: '#3b82f6', color: '#fff', border: 'none', padding: '10px 20px', borderRadius: '8px', fontSize: '16px', cursor: 'pointer' }}>🖨️ Print / PDF</button>
             </div>
 
             <div className="mobile-controls" style={{ display: 'flex', gap: '10px' }}>
-              <button onClick={handleMobileShare} disabled={!previewImageUrl} style={{ backgroundColor: '#3b82f6', color: '#fff', border: 'none', padding: '10px 16px', borderRadius: '8px', fontSize: '14px', cursor: 'pointer' }}>📤 Share / Save</button>
+              <button onClick={handleMobileShare} disabled={!previewImageUrl} style={{ backgroundColor: '#3b82f6', color: '#fff', border: 'none', padding: '10px 16px', borderRadius: '8px', fontSize: '14px', cursor: 'pointer' }}>📤 {currentT.shareInvoice}</button>
               <button onClick={handleNativePrint} style={{ backgroundColor: '#10b981', color: '#fff', border: 'none', padding: '10px 16px', borderRadius: '8px', fontSize: '14px', cursor: 'pointer' }}>🖨️ Print</button>
             </div>
           </div>
@@ -1787,7 +1730,7 @@ export default function POSPage() {
             flex-direction: column !important;
             align-items: flex-start !important;
             gap: 16px !important;
-            margin-top: 60px !important; /* Pushes the title down past the hamburger menu */
+            margin-top: 0 !important;
             margin-bottom: 24px !important;
           }
           .header-left {
