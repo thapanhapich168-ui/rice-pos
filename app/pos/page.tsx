@@ -9,9 +9,9 @@ import * as htmlToImage from 'html-to-image'
 // If logos are still blank on iPhone, convert your Imgur links to Base64 strings
 // using a free tool like https://www.base64-image.de/ and paste the long strings below.
 // ==========================================
-const LOGO_LEFT_SRC = "https://i.imgur.com/s0hg3MQ.png";
-const LOGO_RIGHT_SRC = "https://i.imgur.com/Guk0hVe.png";
-const WATERMARK_SRC = "https://i.imgur.com/XUsrp9D.png";
+const LOGO_LEFT_SRC = "/logo-left.png";
+const LOGO_RIGHT_SRC = "/logo-right.png";
+const WATERMARK_SRC = "/watermark.png";
 
 // Constants
 const EXCHANGE_RATE = 4000;
