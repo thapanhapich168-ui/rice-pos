@@ -1731,8 +1731,8 @@ export default function POSPage() {
           .desktop-cart-panel { display: none !important; }
           
           .main-wrapper { 
-            /* GUARANTEED CLEARANCE: 90px baseline + safe area dodges the hamburger entirely */
-            padding: calc(90px + env(safe-area-inset-top, 0px)) 16px 140px 16px !important; 
+            /* GUARANTEED CLEARANCE: 120px perfectly dodges the lowered 55px hamburger menu */
+            padding: 120px 16px 140px 16px !important; 
             min-height: auto;
           }
           .header-container {

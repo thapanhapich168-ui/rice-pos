@@ -32,7 +32,6 @@ export default function Sidebar() {
     { label: '⚙️ Settings', href: '/settings' }
   ]
 
-  // Automatically secure screens: if user logs out, boot them back to root login page
   useEffect(() => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       if (!session) {
@@ -47,25 +46,24 @@ export default function Sidebar() {
     router.push('/')
   }
 
-  // Prevents the hamburger from showing up on the login screen
   if (pathname === '/') return null;
 
   return (
     <>
-      {/* MOBILE BACKDROP: Appears only on phones to let you click outside to close */}
+      {/* MOBILE BACKDROP */}
       <div 
         className={`sidebar-backdrop ${isOpen ? 'open' : ''}`} 
         onClick={() => setIsOpen(false)} 
       />
 
-      {/* FIXED BURGER BUTTON (Safe-area protected so it dodges the iOS notch) */}
+      {/* FIXED BURGER BUTTON (Guaranteed Hardware Clearance) */}
       <button
         onClick={() => setIsOpen(!isOpen)}
         style={{
           position: 'fixed',
-          top: 'max(15px, env(safe-area-inset-top, 15px))',
-          left: 'max(15px, env(safe-area-inset-left, 15px))',
-          zIndex: 1001, // Guaranteed to stay on top of everything
+          top: '55px', /* FIXED: Safely below all iOS notches, clocks, and battery icons */
+          left: '20px',
+          zIndex: 1001,
           background: '#111827',
           color: 'white',
           border: 'none',
@@ -143,7 +141,6 @@ export default function Sidebar() {
 
       {/* SIDEBAR RESPONSIVE & MOBILE PHYSICS */}
       <style jsx>{`
-        /* MOBILE BACKDROP */
         .sidebar-backdrop {
           position: fixed;
           top: 0; left: 0; right: 0; bottom: 0;
@@ -154,11 +151,10 @@ export default function Sidebar() {
           transition: opacity 0.3s ease;
         }
 
-        /* BASE SIDEBAR STYLES */
         .sidebar-wrapper {
           background: #111827;
           color: white;
-          height: 100dvh; /* Flawless full height bypassing Safari/Chrome URL bars */
+          height: 100dvh;
           display: flex;
           flex-direction: column;
           justify-content: space-between;
@@ -169,7 +165,6 @@ export default function Sidebar() {
           z-index: 1000;
         }
 
-        /* CLOSED STATE */
         .sidebar-wrapper.closed {
           width: 0px;
           min-width: 0px;
@@ -178,18 +173,15 @@ export default function Sidebar() {
           padding: 0px;
         }
 
-        /* OPEN STATE */
         .sidebar-wrapper.open {
           width: 240px;
           min-width: 240px;
           opacity: 1;
           pointer-events: auto;
-          /* Safely pads the top & bottom so nothing touches the absolute edges on phones */
           padding: max(15px, env(safe-area-inset-top, 15px)) 20px max(20px, env(safe-area-inset-bottom, 20px)) 20px;
           box-shadow: 4px 0 10px rgba(0, 0, 0, 0.1);
         }
 
-        /* DESKTOP SPECIFIC RULES */
         @media (min-width: 1024px) {
           .sidebar-wrapper {
             position: sticky;
@@ -197,14 +189,13 @@ export default function Sidebar() {
             left: 0;
           }
           .sidebar-backdrop {
-            display: none; /* We don't want a backdrop on laptops */
+            display: none;
           }
         }
 
-        /* MOBILE SPECIFIC RULES */
         @media (max-width: 1023px) {
           .sidebar-wrapper {
-            position: fixed; /* Pops out of the layout flow as a drawer */
+            position: fixed;
             top: 0;
             left: 0;
           }
