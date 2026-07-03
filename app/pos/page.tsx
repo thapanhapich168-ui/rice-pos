@@ -187,6 +187,9 @@ export default function POSPage() {
 
   const [cartCustomerNameOverride, setCartCustomerNameOverride] = useState('')
 
+  // ==========================================
+  // DYNAMIC PAYMENT ROWS
+  // ==========================================
   const [paymentRows, setPaymentRows] = useState<{id: number, method: string, amount: number | '', isAuto?: boolean}[]>([
     { id: Date.now(), method: 'Cash ៛', amount: '', isAuto: true }
   ]);
@@ -363,17 +366,19 @@ export default function POSPage() {
     };
   }, []);
 
-  // Mobile Invoice Generation Engine
+  // Mobile Invoice Generation Engine (Waits to ensure HD logos load before capture)
   useEffect(() => {
     if (completedSale && invoiceRef.current && !previewImageUrl && showInvoicePreview) {
       const timer = setTimeout(async () => {
         try {
           await document.fonts.ready;
+          // Wait 800ms to guarantee logos/qr are fetched completely in DOM
           await new Promise(r => setTimeout(r, 800));
 
           const isMobile = window.innerWidth < 1024;
           
           if (isMobile) {
+            // NO useCORS property - html-to-image uses crossOrigin directly from the img tags
             await htmlToImage.toPng(invoiceRef.current!, { pixelRatio: 1, backgroundColor: '#ffffff' });
           }
           
@@ -972,7 +977,7 @@ export default function POSPage() {
     <div className="pos-layout-wrapper" style={{ display: 'flex', width: '100%', backgroundColor: '#ffffff', boxSizing: 'border-box' }}>
       
       {/* PRELOAD IMAGES TO FIX SAFARI MOBILE BLANK LOGO ISSUE */}
-      <div style={{ position: 'absolute', width: '1px', height: '1px', overflow: 'hidden', clip: 'rect(1px, 1px, 1px, 1px)', zIndex: -1 }}>
+      <div style={{ width: 0, height: 0, overflow: 'hidden', position: 'absolute', opacity: 0 }}>
         <img src="https://i.imgur.com/s0hg3MQ.png" crossOrigin="anonymous" alt="preload" />
         <img src="https://i.imgur.com/Guk0hVe.png" crossOrigin="anonymous" alt="preload" />
         <img src="https://i.imgur.com/XUsrp9D.png" crossOrigin="anonymous" alt="preload" />
@@ -1200,7 +1205,7 @@ export default function POSPage() {
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.4)', zIndex: 9999, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}>
           <div style={{ flex: 1 }} onClick={() => setIsMobileCartOpen(false)}></div>
           
-          <div style={{ width: '100%', maxHeight: '85%', backgroundColor: '#ffffff', borderTopLeftRadius: '20px', borderTopRightRadius: '20px', display: 'flex', flexDirection: 'column', position: 'relative', boxShadow: '0 -10px 25px rgba(0,0,0,0.1)' }}>
+          <div style={{ width: '100%', maxHeight: '85dvh', backgroundColor: '#ffffff', borderTopLeftRadius: '20px', borderTopRightRadius: '20px', display: 'flex', flexDirection: 'column', position: 'relative', boxShadow: '0 -10px 25px rgba(0,0,0,0.1)' }}>
             <div style={{ width: '100%', display: 'flex', justifyContent: 'center', paddingTop: '12px', paddingBottom: '8px', flexShrink: 0 }}>
               <div style={{ width: '40px', height: '5px', backgroundColor: '#cbd5e1', borderRadius: '10px' }}></div>
             </div>
@@ -1654,10 +1659,6 @@ export default function POSPage() {
           font-variant-numeric: tabular-nums lining-nums;
         }
         
-        :root {
-          --app-height: 100vh;
-        }
-        
         body {
           font-variant-numeric: tabular-nums lining-nums;
         }
@@ -1731,8 +1732,8 @@ export default function POSPage() {
           .desktop-cart-panel { display: none !important; }
           
           .main-wrapper { 
-            /* GUARANTEED CLEARANCE: 90px baseline + safe area dodges the hamburger entirely */
-            padding: calc(90px + env(safe-area-inset-top, 0px)) 16px 140px 16px !important; 
+            /* Let the page scroll naturally to bypass Safari issues */
+            padding: max(80px, env(safe-area-inset-top, 80px)) 16px 140px 16px !important; 
             min-height: auto;
           }
           .header-container {
