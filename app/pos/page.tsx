@@ -4,10 +4,31 @@ import { useEffect, useState, useRef } from 'react'
 import { supabase } from '@/lib/supabaseClient'
 import * as htmlToImage from 'html-to-image'
 
-// Directly pointing to your Next.js public folder
+// ==========================================
+// ⚠️ SAFARI IOS IMAGE FIX
+// ==========================================
 const LOGO_LEFT_SRC = "/logo-left.png";
 const LOGO_RIGHT_SRC = "/logo-right.png";
 const WATERMARK_SRC = "/watermark.png";
+
+// 🛠️ SAFARI INVOICE IMAGE CONVERTER 
+// Uses absolute URLs and provides a fallback if local fetch fails on mobile
+const fetchImageAsBase64 = async (path: string) => {
+  try {
+    const absoluteUrl = new URL(path, window.location.origin).href;
+    const res = await fetch(absoluteUrl);
+    const blob = await res.blob();
+    return new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve(reader.result as string);
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+  } catch (error) {
+    console.warn(`Base64 conversion failed for ${path}, using raw URL`);
+    return path; 
+  }
+};
 
 // Constants
 const EXCHANGE_RATE = 4000;
@@ -69,7 +90,7 @@ const t: Record<'en' | 'kh', any> = {
 };
 
 // ==========================================
-// ROBUST LIVE COMMA FORMATTER
+// ROBUST LIVE COMMA FORMATTER (Stateless Display)
 // ==========================================
 function CurrencyInput({ value, onChange, placeholder, style, autoFocus, className, onFocus }: any) {
   const [inputValue, setInputValue] = useState('');
@@ -87,6 +108,7 @@ function CurrencyInput({ value, onChange, placeholder, style, autoFocus, classNa
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     let raw = e.target.value.replace(/[^0-9.]/g, '');
+    
     const parts = raw.split('.');
     if (parts.length > 2) raw = parts[0] + '.' + parts.slice(1).join('');
 
@@ -164,6 +186,9 @@ export default function POSPage() {
   const [productOrder, setProductOrder] = useState<number[]>([])
   const [activeBatches, setActiveBatches] = useState<Record<number, any[]>>({})
   
+  // Default to raw URLs so it never errors out as blank, then swap to Base64
+  const [invoiceImages, setInvoiceImages] = useState({ left: LOGO_LEFT_SRC, right: LOGO_RIGHT_SRC, watermark: WATERMARK_SRC });
+
   const [lang, setLang] = useState<'en' | 'kh'>('en')
   const [searchQuery, setSearchQuery] = useState('')
   const [activeTab, setActiveTab] = useState<'retail' | 'wholesale'>('retail')
@@ -179,6 +204,9 @@ export default function POSPage() {
 
   const [cartCustomerNameOverride, setCartCustomerNameOverride] = useState('')
 
+  // ==========================================
+  // DYNAMIC PAYMENT ROWS
+  // ==========================================
   const [paymentRows, setPaymentRows] = useState<{id: number, method: string, amount: number | '', isAuto?: boolean}[]>([
     { id: Date.now(), method: 'Cash ៛', amount: '', isAuto: true }
   ]);
@@ -211,6 +239,17 @@ export default function POSPage() {
   }, 0);
 
   const totalUSD = totalRiel / EXCHANGE_RATE; 
+
+  // Convert Local Images to Base64 on Mount securely
+  useEffect(() => {
+    const loadImages = async () => {
+      const leftB64 = await fetchImageAsBase64(LOGO_LEFT_SRC);
+      const rightB64 = await fetchImageAsBase64(LOGO_RIGHT_SRC);
+      const waterB64 = await fetchImageAsBase64(WATERMARK_SRC);
+      setInvoiceImages({ left: leftB64, right: rightB64, watermark: waterB64 });
+    };
+    loadImages();
+  }, []);
 
   useEffect(() => {
     setPaymentRows(prev => {
@@ -323,6 +362,7 @@ export default function POSPage() {
     }
   }, [activeTab, customers]) 
 
+  // SAFARI DYNAMIC UI & TAB GROUP REPAINT FIX
   useEffect(() => {
     const handleVisibilityAndResize = () => {
       if (document.visibilityState === 'visible') {
@@ -330,10 +370,12 @@ export default function POSPage() {
         document.body.style.transform = 'scale(1)';
       }
     };
+
     window.addEventListener('resize', handleVisibilityAndResize);
     window.addEventListener('visibilitychange', handleVisibilityAndResize);
     window.addEventListener('orientationchange', handleVisibilityAndResize);
     window.addEventListener('pageshow', handleVisibilityAndResize);
+    
     handleVisibilityAndResize();
 
     return () => {
@@ -344,38 +386,27 @@ export default function POSPage() {
     };
   }, []);
 
-  // =========================================================================
-  // THE SAFARI ULTIMATE IMAGE FIX ENGINE (DOUBLE-CAPTURE WARMUP)
-  // =========================================================================
+  // Mobile Invoice Generation Engine (Waits to ensure HD logos load before capture)
   useEffect(() => {
     if (completedSale && invoiceRef.current && !previewImageUrl && showInvoicePreview) {
-      
-      const captureProcess = async () => {
+      const timer = setTimeout(async () => {
         try {
-          setIsGeneratingPreview(true);
-          
-          // Wait to ensure DOM has fully painted the invisible container
+          await document.fonts.ready;
+          // Wait 800ms to guarantee logos/qr are fetched completely in DOM
           await new Promise(r => setTimeout(r, 800));
-          
+
           const isMobile = window.innerWidth < 1024;
-
-          // HACK STEP 1: The Warm-up Pass.
-          // We take a low-resolution screenshot and throw it away.
-          // This forces iOS Safari to decode and cache the images inside the Canvas context.
-          await htmlToImage.toPng(invoiceRef.current!, { 
-            pixelRatio: 0.1, 
-            backgroundColor: '#ffffff',
-            cacheBust: true,
-            skipAutoScale: true
-          });
-
-          // Wait a tiny bit for the Safari buffer to stabilize
-          await new Promise(r => setTimeout(r, 250));
-
-          // HACK STEP 2: The Real Capture.
-          // Now Safari has the images perfectly loaded.
+          
+          if (isMobile) {
+            await htmlToImage.toPng(invoiceRef.current!, { 
+              pixelRatio: 1, 
+              backgroundColor: '#ffffff',
+              cacheBust: true
+            });
+          }
+          
           const dataUrl = await htmlToImage.toPng(invoiceRef.current!, { 
-            pixelRatio: isMobile ? 1 : 3, 
+            pixelRatio: 3, 
             backgroundColor: '#ffffff',
             cacheBust: true
           });
@@ -383,14 +414,12 @@ export default function POSPage() {
           setPreviewImageUrl(dataUrl);
           setIsGeneratingPreview(false);
           executeAutoSaveOnly(dataUrl, completedSale.invoiceNo);
-
         } catch (error) {
           console.error("Preview generation failed:", error);
           setIsGeneratingPreview(false);
         }
-      };
-
-      captureProcess();
+      }, 400);
+      return () => clearTimeout(timer);
     }
   }, [completedSale, previewImageUrl, showInvoicePreview])
 
@@ -1481,34 +1510,30 @@ export default function POSPage() {
         </div>
       )}
 
-      {/* FINAL INVISIBLE DOM CAPTURE AREA */}
+      {/* FINAL INVISIBLE DOM CAPTURE AREA (STRICTLY BACKGROUND) */}
       {completedSale && (
-        <div style={{ 
-          position: 'fixed', // MUST BE FIXED, not absolute
-          top: 0, 
-          left: 0, 
-          zIndex: -9999, 
-          opacity: 0.01, // ⚠️ CRITICAL SAFARI FIX: Safari culls opacity: 0 and left: -10000px
-          pointerEvents: 'none' 
-        }}>
+        <div style={{ position: 'absolute', top: '-10000px', left: '-10000px', zIndex: -1000, pointerEvents: 'none' }}>
           <div id="invoice-capture-area" ref={invoiceRef} style={{ width: '794px', height: '559px', backgroundColor: '#ffffff', position: 'relative', margin: 0, padding: '19px', boxSizing: 'border-box', fontFamily: "'Noto Sans Khmer', Arial, sans-serif", fontSize: '12.8px', color: '#000000', overflow: 'hidden' }}>
             <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Khmer&display=swap" rel="stylesheet" crossOrigin="anonymous" />
             
-            <img 
-              src={WATERMARK_SRC} 
-              className="invoice-watermark" 
-              style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', width: '40%', height: 'auto', opacity: 0.14, zIndex: 0, pointerEvents: 'none', objectFit: 'contain' }} 
-              alt="Watermark" 
-              crossOrigin="anonymous"
-            />
+            {invoiceImages.watermark && (
+              <img 
+                src={invoiceImages.watermark} 
+                className="invoice-watermark" 
+                style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', width: '40%', height: 'auto', opacity: 0.14, zIndex: 0, pointerEvents: 'none', objectFit: 'contain' }} 
+                alt="Watermark" 
+                crossOrigin="anonymous"
+                loading="eager"
+              />
+            )}
 
             <div className="content" style={{ position: 'relative', zIndex: 1, display: 'flex', flexDirection: 'column', height: '100%' }}>
               
               <div style={{ position: 'absolute', top: 0, left: 0, width: '60px', height: '70px', zIndex: 2 }}>
-                <img src={LOGO_LEFT_SRC} alt="Left Logo" style={{ width: '100%', height: '100%', display: 'block' }} crossOrigin="anonymous" />
+                {invoiceImages.left && <img src={invoiceImages.left} alt="Left Logo" style={{ width: '100%', height: '100%', display: 'block' }} crossOrigin="anonymous" loading="eager" />}
               </div>
               <div style={{ position: 'absolute', top: 0, right: 0, width: '85px', height: '75px', zIndex: 2 }}>
-                <img src={LOGO_RIGHT_SRC} alt="Right Logo" style={{ width: '95%', height: '100%', display: 'block' }} crossOrigin="anonymous" />
+                {invoiceImages.right && <img src={invoiceImages.right} alt="Right Logo" style={{ width: '95%', height: '100%', display: 'block' }} crossOrigin="anonymous" loading="eager" />}
               </div>
 
               <header style={{ textAlign: 'center', marginBottom: '14px', lineHeight: 1.2 }}>
@@ -1628,7 +1653,7 @@ export default function POSPage() {
         </div>
       )}
 
-      {/* RENDERED INVOICE PREVIEW MODAL */}
+      {/* RENDERED INVOICE PREVIEW MODAL (IF APPLICABLE) */}
       {showInvoicePreview && completedSale && (
         <div className="invoice-modal-overlay" style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.85)', zIndex: 10006, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
           
