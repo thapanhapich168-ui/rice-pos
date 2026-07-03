@@ -212,32 +212,13 @@ export default function POSPage() {
   
   const invoiceRef = useRef<HTMLDivElement>(null)
 
-  // SAFARI DYNAMIC UI & TAB GROUP REPAINT FIX (The "Fillout" Method)
-  useEffect(() => {
-    const handleVisibilityAndResize = () => {
-      if (document.visibilityState === 'visible') {
-        // Forces Safari to physically recalculate its inner bounds when tab bars expand/shrink
-        document.documentElement.style.setProperty('--app-height', `${window.innerHeight}px`);
-        // Tiny non-destructive layout shift to force Safari to repaint the DOM
-        document.body.style.transform = 'scale(1)';
-      }
-    };
-
-    window.addEventListener('resize', handleVisibilityAndResize);
-    window.addEventListener('visibilitychange', handleVisibilityAndResize);
-    window.addEventListener('orientationchange', handleVisibilityAndResize);
-    window.addEventListener('pageshow', handleVisibilityAndResize);
-    
-    // Initial execution
-    handleVisibilityAndResize();
-
-    return () => {
-      window.removeEventListener('resize', handleVisibilityAndResize);
-      window.removeEventListener('visibilitychange', handleVisibilityAndResize);
-      window.removeEventListener('orientationchange', handleVisibilityAndResize);
-      window.removeEventListener('pageshow', handleVisibilityAndResize);
-    };
-  }, []);
+  const resetScroll = () => {
+    setTimeout(() => {
+      window.scrollTo(0, 0);
+      document.body.scrollTop = 0;
+      if (document.documentElement) document.documentElement.scrollTop = 0;
+    }, 50);
+  };
 
   const totalRiel = cart.reduce((sum, item) => {
     const isReturn = item.custom_name.includes('ដូរ');
@@ -358,22 +339,27 @@ export default function POSPage() {
     }
   }, [activeTab, customers]) 
 
+  // Mobile Invoice Generation Engine (Waits to ensure HD logos load before capture & Fixes CORS)
   useEffect(() => {
     if (completedSale && invoiceRef.current && !previewImageUrl && showInvoicePreview) {
       const timer = setTimeout(async () => {
         try {
           await document.fonts.ready;
+          // Wait 800ms to guarantee logos/qr are fetched completely in DOM before capture
           await new Promise(r => setTimeout(r, 800));
 
           const isMobile = window.innerWidth < 1024;
           
+          // Prime the canvas (Added useCORS to pull cross-origin Imgur logos securely)
           if (isMobile) {
-            await htmlToImage.toPng(invoiceRef.current!, { pixelRatio: 1, backgroundColor: '#ffffff' });
+            await htmlToImage.toPng(invoiceRef.current!, { pixelRatio: 1, backgroundColor: '#ffffff', useCORS: true });
           }
           
+          // High-Res Capture
           const dataUrl = await htmlToImage.toPng(invoiceRef.current!, { 
             pixelRatio: 3, 
-            backgroundColor: '#ffffff' 
+            backgroundColor: '#ffffff',
+            useCORS: true
           });
           
           setPreviewImageUrl(dataUrl);
@@ -806,6 +792,7 @@ export default function POSPage() {
         });
       }
 
+      // Show Summary OR Invoice logic based on rules
       let cRiel = 0, qRiel = 0, cUsd = 0, qUsd = 0;
       activePayments.forEach(r => {
         if (r.method === 'Cash ៛') cRiel += Number(r.amount);
@@ -815,10 +802,12 @@ export default function POSPage() {
       });
 
       if (activeTab === 'wholesale' && !isSimpleCustomer) {
+        // Wholesale, Not Walk-in: Show Invoice, NO Summary
         setIsGeneratingPreview(true);
         setShowInvoicePreview(true);
         setSaleSummary(null);
       } else {
+        // Retail OR Wholesale Walk-in: Show Summary, NO Invoice
         setShowInvoicePreview(false);
         setSaleSummary({ 
           total: currentTotalRiel, 
@@ -965,7 +954,7 @@ export default function POSPage() {
     <div className="pos-layout-wrapper" style={{ display: 'flex', width: '100%', backgroundColor: '#ffffff', boxSizing: 'border-box' }}>
       
       {/* PRELOAD IMAGES TO FIX SAFARI MOBILE BLANK LOGO ISSUE */}
-      <div style={{ width: 0, height: 0, overflow: 'hidden', position: 'absolute', opacity: 0 }}>
+      <div style={{ position: 'absolute', width: '1px', height: '1px', overflow: 'hidden', clip: 'rect(1px, 1px, 1px, 1px)', zIndex: -1 }}>
         <img src="https://i.imgur.com/s0hg3MQ.png" crossOrigin="anonymous" alt="preload" />
         <img src="https://i.imgur.com/Guk0hVe.png" crossOrigin="anonymous" alt="preload" />
         <img src="https://i.imgur.com/XUsrp9D.png" crossOrigin="anonymous" alt="preload" />
@@ -1145,7 +1134,7 @@ export default function POSPage() {
           )}
         </div>
         
-        <div style={{ paddingTop: '12px', paddingRight: '20px', paddingBottom: '16px', paddingLeft: '20px', borderTop: '1px solid #e2e8f0', backgroundColor: '#f8fafc', flexShrink: 0, zIndex: 10, boxShadow: '0 -4px 10px rgba(0,0,0,0.02)' }}>
+        <div style={{ position: 'sticky', bottom: 0, paddingTop: '12px', paddingRight: '20px', paddingBottom: '16px', paddingLeft: '20px', borderTop: '1px solid #e2e8f0', backgroundColor: '#f8fafc', flexShrink: 0, zIndex: 10, boxShadow: '0 -4px 10px rgba(0,0,0,0.02)' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '4px' }}>
             <span style={{ fontSize: '13px', color: '#334155' }}>{currentT.totalKhmer}</span>
             <span style={{ fontSize: '18px', fontWeight: 'bold', color: totalRiel < 0 ? '#ef4444' : '#b58a3d' }}>{formatRielFromNative(totalRiel)}</span>
@@ -1337,7 +1326,7 @@ export default function POSPage() {
 
       {/* CREATE NEW CUSTOMER MODAL */}
       {isCreateCustomerModalOpen && (
-        <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 9999, display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '20px', boxSizing: 'border-box' }}>
+        <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 9999, display: 'flex', justifyContent: 'center', alignItems: 'flex-start', paddingTop: '10vh', padding: '20px', boxSizing: 'border-box' }}>
           <div style={{ backgroundColor: '#ffffff', width: '100%', maxWidth: '400px', borderRadius: '12px', padding: '24px', boxShadow: '0 10px 25px rgba(0,0,0,0.15)' }}>
             <h3 style={{ margin: '0 0 16px 0', color: '#334155', borderBottom: '1px solid #f1f5f9', paddingBottom: '10px', fontSize: '18px' }}>Create New Customer</h3>
             
@@ -1388,7 +1377,7 @@ export default function POSPage() {
 
       {/* RETURN & EXCHANGE MODAL */}
       {exchangeModal.isOpen && exchangeModal.product && (
-        <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 10000, display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '20px', boxSizing: 'border-box' }} onMouseDown={() => setExchangeModal({ isOpen: false, product: null, consumedKg: '' })}>
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 10000, display: 'flex', justifyContent: 'center', alignItems: 'flex-start', paddingTop: '15vh', paddingLeft: '20px', paddingRight: '20px', boxSizing: 'border-box' }} onMouseDown={() => setExchangeModal({ isOpen: false, product: null, consumedKg: '' })}>
           <div style={{ backgroundColor: '#ffffff', width: '100%', maxWidth: '400px', borderRadius: '12px', padding: '24px', boxShadow: '0 10px 25px rgba(0,0,0,0.15)' }} onMouseDown={e => e.stopPropagation()}>
             <h3 style={{ margin: '0 0 16px 0', color: '#334155', borderBottom: '1px solid #f1f5f9', paddingBottom: '10px', fontSize: '18px' }}>🔄 Exchange / Return Bag</h3>
             
@@ -1423,7 +1412,7 @@ export default function POSPage() {
 
       {/* MOBILE PRODUCT ADD POPUP */}
       {selectedMobileProduct && (
-        <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 9999, display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '20px', boxSizing: 'border-box' }} onMouseDown={() => setSelectedMobileProduct(null)}>
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 9999, display: 'flex', justifyContent: 'center', alignItems: 'flex-start', paddingTop: '15vh', paddingLeft: '20px', paddingRight: '20px', boxSizing: 'border-box' }} onMouseDown={() => setSelectedMobileProduct(null)}>
           <div style={{ backgroundColor: '#ffffff', width: '100%', maxWidth: '400px', borderRadius: '12px', padding: '24px', boxShadow: '0 10px 25px rgba(0,0,0,0.15)' }} onMouseDown={e => e.stopPropagation()}>
             <h3 style={{ margin: '0 0 16px 0', color: '#334155', borderBottom: '1px solid #f1f5f9', paddingBottom: '10px', fontSize: '18px' }}>{currentT.mobileModalTitle}</h3>
             <div style={{ marginBottom: '16px' }}>
@@ -1483,7 +1472,7 @@ export default function POSPage() {
 
       {/* FINAL INVISIBLE DOM CAPTURE AREA (STRICTLY BACKGROUND) */}
       {completedSale && (
-        <div style={{ position: 'absolute', top: 0, left: 0, zIndex: -1000, opacity: 0, pointerEvents: 'none' }}>
+        <div style={{ position: 'fixed', top: 0, left: 0, zIndex: -1000, pointerEvents: 'none' }}>
           <div id="invoice-capture-area" ref={invoiceRef} style={{ width: '794px', height: '559px', backgroundColor: '#ffffff', position: 'relative', margin: 0, padding: '19px', boxSizing: 'border-box', fontFamily: "'Noto Sans Khmer', Arial, sans-serif", fontSize: '12.8px', color: '#000000', overflow: 'hidden' }}>
             <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Khmer&display=swap" rel="stylesheet" crossOrigin="anonymous" />
             
@@ -1645,6 +1634,10 @@ export default function POSPage() {
         input, select, button, textarea {
           font-family: inherit;
           font-variant-numeric: tabular-nums lining-nums;
+        }
+        
+        :root {
+          --app-height: 100vh;
         }
         
         body {
