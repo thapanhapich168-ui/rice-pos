@@ -1,5 +1,6 @@
 import './globals.css'
 import Sidebar from '@/components/Sidebar'
+import SplashScreen from '@/components/SplashScreen'
 
 export const metadata = {
   title: 'Angkor Radiant Rice POS',
@@ -13,15 +14,18 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <body style={{ display: 'flex', margin: 0, padding: 0, width: '100vw', height: '100vh', overflow: 'hidden', background: '#f8fafc' }}>
-        
-        {/* The Sidebar handles its own hiding logic now! */}
-        <Sidebar />
+      <body>
+        <SplashScreen>
+          <div style={{ display: 'flex', width: '100%', height: '100dvh', overflow: 'hidden' }}>
+            
+            <Sidebar />
 
-        <main style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden', height: '100vh' }}>
-          {children}
-        </main>
-
+            <main className="app-scroller">
+              {children}
+            </main>
+            
+          </div>
+        </SplashScreen>
       </body>
     </html>
   )
