@@ -6,12 +6,27 @@ import * as htmlToImage from 'html-to-image'
 
 // ==========================================
 // ⚠️ SAFARI IOS IMAGE FIX
-// If logos are still blank on iPhone, convert your Imgur links to Base64 strings
-// using a free tool like https://www.base64-image.de/ and paste the long strings below.
 // ==========================================
 const LOGO_LEFT_SRC = "/logo-left.png";
 const LOGO_RIGHT_SRC = "/logo-right.png";
 const WATERMARK_SRC = "/watermark.png";
+
+// 🛠️ SAFARI INVOICE IMAGE CONVERTER (Converts local files to Base64 in memory)
+const fetchImageAsBase64 = async (url: string) => {
+  try {
+    const res = await fetch(url);
+    const blob = await res.blob();
+    return new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve(reader.result as string);
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+  } catch (error) {
+    console.error(`Failed to convert ${url} to Base64:`, error);
+    return '';
+  }
+};
 
 // Constants
 const EXCHANGE_RATE = 4000;
@@ -113,7 +128,6 @@ function CurrencyInput({ value, onChange, placeholder, style, autoFocus, classNa
       onChange={handleChange}
       onFocus={onFocus}
       autoFocus={autoFocus}
-      // REMOVED window.scrollTo hack here
       style={{ ...style, color: '#334155' }}
       className={className || "mobile-input-field"}
     />
@@ -154,7 +168,6 @@ function CartInput({ value, onChange, isQty, fontSize = '14px' }: { value: numbe
       inputMode="decimal"
       value={inputValue}
       onChange={handleChange}
-      // REMOVED window.scrollTo hack here
       style={{ 
         width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', 
         fontSize: fontSize, fontWeight: 'normal', color: '#334155', backgroundColor: '#ffffff', outline: 'none', textAlign: 'center'
@@ -171,6 +184,9 @@ export default function POSPage() {
   const [productOrder, setProductOrder] = useState<number[]>([])
   const [activeBatches, setActiveBatches] = useState<Record<number, any[]>>({})
   
+  // Base64 Image State for Safari Fix
+  const [invoiceImages, setInvoiceImages] = useState({ left: '', right: '', watermark: '' });
+
   const [lang, setLang] = useState<'en' | 'kh'>('en')
   const [searchQuery, setSearchQuery] = useState('')
   const [activeTab, setActiveTab] = useState<'retail' | 'wholesale'>('retail')
@@ -221,6 +237,17 @@ export default function POSPage() {
   }, 0);
 
   const totalUSD = totalRiel / EXCHANGE_RATE; 
+
+  // Convert Local Images to Base64 on Mount
+  useEffect(() => {
+    const loadImages = async () => {
+      const leftB64 = await fetchImageAsBase64(LOGO_LEFT_SRC);
+      const rightB64 = await fetchImageAsBase64(LOGO_RIGHT_SRC);
+      const waterB64 = await fetchImageAsBase64(WATERMARK_SRC);
+      setInvoiceImages({ left: leftB64, right: rightB64, watermark: waterB64 });
+    };
+    loadImages();
+  }, []);
 
   useEffect(() => {
     setPaymentRows(prev => {
@@ -372,14 +399,14 @@ export default function POSPage() {
             await htmlToImage.toPng(invoiceRef.current!, { 
               pixelRatio: 1, 
               backgroundColor: '#ffffff',
-              cacheBust: true // <--- SAFARI HACK: Forces re-fetch to avoid tainted canvas
+              cacheBust: true
             });
           }
           
           const dataUrl = await htmlToImage.toPng(invoiceRef.current!, { 
             pixelRatio: 3, 
             backgroundColor: '#ffffff',
-            cacheBust: true // <--- SAFARI HACK: Forces re-fetch to avoid tainted canvas
+            cacheBust: true
           });
           
           setPreviewImageUrl(dataUrl);
@@ -971,13 +998,6 @@ export default function POSPage() {
   return (
     <div className="pos-layout-wrapper" style={{ display: 'flex', width: '100%', backgroundColor: '#ffffff', boxSizing: 'border-box' }}>
       
-      {/* PRELOAD IMAGES TO FIX SAFARI MOBILE BLANK LOGO ISSUE */}
-      <div style={{ width: 0, height: 0, overflow: 'hidden', position: 'absolute', opacity: 0 }}>
-        <img src={LOGO_LEFT_SRC} crossOrigin="anonymous" alt="preload" />
-        <img src={LOGO_RIGHT_SRC} crossOrigin="anonymous" alt="preload" />
-        <img src={WATERMARK_SRC} crossOrigin="anonymous" alt="preload" />
-      </div>
-
       {/* SELECTION ENGINE VIEW GRID PANEL */}
       <div className="pos-main-engine hide-scrollbar" style={{ flex: 1, display: 'flex', flexDirection: 'column', backgroundColor: '#f8fafc', minWidth: 0 }}>
         
@@ -1494,12 +1514,25 @@ export default function POSPage() {
           <div id="invoice-capture-area" ref={invoiceRef} style={{ width: '794px', height: '559px', backgroundColor: '#ffffff', position: 'relative', margin: 0, padding: '19px', boxSizing: 'border-box', fontFamily: "'Noto Sans Khmer', Arial, sans-serif", fontSize: '12.8px', color: '#000000', overflow: 'hidden' }}>
             <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Khmer&display=swap" rel="stylesheet" crossOrigin="anonymous" />
             
-            <div className="invoice-watermark" style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', backgroundImage: `url('${WATERMARK_SRC}')`, backgroundRepeat: 'no-repeat', backgroundPosition: 'center center', backgroundSize: '40%', opacity: 0.14, zIndex: 0, pointerEvents: 'none' }}></div>
+            {/* ⚠️ CHANGED TO AN IMG TAG FOR SAFARI COMPATIBILITY */}
+            {invoiceImages.watermark && (
+              <img 
+                src={invoiceImages.watermark} 
+                className="invoice-watermark" 
+                style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', width: '40%', height: 'auto', opacity: 0.14, zIndex: 0, pointerEvents: 'none', objectFit: 'contain' }} 
+                alt="Watermark" 
+              />
+            )}
 
             <div className="content" style={{ position: 'relative', zIndex: 1, display: 'flex', flexDirection: 'column', height: '100%' }}>
               
-              <div style={{ position: 'absolute', top: 0, left: 0, width: '60px', height: '70px', zIndex: 2 }}><img src={LOGO_LEFT_SRC} alt="Left Logo" style={{ width: '100%', height: '100%', display: 'block' }} crossOrigin="anonymous" /></div>
-              <div style={{ position: 'absolute', top: 0, right: 0, width: '85px', height: '75px', zIndex: 2 }}><img src={LOGO_RIGHT_SRC} alt="Right Logo" style={{ width: '95%', height: '100%', display: 'block' }} crossOrigin="anonymous" /></div>
+              {/* ⚠️ NOW USING BASE64 STRINGS */}
+              <div style={{ position: 'absolute', top: 0, left: 0, width: '60px', height: '70px', zIndex: 2 }}>
+                {invoiceImages.left && <img src={invoiceImages.left} alt="Left Logo" style={{ width: '100%', height: '100%', display: 'block' }} />}
+              </div>
+              <div style={{ position: 'absolute', top: 0, right: 0, width: '85px', height: '75px', zIndex: 2 }}>
+                {invoiceImages.right && <img src={invoiceImages.right} alt="Right Logo" style={{ width: '95%', height: '100%', display: 'block' }} />}
+              </div>
 
               <header style={{ textAlign: 'center', marginBottom: '14px', lineHeight: 1.2 }}>
                 <h1 style={{ fontSize: '23px', margin: '0 0 2px 0', fontWeight: 'bold', color: 'green' }}>ដេប៉ូអង្ករ រ៉េឌៀន</h1>
