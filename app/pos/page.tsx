@@ -11,10 +11,12 @@ const LOGO_LEFT_SRC = "/logo-left.png";
 const LOGO_RIGHT_SRC = "/logo-right.png";
 const WATERMARK_SRC = "/watermark.png";
 
-// 🛠️ SAFARI INVOICE IMAGE CONVERTER (Converts local files to Base64 in memory)
-const fetchImageAsBase64 = async (url: string) => {
+// 🛠️ SAFARI INVOICE IMAGE CONVERTER 
+// Uses absolute URLs and provides a fallback if local fetch fails on mobile
+const fetchImageAsBase64 = async (path: string) => {
   try {
-    const res = await fetch(url);
+    const absoluteUrl = new URL(path, window.location.origin).href;
+    const res = await fetch(absoluteUrl);
     const blob = await res.blob();
     return new Promise<string>((resolve, reject) => {
       const reader = new FileReader();
@@ -23,8 +25,8 @@ const fetchImageAsBase64 = async (url: string) => {
       reader.readAsDataURL(blob);
     });
   } catch (error) {
-    console.error(`Failed to convert ${url} to Base64:`, error);
-    return '';
+    console.warn(`Base64 conversion failed for ${path}, using raw URL`);
+    return path; 
   }
 };
 
@@ -184,8 +186,8 @@ export default function POSPage() {
   const [productOrder, setProductOrder] = useState<number[]>([])
   const [activeBatches, setActiveBatches] = useState<Record<number, any[]>>({})
   
-  // Base64 Image State for Safari Fix
-  const [invoiceImages, setInvoiceImages] = useState({ left: '', right: '', watermark: '' });
+  // Default to raw URLs so it never errors out as blank, then swap to Base64
+  const [invoiceImages, setInvoiceImages] = useState({ left: LOGO_LEFT_SRC, right: LOGO_RIGHT_SRC, watermark: WATERMARK_SRC });
 
   const [lang, setLang] = useState<'en' | 'kh'>('en')
   const [searchQuery, setSearchQuery] = useState('')
@@ -238,7 +240,7 @@ export default function POSPage() {
 
   const totalUSD = totalRiel / EXCHANGE_RATE; 
 
-  // Convert Local Images to Base64 on Mount
+  // Convert Local Images to Base64 on Mount securely
   useEffect(() => {
     const loadImages = async () => {
       const leftB64 = await fetchImageAsBase64(LOGO_LEFT_SRC);
@@ -1510,28 +1512,28 @@ export default function POSPage() {
 
       {/* FINAL INVISIBLE DOM CAPTURE AREA (STRICTLY BACKGROUND) */}
       {completedSale && (
-        <div style={{ position: 'absolute', top: 0, left: 0, zIndex: -1000, opacity: 0, pointerEvents: 'none' }}>
+        <div style={{ position: 'absolute', top: '-10000px', left: '-10000px', zIndex: -1000, pointerEvents: 'none' }}>
           <div id="invoice-capture-area" ref={invoiceRef} style={{ width: '794px', height: '559px', backgroundColor: '#ffffff', position: 'relative', margin: 0, padding: '19px', boxSizing: 'border-box', fontFamily: "'Noto Sans Khmer', Arial, sans-serif", fontSize: '12.8px', color: '#000000', overflow: 'hidden' }}>
             <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Khmer&display=swap" rel="stylesheet" crossOrigin="anonymous" />
             
-            {/* ⚠️ CHANGED TO AN IMG TAG FOR SAFARI COMPATIBILITY */}
             {invoiceImages.watermark && (
               <img 
                 src={invoiceImages.watermark} 
                 className="invoice-watermark" 
                 style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', width: '40%', height: 'auto', opacity: 0.14, zIndex: 0, pointerEvents: 'none', objectFit: 'contain' }} 
                 alt="Watermark" 
+                crossOrigin="anonymous"
+                loading="eager"
               />
             )}
 
             <div className="content" style={{ position: 'relative', zIndex: 1, display: 'flex', flexDirection: 'column', height: '100%' }}>
               
-              {/* ⚠️ NOW USING BASE64 STRINGS */}
               <div style={{ position: 'absolute', top: 0, left: 0, width: '60px', height: '70px', zIndex: 2 }}>
-                {invoiceImages.left && <img src={invoiceImages.left} alt="Left Logo" style={{ width: '100%', height: '100%', display: 'block' }} />}
+                {invoiceImages.left && <img src={invoiceImages.left} alt="Left Logo" style={{ width: '100%', height: '100%', display: 'block' }} crossOrigin="anonymous" loading="eager" />}
               </div>
               <div style={{ position: 'absolute', top: 0, right: 0, width: '85px', height: '75px', zIndex: 2 }}>
-                {invoiceImages.right && <img src={invoiceImages.right} alt="Right Logo" style={{ width: '95%', height: '100%', display: 'block' }} />}
+                {invoiceImages.right && <img src={invoiceImages.right} alt="Right Logo" style={{ width: '95%', height: '100%', display: 'block' }} crossOrigin="anonymous" loading="eager" />}
               </div>
 
               <header style={{ textAlign: 'center', marginBottom: '14px', lineHeight: 1.2 }}>
