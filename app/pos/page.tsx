@@ -4,6 +4,15 @@ import { useEffect, useState, useRef } from 'react'
 import { supabase } from '@/lib/supabaseClient'
 import * as htmlToImage from 'html-to-image'
 
+// ==========================================
+// ⚠️ SAFARI IOS IMAGE FIX
+// If logos are still blank on iPhone, convert your Imgur links to Base64 strings
+// using a free tool like https://www.base64-image.de/ and paste the long strings below.
+// ==========================================
+const LOGO_LEFT_SRC = "https://i.imgur.com/s0hg3MQ.png";
+const LOGO_RIGHT_SRC = "https://i.imgur.com/Guk0hVe.png";
+const WATERMARK_SRC = "https://i.imgur.com/XUsrp9D.png";
+
 // Constants
 const EXCHANGE_RATE = 4000;
 const RICE_CATEGORIES = ['All', 'មិញ', 'ខុន', 'ខ្ញី', 'ម្លិះ', 'រំដួល', 'បីកំណាត់', 'ដំណើប', 'សម្រូប', 'ផ្សេងៗ'];
@@ -104,12 +113,7 @@ function CurrencyInput({ value, onChange, placeholder, style, autoFocus, classNa
       onChange={handleChange}
       onFocus={onFocus}
       autoFocus={autoFocus}
-      onBlur={() => {
-        setTimeout(() => {
-          window.scrollTo(0, 0);
-          document.body.scrollTop = 0;
-        }, 100);
-      }}
+      // REMOVED window.scrollTo hack here
       style={{ ...style, color: '#334155' }}
       className={className || "mobile-input-field"}
     />
@@ -150,12 +154,7 @@ function CartInput({ value, onChange, isQty, fontSize = '14px' }: { value: numbe
       inputMode="decimal"
       value={inputValue}
       onChange={handleChange}
-      onBlur={() => {
-        setTimeout(() => {
-          window.scrollTo(0, 0);
-          document.body.scrollTop = 0;
-        }, 100);
-      }}
+      // REMOVED window.scrollTo hack here
       style={{ 
         width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', 
         fontSize: fontSize, fontWeight: 'normal', color: '#334155', backgroundColor: '#ffffff', outline: 'none', textAlign: 'center'
@@ -214,14 +213,6 @@ export default function POSPage() {
   const [editingInvoiceId, setEditingInvoiceId] = useState<string | null>(null)
   
   const invoiceRef = useRef<HTMLDivElement>(null)
-
-  const resetScroll = () => {
-    setTimeout(() => {
-      window.scrollTo(0, 0);
-      document.body.scrollTop = 0;
-      if (document.documentElement) document.documentElement.scrollTop = 0;
-    }, 50);
-  };
 
   const totalRiel = cart.reduce((sum, item) => {
     const isReturn = item.custom_name.includes('ដូរ');
@@ -378,13 +369,17 @@ export default function POSPage() {
           const isMobile = window.innerWidth < 1024;
           
           if (isMobile) {
-            // NO useCORS property - html-to-image uses crossOrigin directly from the img tags
-            await htmlToImage.toPng(invoiceRef.current!, { pixelRatio: 1, backgroundColor: '#ffffff' });
+            await htmlToImage.toPng(invoiceRef.current!, { 
+              pixelRatio: 1, 
+              backgroundColor: '#ffffff',
+              cacheBust: true // <--- SAFARI HACK: Forces re-fetch to avoid tainted canvas
+            });
           }
           
           const dataUrl = await htmlToImage.toPng(invoiceRef.current!, { 
             pixelRatio: 3, 
-            backgroundColor: '#ffffff' 
+            backgroundColor: '#ffffff',
+            cacheBust: true // <--- SAFARI HACK: Forces re-fetch to avoid tainted canvas
           });
           
           setPreviewImageUrl(dataUrl);
@@ -978,9 +973,9 @@ export default function POSPage() {
       
       {/* PRELOAD IMAGES TO FIX SAFARI MOBILE BLANK LOGO ISSUE */}
       <div style={{ width: 0, height: 0, overflow: 'hidden', position: 'absolute', opacity: 0 }}>
-        <img src="https://i.imgur.com/s0hg3MQ.png" crossOrigin="anonymous" alt="preload" />
-        <img src="https://i.imgur.com/Guk0hVe.png" crossOrigin="anonymous" alt="preload" />
-        <img src="https://i.imgur.com/XUsrp9D.png" crossOrigin="anonymous" alt="preload" />
+        <img src={LOGO_LEFT_SRC} crossOrigin="anonymous" alt="preload" />
+        <img src={LOGO_RIGHT_SRC} crossOrigin="anonymous" alt="preload" />
+        <img src={WATERMARK_SRC} crossOrigin="anonymous" alt="preload" />
       </div>
 
       {/* SELECTION ENGINE VIEW GRID PANEL */}
@@ -1499,12 +1494,12 @@ export default function POSPage() {
           <div id="invoice-capture-area" ref={invoiceRef} style={{ width: '794px', height: '559px', backgroundColor: '#ffffff', position: 'relative', margin: 0, padding: '19px', boxSizing: 'border-box', fontFamily: "'Noto Sans Khmer', Arial, sans-serif", fontSize: '12.8px', color: '#000000', overflow: 'hidden' }}>
             <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Khmer&display=swap" rel="stylesheet" crossOrigin="anonymous" />
             
-            <div className="invoice-watermark" style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', backgroundImage: "url('https://i.imgur.com/XUsrp9D.png')", backgroundRepeat: 'no-repeat', backgroundPosition: 'center center', backgroundSize: '40%', opacity: 0.14, zIndex: 0, pointerEvents: 'none' }}></div>
+            <div className="invoice-watermark" style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', backgroundImage: `url('${WATERMARK_SRC}')`, backgroundRepeat: 'no-repeat', backgroundPosition: 'center center', backgroundSize: '40%', opacity: 0.14, zIndex: 0, pointerEvents: 'none' }}></div>
 
             <div className="content" style={{ position: 'relative', zIndex: 1, display: 'flex', flexDirection: 'column', height: '100%' }}>
               
-              <div style={{ position: 'absolute', top: 0, left: 0, width: '60px', height: '70px', zIndex: 2 }}><img src="https://i.imgur.com/s0hg3MQ.png" alt="Left Logo" style={{ width: '100%', height: '100%', display: 'block' }} crossOrigin="anonymous" /></div>
-              <div style={{ position: 'absolute', top: 0, right: 0, width: '85px', height: '75px', zIndex: 2 }}><img src="https://i.imgur.com/Guk0hVe.png" alt="Right Logo" style={{ width: '95%', height: '100%', display: 'block' }} crossOrigin="anonymous" /></div>
+              <div style={{ position: 'absolute', top: 0, left: 0, width: '60px', height: '70px', zIndex: 2 }}><img src={LOGO_LEFT_SRC} alt="Left Logo" style={{ width: '100%', height: '100%', display: 'block' }} crossOrigin="anonymous" /></div>
+              <div style={{ position: 'absolute', top: 0, right: 0, width: '85px', height: '75px', zIndex: 2 }}><img src={LOGO_RIGHT_SRC} alt="Right Logo" style={{ width: '95%', height: '100%', display: 'block' }} crossOrigin="anonymous" /></div>
 
               <header style={{ textAlign: 'center', marginBottom: '14px', lineHeight: 1.2 }}>
                 <h1 style={{ fontSize: '23px', margin: '0 0 2px 0', fontWeight: 'bold', color: 'green' }}>ដេប៉ូអង្ករ រ៉េឌៀន</h1>
