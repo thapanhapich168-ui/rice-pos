@@ -187,6 +187,9 @@ export default function POSPage() {
 
   const [cartCustomerNameOverride, setCartCustomerNameOverride] = useState('')
 
+  // ==========================================
+  // DYNAMIC PAYMENT ROWS
+  // ==========================================
   const [paymentRows, setPaymentRows] = useState<{id: number, method: string, amount: number | '', isAuto?: boolean}[]>([
     { id: Date.now(), method: 'Cash ៛', amount: '', isAuto: true }
   ]);
@@ -339,27 +342,49 @@ export default function POSPage() {
     }
   }, [activeTab, customers]) 
 
-  // Mobile Invoice Generation Engine (Waits to ensure HD logos load before capture & Fixes CORS)
+  // SAFARI DYNAMIC UI & TAB GROUP REPAINT FIX
+  useEffect(() => {
+    const handleVisibilityAndResize = () => {
+      if (document.visibilityState === 'visible') {
+        document.documentElement.style.setProperty('--app-height', `${window.innerHeight}px`);
+        document.body.style.transform = 'scale(1)';
+      }
+    };
+
+    window.addEventListener('resize', handleVisibilityAndResize);
+    window.addEventListener('visibilitychange', handleVisibilityAndResize);
+    window.addEventListener('orientationchange', handleVisibilityAndResize);
+    window.addEventListener('pageshow', handleVisibilityAndResize);
+    
+    handleVisibilityAndResize();
+
+    return () => {
+      window.removeEventListener('resize', handleVisibilityAndResize);
+      window.removeEventListener('visibilitychange', handleVisibilityAndResize);
+      window.removeEventListener('orientationchange', handleVisibilityAndResize);
+      window.removeEventListener('pageshow', handleVisibilityAndResize);
+    };
+  }, []);
+
+  // Mobile Invoice Generation Engine (Waits to ensure HD logos load before capture)
   useEffect(() => {
     if (completedSale && invoiceRef.current && !previewImageUrl && showInvoicePreview) {
       const timer = setTimeout(async () => {
         try {
           await document.fonts.ready;
-          // Wait 800ms to guarantee logos/qr are fetched completely in DOM before capture
+          // Wait 800ms to guarantee logos/qr are fetched completely in DOM
           await new Promise(r => setTimeout(r, 800));
 
           const isMobile = window.innerWidth < 1024;
           
-          // Prime the canvas (Added useCORS to pull cross-origin Imgur logos securely)
           if (isMobile) {
-            await htmlToImage.toPng(invoiceRef.current!, { pixelRatio: 1, backgroundColor: '#ffffff', useCORS: true });
+            // NO useCORS property - html-to-image uses crossOrigin directly from the img tags
+            await htmlToImage.toPng(invoiceRef.current!, { pixelRatio: 1, backgroundColor: '#ffffff' });
           }
           
-          // High-Res Capture
           const dataUrl = await htmlToImage.toPng(invoiceRef.current!, { 
             pixelRatio: 3, 
-            backgroundColor: '#ffffff',
-            useCORS: true
+            backgroundColor: '#ffffff' 
           });
           
           setPreviewImageUrl(dataUrl);
@@ -802,12 +827,10 @@ export default function POSPage() {
       });
 
       if (activeTab === 'wholesale' && !isSimpleCustomer) {
-        // Wholesale, Not Walk-in: Show Invoice, NO Summary
         setIsGeneratingPreview(true);
         setShowInvoicePreview(true);
         setSaleSummary(null);
       } else {
-        // Retail OR Wholesale Walk-in: Show Summary, NO Invoice
         setShowInvoicePreview(false);
         setSaleSummary({ 
           total: currentTotalRiel, 
@@ -954,7 +977,7 @@ export default function POSPage() {
     <div className="pos-layout-wrapper" style={{ display: 'flex', width: '100%', backgroundColor: '#ffffff', boxSizing: 'border-box' }}>
       
       {/* PRELOAD IMAGES TO FIX SAFARI MOBILE BLANK LOGO ISSUE */}
-      <div style={{ position: 'absolute', width: '1px', height: '1px', overflow: 'hidden', clip: 'rect(1px, 1px, 1px, 1px)', zIndex: -1 }}>
+      <div style={{ width: 0, height: 0, overflow: 'hidden', position: 'absolute', opacity: 0 }}>
         <img src="https://i.imgur.com/s0hg3MQ.png" crossOrigin="anonymous" alt="preload" />
         <img src="https://i.imgur.com/Guk0hVe.png" crossOrigin="anonymous" alt="preload" />
         <img src="https://i.imgur.com/XUsrp9D.png" crossOrigin="anonymous" alt="preload" />
@@ -1182,7 +1205,7 @@ export default function POSPage() {
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.4)', zIndex: 9999, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}>
           <div style={{ flex: 1 }} onClick={() => setIsMobileCartOpen(false)}></div>
           
-          <div style={{ width: '100%', maxHeight: '85%', backgroundColor: '#ffffff', borderTopLeftRadius: '20px', borderTopRightRadius: '20px', display: 'flex', flexDirection: 'column', position: 'relative', boxShadow: '0 -10px 25px rgba(0,0,0,0.1)' }}>
+          <div style={{ width: '100%', maxHeight: '85dvh', backgroundColor: '#ffffff', borderTopLeftRadius: '20px', borderTopRightRadius: '20px', display: 'flex', flexDirection: 'column', position: 'relative', boxShadow: '0 -10px 25px rgba(0,0,0,0.1)' }}>
             <div style={{ width: '100%', display: 'flex', justifyContent: 'center', paddingTop: '12px', paddingBottom: '8px', flexShrink: 0 }}>
               <div style={{ width: '40px', height: '5px', backgroundColor: '#cbd5e1', borderRadius: '10px' }}></div>
             </div>
@@ -1377,7 +1400,7 @@ export default function POSPage() {
 
       {/* RETURN & EXCHANGE MODAL */}
       {exchangeModal.isOpen && exchangeModal.product && (
-        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 10000, display: 'flex', justifyContent: 'center', alignItems: 'flex-start', paddingTop: '15vh', paddingLeft: '20px', paddingRight: '20px', boxSizing: 'border-box' }} onMouseDown={() => setExchangeModal({ isOpen: false, product: null, consumedKg: '' })}>
+        <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 10000, display: 'flex', justifyContent: 'center', alignItems: 'flex-start', paddingTop: '15vh', paddingLeft: '20px', paddingRight: '20px', boxSizing: 'border-box' }} onMouseDown={() => setExchangeModal({ isOpen: false, product: null, consumedKg: '' })}>
           <div style={{ backgroundColor: '#ffffff', width: '100%', maxWidth: '400px', borderRadius: '12px', padding: '24px', boxShadow: '0 10px 25px rgba(0,0,0,0.15)' }} onMouseDown={e => e.stopPropagation()}>
             <h3 style={{ margin: '0 0 16px 0', color: '#334155', borderBottom: '1px solid #f1f5f9', paddingBottom: '10px', fontSize: '18px' }}>🔄 Exchange / Return Bag</h3>
             
@@ -1412,7 +1435,7 @@ export default function POSPage() {
 
       {/* MOBILE PRODUCT ADD POPUP */}
       {selectedMobileProduct && (
-        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 9999, display: 'flex', justifyContent: 'center', alignItems: 'flex-start', paddingTop: '15vh', paddingLeft: '20px', paddingRight: '20px', boxSizing: 'border-box' }} onMouseDown={() => setSelectedMobileProduct(null)}>
+        <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 9999, display: 'flex', justifyContent: 'center', alignItems: 'flex-start', paddingTop: '15vh', paddingLeft: '20px', paddingRight: '20px', boxSizing: 'border-box' }} onMouseDown={() => setSelectedMobileProduct(null)}>
           <div style={{ backgroundColor: '#ffffff', width: '100%', maxWidth: '400px', borderRadius: '12px', padding: '24px', boxShadow: '0 10px 25px rgba(0,0,0,0.15)' }} onMouseDown={e => e.stopPropagation()}>
             <h3 style={{ margin: '0 0 16px 0', color: '#334155', borderBottom: '1px solid #f1f5f9', paddingBottom: '10px', fontSize: '18px' }}>{currentT.mobileModalTitle}</h3>
             <div style={{ marginBottom: '16px' }}>
@@ -1472,7 +1495,7 @@ export default function POSPage() {
 
       {/* FINAL INVISIBLE DOM CAPTURE AREA (STRICTLY BACKGROUND) */}
       {completedSale && (
-        <div style={{ position: 'fixed', top: 0, left: 0, zIndex: -1000, pointerEvents: 'none' }}>
+        <div style={{ position: 'absolute', top: 0, left: 0, zIndex: -1000, opacity: 0, pointerEvents: 'none' }}>
           <div id="invoice-capture-area" ref={invoiceRef} style={{ width: '794px', height: '559px', backgroundColor: '#ffffff', position: 'relative', margin: 0, padding: '19px', boxSizing: 'border-box', fontFamily: "'Noto Sans Khmer', Arial, sans-serif", fontSize: '12.8px', color: '#000000', overflow: 'hidden' }}>
             <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Khmer&display=swap" rel="stylesheet" crossOrigin="anonymous" />
             
@@ -1636,10 +1659,6 @@ export default function POSPage() {
           font-variant-numeric: tabular-nums lining-nums;
         }
         
-        :root {
-          --app-height: 100vh;
-        }
-        
         body {
           font-variant-numeric: tabular-nums lining-nums;
         }
@@ -1713,8 +1732,8 @@ export default function POSPage() {
           .desktop-cart-panel { display: none !important; }
           
           .main-wrapper { 
-            /* Safely clears the hamburger icon plus Apple's top notch */
-            padding: calc(70px + env(safe-area-inset-top, 20px)) 16px 140px 16px !important; 
+            /* Let the page scroll naturally to bypass Safari issues */
+            padding: max(80px, env(safe-area-inset-top, 80px)) 16px 140px 16px !important; 
             min-height: auto;
           }
           .header-container {
