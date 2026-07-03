@@ -212,13 +212,32 @@ export default function POSPage() {
   
   const invoiceRef = useRef<HTMLDivElement>(null)
 
-  const resetScroll = () => {
-    setTimeout(() => {
-      window.scrollTo(0, 0);
-      document.body.scrollTop = 0;
-      if (document.documentElement) document.documentElement.scrollTop = 0;
-    }, 50);
-  };
+  // SAFARI DYNAMIC UI & TAB GROUP REPAINT FIX (The "Fillout" Method)
+  useEffect(() => {
+    const handleVisibilityAndResize = () => {
+      if (document.visibilityState === 'visible') {
+        // Forces Safari to physically recalculate its inner bounds when tab bars expand/shrink
+        document.documentElement.style.setProperty('--app-height', `${window.innerHeight}px`);
+        // Tiny non-destructive layout shift to force Safari to repaint the DOM
+        document.body.style.transform = 'scale(1)';
+      }
+    };
+
+    window.addEventListener('resize', handleVisibilityAndResize);
+    window.addEventListener('visibilitychange', handleVisibilityAndResize);
+    window.addEventListener('orientationchange', handleVisibilityAndResize);
+    window.addEventListener('pageshow', handleVisibilityAndResize);
+    
+    // Initial execution
+    handleVisibilityAndResize();
+
+    return () => {
+      window.removeEventListener('resize', handleVisibilityAndResize);
+      window.removeEventListener('visibilitychange', handleVisibilityAndResize);
+      window.removeEventListener('orientationchange', handleVisibilityAndResize);
+      window.removeEventListener('pageshow', handleVisibilityAndResize);
+    };
+  }, []);
 
   const totalRiel = cart.reduce((sum, item) => {
     const isReturn = item.custom_name.includes('ដូរ');
@@ -570,8 +589,6 @@ export default function POSPage() {
     if (row.method.includes('$')) return sum + (amt * EXCHANGE_RATE);
     return sum + amt;
   }, 0);
-
-  const liveRemaining = totalRiel - liveTotalReceivedInRiel;
 
   const getCategorizedItems = (cartItems: any[]) => {
     let normalItems: any[] = [], specialItems: any[] = [], negativeItems: any[] = [], serviceItems: any[] = [];
@@ -945,7 +962,7 @@ export default function POSPage() {
   }
 
   return (
-    <div className="pos-layout-wrapper" style={{ display: 'flex', width: '100%', backgroundColor: '#ffffff', boxSizing: 'border-box', minHeight: '100dvh' }}>
+    <div className="pos-layout-wrapper" style={{ display: 'flex', width: '100%', backgroundColor: '#ffffff', boxSizing: 'border-box' }}>
       
       {/* PRELOAD IMAGES TO FIX SAFARI MOBILE BLANK LOGO ISSUE */}
       <div style={{ width: 0, height: 0, overflow: 'hidden', position: 'absolute', opacity: 0 }}>
@@ -955,7 +972,7 @@ export default function POSPage() {
       </div>
 
       {/* SELECTION ENGINE VIEW GRID PANEL */}
-      <div className="pos-main-engine hide-scrollbar" style={{ flex: 1, display: 'flex', flexDirection: 'column', backgroundColor: '#f8fafc', minWidth: 0, height: 'auto', overflowY: 'visible' }}>
+      <div className="pos-main-engine hide-scrollbar" style={{ flex: 1, display: 'flex', flexDirection: 'column', backgroundColor: '#f8fafc', minWidth: 0 }}>
         
         <div className="main-wrapper" style={{ flex: 1 }}>
           <div className="header-container">
@@ -1058,7 +1075,7 @@ export default function POSPage() {
       {/* ==============================================================================================
           DESKTOP SIDEBAR CART
           ============================================================================================== */}
-      <div className="desktop-cart-panel" style={{ width: '400px', backgroundColor: '#ffffff', borderLeft: '1px solid #e5e7eb', display: 'flex', flexDirection: 'column', position: 'sticky', top: '80px', height: 'calc(100vh - 80px)' }}>
+      <div className="desktop-cart-panel" style={{ width: '400px', backgroundColor: '#ffffff', borderLeft: '1px solid #e5e7eb', display: 'flex', flexDirection: 'column', position: 'sticky', top: '0px', height: '100vh' }}>
         <div style={{ paddingTop: '16px', paddingRight: '20px', paddingBottom: '16px', paddingLeft: '20px', borderBottom: '1px solid #f1f5f9', backgroundColor: '#f8fafc', flexShrink: 0 }}>
           <h2 style={{ fontSize: '16px', margin: 0, fontWeight: 'bold', color: '#334155' }}>{currentT.cartTitle} ({cart.length})</h2>
         </div>
@@ -1176,7 +1193,7 @@ export default function POSPage() {
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.4)', zIndex: 9999, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}>
           <div style={{ flex: 1 }} onClick={() => setIsMobileCartOpen(false)}></div>
           
-          <div style={{ width: '100%', maxHeight: '85dvh', backgroundColor: '#ffffff', borderTopLeftRadius: '20px', borderTopRightRadius: '20px', display: 'flex', flexDirection: 'column', position: 'relative', boxShadow: '0 -10px 25px rgba(0,0,0,0.1)' }}>
+          <div style={{ width: '100%', maxHeight: '85%', backgroundColor: '#ffffff', borderTopLeftRadius: '20px', borderTopRightRadius: '20px', display: 'flex', flexDirection: 'column', position: 'relative', boxShadow: '0 -10px 25px rgba(0,0,0,0.1)' }}>
             <div style={{ width: '100%', display: 'flex', justifyContent: 'center', paddingTop: '12px', paddingBottom: '8px', flexShrink: 0 }}>
               <div style={{ width: '40px', height: '5px', backgroundColor: '#cbd5e1', borderRadius: '10px' }}></div>
             </div>
@@ -1239,7 +1256,7 @@ export default function POSPage() {
               })}
             </div>
             
-            <div style={{ padding: '12px 20px calc(80px + env(safe-area-inset-bottom, 20px)) 20px', borderTop: '1px solid #e2e8f0', backgroundColor: '#f8fafc', boxShadow: '0 -4px 10px rgba(0,0,0,0.05)', flexShrink: 0 }}>
+            <div style={{ padding: '12px 20px calc(24px + env(safe-area-inset-bottom, 12px)) 20px', borderTop: '1px solid #e2e8f0', backgroundColor: '#f8fafc', boxShadow: '0 -4px 10px rgba(0,0,0,0.05)', flexShrink: 0 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
                 <span style={{ fontSize: '14px', color: '#475569' }}>{currentT.totalKhmer}</span>
                 <span style={{ fontWeight: 'bold', color: totalRiel < 0 ? '#ef4444' : '#b58a3d', fontSize: '20px' }}>{formatRielFromNative(totalRiel)}</span>
@@ -1640,7 +1657,6 @@ export default function POSPage() {
           font-family: Arial, sans-serif; 
           box-sizing: border-box; 
           color: #333;
-          min-height: 100dvh;
         }
         .header-container { 
           margin-bottom: 24px; 
@@ -1704,8 +1720,8 @@ export default function POSPage() {
           .desktop-cart-panel { display: none !important; }
           
           .main-wrapper { 
-            /* Safely clears the hamburger icon without a massive gap */
-            padding: max(70px, env(safe-area-inset-top, 70px)) 16px 140px 16px !important; 
+            /* Safely clears the hamburger icon plus Apple's top notch */
+            padding: calc(70px + env(safe-area-inset-top, 20px)) 16px 140px 16px !important; 
             min-height: auto;
           }
           .header-container {
