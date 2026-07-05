@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabaseClient'
 
 const formatRiel = (amount: number) => `${new Intl.NumberFormat('en-US').format(Math.round(amount))} ៛`;
+const formatUSD = (amount: number) => `$${new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(amount)}`;
 const EXCHANGE_RATE = 4000;
 
 // ==========================================
@@ -122,7 +123,7 @@ export default function ExpenseDashboard() {
         let saveRiel = 0;
         let saveUsd = 0;
 
-        // FIXED: Log specifically to the bucket the user selected
+        // Log specifically to the bucket the user selected
         if (row.method.includes('$')) {
           saveUsd = rawAmount;
         } else {
@@ -617,7 +618,7 @@ export default function ExpenseDashboard() {
                     <tr style={{ borderBottom: '1px solid #cbd5e1' }}>
                       <th style={{ padding: '8px 0', textAlign: 'left', color: '#475569', fontWeight: 'bold', fontSize: '12px' }}>Date</th>
                       <th style={{ padding: '8px 0', textAlign: 'left', color: '#475569', fontWeight: 'bold', fontSize: '12px' }}>Payment Method</th>
-                      <th style={{ padding: '8px 0', textAlign: 'right', color: '#475569', fontWeight: 'bold', fontSize: '12px' }}>Amount</th>
+                      <th style={{ padding: '8px 0', textAlign: 'right', color: '#475569', fontWeight: 'bold', fontSize: '12px' }}>Amount (៛)</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -644,6 +645,7 @@ export default function ExpenseDashboard() {
 
       {/* --- GLOBAL CSS --- */}
       <style jsx global>{`
+        /* Force inherit font for all inputs and enable tabular numbers for exact matching height */
         input, select, button, textarea {
           font-family: inherit;
           font-variant-numeric: tabular-nums lining-nums;
@@ -726,9 +728,7 @@ export default function ExpenseDashboard() {
 
         @media (max-width: 1023px) { 
           .main-wrapper { 
-            /* GUARANTEED HARDWARE CLEARANCE: Leaves a clean gap under the 55px hamburger menu on all devices */
-            padding: 90px 16px 24px 16px !important; 
-            min-height: auto;
+            padding: max(80px, env(safe-area-inset-top, 80px)) 16px 24px 16px !important; 
           }
           .header-container {
             flex-direction: column !important;
@@ -749,7 +749,7 @@ export default function ExpenseDashboard() {
             font-size: 14px !important;
           }
           .mobile-select-menu, .mobile-input-field {
-            font-size: 16px !important;
+            font-size: 16px !important; /* Disables Mobile Safari Auto-Zoom physics shifts */
           }
         }
       `}</style>
