@@ -12,6 +12,7 @@ const LOGO_RIGHT_SRC = "/logo-right.png";
 const WATERMARK_SRC = "/watermark.png";
 
 // 🛠️ SAFARI INVOICE IMAGE CONVERTER 
+// Uses absolute URLs and provides a fallback if local fetch fails on mobile
 const fetchImageAsBase64 = async (path: string) => {
   try {
     const absoluteUrl = new URL(path, window.location.origin).href;
@@ -363,10 +364,12 @@ export default function POSPage() {
         document.body.style.transform = 'scale(1)';
       }
     };
+
     window.addEventListener('resize', handleVisibilityAndResize);
     window.addEventListener('visibilitychange', handleVisibilityAndResize);
     window.addEventListener('orientationchange', handleVisibilityAndResize);
     window.addEventListener('pageshow', handleVisibilityAndResize);
+    
     handleVisibilityAndResize();
 
     return () => {
@@ -379,39 +382,31 @@ export default function POSPage() {
 
   useEffect(() => {
     if (completedSale && invoiceRef.current && !previewImageUrl && showInvoicePreview) {
-      
-      const captureProcess = async () => {
+      const timer = setTimeout(async () => {
         try {
-          setIsGeneratingPreview(true);
+          await document.fonts.ready;
           await new Promise(r => setTimeout(r, 800));
+
           const isMobile = window.innerWidth < 1024;
-
-          await htmlToImage.toPng(invoiceRef.current!, { 
-            pixelRatio: 0.1, 
-            backgroundColor: '#ffffff',
-            cacheBust: true,
-            skipAutoScale: true
-          });
-
-          await new Promise(r => setTimeout(r, 250));
-
+          
+          if (isMobile) {
+            await htmlToImage.toPng(invoiceRef.current!, { pixelRatio: 1, backgroundColor: '#ffffff' });
+          }
+          
           const dataUrl = await htmlToImage.toPng(invoiceRef.current!, { 
-            pixelRatio: isMobile ? 1 : 3, 
-            backgroundColor: '#ffffff',
-            cacheBust: true
+            pixelRatio: 3, 
+            backgroundColor: '#ffffff' 
           });
           
           setPreviewImageUrl(dataUrl);
           setIsGeneratingPreview(false);
           executeAutoSaveOnly(dataUrl, completedSale.invoiceNo);
-
         } catch (error) {
           console.error("Preview generation failed:", error);
           setIsGeneratingPreview(false);
         }
-      };
-
-      captureProcess();
+      }, 400);
+      return () => clearTimeout(timer);
     }
   }, [completedSale, previewImageUrl, showInvoicePreview])
 
@@ -721,6 +716,7 @@ export default function POSPage() {
         const finalLocation = selectedCustomer?.location || '';
         const finalPhone = selectedCustomer?.phone || '';
         
+        const combinedRiceTypes = currentCart.map(item => `${item.custom_name} (x${item.quantity})`).join(', ');
         const baseSaleRows = [];
         const stockUpdates: Record<number, number> = {}; 
         const fifoUpdates: Record<number, number> = {}; 
@@ -768,7 +764,6 @@ export default function POSPage() {
 
         const finalSaleRows = [];
         const finalSummaries = [];
-        const combinedRiceTypes = currentCart.map(item => `${item.custom_name} (x${item.quantity})`).join(', ');
 
         for (let sIdx = 0; sIdx < effectiveSplits.length; sIdx++) {
            const split = effectiveSplits[sIdx];
@@ -813,11 +808,9 @@ export default function POSPage() {
           await supabase.from('invoice_summaries').delete().like('invoice_id', `${editingInvoiceId}%`);
         }
 
-        // 1. MUST SAVE THE INVOICE HEADER FIRST
         const { error: summaryErr } = await supabase.from('invoice_summaries').insert(finalSummaries);
         if (summaryErr) throw new Error(`Failed to save to Summaries table: ${summaryErr.message}`);
 
-        // 2. THEN SAVE THE INDIVIDUAL BAGS OF RICE
         const { error: salesErr } = await supabase.from('sales').insert(finalSaleRows);
         if (salesErr) throw new Error(`Failed to save to Sales table: ${salesErr.message}`);
 
@@ -839,7 +832,6 @@ export default function POSPage() {
         });
       }
 
-      // Show Summary OR Invoice logic based on rules
       let cR = 0, qR = 0, cUsd = 0, qUsd = 0;
       activePayments.forEach(r => {
         if (r.method === 'Cash ៛') cR += Number(r.amount);
@@ -1475,7 +1467,7 @@ export default function POSPage() {
         </div>
       )}
 
-      {/* SALE SUMMARY MODAL (AUTO-DISMISSES) */}
+      {/* 💰 SALE SUMMARY MODAL (NOW SHOWS CHANGE CLEARLY) */}
       {saleSummary && (
         <div className="modal-overlay" style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.85)', zIndex: 10005, display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '20px', boxSizing: 'border-box' }}>
           <div className="modal-content" style={{ backgroundColor: '#ffffff', width: '100%', maxWidth: '400px', borderRadius: '16px', padding: '30px', boxShadow: '0 10px 25px rgba(0,0,0,0.2)' }}>
@@ -1535,16 +1527,15 @@ export default function POSPage() {
               className="invoice-watermark" 
               style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', width: '40%', height: 'auto', opacity: 0.14, zIndex: 0, pointerEvents: 'none', objectFit: 'contain' }} 
               alt="Watermark" 
-              crossOrigin="anonymous"
             />
 
             <div className="content" style={{ position: 'relative', zIndex: 1, display: 'flex', flexDirection: 'column', height: '100%' }}>
               
               <div style={{ position: 'absolute', top: 0, left: 0, width: '60px', height: '70px', zIndex: 2 }}>
-                <img src={invoiceImages.left} alt="Left Logo" style={{ width: '100%', height: '100%', display: 'block' }} crossOrigin="anonymous" />
+                <img src={invoiceImages.left} alt="Left Logo" style={{ width: '100%', height: '100%', display: 'block' }} />
               </div>
               <div style={{ position: 'absolute', top: 0, right: 0, width: '85px', height: '75px', zIndex: 2 }}>
-                <img src={invoiceImages.right} alt="Right Logo" style={{ width: '95%', height: '100%', display: 'block' }} crossOrigin="anonymous" />
+                <img src={invoiceImages.right} alt="Right Logo" style={{ width: '95%', height: '100%', display: 'block' }} />
               </div>
 
               <header style={{ textAlign: 'center', marginBottom: '14px', lineHeight: 1.2 }}>
@@ -1668,7 +1659,7 @@ export default function POSPage() {
       {showInvoicePreview && completedSale && (
         <div className="invoice-modal-overlay" style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.85)', zIndex: 10006, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
           
-          {/* 🛑 THE NEW FLOATING CHANGE BANNER 🛑 */}
+          {/* 💰 THE NEW FLOATING CHANGE BANNER 💰 */}
           {completedSale.changeDue > 0 && (
             <div style={{ width: '100%', maxWidth: '850px', background: '#ecfdf5', border: '2px dashed #10b981', borderRadius: '12px', padding: '16px 24px', marginBottom: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div>
@@ -1787,7 +1778,6 @@ export default function POSPage() {
           .desktop-cart-panel { display: none !important; }
           
           .main-wrapper { 
-            /* Let the page scroll naturally to bypass Safari issues */
             padding: max(80px, env(safe-area-inset-top, 80px)) 16px 140px 16px !important; 
             min-height: auto;
           }
