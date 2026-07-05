@@ -382,8 +382,9 @@ export default function POSPage() {
 
   useEffect(() => {
     if (completedSale && invoiceRef.current && !previewImageUrl && showInvoicePreview) {
-      const timer = setTimeout(async () => {
+      const captureProcess = async () => {
         try {
+          setIsGeneratingPreview(true);
           await document.fonts.ready;
           await new Promise(r => setTimeout(r, 800));
 
@@ -405,8 +406,9 @@ export default function POSPage() {
           console.error("Preview generation failed:", error);
           setIsGeneratingPreview(false);
         }
-      }, 400);
-      return () => clearTimeout(timer);
+      };
+
+      captureProcess();
     }
   }, [completedSale, previewImageUrl, showInvoicePreview])
 
@@ -1527,15 +1529,16 @@ export default function POSPage() {
               className="invoice-watermark" 
               style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', width: '40%', height: 'auto', opacity: 0.14, zIndex: 0, pointerEvents: 'none', objectFit: 'contain' }} 
               alt="Watermark" 
+              decoding="sync"
             />
 
             <div className="content" style={{ position: 'relative', zIndex: 1, display: 'flex', flexDirection: 'column', height: '100%' }}>
               
               <div style={{ position: 'absolute', top: 0, left: 0, width: '60px', height: '70px', zIndex: 2 }}>
-                <img src={invoiceImages.left} alt="Left Logo" style={{ width: '100%', height: '100%', display: 'block' }} />
+                <img src={invoiceImages.left} alt="Left Logo" style={{ width: '100%', height: '100%', display: 'block' }} decoding="sync" />
               </div>
               <div style={{ position: 'absolute', top: 0, right: 0, width: '85px', height: '75px', zIndex: 2 }}>
-                <img src={invoiceImages.right} alt="Right Logo" style={{ width: '95%', height: '100%', display: 'block' }} />
+                <img src={invoiceImages.right} alt="Right Logo" style={{ width: '95%', height: '100%', display: 'block' }} decoding="sync" />
               </div>
 
               <header style={{ textAlign: 'center', marginBottom: '14px', lineHeight: 1.2 }}>
