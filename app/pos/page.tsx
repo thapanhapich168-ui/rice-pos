@@ -12,7 +12,6 @@ const LOGO_RIGHT_SRC = "/logo-right.png";
 const WATERMARK_SRC = "/watermark.png";
 
 // 🛠️ SAFARI INVOICE IMAGE CONVERTER 
-// Uses absolute URLs and provides a fallback if local fetch fails on mobile
 const fetchImageAsBase64 = async (path: string) => {
   try {
     const absoluteUrl = new URL(path, window.location.origin).href;
@@ -186,7 +185,6 @@ export default function POSPage() {
   const [productOrder, setProductOrder] = useState<number[]>([])
   const [activeBatches, setActiveBatches] = useState<Record<number, any[]>>({})
   
-  // Default to raw URLs so it never errors out as blank, then swap to Base64
   const [invoiceImages, setInvoiceImages] = useState({ left: LOGO_LEFT_SRC, right: LOGO_RIGHT_SRC, watermark: WATERMARK_SRC });
 
   const [lang, setLang] = useState<'en' | 'kh'>('en')
@@ -204,9 +202,6 @@ export default function POSPage() {
 
   const [cartCustomerNameOverride, setCartCustomerNameOverride] = useState('')
 
-  // ==========================================
-  // DYNAMIC PAYMENT ROWS
-  // ==========================================
   const [paymentRows, setPaymentRows] = useState<{id: number, method: string, amount: number | '', isAuto?: boolean}[]>([
     { id: Date.now(), method: 'Cash ៛', amount: '', isAuto: true }
   ]);
@@ -240,7 +235,6 @@ export default function POSPage() {
 
   const totalUSD = totalRiel / EXCHANGE_RATE; 
 
-  // Convert Local Images to Base64 on Mount securely
   useEffect(() => {
     const loadImages = async () => {
       const leftB64 = await fetchImageAsBase64(LOGO_LEFT_SRC);
@@ -362,7 +356,6 @@ export default function POSPage() {
     }
   }, [activeTab, customers]) 
 
-  // SAFARI DYNAMIC UI & TAB GROUP REPAINT FIX
   useEffect(() => {
     const handleVisibilityAndResize = () => {
       if (document.visibilityState === 'visible') {
@@ -370,12 +363,10 @@ export default function POSPage() {
         document.body.style.transform = 'scale(1)';
       }
     };
-
     window.addEventListener('resize', handleVisibilityAndResize);
     window.addEventListener('visibilitychange', handleVisibilityAndResize);
     window.addEventListener('orientationchange', handleVisibilityAndResize);
     window.addEventListener('pageshow', handleVisibilityAndResize);
-    
     handleVisibilityAndResize();
 
     return () => {
@@ -386,27 +377,26 @@ export default function POSPage() {
     };
   }, []);
 
-  // Mobile Invoice Generation Engine (Waits to ensure HD logos load before capture)
   useEffect(() => {
     if (completedSale && invoiceRef.current && !previewImageUrl && showInvoicePreview) {
-      const timer = setTimeout(async () => {
+      
+      const captureProcess = async () => {
         try {
-          await document.fonts.ready;
-          // Wait 800ms to guarantee logos/qr are fetched completely in DOM
+          setIsGeneratingPreview(true);
           await new Promise(r => setTimeout(r, 800));
-
           const isMobile = window.innerWidth < 1024;
-          
-          if (isMobile) {
-            await htmlToImage.toPng(invoiceRef.current!, { 
-              pixelRatio: 1, 
-              backgroundColor: '#ffffff',
-              cacheBust: true
-            });
-          }
-          
+
+          await htmlToImage.toPng(invoiceRef.current!, { 
+            pixelRatio: 0.1, 
+            backgroundColor: '#ffffff',
+            cacheBust: true,
+            skipAutoScale: true
+          });
+
+          await new Promise(r => setTimeout(r, 250));
+
           const dataUrl = await htmlToImage.toPng(invoiceRef.current!, { 
-            pixelRatio: 3, 
+            pixelRatio: isMobile ? 1 : 3, 
             backgroundColor: '#ffffff',
             cacheBust: true
           });
@@ -414,12 +404,14 @@ export default function POSPage() {
           setPreviewImageUrl(dataUrl);
           setIsGeneratingPreview(false);
           executeAutoSaveOnly(dataUrl, completedSale.invoiceNo);
+
         } catch (error) {
           console.error("Preview generation failed:", error);
           setIsGeneratingPreview(false);
         }
-      }, 400);
-      return () => clearTimeout(timer);
+      };
+
+      captureProcess();
     }
   }, [completedSale, previewImageUrl, showInvoicePreview])
 
@@ -821,11 +813,13 @@ export default function POSPage() {
           await supabase.from('invoice_summaries').delete().like('invoice_id', `${editingInvoiceId}%`);
         }
 
-        const { error: salesErr } = await supabase.from('sales').insert(finalSaleRows);
-        if (salesErr) throw new Error(`Failed to save to Sales table: ${salesErr.message}`);
-
+        // 1. MUST SAVE THE INVOICE HEADER FIRST
         const { error: summaryErr } = await supabase.from('invoice_summaries').insert(finalSummaries);
         if (summaryErr) throw new Error(`Failed to save to Summaries table: ${summaryErr.message}`);
+
+        // 2. THEN SAVE THE INDIVIDUAL BAGS OF RICE
+        const { error: salesErr } = await supabase.from('sales').insert(finalSaleRows);
+        if (salesErr) throw new Error(`Failed to save to Sales table: ${salesErr.message}`);
 
         for (const [prodId, newStock] of Object.entries(stockUpdates)) {
            await supabase.from('products').update({ stock: newStock }).eq('id', prodId);
@@ -836,16 +830,20 @@ export default function POSPage() {
 
         const currentDate = new Date();
         setCompletedSale({
-          invoiceNo: displayInvoiceNo, cartSnapshot: currentCart, customer: { name: finalCustomerName, phone: finalPhone, location: finalLocation },
-          dateObj: { day: String(currentDate.getDate()).padStart(2, '0'), month: String(currentDate.getMonth() + 1).padStart(2, '0'), year: currentDate.getFullYear() }
+          invoiceNo: displayInvoiceNo, 
+          cartSnapshot: currentCart, 
+          customer: { name: finalCustomerName, phone: finalPhone, location: finalLocation },
+          dateObj: { day: String(currentDate.getDate()).padStart(2, '0'), month: String(currentDate.getMonth() + 1).padStart(2, '0'), year: currentDate.getFullYear() },
+          changeDue: actualRemaining < 0 ? Math.abs(actualRemaining) : 0,
+          amountReceived: actualTotalReceived
         });
       }
 
       // Show Summary OR Invoice logic based on rules
-      let cRiel = 0, qRiel = 0, cUsd = 0, qUsd = 0;
+      let cR = 0, qR = 0, cUsd = 0, qUsd = 0;
       activePayments.forEach(r => {
-        if (r.method === 'Cash ៛') cRiel += Number(r.amount);
-        if (r.method === 'QR ៛' || r.method === 'Mom QR ៛') qRiel += Number(r.amount);
+        if (r.method === 'Cash ៛') cR += Number(r.amount);
+        if (r.method === 'QR ៛' || r.method === 'Mom QR ៛') qR += Number(r.amount);
         if (r.method === 'Cash $') cUsd += Number(r.amount);
         if (r.method === 'QR $' || r.method === 'Mom QR $') qUsd += Number(r.amount);
       });
@@ -858,7 +856,7 @@ export default function POSPage() {
         setShowInvoicePreview(false);
         setSaleSummary({ 
           total: currentTotalRiel, 
-          receivedRiel: cRiel + qRiel, 
+          receivedRiel: cR + qR, 
           receivedUsd: cUsd + qUsd, 
           totalReceivedInRiel: actualTotalReceived,
           change: actualRemaining < 0 ? Math.abs(actualRemaining) : 0, 
@@ -1481,11 +1479,20 @@ export default function POSPage() {
       {saleSummary && (
         <div className="modal-overlay" style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.85)', zIndex: 10005, display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '20px', boxSizing: 'border-box' }}>
           <div className="modal-content" style={{ backgroundColor: '#ffffff', width: '100%', maxWidth: '400px', borderRadius: '16px', padding: '30px', boxShadow: '0 10px 25px rgba(0,0,0,0.2)' }}>
-            <h2 style={{ marginTop: 0, color: saleSummary.isDebt ? '#d97706' : '#10b981', fontSize: '20px', marginBottom: '8px', textAlign: 'center' }}>
+            <h2 style={{ marginTop: 0, color: saleSummary.isDebt ? '#d97706' : '#10b981', fontSize: '20px', marginBottom: '16px', textAlign: 'center' }}>
               {saleSummary.isCashless ? 'Sale Recorded! ✅' : saleSummary.isDebt ? 'Partial Payment Logged ⏳' : 'Sale Complete! ✅'}
             </h2>
               
-            <div style={{ background: '#f8fafc', padding: '24px', borderRadius: '12px', margin: '20px 0', border: '1px solid #e2e8f0' }}>
+            {/* 🛑 THE NEW CHANGE DUE BOX 🛑 */}
+            {saleSummary.change > 0 && (
+              <div style={{ background: '#ecfdf5', padding: '20px', borderRadius: '12px', border: '2px dashed #10b981', marginBottom: '20px', textAlign: 'center' }}>
+                <div style={{ fontSize: '13px', color: '#047857', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '1px' }}>Change to Return</div>
+                <div style={{ fontSize: '38px', color: '#047857', fontWeight: 'bold', margin: '4px 0' }}>{formatRielFromNative(saleSummary.change)}</div>
+                <div style={{ fontSize: '13px', color: '#059669', marginTop: '4px' }}>Out of {formatRielFromNative(saleSummary.totalReceivedInRiel)} received</div>
+              </div>
+            )}
+
+            <div style={{ background: '#f8fafc', padding: '24px', borderRadius: '12px', marginBottom: '20px', border: '1px solid #e2e8f0' }}>
               <div style={{ fontSize: '11px', color: '#64748b', marginBottom: '12px', textTransform: 'uppercase', textAlign: 'center' }}>Items Description Formula</div>
               <div style={{ maxHeight: '150px', overflowY: 'auto', marginBottom: '12px' }}>
                 {saleSummary.items?.map((item: any, idx: number) => (
@@ -1497,12 +1504,12 @@ export default function POSPage() {
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px dashed #cbd5e1', paddingTop: '16px', marginTop: '16px', fontSize: '14px' }}>
                 <span style={{ color: '#64748b' }}>Total Sale:</span>
-                <span style={{ color: saleSummary.total < 0 ? '#ef4444' : '#10b981' }}>{formatRielFromNative(saleSummary.total)}</span>
+                <span style={{ color: saleSummary.total < 0 ? '#ef4444' : '#10b981', fontWeight: 'bold' }}>{formatRielFromNative(saleSummary.total)}</span>
               </div>
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-              <button onClick={() => { setSaleSummary(null); setCompletedSale(null); setPreviewImageUrl(null); }} style={{ width: '100%', padding: '16px', background: '#f1f5f9', color: '#475569', border: 'none', borderRadius: '8px', cursor: 'pointer', fontSize: '14px' }}>
+              <button onClick={() => { setSaleSummary(null); setCompletedSale(null); setPreviewImageUrl(null); }} style={{ width: '100%', padding: '16px', background: '#f1f5f9', color: '#475569', border: 'none', borderRadius: '8px', cursor: 'pointer', fontSize: '15px', fontWeight: 'bold' }}>
                  Close Window
               </button>
             </div>
@@ -1510,30 +1517,34 @@ export default function POSPage() {
         </div>
       )}
 
-      {/* FINAL INVISIBLE DOM CAPTURE AREA (STRICTLY BACKGROUND) */}
+      {/* FINAL INVISIBLE DOM CAPTURE AREA */}
       {completedSale && (
-        <div style={{ position: 'absolute', top: '-10000px', left: '-10000px', zIndex: -1000, pointerEvents: 'none' }}>
+        <div style={{ 
+          position: 'fixed', 
+          top: 0, 
+          left: 0, 
+          zIndex: -9999, 
+          opacity: 0.01,
+          pointerEvents: 'none' 
+        }}>
           <div id="invoice-capture-area" ref={invoiceRef} style={{ width: '794px', height: '559px', backgroundColor: '#ffffff', position: 'relative', margin: 0, padding: '19px', boxSizing: 'border-box', fontFamily: "'Noto Sans Khmer', Arial, sans-serif", fontSize: '12.8px', color: '#000000', overflow: 'hidden' }}>
             <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Khmer&display=swap" rel="stylesheet" crossOrigin="anonymous" />
             
-            {invoiceImages.watermark && (
-              <img 
-                src={invoiceImages.watermark} 
-                className="invoice-watermark" 
-                style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', width: '40%', height: 'auto', opacity: 0.14, zIndex: 0, pointerEvents: 'none', objectFit: 'contain' }} 
-                alt="Watermark" 
-                crossOrigin="anonymous"
-                loading="eager"
-              />
-            )}
+            <img 
+              src={invoiceImages.watermark} 
+              className="invoice-watermark" 
+              style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', width: '40%', height: 'auto', opacity: 0.14, zIndex: 0, pointerEvents: 'none', objectFit: 'contain' }} 
+              alt="Watermark" 
+              crossOrigin="anonymous"
+            />
 
             <div className="content" style={{ position: 'relative', zIndex: 1, display: 'flex', flexDirection: 'column', height: '100%' }}>
               
               <div style={{ position: 'absolute', top: 0, left: 0, width: '60px', height: '70px', zIndex: 2 }}>
-                {invoiceImages.left && <img src={invoiceImages.left} alt="Left Logo" style={{ width: '100%', height: '100%', display: 'block' }} crossOrigin="anonymous" loading="eager" />}
+                <img src={invoiceImages.left} alt="Left Logo" style={{ width: '100%', height: '100%', display: 'block' }} crossOrigin="anonymous" />
               </div>
               <div style={{ position: 'absolute', top: 0, right: 0, width: '85px', height: '75px', zIndex: 2 }}>
-                {invoiceImages.right && <img src={invoiceImages.right} alt="Right Logo" style={{ width: '95%', height: '100%', display: 'block' }} crossOrigin="anonymous" loading="eager" />}
+                <img src={invoiceImages.right} alt="Right Logo" style={{ width: '95%', height: '100%', display: 'block' }} crossOrigin="anonymous" />
               </div>
 
               <header style={{ textAlign: 'center', marginBottom: '14px', lineHeight: 1.2 }}>
@@ -1653,10 +1664,24 @@ export default function POSPage() {
         </div>
       )}
 
-      {/* RENDERED INVOICE PREVIEW MODAL (IF APPLICABLE) */}
+      {/* RENDERED INVOICE PREVIEW MODAL */}
       {showInvoicePreview && completedSale && (
         <div className="invoice-modal-overlay" style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.85)', zIndex: 10006, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
           
+          {/* 🛑 THE NEW FLOATING CHANGE BANNER 🛑 */}
+          {completedSale.changeDue > 0 && (
+            <div style={{ width: '100%', maxWidth: '850px', background: '#ecfdf5', border: '2px dashed #10b981', borderRadius: '12px', padding: '16px 24px', marginBottom: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div>
+                <div style={{ fontSize: '12px', color: '#059669', fontWeight: 'bold', textTransform: 'uppercase' }}>Amount Received</div>
+                <div style={{ fontSize: '18px', color: '#047857', fontWeight: 'bold' }}>{formatRielFromNative(completedSale.amountReceived)}</div>
+              </div>
+              <div style={{ textAlign: 'right' }}>
+                <div style={{ fontSize: '13px', color: '#047857', fontWeight: 'bold', textTransform: 'uppercase' }}>Change Due ➔</div>
+                <div style={{ fontSize: '32px', color: '#047857', fontWeight: 'bold' }}>{formatRielFromNative(completedSale.changeDue)}</div>
+              </div>
+            </div>
+          )}
+
           <div className="invoice-controls" style={{ display: 'flex', justifyContent: 'space-between', width: '100%', maxWidth: '850px', marginBottom: '16px', padding: '0 20px' }}>
             <button onClick={() => { setShowInvoicePreview(false); setCompletedSale(null); setPreviewImageUrl(null); }} style={{ backgroundColor: '#dc2626', color: '#fff', border: 'none', padding: '10px 20px', borderRadius: '8px', fontSize: '16px', cursor: 'pointer' }}>❌ {currentT.close}</button>
             
@@ -1671,13 +1696,13 @@ export default function POSPage() {
             </div>
           </div>
 
-          <div className="invoice-preview-container" style={{ width: '100%', maxWidth: '850px', padding: '0 10px', display: 'flex', justifyContent: 'center' }}>
+          <div className="invoice-preview-container" style={{ width: '100%', maxWidth: '850px', padding: '0 10px', display: 'flex', justifyContent: 'center', flexShrink: 1, minHeight: 0 }}>
             {isGeneratingPreview || !previewImageUrl ? (
               <div style={{ padding: '40px', backgroundColor: '#fff', borderRadius: '8px', color: '#334155', display: 'flex', alignItems: 'center', gap: '12px' }}>
                 <span style={{ fontSize: '24px' }}>⏳</span> Generating High-Resolution Invoice...
               </div>
             ) : (
-              <img src={previewImageUrl} alt="Invoice Preview" style={{ width: '100%', maxWidth: '794px', borderRadius: '4px', objectFit: 'contain', boxShadow: '0 10px 25px rgba(0,0,0,0.5)' }} />
+              <img src={previewImageUrl} alt="Invoice Preview" style={{ width: '100%', maxWidth: '794px', maxHeight: '60vh', borderRadius: '4px', objectFit: 'contain', boxShadow: '0 10px 25px rgba(0,0,0,0.5)' }} />
             )}
           </div>
         </div>

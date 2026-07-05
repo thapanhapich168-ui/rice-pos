@@ -3,7 +3,6 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabaseClient'
 
-// --- CONSTANTS & FORMATTERS ---
 const EXCHANGE_RATE = 4000;
 
 const formatRiel = (v: number) => `${new Intl.NumberFormat('en-US').format(Math.round(v))} ៛`;
@@ -11,227 +10,152 @@ const formatUSD = (v: number) => `$${Number(v).toFixed(2)}`;
 const formatUSDEquiv = (vRiel: number) => `$${(vRiel / EXCHANGE_RATE).toFixed(2)}`;
 const formatNumber = (v: number) => new Intl.NumberFormat('en-US').format(v);
 
+const parseOwner = (ownerStr: any) => {
+  const o = (ownerStr || '').toLowerCase().trim();
+  if (o === 'mom') return 'mom';
+  if (o === 'pich') return 'pich';
+  if (o === 'jing') return 'jing';
+  return 'both'; 
+};
+
+function CurrencyInput({ value, onChange, onBlur, placeholder, style, autoFocus, className }: any) {
+  const [inputValue, setInputValue] = useState('');
+
+  useEffect(() => {
+    if (value === '' || value === 0) setInputValue('');
+    else {
+      const parsed = parseFloat(inputValue.replace(/,/g, ''));
+      if (parsed !== value) setInputValue(new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 }).format(value));
+    }
+  }, [value]);
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    let raw = e.target.value.replace(/[^0-9.]/g, '');
+    const parts = raw.split('.');
+    if (parts.length > 2) raw = parts[0] + '.' + parts.slice(1).join('');
+    let formatted = parts[0] ? new Intl.NumberFormat('en-US').format(parseInt(parts[0], 10)) : '';
+    if (parts.length > 1) formatted += '.' + parts[1].substring(0, 2);
+    setInputValue(formatted === '' ? '' : formatted);
+    const num = parseFloat(raw);
+    onChange(isNaN(num) ? '' : num);
+  };
+
+  return <input type="text" inputMode="decimal" placeholder={placeholder} value={inputValue} onChange={handleChange} onBlur={onBlur} autoFocus={autoFocus} style={{ ...style, color: '#334155' }} className={className || "mobile-input-field"} />
+}
+
 export default function DashboardPage() {
   const [wholesaleSales, setWholesaleSales] = useState<any[]>([])
   const [retailSales, setRetailSales] = useState<any[]>([])
   const [invoiceSummaries, setInvoiceSummaries] = useState<any[]>([])
+  const [invoicePayments, setInvoicePayments] = useState<any[]>([]) 
   const [expenses, setExpenses] = useState<any[]>([])
   const [staffList, setStaffList] = useState<any[]>([]) 
   const [inventoryList, setInventoryList] = useState<any[]>([]) 
   const [accountsPayable, setAccountsPayable] = useState<any[]>([]) 
   const [cogsSettlements, setCogsSettlements] = useState<any[]>([]) 
-  const [priceHistory, setPriceHistory] = useState<any[]>([]) // Used for accurate Batch Valuation
+  const [priceHistory, setPriceHistory] = useState<any[]>([]) 
 
-  // --- MANUAL ASSET STATES ---
+  const [showStartingBalance, setShowStartingBalance] = useState(false)
   const [baseCapital, setBaseCapital] = useState<number>(0)
   const [initCashRiel, setInitCashRiel] = useState<number>(0)
   const [initCashUsd, setInitCashUsd] = useState<number>(0)
   const [initQrRiel, setInitQrRiel] = useState<number>(0)
   const [initQrUsd, setInitQrUsd] = useState<number>(0)
-  
-  // AR & AP Trackers
   const [familyOweRiel, setFamilyOweRiel] = useState<number>(0)
   const [familyOweUsd, setFamilyOweUsd] = useState<number>(0)
-  const [persOweRiel, setPersOweRiel] = useState<number>(0) // Owe to Mom
+  const [persOweRiel, setPersOweRiel] = useState<number>(0) 
 
   const [activeTab, setActiveTab] = useState<'wholesale' | 'retail' | 'asset'>('wholesale')
   const [assetFilter, setAssetFilter] = useState<'today' | 'yesterday' | 'week' | 'month' | 'all'>('month')
 
-  // -------------------------
-  // LOAD DATA
-  // -------------------------
   useEffect(() => {
-    loadData()
+    loadData();
+    const channel = supabase.channel('dashboard-channel').on('postgres_changes', { event: '*', schema: 'public' }, () => loadData()).subscribe();
+    return () => { supabase.removeChannel(channel); };
   }, [])
 
   async function loadData() {
-    const { data: salesData } = await supabase.from('sales').select('*')
-    setWholesaleSales(salesData || [])
+    const [{data: salesData}, {data: sumData}, {data: retData}, {data: expData}, {data: staffData}, {data: prodData}, {data: apData}, {data: cogsData}, {data: batchData}, {data: invPayData}] = await Promise.all([
+      supabase.from('sales').select('*'),
+      supabase.from('invoice_summaries').select('*'),
+      supabase.from('retail_sales').select('*'),
+      supabase.from('expenses').select('*'),
+      supabase.from('staff').select('*'),
+      supabase.from('products').select('*').order('id'),
+      supabase.from('accounts_payable').select('*').order('created_at', { ascending: false }),
+      supabase.from('cogs_settlements').select('*'),
+      supabase.from('price_history').select('*'),
+      supabase.from('invoice_payments').select('*')
+    ]);
 
-    const { data: summariesData } = await supabase.from('invoice_summaries').select('*')
-    setInvoiceSummaries(summariesData || [])
+    setWholesaleSales(salesData || []); setInvoiceSummaries(sumData || []); setRetailSales(retData || []); setExpenses(expData || []); setStaffList(staffData || []); setInventoryList(prodData || []); setAccountsPayable(apData || []); setCogsSettlements(cogsData || []); setPriceHistory(batchData || []); setInvoicePayments(invPayData || []);
 
-    try {
-      const { data: retailData } = await supabase.from('retail_sales').select('*')
-      setRetailSales(retailData || [])
-    } catch (e) { setRetailSales([]) }
-
-    try {
-      const { data: expensesData } = await supabase.from('expenses').select('*')
-      setExpenses(expensesData || [])
-    } catch (e) { setExpenses([]) }
-
-    try {
-      const { data: staffData } = await supabase.from('staff').select('*')
-      setStaffList(staffData || [])
-    } catch (e) { setStaffList([]) }
-
-    try {
-      const { data: prodData } = await supabase.from('products').select('*').order('id')
-      setInventoryList(prodData || [])
-    } catch (e) { setInventoryList([]) }
-
-    try {
-      const { data: apData } = await supabase.from('accounts_payable').select('*').order('created_at', { ascending: false })
-      setAccountsPayable(apData || [])
-    } catch (e) { setAccountsPayable([]) }
-
-    try {
-      const { data: cogsData } = await supabase.from('cogs_settlements').select('*')
-      setCogsSettlements(cogsData || [])
-    } catch (e) { setCogsSettlements([]) }
-
-    try {
-      const { data: batchData } = await supabase.from('price_history').select('*')
-      setPriceHistory(batchData || [])
-    } catch (e) { setPriceHistory([]) }
-
-    try {
-      const keys = ['base_capital', 'initial_cash_riel', 'initial_cash_usd', 'initial_qr_riel', 'initial_qr_usd', 'personal_owe_riel', 'family_owe_riel', 'family_owe_usd'];
-      const { data: capData } = await supabase.from('app_settings').select('*').in('setting_key', keys)
-      if (capData) {
-        capData.forEach(s => {
-          if (s.setting_key === 'base_capital') setBaseCapital(Number(s.setting_value) || 0)
-          if (s.setting_key === 'initial_cash_riel') setInitCashRiel(Number(s.setting_value) || 0)
-          if (s.setting_key === 'initial_cash_usd') setInitCashUsd(Number(s.setting_value) || 0)
-          if (s.setting_key === 'initial_qr_riel') setInitQrRiel(Number(s.setting_value) || 0)
-          if (s.setting_key === 'initial_qr_usd') setInitQrUsd(Number(s.setting_value) || 0)
-          if (s.setting_key === 'personal_owe_riel') setPersOweRiel(Number(s.setting_value) || 0)
-          if (s.setting_key === 'family_owe_riel') setFamilyOweRiel(Number(s.setting_value) || 0)
-          if (s.setting_key === 'family_owe_usd') setFamilyOweUsd(Number(s.setting_value) || 0)
-        })
-      }
-    } catch (e) { console.warn("App settings missing.") }
+    const keys = ['base_capital', 'initial_cash_riel', 'initial_cash_usd', 'initial_qr_riel', 'initial_qr_usd', 'personal_owe_riel', 'family_owe_riel', 'family_owe_usd'];
+    const { data: capData } = await supabase.from('app_settings').select('*').in('setting_key', keys)
+    if (capData) {
+      capData.forEach(s => {
+        if (s.setting_key === 'base_capital') setBaseCapital(Number(s.setting_value) || 0)
+        if (s.setting_key === 'initial_cash_riel') setInitCashRiel(Number(s.setting_value) || 0)
+        if (s.setting_key === 'initial_cash_usd') setInitCashUsd(Number(s.setting_value) || 0)
+        if (s.setting_key === 'initial_qr_riel') setInitQrRiel(Number(s.setting_value) || 0)
+        if (s.setting_key === 'initial_qr_usd') setInitQrUsd(Number(s.setting_value) || 0)
+        if (s.setting_key === 'personal_owe_riel') setPersOweRiel(Number(s.setting_value) || 0)
+        if (s.setting_key === 'family_owe_riel') setFamilyOweRiel(Number(s.setting_value) || 0)
+        if (s.setting_key === 'family_owe_usd') setFamilyOweUsd(Number(s.setting_value) || 0)
+      })
+    }
   }
 
   async function updateSetting(key: string, val: number) {
     await supabase.from('app_settings').upsert({ setting_key: key, setting_value: val }, { onConflict: 'setting_key' })
   }
 
-  // -------------------------
-  // TIME HELPERS
-  // -------------------------
   const now = new Date()
-
-  const isToday = (dateStr: string) => {
-    if (!dateStr) return false;
-    const d = new Date(dateStr);
-    return d.getDate() === now.getDate() && d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
-  }
-
-  const isMTD = (dateStr: string) => {
-    if (!dateStr) return false;
-    const d = new Date(dateStr);
-    return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
-  }
-
-  const isLastMonth = (dateStr: string) => {
-    if (!dateStr) return false;
-    const d = new Date(dateStr);
-    const lm = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-    return d.getMonth() === lm.getMonth() && d.getFullYear() === lm.getFullYear();
-  }
-
-  const getDayOfMonth = (dateStr: string) => {
-    if (!dateStr) return 1;
-    return new Date(dateStr).getDate();
-  }
-
+  const isToday = (dateStr: string) => { if (!dateStr) return false; const d = new Date(dateStr); return d.getDate() === now.getDate() && d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear(); }
+  const isMTD = (dateStr: string) => { if (!dateStr) return false; const d = new Date(dateStr); return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear(); }
+  const isLastMonth = (dateStr: string) => { if (!dateStr) return false; const d = new Date(dateStr); const lm = new Date(now.getFullYear(), now.getMonth() - 1, 1); return d.getMonth() === lm.getMonth() && d.getFullYear() === lm.getFullYear(); }
+  const getDayOfMonth = (dateStr: string) => { if (!dateStr) return 1; return new Date(dateStr).getDate(); }
+  
   const isAssetMatch = (dateStr: string, filter: string) => {
     if (filter === 'all') return true;
     if (!dateStr) return false;
-    const d = new Date(dateStr);
-    const today = new Date();
-    today.setHours(0,0,0,0);
-    d.setHours(0,0,0,0);
-    
+    const d = new Date(dateStr); const today = new Date();
+    today.setHours(0,0,0,0); d.setHours(0,0,0,0);
     if (filter === 'today') return d.getTime() === today.getTime();
-    if (filter === 'yesterday') {
-      const yest = new Date(today); yest.setDate(yest.getDate() - 1);
-      return d.getTime() === yest.getTime();
-    }
-    if (filter === 'week') {
-      const lastWeek = new Date(today); lastWeek.setDate(lastWeek.getDate() - 7);
-      return d >= lastWeek && d <= today;
-    }
+    if (filter === 'yesterday') { const yest = new Date(today); yest.setDate(yest.getDate() - 1); return d.getTime() === yest.getTime(); }
+    if (filter === 'week') { const lastWeek = new Date(today); lastWeek.setDate(lastWeek.getDate() - 7); return d >= lastWeek && d <= today; }
     if (filter === 'month') return d.getMonth() === today.getMonth() && d.getFullYear() === today.getFullYear();
     return true;
   }
 
-  function calculateDaysWorked(startDateStr: string, filter: string) {
-    if (!startDateStr) return 0;
-    const start = new Date(startDateStr); start.setHours(0,0,0,0);
-    const today = new Date(); today.setHours(0,0,0,0);
-    
-    if (filter === 'today' || filter === 'yesterday') return 1;
-    if (filter === 'week') return 7; 
-    
-    if (filter === 'month') {
-      const firstOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
-      const actualStart = start > firstOfMonth ? start : firstOfMonth;
-      const diffTime = today.getTime() - actualStart.getTime();
-      return Math.max(0, Math.floor(diffTime / (1000 * 60 * 60 * 24)) + 1);
-    }
-    
-    if (filter === 'all') {
-      const diffTime = today.getTime() - start.getTime();
-      return Math.max(0, Math.floor(diffTime / (1000 * 60 * 60 * 24)) + 1);
-    }
-    return 0;
-  }
-
-  // -------------------------
-  // CORE CALCULATION ENGINE
-  // -------------------------
   const activeSalesData = activeTab === 'wholesale' ? wholesaleSales : retailSales;
 
   function calculateMetrics(dataSet: any[], timeFilter: (d: string) => boolean) {
-    const filtered = dataSet.filter(s => timeFilter(s.created_at))
-    let totalSales = 0, pichSales = 0, jingSales = 0, bothSales = 0, momSales = 0
-    let totalProfit = 0, pichProfit = 0, jingProfit = 0, bothProfit = 0, momProfit = 0
-    
-    let cR = 0, cU = 0, qR = 0, qU = 0
+    const filtered = dataSet.filter(s => timeFilter(s.created_at));
+    let totalSales = 0, pichSales = 0, jingSales = 0, bothSales = 0, momSales = 0;
+    let totalProfit = 0, pichProfit = 0, jingProfit = 0, bothProfit = 0, momProfit = 0;
+    let cR = 0, cU = 0, qR = 0, qU = 0;
 
     filtered.forEach(sale => {
-      const qty = Number(sale.qty || 0);
-      const price = Number(sale.price_per_bag || 0);
-      const cogs = Number(sale.cogs_price || 0);
-      const revenue = qty * price;
-      const profit = (price - cogs) * qty;
-
-      const owner = (sale.owner || '').toLowerCase().trim();
-      const methodStr = (sale.payment_method || 'Cash ៛')
+      const qty = Number(sale.qty || 0); const price = Number(sale.price_per_bag || 0); const cogs = Number(sale.cogs_price || 0);
+      const revenue = qty * price; const profit = (price - cogs) * qty;
+      const owner = parseOwner(sale.owner); const methodStr = (sale.payment_method || 'Cash ៛');
 
       if (activeTab === 'retail') {
         if (methodStr.includes(':')) {
-           const parts = methodStr.split(',');
-           parts.forEach((p: string) => {
-             const [m, amtStr] = p.split(':');
-             const pAmt = Number(amtStr) || 0;
-             if (m.includes('Cash ៛')) cR += pAmt;
-             else if (m.includes('Cash $')) cU += pAmt; 
-             else if (m.includes('QR ៛') || m.includes('Mom QR ៛')) qR += pAmt;
-             else if (m.includes('QR $') || m.includes('Mom QR $')) qU += pAmt;
-             else cR += pAmt;
+           methodStr.split(',').forEach((p: string) => {
+             const [m, amtStr] = p.split(':'); const pAmt = Number(amtStr) || 0;
+             if (m.includes('Cash ៛')) cR += pAmt; else if (m.includes('Cash $')) cU += pAmt; else if (m.includes('QR ៛') || m.includes('Mom QR ៛')) qR += pAmt; else if (m.includes('QR $') || m.includes('Mom QR $')) qU += pAmt; else cR += pAmt;
            });
         } else {
-           if (methodStr.includes('Cash ៛')) cR += revenue;
-           else if (methodStr.includes('Cash $')) cU += (revenue / EXCHANGE_RATE);
-           else if (methodStr.includes('QR ៛') || methodStr.includes('Mom QR ៛')) qR += revenue;
-           else if (methodStr.includes('QR $') || methodStr.includes('Mom QR $')) qU += (revenue / EXCHANGE_RATE);
-           else cR += revenue; 
+           if (methodStr.includes('Cash ៛')) cR += revenue; else if (methodStr.includes('Cash $')) cU += (revenue / EXCHANGE_RATE); else if (methodStr.includes('QR ៛') || methodStr.includes('Mom QR ៛')) qR += revenue; else if (methodStr.includes('QR $') || methodStr.includes('Mom QR $')) qU += (revenue / EXCHANGE_RATE); else cR += revenue; 
         }
       }
 
-      const isMom = owner === 'mom' || owner === '' || owner === 'none' || owner === 'null';
-
-      if (isMom) { 
-        momSales += revenue; momProfit += profit 
-      } else {
+      if (owner === 'mom') { momSales += revenue; momProfit += profit } 
+      else {
         totalSales += revenue; totalProfit += profit;
-        if (owner === 'pich') { pichSales += revenue; pichProfit += profit }
-        else if (owner === 'jing') { jingSales += revenue; jingProfit += profit }
-        else if (owner === 'both') { bothSales += revenue; bothProfit += profit }
+        if (owner === 'pich') { pichSales += revenue; pichProfit += profit } else if (owner === 'jing') { jingSales += revenue; jingProfit += profit } else { bothSales += revenue; bothProfit += profit }
       }
     })
     return { totalSales, pichSales, jingSales, bothSales, momSales, totalProfit, pichProfit, jingProfit, bothProfit, momProfit, cR, cU, qR, qU }
@@ -239,307 +163,313 @@ export default function DashboardPage() {
 
   function calculateExpenses(expSet: any[], timeFilter: (d: string) => boolean, period: 'today' | 'mtd' | 'lastMonth') {
     const filtered = expSet.filter(e => timeFilter(e.created_at))
-    
     let bizCashRiel = 0, bizCashUsd = 0, bizQrRiel = 0, bizQrUsd = 0;
     let persCashRiel = 0, persCashUsd = 0, persQrRiel = 0, persQrUsd = 0;
 
     filtered.forEach(exp => {
-      const owner = (exp.spender || '').toLowerCase().trim();
-      const isMom = owner === 'mom' || owner === '' || owner === 'none' || owner === 'null';
-      if (isMom) return; 
-
-      let amtRiel = Number(exp.amount_riel || 0);
-      let amtUsd = Number(exp.amount || 0);
+      if (parseOwner(exp.spender) === 'mom') return; 
+      let amtRiel = Number(exp.amount_riel || 0); let amtUsd = Number(exp.amount || 0);
       if (amtRiel < 0) return;
 
       const methodStr = (exp.payment_method || '').toLowerCase();
       const type = (exp.description || '').toLowerCase()
+      // Advance payouts are recorded as STAFF in expenses, which we categorise as Business Cash Outflow
       const isBiz = type === 'business' || type === 'biz' || type === 'staff';
 
       const processSplit = (m: string, aRiel: number, aUsd: number) => {
         const isQr = m.includes('qr');
         if (isBiz) {
-          if (aUsd > 0) { isQr ? bizQrUsd += aUsd : bizCashUsd += aUsd; }
-          else          { isQr ? bizQrRiel += aRiel : bizCashRiel += aRiel; }
+          if (aUsd > 0) { isQr ? bizQrUsd += aUsd : bizCashUsd += aUsd; } else { isQr ? bizQrRiel += aRiel : bizCashRiel += aRiel; }
         } else {
-          if (aUsd > 0) { isQr ? persQrUsd += aUsd : persCashUsd += aUsd; }
-          else          { isQr ? persQrRiel += aRiel : persCashRiel += aRiel; }
+          if (aUsd > 0) { isQr ? persQrUsd += aUsd : persCashUsd += aUsd; } else { isQr ? persQrRiel += aRiel : persCashRiel += aRiel; }
         }
       };
 
       if (methodStr.includes(':')) {
-         const parts = methodStr.split(',');
-         parts.forEach((p: string) => {
+         methodStr.split(',').forEach((p: string) => {
            const [m, amtString] = p.split(':');
-           let pAmt = Number(amtString) || 0;
-           let pUsd = 0; let pRiel = pAmt;
-           if (m.includes('$')) {
-             pUsd = pAmt;
-             pRiel = pAmt * EXCHANGE_RATE;
-           }
+           let pAmt = Number(amtString) || 0; let pUsd = 0; let pRiel = pAmt;
+           if (m.includes('$')) { pUsd = pAmt; pRiel = pAmt * EXCHANGE_RATE; }
            processSplit(m.trim(), Math.abs(pRiel), Math.abs(pUsd));
          });
-      } else {
-         processSplit(methodStr, Math.abs(amtRiel), Math.abs(amtUsd));
-      }
+      } else { processSplit(methodStr, Math.abs(amtRiel), Math.abs(amtUsd)); }
     })
 
-    let payrollTotal = 0;
-    staffList.forEach(staff => {
-      const dailyRate = (Number(staff.salary) || 0) / 30;
-      if (period === 'today') payrollTotal += dailyRate;
-      else if (period === 'mtd') payrollTotal += (dailyRate * calculateDaysWorked(staff.start_date, 'month'));
-      else if (period === 'lastMonth') payrollTotal += (Number(staff.salary) || 0); 
-    });
-    bizCashRiel += Math.round(payrollTotal);
+    // Auto-salary deduction has been removed here.
 
     return { bizCashRiel, bizCashUsd, bizQrRiel, bizQrUsd, persCashRiel, persCashUsd, persQrRiel, persQrUsd }
   }
 
-  // --- ASSET ENGINE (STRICT MATHEMATICAL RULES) ---
+  // --- STRICT ALL-TIME ASSET ENGINE WITH LIABILITY SHIELDS ---
   function calculateAssets() {
     let liveCashRiel = initCashRiel, liveCashUsd = initCashUsd;
     let liveQrRiel = initQrRiel, liveQrUsd = initQrUsd;
+    
     let bizCredit = 0;
     let totalSupplierAP = 0;
-    let momCollected = 0; 
-    let momPaidOut = 0;   
+    let momTotalCogs = 0;
+    let momTotalPaid = 0;
+    let momCollected = 0;
+    let momPaidOut = 0;
+    let liabilityOffsetUsed = 0; 
     let riceStockValue = 0;
-    
-    // 🚀 ACCURATE BATCH-BY-BATCH RICE VALUATION
+    let staffDebtRiel = 0; // Asset (Money owed to Business)
+
+    // Calculate total money staff owes the business
+    staffList.forEach(staff => {
+      staffDebtRiel += Number(staff.total_debt) || 0;
+    });
+
     const productValuations: Record<number, { qty: number, totalValue: number, avgCost: number }> = {};
-
     inventoryList.forEach(p => {
-      let pStock = Number(p.stock || 0);
-      let pValue = 0;
-      let accountedStock = 0;
-
-      // Find active batches for this specific product
+      let pStock = Number(p.stock || 0); let pValue = 0; let accountedStock = 0;
       const activeBatches = priceHistory.filter(b => b.product_id === p.id && ((b.imported_qty || 0) - (b.sold_qty || 0)) > 0);
-
       activeBatches.forEach(b => {
         const rem = (b.imported_qty || 0) - (b.sold_qty || 0);
-        pValue += (rem * Number(b.cost_price || 0));
-        accountedStock += rem;
+        pValue += (rem * Number(b.cost_price || 0)); accountedStock += rem;
       });
 
-      // Handle edge cases where system stock doesn't perfectly match batch remaining
-      if (pStock > accountedStock) {
-        pValue += (pStock - accountedStock) * Number(p.cost_price || 0);
-      } else if (pStock < accountedStock && accountedStock > 0) {
-        const avgBatchCost = pValue / accountedStock;
-        pValue = pStock * avgBatchCost;
-      }
+      if (pStock > accountedStock) pValue += (pStock - accountedStock) * Number(p.cost_price || 0);
+      else if (pStock < accountedStock && accountedStock > 0) pValue = pStock * (pValue / accountedStock);
 
       riceStockValue += pValue;
-
-      productValuations[p.id] = {
-        qty: pStock,
-        totalValue: pValue,
-        avgCost: pStock > 0 ? pValue / pStock : Number(p.cost_price || 0)
-      };
+      productValuations[p.id] = { qty: pStock, totalValue: pValue, avgCost: pStock > 0 ? pValue / pStock : Number(p.cost_price || 0) };
     });
 
-    accountsPayable.forEach(ap => {
-      if (ap.status === 'Unpaid') totalSupplierAP += Number(ap.amount_riel || 0);
-    });
+    accountsPayable.forEach(ap => { if (ap.status === 'Unpaid') totalSupplierAP += Number(ap.amount_riel || 0); });
 
-    const fRetail = retailSales.filter(s => isAssetMatch(s.created_at, assetFilter));
-    const fWhole = invoiceSummaries.filter(s => isAssetMatch(s.created_at, assetFilter));
-    const fExp = expenses.filter(e => isAssetMatch(e.created_at, assetFilter));
+    const isBusinessMethod = (m: string) => {
+        const lowerM = m.toLowerCase();
+        if (lowerM.includes('mom qr')) return false; 
+        return true; 
+    };
 
+    // ONLY modifies the drawer if the money is actually business cash
     const addFunds = (amtRiel: number, method: string) => {
       const m = method || 'Cash ៛';
+      const lowerM = m.toLowerCase();
+      if (lowerM.includes('liability') || lowerM.includes('mom qr')) return; 
+      
       if (m.includes('Cash ៛')) liveCashRiel += amtRiel;
       else if (m.includes('Cash $')) liveCashUsd += (amtRiel / EXCHANGE_RATE);
-      else if (m.includes('QR ៛') || m.includes('Mom QR ៛')) liveQrRiel += amtRiel;
-      else if (m.includes('QR $') || m.includes('Mom QR $')) liveQrUsd += (amtRiel / EXCHANGE_RATE);
+      else if (m.includes('QR ៛')) liveQrRiel += amtRiel;
+      else if (m.includes('QR $')) liveQrUsd += (amtRiel / EXCHANGE_RATE);
       else liveCashRiel += amtRiel;
     }
 
     const subFunds = (amtRiel: number, method: string) => {
       const m = method || 'Cash ៛';
+      const lowerM = m.toLowerCase();
+      if (lowerM.includes('liability') || lowerM.includes('mom qr')) return; 
+
       if (m.includes('Cash ៛')) liveCashRiel -= amtRiel;
       else if (m.includes('Cash $')) liveCashUsd -= (amtRiel / EXCHANGE_RATE);
-      else if (m.includes('QR ៛') || m.includes('Mom QR ៛')) liveQrRiel -= amtRiel;
-      else if (m.includes('QR $') || m.includes('Mom QR $')) liveQrUsd -= (amtRiel / EXCHANGE_RATE);
+      else if (m.includes('QR ៛')) liveQrRiel -= amtRiel;
+      else if (m.includes('QR $')) liveQrUsd -= (amtRiel / EXCHANGE_RATE);
       else liveCashRiel -= amtRiel;
     }
 
-    let momTotalCogs = 0;
-    let momTotalPaid = 0;
-
+    // 1. RETAIL
     retailSales.forEach(r => {
-      const owner = (r.owner || '').toLowerCase().trim();
-      const isMom = owner === 'mom' || owner === '' || owner === 'none' || owner === 'null';
-      
-      if (isMom) {
-        let qty = Number(r.qty || 0);
-        let cogs = Number(r.cogs_price || 0);
-        let amt = qty * cogs;
-        let desc = r.custom_rice_type || r.rice_type || '';
-        
-        if (!desc.includes('សេវាដឹក') && !(desc.includes('បាវ') && cogs === 0)) {
-           if (desc.includes('ដូរ') || desc.includes('បញ្ចុះតម្លៃ') || desc.includes('កក់')) amt = -Math.abs(amt);
-           else amt = Math.abs(amt);
-           momTotalCogs += amt;
-        }
-      }
-    });
+      const owner = parseOwner(r.owner);
+      const methodStr = r.payment_method || 'Cash ៛';
 
-    wholesaleSales.forEach(w => {
-      const owner = (w.owner || '').toLowerCase().trim();
-      const isMom = owner === 'mom' || owner === '' || owner === 'none' || owner === 'null';
+      if (methodStr.includes(':')) {
+          methodStr.split(',').forEach((pStr: string) => {
+              const [mName, amtStr] = pStr.split(':');
+              let bAmt = Number(amtStr) || 0;
+              if (mName.includes('$')) bAmt *= EXCHANGE_RATE;
 
-      if (isMom) {
-        let qty = Number(w.qty || 0);
-        let cogs = Number(w.cogs_price || 0);
-        let amt = qty * cogs;
-        let desc = w.custom_rice_type || w.rice_type || '';
-        
-        if (!desc.includes('សេវាដឹក') && !(desc.includes('បាវ') && cogs === 0)) {
-           if (desc.includes('ដូរ') || desc.includes('បញ្ចុះតម្លៃ') || desc.includes('កក់')) amt = -Math.abs(amt);
-           else amt = Math.abs(amt);
-           momTotalCogs += amt;
-        }
-      }
-    });
-
-    cogsSettlements.forEach(c => {
-      const owner = (c.owner_name || '').toLowerCase().trim();
-      const isMom = owner === 'mom' || owner === '' || owner === 'none' || owner === 'null' || owner === 'retail';
-      if (isMom) {
-        momTotalPaid += Number(c.paid_amount || 0);
-      }
-    });
-
-    const momCogsAr = Math.max(0, momTotalCogs - momTotalPaid);
-
-    fRetail.forEach(r => { 
-      const owner = (r.owner || '').toLowerCase().trim();
-      const isMom = owner === 'mom' || owner === '' || owner === 'none' || owner === 'null';
-      const totalSale = Number(r.qty || 0) * Number(r.price_per_bag || 0);
-      
-      if (isMom) momCollected += totalSale;
-      addFunds(totalSale, r.payment_method);
-    });
-
-    fWhole.forEach(inv => {
-      const owner = (inv.owner || '').toLowerCase().trim();
-      const isMom = owner === 'mom' || owner === '' || owner === 'none' || owner === 'null';
-      const owed = Number(inv.balance_due || 0);
-      
-      if (!isMom) bizCredit += owed; 
-      
-      const totalSale = Number(inv.total_sales || 0);
-      const actuallyPaid = totalSale - owed;
-
-      if (actuallyPaid > 0) {
-        if (isMom) momCollected += actuallyPaid; 
-
-        const paymentMethod = inv.payment_method || 'Cash ៛';
-        if (paymentMethod.includes(':')) {
-          const parts = paymentMethod.split(',');
-          parts.forEach((p: string) => {
-            const [m, amtStr] = p.split(':');
-            let amtRiel = Number(amtStr) || 0;
-            if (m.includes('$')) amtRiel *= EXCHANGE_RATE;
-            addFunds(amtRiel, m.trim());
+              if (isBusinessMethod(mName.trim())) {
+                  addFunds(bAmt, mName.trim());
+                  if (owner === 'mom') momCollected += bAmt; 
+              }
           });
-        } else {
-          addFunds(actuallyPaid, paymentMethod);
+      } else {
+          if (isBusinessMethod(methodStr)) {
+              addFunds(Number(r.qty || 0) * Number(r.price_per_bag || 0), methodStr);
+              if (owner === 'mom') momCollected += Number(r.qty || 0) * Number(r.price_per_bag || 0);
+          }
+      }
+
+      if (owner === 'mom') {
+        let cogsAmt = Number(r.qty || 0) * Number(r.cogs_price || 0);
+        let desc = r.custom_rice_type || r.rice_type || '';
+        if (!desc.includes('សេវាដឹក') && !(desc.includes('បាវ') && cogsAmt === 0)) {
+           if (desc.includes('ដូរ') || desc.includes('បញ្ចុះតម្លៃ') || desc.includes('កក់')) cogsAmt = -Math.abs(cogsAmt);
+           else cogsAmt = Math.abs(cogsAmt);
+           momTotalCogs += cogsAmt;
         }
       }
     });
 
-    let bizExpRiel = 0, bizExpUsd = 0;
-    let persExpRiel = 0, persExpUsd = 0;
-    let riceExpRiel = 0, riceExpUsd = 0;
+    // 2. WHOLESALE
+    wholesaleSales.forEach(w => {
+      const owner = parseOwner(w.owner);
+      if (owner === 'mom') {
+        let cogsAmt = Number(w.qty || 0) * Number(w.cogs_price || 0);
+        let desc = w.custom_rice_type || w.rice_type || '';
+        if (!desc.includes('សេវាដឹក') && !(desc.includes('បាវ') && cogsAmt === 0)) {
+           if (desc.includes('ដូរ') || desc.includes('បញ្ចុះតម្លៃ') || desc.includes('កក់')) cogsAmt = -Math.abs(cogsAmt);
+           else cogsAmt = Math.abs(cogsAmt);
+           momTotalCogs += cogsAmt;
+        }
+      }
+    });
 
-    fExp.forEach(e => { 
-      const owner = (e.spender || '').toLowerCase().trim();
-      const isMom = owner === 'mom' || owner === '' || owner === 'none' || owner === 'null';
-      if (isMom) return; 
+    // 3. INVOICE PAYMENTS
+    invoicePayments.forEach(p => {
+       const amt = Number(p.amount_paid || 0);
+       const methodStr = p.payment_method || 'Cash ៛';
+       
+       if (methodStr.includes(':')) {
+           methodStr.split(',').forEach((pStr: string) => {
+              const [mName, amtStr] = pStr.split(':');
+              let bAmt = Number(amtStr) || 0;
+              if (mName.includes('$')) bAmt *= EXCHANGE_RATE;
+              
+              if (isBusinessMethod(mName.trim())) {
+                  addFunds(bAmt, mName.trim());
+                  const parentInv = invoiceSummaries.find(i => i.invoice_id === p.invoice_id);
+                  if (parentInv && parseOwner(parentInv.owner) === 'mom') momCollected += bAmt;
+              }
+           });
+       } else {
+           if (isBusinessMethod(methodStr)) {
+               addFunds(amt, methodStr);
+               const parentInv = invoiceSummaries.find(i => i.invoice_id === p.invoice_id);
+               if (parentInv && parseOwner(parentInv.owner) === 'mom') momCollected += amt;
+           }
+       }
+    });
+
+    // 4. INVOICE SUMMARIES
+    invoiceSummaries.forEach(inv => {
+       const owner = parseOwner(inv.owner);
+       if (owner !== 'mom') bizCredit += Number(inv.balance_due || 0);
+    });
+
+    // 5. COGS SETTLEMENTS (Syncs correctly with COGS Page Liability Engine)
+    cogsSettlements.forEach(c => {
+       const owner = parseOwner(c.owner_name);
+       const methodStr = (c.payment_method || '').toLowerCase();
+       const totalAmt = Number(c.paid_amount || 0);
+
+       if (owner === 'mom') momTotalPaid += totalAmt;
+
+       if (methodStr.includes(':')) {
+          methodStr.split(',').forEach((p: string) => {
+             const [mName, amtStr] = p.split(':');
+             const lowerM = mName.trim().toLowerCase();
+             let bAmt = Number(amtStr) || 0;
+             if (mName.includes('$')) bAmt *= EXCHANGE_RATE;
+
+             if (lowerM.includes('liability')) {
+                 if (owner === 'mom') liabilityOffsetUsed += bAmt;
+             } else {
+                 subFunds(bAmt, mName.trim()); // Safely subtracts actual business cash
+             }
+          });
+       } else {
+           if (methodStr.includes('liability')) {
+               if (owner === 'mom') liabilityOffsetUsed += totalAmt;
+           } else {
+               subFunds(totalAmt, c.payment_method);
+           }
+       }
+    });
+
+    // 6. EXPENSES
+    expenses.forEach(e => {
+      const owner = parseOwner(e.spender);
+      if (owner === 'mom') return;
 
       let amtRiel = Number(e.amount_riel || 0);
       const paymentMethod = e.payment_method || 'Cash ៛';
 
-      if (amtRiel < 0) { 
-        const remarks = (e.remarks || '').toLowerCase();
-        if (remarks.includes('payment from') && !remarks.includes('cogs')) return;
-        if (remarks.includes('account settled') && !remarks.includes('cogs')) return;
-        
-        if (paymentMethod.includes(':')) {
-          const parts = paymentMethod.split(',');
-          parts.forEach((p: string) => {
-            const [m, amtStr] = p.split(':');
-            let bucketAmt = Number(amtStr) || 0;
-            if (m.includes('$')) bucketAmt *= EXCHANGE_RATE;
-            addFunds(Math.abs(bucketAmt), m.trim());
-          });
-        } else {
-          addFunds(Math.abs(amtRiel), paymentMethod);
-        }
+      if (amtRiel < 0) {
+         const remarks = (e.remarks || '').toLowerCase();
+         if (remarks.includes('payment from') && !remarks.includes('cogs')) return;
+         if (remarks.includes('account settled') && !remarks.includes('cogs')) return;
 
-      } else { 
-        const remarks = (e.remarks || '').toLowerCase();
-        const desc = (e.description || '').toUpperCase();
-        
-        if (remarks.includes("settled mom's account liability")) {
-          momPaidOut += Math.abs(amtRiel); 
-        }
+         if (paymentMethod.includes(':')) {
+            paymentMethod.split(',').forEach((p: string) => {
+              const [m, amtStr] = p.split(':');
+              let bucketAmt = Number(amtStr) || 0;
+              if (m.includes('$')) bucketAmt *= EXCHANGE_RATE;
+              addFunds(Math.abs(bucketAmt), m.trim());
+            });
+         } else addFunds(Math.abs(amtRiel), paymentMethod);
+      } else {
+         const remarks = (e.remarks || '').toLowerCase();
+         if (remarks.includes("settled mom's account liability")) {
+             momPaidOut += Math.abs(amtRiel) + (Math.abs(Number(e.amount_usd || 0)) * EXCHANGE_RATE);
+         }
 
-        let isRice = false, isBiz = false;
-        if (remarks.includes('stock import') || remarks.includes('rice') || desc.includes('RICE') || desc.includes('COGS')) {
-           isRice = true;
-        } else if (desc === 'BUSINESS' || desc === 'BIZ' || desc === 'STAFF') {
-           isBiz = true;
-        }
-
-        const distributeToBuckets = (m: string, partRiel: number) => {
-           let r = 0, u = 0;
-           if (m.includes('$')) u = partRiel / EXCHANGE_RATE;
-           else r = partRiel;
-
-           if (isRice) { riceExpRiel += r; riceExpUsd += u; }
-           else if (isBiz) { bizExpRiel += r; bizExpUsd += u; }
-           else { persExpRiel += r; persExpUsd += u; }
-        };
-
-        if (paymentMethod.includes(':')) {
-          const parts = paymentMethod.split(',');
-          parts.forEach((p: string) => {
-            const [m, amtStr] = p.split(':');
-            let bucketAmt = Number(amtStr) || 0;
-            if (m.includes('$')) bucketAmt *= EXCHANGE_RATE;
-            
-            subFunds(Math.abs(bucketAmt), m.trim());
-            distributeToBuckets(m.trim(), Math.abs(bucketAmt));
-          });
-        } else {
-          subFunds(Math.abs(amtRiel), paymentMethod);
-          distributeToBuckets(paymentMethod, Math.abs(amtRiel));
-        }
+         if (paymentMethod.includes(':')) {
+            paymentMethod.split(',').forEach((p: string) => {
+              const [m, amtStr] = p.split(':');
+              let bucketAmt = Number(amtStr) || 0;
+              if (m.includes('$')) bucketAmt *= EXCHANGE_RATE;
+              subFunds(Math.abs(bucketAmt), m.trim());
+            });
+         } else subFunds(Math.abs(amtRiel), paymentMethod);
       }
     });
 
-    let payroll = 0;
-    staffList.forEach(staff => {
-      const daily = (Number(staff.salary) || 0) / 30;
-      payroll += (daily * calculateDaysWorked(staff.start_date, assetFilter));
-    });
-    liveCashRiel -= payroll;
-    bizExpRiel += payroll; 
+    // Auto-salary deduction has been removed here. Staff debt (advances) already deducts cash when logged as an expense.
 
-    const liveMomLiability = Math.max(0, persOweRiel + momCollected - momPaidOut); 
+    // 7. TIME-FILTERED EXPENSES 
+    let bizExpRiel = 0, bizExpUsd = 0;
+    let persExpRiel = 0, persExpUsd = 0;
+    let riceExpRiel = 0, riceExpUsd = 0;
+
+    expenses.filter(e => isAssetMatch(e.created_at, assetFilter)).forEach(e => {
+        const owner = parseOwner(e.spender);
+        if (owner === 'mom') return;
+
+        let amtRiel = Number(e.amount_riel || 0);
+        if (amtRiel < 0) return;
+        
+        const methodStr = (e.payment_method || '').toLowerCase();
+        const remarks = (e.remarks || '').toLowerCase();
+        const desc = (e.description || '').toUpperCase();
+        
+        let isRice = false, isBiz = false;
+        if (remarks.includes('stock import') || remarks.includes('rice') || desc.includes('RICE') || desc.includes('COGS')) isRice = true;
+        else if (desc === 'BUSINESS' || desc === 'BIZ' || desc === 'STAFF') isBiz = true;
+
+        const distributeToBuckets = (m: string, partRiel: number) => {
+           let r = 0, u = 0;
+           if (m.includes('$')) u = partRiel / EXCHANGE_RATE; else r = partRiel;
+           if (isRice) { riceExpRiel += r; riceExpUsd += u; } else if (isBiz) { bizExpRiel += r; bizExpUsd += u; } else { persExpRiel += r; persExpUsd += u; }
+        };
+
+        if (methodStr.includes(':')) {
+           methodStr.split(',').forEach((p: string) => {
+              const [m, amtStr] = p.split(':');
+              let bucketAmt = Number(amtStr) || 0;
+              if (m.includes('$')) bucketAmt *= EXCHANGE_RATE;
+              distributeToBuckets(m.trim(), Math.abs(bucketAmt));
+           });
+        } else distributeToBuckets(methodStr, Math.abs(amtRiel));
+    });
+
+    // --- FINAL MATH ---
+    const momCogsAr = Math.max(0, momTotalCogs - momTotalPaid);
+    
+    // The exact synced calculation
+    const liveMomLiability = Math.max(0, persOweRiel + momCollected - momPaidOut - liabilityOffsetUsed);
+    
     const familyArRielEq = familyOweRiel + (familyOweUsd * EXCHANGE_RATE);
-    
+
     const liquidAssets = baseCapital + (liveCashRiel + (liveCashUsd * EXCHANGE_RATE)) + (liveQrRiel + (liveQrUsd * EXCHANGE_RATE));
-    const netWorth = liquidAssets + bizCredit + familyArRielEq + momCogsAr - totalSupplierAP - liveMomLiability;
-    
-    return { 
+    // Added staffDebtRiel as an Asset
+    const netWorth = liquidAssets + bizCredit + familyArRielEq + momCogsAr + staffDebtRiel - totalSupplierAP - liveMomLiability;
+
+    return {
       liveCashRiel, liveCashUsd, liveQrRiel, liveQrUsd,
-      bizCredit, familyArRielEq, momCogsAr, liveMomLiability, totalSupplierAP,
+      bizCredit, familyArRielEq, momCogsAr, liveMomLiability, totalSupplierAP, staffDebtRiel,
       netWorth, riceStockValue, productValuations,
       bizExpRiel, bizExpUsd, persExpRiel, persExpUsd, riceExpRiel, riceExpUsd
     };
@@ -558,7 +488,7 @@ export default function DashboardPage() {
   const generateDailyArray = (dataSet: any[], isTargetMonth: (d: string) => boolean) => {
     const dailySales = new Array(31).fill(0)
     const dailyProfit = new Array(31).fill(0)
-    dataSet.filter(s => isTargetMonth(s.created_at) && (s.owner || '').toLowerCase().trim() !== 'mom').forEach(sale => {
+    dataSet.filter(s => isTargetMonth(s.created_at) && parseOwner(s.owner) !== 'mom').forEach(sale => {
       const dayIdx = getDayOfMonth(sale.created_at) - 1
       const qty = Number(sale.qty || 0);
       const price = Number(sale.price_per_bag || 0);
@@ -577,8 +507,10 @@ export default function DashboardPage() {
   return (
     <div className="main-wrapper">
       
-      <div className="header-container" style={{ flexWrap: 'wrap', gap: '16px' }}>
-        <h1 className="page-title" style={{ fontWeight: 'bold', color: '#1e293b' }}>📊 Business Dashboard</h1>
+      <div className="header-container">
+        <div className="header-left">
+          <h1 className="page-title">📊 Business Dashboard</h1>
+        </div>
       </div>
 
       <div style={{ display: 'flex', gap: '8px', marginBottom: '24px', background: '#ffffff', padding: '6px', borderRadius: '8px', border: '1px solid #e2e8f0', width: 'fit-content', flexWrap: 'wrap' }}>
@@ -602,42 +534,53 @@ export default function DashboardPage() {
               ))}
             </div>
 
-            <div style={{ background: '#fff', padding: '24px', borderRadius: '12px', border: '1px solid #e2e8f0', marginBottom: '24px', boxShadow: '0 2px 4px rgba(0,0,0,0.02)' }}>
-              <h3 style={{ margin: '0 0 16px 0', fontSize: '14px', color: '#64748b', textTransform: 'uppercase', fontWeight: 'bold' }}>⚙️ Manual Starting Balances</h3>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '16px' }}>
-                <div>
-                  <label style={{ display: 'block', fontSize: '12px', color: '#475569', marginBottom: '6px', fontWeight: 'bold' }}>Base Capital (៛)</label>
-                  <input type="text" inputMode="decimal" className="no-spinners" value={baseCapital === 0 ? '' : baseCapital} onChange={(e) => setBaseCapital(Number(e.target.value))} onBlur={(e) => updateSetting('base_capital', Number(e.target.value))} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', outline: 'none', color: '#334155', boxSizing: 'border-box', fontSize: '14px', fontWeight: 'normal' }} />
+            <div style={{ marginBottom: '24px', background: '#fff', border: '1px solid #e2e8f0', borderRadius: '12px', overflow: 'hidden', boxShadow: '0 2px 4px rgba(0,0,0,0.02)' }}>
+              <button 
+                onClick={() => setShowStartingBalance(!showStartingBalance)}
+                style={{ width: '100%', padding: '16px 24px', background: '#f8fafc', border: 'none', textAlign: 'left', fontWeight: 'bold', color: '#475569', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '14px' }}
+              >
+                <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span>⚙️</span> Manual Starting Balances
+                </span>
+                <span style={{ fontSize: '12px', color: '#94a3b8' }}>{showStartingBalance ? '▲ CLOSE' : '▼ OPEN TO EDIT'}</span>
+              </button>
+              
+              {showStartingBalance && (
+                <div style={{ padding: '24px', borderTop: '1px solid #e2e8f0', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '16px', background: '#ffffff' }}>
+                  <div>
+                    <label style={{ display: 'block', fontSize: '12px', color: '#475569', marginBottom: '6px', fontWeight: 'bold' }}>Base Capital (៛)</label>
+                    <CurrencyInput value={baseCapital} onChange={(v: number) => setBaseCapital(v)} onBlur={() => updateSetting('base_capital', baseCapital)} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', outline: 'none', color: '#334155', boxSizing: 'border-box', fontSize: '14px' }} />
+                  </div>
+                  <div>
+                    <label style={{ display: 'block', fontSize: '12px', color: '#475569', marginBottom: '6px', fontWeight: 'bold' }}>Initial Cash (៛)</label>
+                    <CurrencyInput value={initCashRiel} onChange={(v: number) => setInitCashRiel(v)} onBlur={() => updateSetting('initial_cash_riel', initCashRiel)} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', outline: 'none', color: '#334155', boxSizing: 'border-box', fontSize: '14px' }} />
+                  </div>
+                  <div>
+                    <label style={{ display: 'block', fontSize: '12px', color: '#475569', marginBottom: '6px', fontWeight: 'bold' }}>Initial Cash ($)</label>
+                    <CurrencyInput value={initCashUsd} onChange={(v: number) => setInitCashUsd(v)} onBlur={() => updateSetting('initial_cash_usd', initCashUsd)} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', outline: 'none', color: '#334155', boxSizing: 'border-box', fontSize: '14px' }} />
+                  </div>
+                  <div>
+                    <label style={{ display: 'block', fontSize: '12px', color: '#475569', marginBottom: '6px', fontWeight: 'bold' }}>Initial QR (៛)</label>
+                    <CurrencyInput value={initQrRiel} onChange={(v: number) => setInitQrRiel(v)} onBlur={() => updateSetting('initial_qr_riel', initQrRiel)} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', outline: 'none', color: '#334155', boxSizing: 'border-box', fontSize: '14px' }} />
+                  </div>
+                  <div>
+                    <label style={{ display: 'block', fontSize: '12px', color: '#475569', marginBottom: '6px', fontWeight: 'bold' }}>Initial QR ($)</label>
+                    <CurrencyInput value={initQrUsd} onChange={(v: number) => setInitQrUsd(v)} onBlur={() => updateSetting('initial_qr_usd', initQrUsd)} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', outline: 'none', color: '#334155', boxSizing: 'border-box', fontSize: '14px' }} />
+                  </div>
+                  <div>
+                    <label style={{ display: 'block', fontSize: '12px', color: '#475569', marginBottom: '6px', fontWeight: 'bold' }}>Family Owes Me (៛)</label>
+                    <CurrencyInput value={familyOweRiel} onChange={(v: number) => setFamilyOweRiel(v)} onBlur={() => updateSetting('family_owe_riel', familyOweRiel)} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', outline: 'none', color: '#334155', boxSizing: 'border-box', fontSize: '14px' }} />
+                  </div>
+                  <div>
+                    <label style={{ display: 'block', fontSize: '12px', color: '#475569', marginBottom: '6px', fontWeight: 'bold' }}>Family Owes Me ($)</label>
+                    <CurrencyInput value={familyOweUsd} onChange={(v: number) => setFamilyOweUsd(v)} onBlur={() => updateSetting('family_owe_usd', familyOweUsd)} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', outline: 'none', color: '#334155', boxSizing: 'border-box', fontSize: '14px' }} />
+                  </div>
+                  <div>
+                    <label style={{ display: 'block', fontSize: '12px', color: '#475569', marginBottom: '6px', fontWeight: 'bold' }}>Mom Starting Owe (៛)</label>
+                    <CurrencyInput value={persOweRiel} onChange={(v: number) => setPersOweRiel(v)} onBlur={() => updateSetting('personal_owe_riel', persOweRiel)} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', outline: 'none', color: '#334155', boxSizing: 'border-box', fontSize: '14px' }} />
+                  </div>
                 </div>
-                <div>
-                  <label style={{ display: 'block', fontSize: '12px', color: '#475569', marginBottom: '6px', fontWeight: 'bold' }}>Initial Cash (៛)</label>
-                  <input type="text" inputMode="decimal" className="no-spinners" value={initCashRiel === 0 ? '' : initCashRiel} onChange={(e) => setInitCashRiel(Number(e.target.value))} onBlur={(e) => updateSetting('initial_cash_riel', Number(e.target.value))} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', outline: 'none', color: '#334155', boxSizing: 'border-box', fontSize: '14px', fontWeight: 'normal' }} />
-                </div>
-                <div>
-                  <label style={{ display: 'block', fontSize: '12px', color: '#475569', marginBottom: '6px', fontWeight: 'bold' }}>Initial Cash ($)</label>
-                  <input type="text" inputMode="decimal" className="no-spinners" value={initCashUsd === 0 ? '' : initCashUsd} onChange={(e) => setInitCashUsd(Number(e.target.value))} onBlur={(e) => updateSetting('initial_cash_usd', Number(e.target.value))} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', outline: 'none', color: '#334155', boxSizing: 'border-box', fontSize: '14px', fontWeight: 'normal' }} />
-                </div>
-                <div>
-                  <label style={{ display: 'block', fontSize: '12px', color: '#475569', marginBottom: '6px', fontWeight: 'bold' }}>Initial QR (៛)</label>
-                  <input type="text" inputMode="decimal" className="no-spinners" value={initQrRiel === 0 ? '' : initQrRiel} onChange={(e) => setInitQrRiel(Number(e.target.value))} onBlur={(e) => updateSetting('initial_qr_riel', Number(e.target.value))} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', outline: 'none', color: '#334155', boxSizing: 'border-box', fontSize: '14px', fontWeight: 'normal' }} />
-                </div>
-                <div>
-                  <label style={{ display: 'block', fontSize: '12px', color: '#475569', marginBottom: '6px', fontWeight: 'bold' }}>Initial QR ($)</label>
-                  <input type="text" inputMode="decimal" className="no-spinners" value={initQrUsd === 0 ? '' : initQrUsd} onChange={(e) => setInitQrUsd(Number(e.target.value))} onBlur={(e) => updateSetting('initial_qr_usd', Number(e.target.value))} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', outline: 'none', color: '#334155', boxSizing: 'border-box', fontSize: '14px', fontWeight: 'normal' }} />
-                </div>
-                <div>
-                  <label style={{ display: 'block', fontSize: '12px', color: '#475569', marginBottom: '6px', fontWeight: 'bold' }}>Family Owes Me (៛)</label>
-                  <input type="text" inputMode="decimal" className="no-spinners" value={familyOweRiel === 0 ? '' : familyOweRiel} onChange={(e) => setFamilyOweRiel(Number(e.target.value))} onBlur={(e) => updateSetting('family_owe_riel', Number(e.target.value))} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', outline: 'none', color: '#334155', boxSizing: 'border-box', fontSize: '14px', fontWeight: 'normal' }} />
-                </div>
-                <div>
-                  <label style={{ display: 'block', fontSize: '12px', color: '#475569', marginBottom: '6px', fontWeight: 'bold' }}>Family Owes Me ($)</label>
-                  <input type="text" inputMode="decimal" className="no-spinners" value={familyOweUsd === 0 ? '' : familyOweUsd} onChange={(e) => setFamilyOweUsd(Number(e.target.value))} onBlur={(e) => updateSetting('family_owe_usd', Number(e.target.value))} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', outline: 'none', color: '#334155', boxSizing: 'border-box', fontSize: '14px', fontWeight: 'normal' }} />
-                </div>
-                <div>
-                  <label style={{ display: 'block', fontSize: '12px', color: '#475569', marginBottom: '6px', fontWeight: 'bold' }}>Mom Starting Owe (៛)</label>
-                  <input type="text" inputMode="decimal" className="no-spinners" value={persOweRiel === 0 ? '' : persOweRiel} onChange={(e) => setPersOweRiel(Number(e.target.value))} onBlur={(e) => updateSetting('personal_owe_riel', Number(e.target.value))} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', outline: 'none', color: '#334155', boxSizing: 'border-box', fontSize: '14px', fontWeight: 'normal' }} />
-                </div>
-              </div>
+              )}
             </div>
 
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '16px', marginBottom: '16px' }}>
@@ -680,16 +623,16 @@ export default function DashboardPage() {
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '16px', marginBottom: '32px' }}>
               <div style={{ background: '#fff', padding: '24px', borderRadius: '16px', border: '1px solid #e2e8f0', boxShadow: '0 4px 6px rgba(0,0,0,0.02)' }}>
                 <div style={{ fontSize: '13px', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 'bold' }}>📒 Accounts Receivable (AR)</div>
-                <div style={{ fontSize: '24px', margin: '8px 0', color: '#f59e0b', fontWeight: 'bold' }}>{formatRiel(assetData.bizCredit + assetData.familyArRielEq + assetData.momCogsAr)}</div>
+                <div style={{ fontSize: '24px', margin: '8px 0', color: '#f59e0b', fontWeight: 'bold' }}>{formatRiel(assetData.bizCredit + assetData.familyArRielEq + assetData.momCogsAr + assetData.staffDebtRiel)}</div>
                 
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px', borderTop: '1px dashed #e2e8f0', paddingTop: '12px' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(100px, 1fr))', gap: '8px', borderTop: '1px dashed #e2e8f0', paddingTop: '12px' }}>
                   <div>
                     <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 'bold', textTransform: 'uppercase' }}>Biz AR</span>
                     <div style={{ fontSize: '14px', color: '#334155', fontWeight: 'bold' }}>{formatRiel(assetData.bizCredit)}</div>
                     <div style={{ fontSize: '12px', color: '#64748b' }}>{formatUSD(assetData.bizCredit / EXCHANGE_RATE)}</div>
                   </div>
                   <div>
-                    <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 'bold', textTransform: 'uppercase' }}>Personal AR</span>
+                    <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 'bold', textTransform: 'uppercase' }}>Pers. AR</span>
                     <div style={{ fontSize: '14px', color: '#334155', fontWeight: 'bold' }}>{formatRiel(assetData.familyArRielEq)}</div>
                     <div style={{ fontSize: '12px', color: '#64748b' }}>{formatUSD(assetData.familyArRielEq / EXCHANGE_RATE)}</div>
                   </div>
@@ -697,6 +640,11 @@ export default function DashboardPage() {
                     <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 'bold', textTransform: 'uppercase' }}>Mom AR (COGS)</span>
                     <div style={{ fontSize: '14px', color: '#334155', fontWeight: 'bold' }}>{formatRiel(assetData.momCogsAr)}</div>
                     <div style={{ fontSize: '12px', color: '#64748b' }}>{formatUSD(assetData.momCogsAr / EXCHANGE_RATE)}</div>
+                  </div>
+                  <div>
+                    <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 'bold', textTransform: 'uppercase' }}>Staff Debt</span>
+                    <div style={{ fontSize: '14px', color: '#334155', fontWeight: 'bold' }}>{formatRiel(assetData.staffDebtRiel)}</div>
+                    <div style={{ fontSize: '12px', color: '#64748b' }}>{formatUSD(assetData.staffDebtRiel / EXCHANGE_RATE)}</div>
                   </div>
                 </div>
               </div>
@@ -745,7 +693,6 @@ export default function DashboardPage() {
               </div>
             </div>
 
-            {/* 🚀 FIXED INVENTORY VALUATION RENDERING */}
             <h3 style={{ margin: '0 0 16px 0', fontSize: '14px', color: '#1e293b', textTransform: 'uppercase' }}>🌾 Detailed Inventory Valuation</h3>
             <div style={{ background: '#fff', borderRadius: '12px', border: '1px solid #e2e8f0', overflow: 'hidden', boxShadow: '0 2px 4px rgba(0,0,0,0.02)', marginBottom: '32px' }}>
               <div style={{ overflowX: 'auto' }}>
@@ -781,7 +728,6 @@ export default function DashboardPage() {
                 </table>
               </div>
             </div>
-            {/* END FIX */}
 
           </div>
         )}
@@ -843,14 +789,42 @@ export default function DashboardPage() {
         }
         body { font-variant-numeric: tabular-nums lining-nums; }
         .main-wrapper { padding: 24px 24px 24px 75px; background: #f8fafc; min-height: 100vh; font-family: Arial, sans-serif; box-sizing: border-box; color: #333; }
-        .header-container { margin-bottom: 24px; display: flex; justify-content: space-between; align-items: center; }
+        
+        .header-container { 
+          margin-bottom: 24px; 
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          flex-wrap: wrap; 
+          gap: 12px;
+        }
+        .header-left {
+          display: flex;
+          flex-direction: row;
+          align-items: center;
+          gap: 16px;
+        }
+        .page-title { 
+          font-size: 24px !important; 
+          color: #4a3b1b !important; 
+          margin: 0; 
+          font-weight: bold;
+          letter-spacing: -0.5px;
+          min-width: 0;
+          white-space: normal;
+          word-break: break-word;
+          line-height: 1.2;
+        }
+
         .section-divider { font-size: 15px; color: #475569; margin-bottom: 16px; border-bottom: 1px solid #e2e8f0; padding-bottom: 6px; }
         .fade-in { animation: fadeIn 0.3s ease-in-out; }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
         input[type="text"].no-spinners::-webkit-inner-spin-button, input[type="text"].no-spinners::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+        
         @media (max-width: 1023px) { 
-          .main-wrapper { padding: max(80px, env(safe-area-inset-top, 80px)) 16px 16px 16px !important; }
-          .header-container { flex-direction: column; align-items: flex-start; gap: 16px; }
+          .main-wrapper { padding: 90px 16px 140px 16px !important; min-height: auto; }
+          .header-container { flex-direction: column !important; align-items: flex-start !important; gap: 16px !important; margin-top: 0 !important; margin-bottom: 24px !important; }
+          .header-left { flex-direction: column !important; align-items: flex-start !important; text-align: left !important; gap: 6px !important; }
         }
       `}</style>
     </div>

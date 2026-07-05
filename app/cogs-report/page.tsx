@@ -10,6 +10,14 @@ const formatUSD = (amount: number) => `$${new Intl.NumberFormat('en-US', { minim
 
 type PaymentRow = { id: number, method: string, amount: number | '' };
 
+const parseOwner = (ownerStr: any) => {
+  const o = (ownerStr || '').toLowerCase().trim();
+  if (o === 'mom') return 'mom';
+  if (o === 'pich') return 'pich';
+  if (o === 'jing') return 'jing';
+  return 'both'; 
+};
+
 // ==========================================
 // ROBUST LIVE COMMA FORMATTER 
 // ==========================================
@@ -69,7 +77,7 @@ export default function CogsReportPage() {
   // App Settings (Liability to Mom)
   const [persOweRiel, setPersOweRiel] = useState<number>(0)
   const [persOweUsd, setPersOweUsd] = useState<number>(0)
-  const [liveMomLiability, setLiveMomLiability] = useState<number>(0) // 🚀 LIVE SYNC FIX
+  const [liveMomLiability, setLiveMomLiability] = useState<number>(0) 
 
   // Navigation States
   const [activeMainTab, setActiveMainTab] = useState<'report' | 'pending' | 'history'>('report')
@@ -106,50 +114,98 @@ export default function CogsReportPage() {
 
   useEffect(() => {
     fetchReportData();
+    const channel = supabase.channel('cogs-channel').on('postgres_changes', { event: '*', schema: 'public' }, () => fetchReportData()).subscribe();
+    return () => { supabase.removeChannel(channel); };
   }, [])
 
   async function fetchReportData() {
     setLoading(true)
     
-    // Fetch all for accurate lifetime balances
-    const { data: sData } = await supabase.from('sales').select('*')
-    const { data: rData } = await supabase.from('retail_sales').select('*')
-    const { data: cData } = await supabase.from('cogs_settlements').select('*')
-    const { data: aData } = await supabase.from('app_settings').select('*').in('setting_key', ['personal_owe_riel', 'personal_owe_usd'])
-    const { data: invData } = await supabase.from('invoice_summaries').select('*')
-    const { data: expData } = await supabase.from('expenses').select('*')
+    const [{data: sData}, {data: rData}, {data: cData}, {data: aData}, {data: invData}, {data: expData}, {data: payData}] = await Promise.all([
+        supabase.from('sales').select('*'),
+        supabase.from('retail_sales').select('*'),
+        supabase.from('cogs_settlements').select('*'),
+        supabase.from('app_settings').select('*').in('setting_key', ['personal_owe_riel', 'personal_owe_usd']),
+        supabase.from('invoice_summaries').select('*'),
+        supabase.from('expenses').select('*'),
+        supabase.from('invoice_payments').select('*')
+    ]);
 
     setSales(sData || [])
     setRetailSales(rData || [])
     setCogsSettlements(cData || [])
 
-    // 🚀 FIXED: LIVE DASHBOARD LIABILITY SYNC ENGINE
+    const isBusinessMethod = (m: string) => {
+        const lowerM = m.toLowerCase();
+        if (lowerM.includes('mom qr')) return false; 
+        return true; 
+    };
+
     let momCollectedRiel = 0;
-    let momPaidOutRiel = 0;
-
+    
+    // 1. Retail Sales collected by Business
     (rData || []).forEach((r: any) => {
-      const owner = (r.owner || '').toLowerCase().trim();
-      const isMom = owner === 'mom' || owner === '' || owner === 'none' || owner === 'null';
-      if (isMom) {
-        momCollectedRiel += Number(r.qty || 0) * Number(r.price_per_bag || 0);
+      const owner = parseOwner(r.owner);
+      const methodStr = r.payment_method || 'Cash ៛';
+      const totalSale = Number(r.qty || 0) * Number(r.price_per_bag || 0);
+
+      if (owner === 'mom') {
+          if (methodStr.includes(':')) {
+              methodStr.split(',').forEach((pStr: string) => {
+                  const [mName, amtStr] = pStr.split(':');
+                  let bAmt = Number(amtStr) || 0;
+                  if (mName.includes('$')) bAmt *= EXCHANGE_RATE;
+                  if (isBusinessMethod(mName.trim())) momCollectedRiel += bAmt; 
+              });
+          } else {
+              if (isBusinessMethod(methodStr)) momCollectedRiel += totalSale;
+          }
       }
     });
 
-    (invData || []).forEach((inv: any) => {
-      const owner = (inv.owner || '').toLowerCase().trim();
-      const isMom = owner === 'mom' || owner === '' || owner === 'none' || owner === 'null';
-      if (isMom) {
-        const owed = Number(inv.balance_due || 0);
-        const totalSale = Number(inv.total_sales || 0);
-        const actuallyPaid = totalSale - owed;
-        if (actuallyPaid > 0) momCollectedRiel += actuallyPaid;
-      }
+    // 2. Wholesale Invoices paid to Business
+    (payData || []).forEach((p: any) => {
+       const amt = Number(p.amount_paid || 0);
+       const methodStr = p.payment_method || 'Cash ៛';
+       const parentInv = (invData || []).find((i: any) => i.invoice_id === p.invoice_id);
+       
+       if (parentInv && parseOwner(parentInv.owner) === 'mom') {
+           if (methodStr.includes(':')) {
+               methodStr.split(',').forEach((pStr: string) => {
+                  const [mName, amtStr] = pStr.split(':');
+                  let bAmt = Number(amtStr) || 0;
+                  if (mName.includes('$')) bAmt *= EXCHANGE_RATE;
+                  if (isBusinessMethod(mName.trim())) momCollectedRiel += bAmt;
+               });
+           } else {
+               if (isBusinessMethod(methodStr)) momCollectedRiel += amt;
+           }
+       }
     });
 
+    let momPaidOutRiel = 0;
     (expData || []).forEach((e: any) => {
       const amtRiel = Number(e.amount_riel || 0);
-      if (amtRiel > 0 && (e.remarks || '').toLowerCase().includes("settled mom's account liability")) {
-         momPaidOutRiel += Math.abs(amtRiel);
+      const amtUsd = Number(e.amount_usd || 0);
+      if ((e.remarks || '').toLowerCase().includes("settled mom's account liability")) {
+         momPaidOutRiel += Math.abs(amtRiel) + (Math.abs(amtUsd) * EXCHANGE_RATE);
+      }
+    });
+
+    let momCogsSettledRiel = 0;
+    (cData || []).forEach((c: any) => {
+      if (parseOwner(c.owner_name) === 'mom') {
+          const method = (c.payment_method || '').toLowerCase();
+          if (method.includes(':')) {
+              method.split(',').forEach((pStr: string) => {
+                 const [mName, amtStr] = pStr.split(':');
+                 let bAmt = Number(amtStr) || 0;
+                 if (mName.includes('$')) bAmt *= EXCHANGE_RATE;
+                 if (!mName.toLowerCase().includes('mom qr')) momCogsSettledRiel += bAmt;
+              });
+          } else {
+              if (!method.includes('mom qr')) momCogsSettledRiel += Number(c.paid_amount || 0);
+          }
       }
     });
 
@@ -161,21 +217,14 @@ export default function CogsReportPage() {
         if (s.setting_key === 'personal_owe_usd') baseOweUsd = Number(s.setting_value) || 0;
       });
     }
-    
-    setPersOweRiel(baseOweRiel);
-    setPersOweUsd(baseOweUsd);
 
-    const liveLiabilityRiel = Math.max(0, baseOweRiel + (baseOweUsd * EXCHANGE_RATE) + momCollectedRiel - momPaidOutRiel);
+    // PERFECT SYNC WITH DASHBOARD LIABILITY
+    const liveLiabilityRiel = Math.max(0, baseOweRiel + (baseOweUsd * EXCHANGE_RATE) + momCollectedRiel - momPaidOutRiel - momCogsSettledRiel);
     setLiveMomLiability(liveLiabilityRiel);
     
     setLoading(false)
   }
 
-  async function updateSetting(key: string, val: number) {
-    await supabase.from('app_settings').upsert({ setting_key: key, setting_value: val }, { onConflict: 'setting_key' })
-  }
-
-  // --- IMAGE EXPORT LOGIC ---
   const handleDownload = async () => {
     if (!reportRef.current) return;
     setIsCapturing(true);
@@ -220,7 +269,6 @@ export default function CogsReportPage() {
 
   const handleNativePrint = () => { window.print(); }
 
-  // --- TIME HELPERS ---
   const now = new Date()
   const isWithinTimeFilter = (dateStr: string, filter: string) => {
     if (filter === 'all') return true;
@@ -237,23 +285,19 @@ export default function CogsReportPage() {
     return true;
   }
 
-  // ==========================================
-  // DATA PROCESSORS
-  // ==========================================
-
-  // 1. Report Processor (A4 View)
   const reportSales = [...sales, ...retailSales].filter(s => {
     const d = s.created_at.split('T')[0];
     return d >= fromDate && d <= toDate;
   }).filter(s => {
-    const owner = (s.owner || '').toLowerCase().trim();
-    if (activeOwnerTab === 'mom') return owner === 'mom' || owner === '' || owner === 'none' || owner === 'null';
-    else return owner === 'pich' || owner === 'jing' || owner === 'both';
+    const owner = parseOwner(s.owner);
+    if (activeOwnerTab === 'mom') return owner === 'mom';
+    else return owner !== 'mom';
   });
 
   const groupedBySeller: Record<string, any[]> = {};
   reportSales.forEach(s => {
-    const seller = s.owner || 'Mom';
+    let seller = parseOwner(s.owner);
+    seller = seller.charAt(0).toUpperCase() + seller.slice(1);
     if (!groupedBySeller[seller]) groupedBySeller[seller] = [];
     groupedBySeller[seller].push(s);
   });
@@ -319,21 +363,21 @@ export default function CogsReportPage() {
     return { rows: finalRows, sellerGrandTotal };
   };
 
-  // 2. Daily Ledger Processor (Pending & History)
   const dailyMap: Record<string, any> = {};
   
   [...sales, ...retailSales].forEach(s => {
-    const owner = (s.owner || 'Mom').trim();
+    const owner = parseOwner(s.owner);
     const isMomTab = activeOwnerTab === 'mom';
-    const isMomOwner = owner.toLowerCase() === 'mom' || owner === '';
+    const isMomOwner = owner === 'mom';
     
     if (isMomTab !== isMomOwner) return;
 
     const date = s.created_at.split('T')[0];
-    const key = `${date}_${owner}`;
+    const displayOwner = owner.charAt(0).toUpperCase() + owner.slice(1);
+    const key = `${date}_${displayOwner}`;
 
     if (!dailyMap[key]) {
-      dailyMap[key] = { key, date, owner, totalCogs: 0, totalPaid: 0, methods: new Set<string>() };
+      dailyMap[key] = { key, date, owner: displayOwner, totalCogs: 0, totalPaid: 0, methods: new Set<string>() };
     }
 
     let qty = Number(s.qty || 0);
@@ -350,7 +394,9 @@ export default function CogsReportPage() {
   });
 
   cogsSettlements.forEach(c => {
-    const key = `${c.settlement_date}_${c.owner_name}`;
+    const owner = parseOwner(c.owner_name);
+    const displayOwner = owner.charAt(0).toUpperCase() + owner.slice(1);
+    const key = `${c.settlement_date}_${displayOwner}`;
     if (dailyMap[key]) {
       dailyMap[key].totalPaid += Number(c.paid_amount || 0);
       if (c.payment_method) dailyMap[key].methods.add(c.payment_method);
@@ -363,7 +409,6 @@ export default function CogsReportPage() {
   const pendingDays = filteredDays.filter(d => d.totalCogs > d.totalPaid + 0.1);
   const historyDays = filteredDays.filter(d => d.totalPaid > 0);
 
-  // Selection Logic
   const handleSelectDay = (key: string) => {
     if (selectedDays.includes(key)) setSelectedDays(selectedDays.filter(k => k !== key));
     else setSelectedDays([...selectedDays, key]);
@@ -373,17 +418,15 @@ export default function CogsReportPage() {
     else setSelectedDays(pendingDays.map(d => d.key));
   }
 
-  // ==========================================
-  // PAYMENT PROCESSING ENGINE
-  // ==========================================
+  // =========================================================
+  // CLEAN ARCHITECTURE: PAYMENT PROCESSOR
+  // =========================================================
   async function processPayments(rows: PaymentRow[], targetDays: any[], isBulk: boolean) {
     if (isProcessing) return;
 
     let totalAppliedRiel = 0;
     let liabilityUsedRiel = 0;
     let liabilityUsedUsd = 0;
-    let cashToLogUsd = 0;
-    let cashToLogRiel = 0;
     let methodStrings: string[] = [];
 
     const totalDue = targetDays.reduce((sum, d) => sum + (d.totalCogs - d.totalPaid), 0);
@@ -400,10 +443,8 @@ export default function CogsReportPage() {
          liabilityUsedUsd += amt;
          totalAppliedRiel += (amt * EXCHANGE_RATE);
        } else if (r.method.includes('$')) {
-         cashToLogUsd += amt;
          totalAppliedRiel += (amt * EXCHANGE_RATE);
        } else {
-         cashToLogRiel += amt;
          totalAppliedRiel += amt;
        }
     }
@@ -411,33 +452,17 @@ export default function CogsReportPage() {
     if (totalAppliedRiel <= 0) return;
     if (totalAppliedRiel > totalDue + 0.1) return alert("Cannot pay more than the total COGS balance.");
     
-    // 🚀 FIXED: PROPER LIABILITY BOUNDARY CHECK AGAINST LIVE DATA
+    // 🔥 STRICT LIABILITY GUARDRAIL
     const liabilityUsedRielEq = liabilityUsedRiel + (liabilityUsedUsd * EXCHANGE_RATE);
-    if (liabilityUsedRielEq > liveMomLiability + 0.1) return alert("Not enough Mom Liability available!");
+    if (liabilityUsedRielEq > liveMomLiability + 0.1) {
+        alert(`Not enough Mom Liability available! You only have ${formatRiel(liveMomLiability)}`);
+        setIsProcessing(false);
+        return; 
+    }
 
     setIsProcessing(true);
 
     try {
-      // 1. Update Liability (if used)
-      if (liabilityUsedRiel > 0 || liabilityUsedUsd > 0) {
-        await updateSetting('personal_owe_riel', persOweRiel - liabilityUsedRiel);
-        await updateSetting('personal_owe_usd', persOweUsd - liabilityUsedUsd);
-      }
-
-      // 2. Log Cash Income (Negative Expense adds to Dashboard Cash)
-      if (cashToLogRiel > 0 || cashToLogUsd > 0) {
-        await supabase.from('expenses').insert([{
-           expense_date: new Date().toISOString().split('T')[0],
-           spender: 'Both',
-           payment_method: methodStrings.join(', '),
-           remarks: isBulk ? `Bulk COGS Settlement` : `Inline COGS Settlement`,
-           amount: cashToLogUsd > 0 ? -Math.abs(cashToLogUsd) : 0,
-           amount_riel: cashToLogRiel > 0 ? -Math.abs(cashToLogRiel) : 0,
-           description: 'BUSINESS'
-        }]);
-      }
-
-      // 3. Distribute across Target Days (Oldest to Newest)
       let remainingToDistribute = totalAppliedRiel;
       const settlesToInsert = [];
       const daysToSettle = [...targetDays].sort((a,b) => a.date.localeCompare(b.date));
@@ -460,9 +485,10 @@ export default function CogsReportPage() {
          remainingToDistribute -= apply;
       }
 
-      await supabase.from('cogs_settlements').insert(settlesToInsert);
+      // 🔥 STRICT ISOLATION: WE NEVER TOUCH THE 'expenses' TABLE HERE EVER AGAIN.
+      const { error } = await supabase.from('cogs_settlements').insert(settlesToInsert);
+      if (error) throw error;
       
-      // Cleanup UI
       if (isBulk) {
         setBulkModalOpen(false);
         setSelectedDays([]);
@@ -480,12 +506,10 @@ export default function CogsReportPage() {
     }
   }
 
-  // --- Inline Payment Wrapper ---
   async function handleProcessCreditPayment(day: any, paymentRows: PaymentRow[]) {
     await processPayments(paymentRows, [day], false);
   }
 
-  // --- BULK MODAL LIVE MATH ---
   const bulkTotalDue = selectedDays.reduce((sum, k) => sum + (dailyMap[k].totalCogs - dailyMap[k].totalPaid), 0);
   const liveBulkReceived = bulkPaymentRows.reduce((sum, row) => {
     const amt = Number(row.amount) || 0;
@@ -496,7 +520,6 @@ export default function CogsReportPage() {
   }, 0);
   const liveBulkRemaining = bulkTotalDue - liveBulkReceived;
 
-  // --- INLINE HISTORY MANAGERS ---
   const getInlinePaymentState = (key: string, owed: number) => {
     return inlinePayments[key] || [{ id: 1, method: 'Cash ៛', amount: owed }];
   }
@@ -525,7 +548,6 @@ export default function CogsReportPage() {
   return (
     <div className="main-wrapper">
       
-      {/* HEADER & GLOBAL CONTROLS */}
       <div className="header-container" style={{ paddingRight: '20px' }}>
         <h1 className="page-title">🌾 COGS Accounting</h1>
         
@@ -549,7 +571,6 @@ export default function CogsReportPage() {
         </div>
       </div>
 
-      {/* MAIN NAVIGATION TABS */}
       <div style={{ display: 'flex', gap: '10px', marginBottom: '20px', background: '#fff', padding: '10px', borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: '0 2px 4px rgba(0,0,0,0.02)', flexWrap: 'wrap' }}>
         <button 
           onClick={() => setActiveMainTab('report')} 
@@ -571,7 +592,6 @@ export default function CogsReportPage() {
         </button>
       </div>
 
-      {/* FILTER TOOLBAR */}
       <div style={{ background: '#fff', padding: '16px 20px', borderRadius: '12px', border: '1px solid #e2e8f0', marginBottom: '24px', display: 'flex', gap: '15px', alignItems: 'center', flexWrap: 'wrap', boxShadow: '0 4px 6px rgba(0,0,0,0.02)' }}>
         
         {activeMainTab === 'report' ? (
@@ -609,9 +629,6 @@ export default function CogsReportPage() {
         </div>
       </div>
 
-      {/* ==================================================================================== */}
-      {/* TAB 1: COGS REPORT (Original A4 View) */}
-      {/* ==================================================================================== */}
       {activeMainTab === 'report' && (
         <div className="a4-paper-container" ref={reportRef}>
           <img className="center-logo" src="https://i.imgur.com/s0hg3MQ.png" alt="Logo" crossOrigin="anonymous" />
@@ -707,9 +724,6 @@ export default function CogsReportPage() {
         </div>
       )}
 
-      {/* ==================================================================================== */}
-      {/* TAB 2: PENDING SETTLEMENTS */}
-      {/* ==================================================================================== */}
       {activeMainTab === 'pending' && (
         <div style={{ background: '#fff', borderRadius: '12px', border: '1px solid #e2e8f0', overflow: 'hidden', boxShadow: '0 4px 6px rgba(0,0,0,0.02)', paddingBottom: '80px' }}>
           <div style={{ overflowX: 'auto' }}>
@@ -752,7 +766,6 @@ export default function CogsReportPage() {
             </table>
           </div>
 
-          {/* FLOATING ACTION BAR FOR BULK SETTLE */}
           {selectedDays.length > 0 && (
             <div style={{ position: 'fixed', bottom: '30px', left: '50%', transform: 'translateX(-50%)', background: '#1e293b', padding: '16px 32px', borderRadius: '50px', boxShadow: '0 10px 25px rgba(0,0,0,0.3)', display: 'flex', gap: '24px', alignItems: 'center', zIndex: 100 }}>
               <div style={{ color: '#fff', fontSize: '15px' }}>
@@ -775,9 +788,6 @@ export default function CogsReportPage() {
         </div>
       )}
 
-      {/* ==================================================================================== */}
-      {/* TAB 3: SETTLEMENT HISTORY (Inline Settling) */}
-      {/* ==================================================================================== */}
       {activeMainTab === 'history' && (
         <div style={{ background: '#fff', borderRadius: '12px', border: '1px solid #e2e8f0', overflow: 'hidden', boxShadow: '0 4px 6px rgba(0,0,0,0.02)' }}>
           <div style={{ overflowX: 'auto' }}>
@@ -876,9 +886,6 @@ export default function CogsReportPage() {
         </div>
       )}
 
-      {/* ==============================================================================================
-          UNIFIED BULK SETTLEMENT MODAL (With Liability Feature)
-          ============================================================================================== */}
       {bulkModalOpen && (
         <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 10000, display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '20px', boxSizing: 'border-box' }} onMouseDown={() => setBulkModalOpen(false)}>
           <div style={{ backgroundColor: '#ffffff', width: '100%', maxWidth: '450px', borderRadius: '16px', padding: '24px', boxShadow: '0 10px 25px rgba(0,0,0,0.15)', maxHeight: '90vh', overflowY: 'auto' }} onMouseDown={e => e.stopPropagation()}>
@@ -896,7 +903,6 @@ export default function CogsReportPage() {
               <div style={{ fontSize: '28px', color: '#e11d48', fontWeight: 'bold' }}>{formatRiel(bulkTotalDue)}</div>
             </div>
 
-            {/* Split Payment Rows */}
             <div style={{ marginBottom: '24px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
                 <label style={{ fontSize: '13px', color: '#475569', fontWeight: 'bold' }}>Payment Method(s)</label>
@@ -950,7 +956,6 @@ export default function CogsReportPage() {
               )}
             </div>
 
-            {/* Live Calculation Footer */}
             {bulkPaymentRows.some(r => Number(r.amount) > 0) && (
               <div style={{ marginBottom: '24px', paddingTop: '16px', borderTop: '1px dashed #cbd5e1', fontSize: '14px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
@@ -1013,7 +1018,6 @@ export default function CogsReportPage() {
           -webkit-appearance: none; margin: 0;
         }
 
-        /* --- ACTION BUTTONS --- */
         .action-btn {
           padding: 10px 16px;
           border-radius: 8px;
@@ -1028,11 +1032,10 @@ export default function CogsReportPage() {
         .share-btn { background: #3b82f6; }
         .print-btn { background: #10b981; }
 
-        /* --- A4 PAPER STYLING --- */
         .a4-paper-container {
           width: 100%;
-          max-width: 794px; /* A4 Width at 96 PPI */
-          min-height: 1123px; /* A4 Height */
+          max-width: 794px; 
+          min-height: 1123px; 
           margin: 0 auto;
           background: #ffffff;
           padding: 40px;
@@ -1091,12 +1094,15 @@ export default function CogsReportPage() {
 
         @media (max-width: 1023px) { 
           .main-wrapper { 
-            padding: max(80px, env(safe-area-inset-top, 80px)) 16px 16px 16px !important; 
+            padding: 90px 16px 140px 16px !important; 
+            min-height: auto;
           }
           .header-container {
-            flex-direction: column;
-            align-items: flex-start;
-            gap: 16px;
+            flex-direction: column !important;
+            align-items: flex-start !important;
+            gap: 16px !important;
+            margin-top: 0 !important;
+            margin-bottom: 24px !important;
           }
           .a4-paper-container {
             padding: 16px;

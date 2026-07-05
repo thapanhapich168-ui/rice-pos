@@ -118,12 +118,15 @@ export default function ExpenseDashboard() {
 
     try {
       for (const row of activePayments) {
-        let amountRiel = Number(row.amount);
-        let amountUsd = 0;
+        let rawAmount = Number(row.amount);
+        let saveRiel = 0;
+        let saveUsd = 0;
 
+        // FIXED: Log specifically to the bucket the user selected
         if (row.method.includes('$')) {
-          amountUsd = amountRiel;
-          amountRiel = amountRiel * EXCHANGE_RATE;
+          saveUsd = rawAmount;
+        } else {
+          saveRiel = rawAmount;
         }
 
         const { error } = await supabase.from('expenses').insert([{
@@ -131,8 +134,8 @@ export default function ExpenseDashboard() {
           spender: spender,
           payment_method: row.method,
           remarks: activePayments.length > 1 ? `${remarks} (Split Payment)` : remarks,                     
-          amount: amountUsd,               
-          amount_riel: amountRiel,         
+          amount_usd: saveUsd,               
+          amount_riel: saveRiel,         
           description: activeTab.toUpperCase(), 
         }]);
 
@@ -180,11 +183,14 @@ export default function ExpenseDashboard() {
 
   // --- Action: Add Debt to Staff ---
   async function handleAddDebt(staff: any) {
-    const amountToAdd = Number(debtAdditions[staff.id])
-    if (!amountToAdd || amountToAdd === 0) return
+    const rawAmount = Number(debtAdditions[staff.id])
+    if (!rawAmount || rawAmount === 0) return
 
     const method = debtMethods[staff.id] || 'Cash ៛'
-    const newTotalDebt = Number(staff.total_debt || 0) + amountToAdd
+    
+    // We convert USD advances to Riel purely for the Staff's Total Debt display
+    const amountInRielEquiv = method.includes('$') ? rawAmount * EXCHANGE_RATE : rawAmount;
+    const newTotalDebt = Number(staff.total_debt || 0) + amountInRielEquiv;
 
     // Optimistic UI update
     setStaffList(prev => prev.map(s => s.id === staff.id ? { ...s, total_debt: newTotalDebt } : s));
@@ -194,23 +200,25 @@ export default function ExpenseDashboard() {
     const { error: staffErr } = await supabase.from('staff').update({ total_debt: newTotalDebt }).eq('id', staff.id)
     
     // 2. Log History
-    await supabase.from('staff_debt_history').insert([{ staff_id: staff.id, amount: amountToAdd, payment_method: method }])
+    await supabase.from('staff_debt_history').insert([{ staff_id: staff.id, amount: rawAmount, payment_method: method }])
 
     // 3. Log as an Expense (since the business is giving them an advance)
-    let amountRiel = amountToAdd;
-    let amountUsd = 0;
+    let saveRiel = 0;
+    let saveUsd = 0;
+    
     if (method.includes('$')) {
-      amountUsd = amountToAdd;
-      amountRiel = amountToAdd * EXCHANGE_RATE;
+      saveUsd = rawAmount;
+    } else {
+      saveRiel = rawAmount;
     }
 
     await supabase.from('expenses').insert([{
       expense_date: new Date().toISOString().split('T')[0],
-      spender: 'Business',
+      spender: 'Both', 
       payment_method: method,
       remarks: `Staff Advance: ${staff.name}`,
-      amount: amountUsd,
-      amount_riel: amountRiel,
+      amount_usd: saveUsd,
+      amount_riel: saveRiel,
       description: 'STAFF'
     }])
 
@@ -407,7 +415,7 @@ export default function ExpenseDashboard() {
 
               {paymentRows.some(r => Number(r.amount) > 0) && (
                 <div style={{ marginTop: '12px', paddingTop: '12px', borderTop: '1px dashed #cbd5e1', display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-                  <span style={{ color: '#475569', fontSize: '13px', fontWeight: 'bold' }}>Total Expense:</span>
+                  <span style={{ color: '#475569', fontSize: '13px', fontWeight: 'bold' }}>Total Expense (៛):</span>
                   <span style={{ color: '#ef4444', fontSize: '16px', fontWeight: 'normal' }}>{formatRiel(totalExpenseRiel)}</span>
                 </div>
               )}
@@ -540,10 +548,10 @@ export default function ExpenseDashboard() {
                                 <option value="QR $">QR $</option>
                               </select>
                               <CurrencyInput 
-                                placeholder="0 ៛" 
+                                placeholder="0" 
                                 value={debtAdditions[staff.id] || ''} 
                                 onChange={(v:any) => setDebtAdditions({ ...debtAdditions, [staff.id]: v })} 
-                                onKeyDown={(e:any) => e.key === 'Enter' && handleAddDebt(staff)}
+                                onEnter={() => handleAddDebt(staff)}
                                 style={{ backgroundColor: '#ffffff', borderColor: '#cbd5e1', borderWidth: '1px', borderStyle: 'solid', borderRadius: '6px', color: '#334155', outline: 'none', boxSizing: 'border-box', fontWeight: 'normal', flex: 1, padding: '6px', fontSize: '13px' }} 
                               />
                               <button 
@@ -609,7 +617,7 @@ export default function ExpenseDashboard() {
                     <tr style={{ borderBottom: '1px solid #cbd5e1' }}>
                       <th style={{ padding: '8px 0', textAlign: 'left', color: '#475569', fontWeight: 'bold', fontSize: '12px' }}>Date</th>
                       <th style={{ padding: '8px 0', textAlign: 'left', color: '#475569', fontWeight: 'bold', fontSize: '12px' }}>Payment Method</th>
-                      <th style={{ padding: '8px 0', textAlign: 'right', color: '#475569', fontWeight: 'bold', fontSize: '12px' }}>Amount (៛)</th>
+                      <th style={{ padding: '8px 0', textAlign: 'right', color: '#475569', fontWeight: 'bold', fontSize: '12px' }}>Amount</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -617,7 +625,9 @@ export default function ExpenseDashboard() {
                       <tr key={record.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
                         <td style={{ padding: '12px 0', color: '#334155', fontWeight: 'normal' }}>{new Date(record.created_at).toLocaleDateString()}</td>
                         <td style={{ padding: '12px 0', color: '#475569', fontWeight: 'normal' }}>{record.payment_method}</td>
-                        <td style={{ padding: '12px 0', textAlign: 'right', color: '#ef4444', fontWeight: 'normal' }}>{formatRiel(record.amount)}</td>
+                        <td style={{ padding: '12px 0', textAlign: 'right', color: '#ef4444', fontWeight: 'normal' }}>
+                          {record.payment_method.includes('$') ? formatUSD(record.amount) : formatRiel(record.amount)}
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -634,7 +644,6 @@ export default function ExpenseDashboard() {
 
       {/* --- GLOBAL CSS --- */}
       <style jsx global>{`
-        /* Force inherit font for all inputs and enable tabular numbers for exact matching height */
         input, select, button, textarea {
           font-family: inherit;
           font-variant-numeric: tabular-nums lining-nums;
@@ -717,7 +726,9 @@ export default function ExpenseDashboard() {
 
         @media (max-width: 1023px) { 
           .main-wrapper { 
-            padding: max(80px, env(safe-area-inset-top, 80px)) 16px 24px 16px !important; 
+            /* GUARANTEED HARDWARE CLEARANCE: Leaves a clean gap under the 55px hamburger menu on all devices */
+            padding: 90px 16px 24px 16px !important; 
+            min-height: auto;
           }
           .header-container {
             flex-direction: column !important;
@@ -738,7 +749,7 @@ export default function ExpenseDashboard() {
             font-size: 14px !important;
           }
           .mobile-select-menu, .mobile-input-field {
-            font-size: 16px !important; /* Disables Mobile Safari Auto-Zoom physics shifts */
+            font-size: 16px !important;
           }
         }
       `}</style>

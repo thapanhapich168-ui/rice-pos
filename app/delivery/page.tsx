@@ -138,22 +138,28 @@ export default function DeliveryPage() {
     if (isProcessing) return;
 
     let totalRielEq = 0;
-    let totalUsdFace = 0;
-    let totalRielFace = 0;
     let methodStrings: string[] = [];
+    const paymentRecordsToInsert: any[] = [];
+    const validSpender = ['Pich', 'Jing'].includes(d.owner) ? d.owner : 'Both';
 
     for (const r of rows) {
       const amt = Number(r.amount) || 0;
       if (amt <= 0) continue;
       
-      if (r.method.includes('$')) {
-        totalRielEq += (amt * EXCHANGE_RATE);
-        totalUsdFace += amt;
-      } else {
-        totalRielEq += amt;
-        totalRielFace += amt;
-      }
+      let convertedAmt = amt;
+      if (r.method.includes('$')) convertedAmt = amt * EXCHANGE_RATE;
+      
+      totalRielEq += convertedAmt;
       methodStrings.push(`${r.method}: ${amt}`);
+
+      // Prepare ledger entry
+      paymentRecordsToInsert.push({
+        invoice_id: d.invoice_id,
+        amount_paid: convertedAmt,
+        payment_method: r.method,
+        recorded_by: validSpender,
+        remarks: `Inline Delivery Settlement`
+      });
     }
 
     if (totalRielEq <= 0) return;
@@ -162,20 +168,11 @@ export default function DeliveryPage() {
     setIsProcessing(true);
 
     try {
-      const validSpender = ['Pich', 'Jing'].includes(d.owner) ? d.owner : 'Both';
+      // 1. Log to the Accounts Receivable Ledger (invoice_payments)
+      const { error: ledgerError } = await supabase.from('invoice_payments').insert(paymentRecordsToInsert);
+      if (ledgerError) throw new Error("Failed to log payment ledger: " + ledgerError.message);
 
-      const { error: expError } = await supabase.from('expenses').insert([{
-        expense_date: new Date().toISOString().split('T')[0],
-        spender: validSpender,
-        payment_method: methodStrings.join(', '),
-        remarks: `Payment from ${d.customer_name} (Inv: ${d.invoice_id})`,
-        amount: totalUsdFace > 0 ? -Math.abs(totalUsdFace) : 0,
-        amount_riel: totalRielFace > 0 ? -Math.abs(totalRielFace) : 0,
-        description: 'BUSINESS'
-      }]);
-
-      if (expError) throw new Error("Failed to log income: " + expError.message);
-
+      // 2. Update the Invoice Summary
       const newBalance = d.balance_due - totalRielEq;
       let newPaymentMethodStr = d.payment_method;
       
@@ -185,6 +182,7 @@ export default function DeliveryPage() {
 
       const isDone = newBalance <= 0;
 
+      // 3. Update Local State
       setDeliveries(prev => prev.map(inv => inv.invoice_id === d.invoice_id ? {
         ...inv,
         balance_due: newBalance,
@@ -195,6 +193,7 @@ export default function DeliveryPage() {
       
       setInlinePayments(prev => { const n = {...prev}; delete n[d.invoice_id]; return n; });
 
+      // 4. Save Invoice updates to Database
       await supabase.from('invoice_summaries')
         .update({
             balance_due: newBalance,
@@ -244,21 +243,16 @@ export default function DeliveryPage() {
     if (isProcessing) return;
 
     let totalRielEq = 0;
-    let totalUsdFace = 0;
-    let totalRielFace = 0;
     let methodStrings: string[] = [];
 
     for (const r of rows) {
       const amt = Number(r.amount) || 0;
       if (amt <= 0) continue;
       
-      if (r.method.includes('$')) {
-        totalRielEq += (amt * EXCHANGE_RATE);
-        totalUsdFace += amt;
-      } else {
-        totalRielEq += amt;
-        totalRielFace += amt;
-      }
+      let convertedAmt = amt;
+      if (r.method.includes('$')) convertedAmt = amt * EXCHANGE_RATE;
+      
+      totalRielEq += convertedAmt;
       methodStrings.push(`${r.method}: ${amt}`);
     }
 
@@ -269,22 +263,11 @@ export default function DeliveryPage() {
 
     try {
       const validSpender = ['Pich', 'Jing'].includes(debtor.owner) ? debtor.owner : 'Both';
-
-      const { error: expError } = await supabase.from('expenses').insert([{
-        expense_date: new Date().toISOString().split('T')[0],
-        spender: validSpender,
-        payment_method: methodStrings.join(', '),
-        remarks: `Payment from ${debtor.name} (${debtor.invoices.length} Invoices)`,
-        amount: totalUsdFace > 0 ? -Math.abs(totalUsdFace) : 0,
-        amount_riel: totalRielFace > 0 ? -Math.abs(totalRielFace) : 0,
-        description: 'BUSINESS'
-      }]);
-
-      if (expError) throw new Error("Failed to log income: " + expError.message);
-
       let remainingToDistribute = totalRielEq;
-      // 🚀 FIX: Explicitly typed to any[] to satisfy Vercel's strict compiler
+      
       const updatedInvoices: any[] = [];
+      const paymentRecordsToInsert: any[] = [];
+      const combinedMethodStr = methodStrings.join(', ');
       
       for (const inv of debtor.invoices) {
         if (remainingToDistribute <= 0) break;
@@ -293,8 +276,17 @@ export default function DeliveryPage() {
         let amountToApply = Math.min(invBalance, remainingToDistribute);
         let newBalance = invBalance - amountToApply;
 
+        // Log the ledger entry for this specific invoice
+        paymentRecordsToInsert.push({
+          invoice_id: inv.invoice_id,
+          amount_paid: amountToApply,
+          payment_method: combinedMethodStr,
+          recorded_by: validSpender,
+          remarks: `Bulk Credit Settlement`
+        });
+
         let newPaymentMethodStr = inv.payment_method;
-        const appliedStr = methodStrings.length === 1 ? `${rows[0].method}: ${amountToApply}` : `Split Payment applied: ${amountToApply}`;
+        const appliedStr = `Paid: ${formatRiel(amountToApply)} via [${combinedMethodStr}]`;
 
         if (inv.payment_method && inv.payment_method !== '-' && inv.payment_method !== 'Unpaid / Debt') {
            newPaymentMethodStr = `${inv.payment_method}, ${appliedStr}`;
@@ -313,14 +305,21 @@ export default function DeliveryPage() {
         remainingToDistribute -= amountToApply;
       }
 
+      // 1. Save all ledger records to invoice_payments
+      if (paymentRecordsToInsert.length > 0) {
+        const { error: ledgerError } = await supabase.from('invoice_payments').insert(paymentRecordsToInsert);
+        if (ledgerError) throw new Error("Failed to log payment ledger: " + ledgerError.message);
+      }
+
+      // 2. Update local state
       const uniqueKey = `${debtor.owner}_${debtor.name}`;
-      
       setDeliveries(prev => prev.map(d => {
         const matched = updatedInvoices.find(u => u.invoice_id === d.invoice_id);
         return matched ? { ...d, ...matched } : d;
       }));
       setCreditPayments(prev => { const n = {...prev}; delete n[uniqueKey]; return n; });
 
+      // 3. Save all updated balances to invoice_summaries
       for (const u of updatedInvoices) {
         await supabase.from('invoice_summaries').update({
           balance_due: u.balance_due,
