@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabaseClient'
 
 const EXCHANGE_RATE = 4000;
@@ -65,7 +65,7 @@ export default function DashboardPage() {
   const [familyOweUsd, setFamilyOweUsd] = useState<number>(0)
   const [persOweRiel, setPersOweRiel] = useState<number>(0) 
 
-  const [activeTab, setActiveTab] = useState<'wholesale' | 'retail' | 'asset'>('wholesale')
+  const [activeTab, setActiveTab] = useState<'summary' | 'wholesale' | 'retail' | 'asset'>('summary')
   const [assetFilter, setAssetFilter] = useState<'today' | 'yesterday' | 'week' | 'month' | 'all'>('month')
 
   useEffect(() => {
@@ -128,7 +128,27 @@ export default function DashboardPage() {
     return true;
   }
 
-  const activeSalesData = activeTab === 'wholesale' ? wholesaleSales : retailSales;
+  function calculateDaysWorked(startDateStr: string, filter: string) {
+    if (!startDateStr) return 0;
+    const start = new Date(startDateStr); start.setHours(0,0,0,0);
+    const today = new Date(); today.setHours(0,0,0,0);
+    if (filter === 'today' || filter === 'yesterday') return 1;
+    if (filter === 'week') return 7; 
+    if (filter === 'month') {
+      const firstOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+      const actualStart = start > firstOfMonth ? start : firstOfMonth;
+      const diffTime = today.getTime() - actualStart.getTime();
+      return Math.max(0, Math.floor(diffTime / 86400000) + 1);
+    }
+    if (filter === 'all') return Math.max(0, Math.floor((today.getTime() - start.getTime()) / 86400000) + 1);
+    return 0;
+  }
+
+  // --- DYNAMIC DATA SELECTION BASED ON TAB ---
+  let activeSalesData: any[] = [];
+  if (activeTab === 'wholesale') activeSalesData = wholesaleSales;
+  else if (activeTab === 'retail') activeSalesData = retailSales;
+  else if (activeTab === 'summary') activeSalesData = [...wholesaleSales, ...retailSales];
 
   function calculateMetrics(dataSet: any[], timeFilter: (d: string) => boolean) {
     const filtered = dataSet.filter(s => timeFilter(s.created_at));
@@ -141,7 +161,7 @@ export default function DashboardPage() {
       const revenue = qty * price; const profit = (price - cogs) * qty;
       const owner = parseOwner(sale.owner); const methodStr = (sale.payment_method || 'Cash ៛');
 
-      if (activeTab === 'retail') {
+      if (activeTab === 'retail' || activeTab === 'summary') {
         if (methodStr.includes(':')) {
            methodStr.split(',').forEach((p: string) => {
              const [m, amtStr] = p.split(':'); const pAmt = Number(amtStr) || 0;
@@ -168,12 +188,11 @@ export default function DashboardPage() {
 
     filtered.forEach(exp => {
       if (parseOwner(exp.spender) === 'mom') return; 
-      let amtRiel = Number(exp.amount_riel || 0); let amtUsd = Number(exp.amount || 0);
-      if (amtRiel < 0) return;
+      let amtRiel = Number(exp.amount_riel || 0); let amtUsd = Number(exp.amount_usd || exp.amount || 0);
+      if (amtRiel < 0 && amtUsd <= 0) return;
 
       const methodStr = (exp.payment_method || '').toLowerCase();
       const type = (exp.description || '').toLowerCase()
-      // Advance payouts are recorded as STAFF in expenses, which we categorise as Business Cash Outflow
       const isBiz = type === 'business' || type === 'biz' || type === 'staff';
 
       const processSplit = (m: string, aRiel: number, aUsd: number) => {
@@ -189,18 +208,46 @@ export default function DashboardPage() {
          methodStr.split(',').forEach((p: string) => {
            const [m, amtString] = p.split(':');
            let pAmt = Number(amtString) || 0; let pUsd = 0; let pRiel = pAmt;
-           if (m.includes('$')) { pUsd = pAmt; pRiel = pAmt * EXCHANGE_RATE; }
+           if (m.includes('$')) { pUsd = pAmt; pRiel = 0; }
            processSplit(m.trim(), Math.abs(pRiel), Math.abs(pUsd));
          });
       } else { processSplit(methodStr, Math.abs(amtRiel), Math.abs(amtUsd)); }
     })
 
-    // Auto-salary deduction has been removed here.
-
     return { bizCashRiel, bizCashUsd, bizQrRiel, bizQrUsd, persCashRiel, persCashUsd, persQrRiel, persQrUsd }
   }
 
-  // --- STRICT ALL-TIME ASSET ENGINE WITH LIABILITY SHIELDS ---
+  // --- TOP PERFORMER CALCULATION ENGINE ---
+  function getTopPerformers(dataSet: any[], timeFilter: (d: string) => boolean) {
+    const filtered = dataSet.filter(s => timeFilter(s.created_at) && parseOwner(s.owner) !== 'mom');
+    const map: Record<string, { name: string, qty: number, profit: number }> = {};
+    
+    filtered.forEach(sale => {
+      const name = sale.custom_rice_type || sale.rice_type || 'Unknown';
+      const qty = Number(sale.qty || 0);
+      const price = Number(sale.price_per_bag || 0);
+      const cogs = Number(sale.cogs_price || 0);
+      const profit = (price - cogs) * qty;
+
+      let isNegative = name.includes('ដូរ') || name.includes('បញ្ចុះតម្លៃ') || name.includes('កក់');
+      let finalQty = isNegative ? -Math.abs(qty) : Math.abs(qty);
+      let finalProfit = isNegative ? -Math.abs(profit) : Math.abs(profit);
+
+      if (!map[name]) map[name] = { name, qty: 0, profit: 0 };
+      map[name].qty += finalQty;
+      map[name].profit += finalProfit;
+    });
+
+    const arr = Object.values(map).filter(item => item.qty > 0 || item.profit > 0);
+    const topByQty = [...arr].sort((a,b) => b.qty - a.qty).slice(0, 3);
+    const topByProfit = [...arr].sort((a,b) => b.profit - a.profit).slice(0, 3);
+
+    return { topByQty, topByProfit };
+  }
+
+  const wholesaleTopMTD = getTopPerformers(wholesaleSales, isMTD);
+  const retailTopMTD = getTopPerformers(retailSales, isMTD);
+
   function calculateAssets() {
     let liveCashRiel = initCashRiel, liveCashUsd = initCashUsd;
     let liveQrRiel = initQrRiel, liveQrUsd = initQrUsd;
@@ -213,17 +260,19 @@ export default function DashboardPage() {
     let momPaidOut = 0;
     let liabilityOffsetUsed = 0; 
     let riceStockValue = 0;
-    let staffDebtRiel = 0; // Asset (Money owed to Business)
+    let staffDebtRiel = 0; 
 
-    // Calculate total money staff owes the business
     staffList.forEach(staff => {
       staffDebtRiel += Number(staff.total_debt) || 0;
     });
 
-    const productValuations: Record<number, { qty: number, totalValue: number, avgCost: number }> = {};
+    const productValuations: Record<number, { qty: number, totalValue: number, avgCost: number, batches: any[] }> = {};
     inventoryList.forEach(p => {
       let pStock = Number(p.stock || 0); let pValue = 0; let accountedStock = 0;
       const activeBatches = priceHistory.filter(b => b.product_id === p.id && ((b.imported_qty || 0) - (b.sold_qty || 0)) > 0);
+      
+      activeBatches.sort((a,b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+
       activeBatches.forEach(b => {
         const rem = (b.imported_qty || 0) - (b.sold_qty || 0);
         pValue += (rem * Number(b.cost_price || 0)); accountedStock += rem;
@@ -233,7 +282,7 @@ export default function DashboardPage() {
       else if (pStock < accountedStock && accountedStock > 0) pValue = pStock * (pValue / accountedStock);
 
       riceStockValue += pValue;
-      productValuations[p.id] = { qty: pStock, totalValue: pValue, avgCost: pStock > 0 ? pValue / pStock : Number(p.cost_price || 0) };
+      productValuations[p.id] = { qty: pStock, totalValue: pValue, avgCost: pStock > 0 ? pValue / pStock : Number(p.cost_price || 0), batches: activeBatches };
     });
 
     accountsPayable.forEach(ap => { if (ap.status === 'Unpaid') totalSupplierAP += Number(ap.amount_riel || 0); });
@@ -244,7 +293,6 @@ export default function DashboardPage() {
         return true; 
     };
 
-    // ONLY modifies the drawer if the money is actually business cash
     const addFunds = (amtRiel: number, method: string) => {
       const m = method || 'Cash ៛';
       const lowerM = m.toLowerCase();
@@ -269,7 +317,6 @@ export default function DashboardPage() {
       else liveCashRiel -= amtRiel;
     }
 
-    // 1. RETAIL
     retailSales.forEach(r => {
       const owner = parseOwner(r.owner);
       const methodStr = r.payment_method || 'Cash ៛';
@@ -303,7 +350,6 @@ export default function DashboardPage() {
       }
     });
 
-    // 2. WHOLESALE
     wholesaleSales.forEach(w => {
       const owner = parseOwner(w.owner);
       if (owner === 'mom') {
@@ -317,7 +363,6 @@ export default function DashboardPage() {
       }
     });
 
-    // 3. INVOICE PAYMENTS
     invoicePayments.forEach(p => {
        const amt = Number(p.amount_paid || 0);
        const methodStr = p.payment_method || 'Cash ៛';
@@ -343,13 +388,11 @@ export default function DashboardPage() {
        }
     });
 
-    // 4. INVOICE SUMMARIES
     invoiceSummaries.forEach(inv => {
        const owner = parseOwner(inv.owner);
        if (owner !== 'mom') bizCredit += Number(inv.balance_due || 0);
     });
 
-    // 5. COGS SETTLEMENTS (Syncs correctly with COGS Page Liability Engine)
     cogsSettlements.forEach(c => {
        const owner = parseOwner(c.owner_name);
        const methodStr = (c.payment_method || '').toLowerCase();
@@ -367,7 +410,10 @@ export default function DashboardPage() {
              if (lowerM.includes('liability')) {
                  if (owner === 'mom') liabilityOffsetUsed += bAmt;
              } else {
-                 subFunds(bAmt, mName.trim()); // Safely subtracts actual business cash
+                 subFunds(bAmt, mName.trim());
+                 if (owner === 'mom' && !lowerM.includes('mom qr')) {
+                     momPaidOut += bAmt; 
+                 }
              }
           });
        } else {
@@ -375,11 +421,13 @@ export default function DashboardPage() {
                if (owner === 'mom') liabilityOffsetUsed += totalAmt;
            } else {
                subFunds(totalAmt, c.payment_method);
+               if (owner === 'mom' && !methodStr.includes('mom qr')) {
+                   momPaidOut += totalAmt;
+               }
            }
        }
     });
 
-    // 6. EXPENSES
     expenses.forEach(e => {
       const owner = parseOwner(e.spender);
       if (owner === 'mom') return;
@@ -417,9 +465,6 @@ export default function DashboardPage() {
       }
     });
 
-    // Auto-salary deduction has been removed here. Staff debt (advances) already deducts cash when logged as an expense.
-
-    // 7. TIME-FILTERED EXPENSES 
     let bizExpRiel = 0, bizExpUsd = 0;
     let persExpRiel = 0, persExpUsd = 0;
     let riceExpRiel = 0, riceExpUsd = 0;
@@ -428,8 +473,8 @@ export default function DashboardPage() {
         const owner = parseOwner(e.spender);
         if (owner === 'mom') return;
 
-        let amtRiel = Number(e.amount_riel || 0);
-        if (amtRiel < 0) return;
+        let amtRiel = Number(e.amount_riel || 0); let amtUsd = Number(e.amount_usd || 0);
+        if (amtRiel < 0 && amtUsd <= 0) return;
         
         const methodStr = (e.payment_method || '').toLowerCase();
         const remarks = (e.remarks || '').toLowerCase();
@@ -439,32 +484,28 @@ export default function DashboardPage() {
         if (remarks.includes('stock import') || remarks.includes('rice') || desc.includes('RICE') || desc.includes('COGS')) isRice = true;
         else if (desc === 'BUSINESS' || desc === 'BIZ' || desc === 'STAFF') isBiz = true;
 
-        const distributeToBuckets = (m: string, partRiel: number) => {
-           let r = 0, u = 0;
-           if (m.includes('$')) u = partRiel / EXCHANGE_RATE; else r = partRiel;
-           if (isRice) { riceExpRiel += r; riceExpUsd += u; } else if (isBiz) { bizExpRiel += r; bizExpUsd += u; } else { persExpRiel += r; persExpUsd += u; }
+        const distributeToBuckets = (m: string, pRiel: number, pUsd: number) => {
+           if (isRice) { riceExpRiel += pRiel; riceExpUsd += pUsd; } 
+           else if (isBiz) { bizExpRiel += pRiel; bizExpUsd += pUsd; } 
+           else { persExpRiel += pRiel; persExpUsd += pUsd; }
         };
 
         if (methodStr.includes(':')) {
            methodStr.split(',').forEach((p: string) => {
               const [m, amtStr] = p.split(':');
-              let bucketAmt = Number(amtStr) || 0;
-              if (m.includes('$')) bucketAmt *= EXCHANGE_RATE;
-              distributeToBuckets(m.trim(), Math.abs(bucketAmt));
+              let pAmt = Number(amtStr) || 0;
+              let pRiel = 0, pUsd = 0;
+              if (m.includes('$')) pUsd = pAmt; else pRiel = pAmt;
+              distributeToBuckets(m.trim(), Math.abs(pRiel), Math.abs(pUsd));
            });
-        } else distributeToBuckets(methodStr, Math.abs(amtRiel));
+        } else distributeToBuckets(methodStr, Math.abs(amtRiel), Math.abs(amtUsd));
     });
 
-    // --- FINAL MATH ---
     const momCogsAr = Math.max(0, momTotalCogs - momTotalPaid);
-    
-    // The exact synced calculation
     const liveMomLiability = Math.max(0, persOweRiel + momCollected - momPaidOut - liabilityOffsetUsed);
-    
     const familyArRielEq = familyOweRiel + (familyOweUsd * EXCHANGE_RATE);
 
     const liquidAssets = baseCapital + (liveCashRiel + (liveCashUsd * EXCHANGE_RATE)) + (liveQrRiel + (liveQrUsd * EXCHANGE_RATE));
-    // Added staffDebtRiel as an Asset
     const netWorth = liquidAssets + bizCredit + familyArRielEq + momCogsAr + staffDebtRiel - totalSupplierAP - liveMomLiability;
 
     return {
@@ -493,9 +534,13 @@ export default function DashboardPage() {
       const qty = Number(sale.qty || 0);
       const price = Number(sale.price_per_bag || 0);
       const cogs = Number(sale.cogs_price || 0);
+      
+      let isNegative = (sale.custom_rice_type || sale.rice_type || '').includes('ដូរ') || (sale.custom_rice_type || sale.rice_type || '').includes('បញ្ចុះតម្លៃ');
+      let finalQty = isNegative ? -Math.abs(qty) : Math.abs(qty);
+      
       if (dayIdx >= 0 && dayIdx < 31) {
-        dailySales[dayIdx] += (qty * price);
-        dailyProfit[dayIdx] += ((price - cogs) * qty);
+        dailySales[dayIdx] += (finalQty * price);
+        dailyProfit[dayIdx] += ((price - cogs) * finalQty);
       }
     })
     return { dailySales, dailyProfit }
@@ -514,6 +559,7 @@ export default function DashboardPage() {
       </div>
 
       <div style={{ display: 'flex', gap: '8px', marginBottom: '24px', background: '#ffffff', padding: '6px', borderRadius: '8px', border: '1px solid #e2e8f0', width: 'fit-content', flexWrap: 'wrap' }}>
+        <button onClick={() => setActiveTab('summary')} style={{ padding: '10px 20px', borderRadius: '6px', border: 'none', cursor: 'pointer', fontSize: '14px', fontWeight: 'bold', background: activeTab === 'summary' ? '#b58a3d' : 'transparent', color: activeTab === 'summary' ? '#fff' : '#64748b', transition: 'all 0.2s' }}>📈 Business Summary</button>
         <button onClick={() => setActiveTab('wholesale')} style={{ padding: '10px 20px', borderRadius: '6px', border: 'none', cursor: 'pointer', fontSize: '14px', fontWeight: 'bold', background: activeTab === 'wholesale' ? '#b58a3d' : 'transparent', color: activeTab === 'wholesale' ? '#fff' : '#64748b', transition: 'all 0.2s' }}>🌾 Wholesale Data</button>
         <button onClick={() => setActiveTab('retail')} style={{ padding: '10px 20px', borderRadius: '6px', border: 'none', cursor: 'pointer', fontSize: '14px', fontWeight: 'bold', background: activeTab === 'retail' ? '#b58a3d' : 'transparent', color: activeTab === 'retail' ? '#fff' : '#64748b', transition: 'all 0.2s' }}>🛍️ Retail Data</button>
         <button onClick={() => setActiveTab('asset')} style={{ padding: '10px 20px', borderRadius: '6px', border: 'none', cursor: 'pointer', fontSize: '14px', fontWeight: 'bold', background: activeTab === 'asset' ? '#10b981' : 'transparent', color: activeTab === 'asset' ? '#fff' : '#64748b', transition: 'all 0.2s' }}>💰 Business Asset</button>
@@ -667,25 +713,25 @@ export default function DashboardPage() {
                   
                   <div style={{ padding: '16px', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
                     <div style={{ fontSize: '12px', color: '#64748b', fontWeight: 'bold', marginBottom: '8px' }}>BUSINESS EXPENSES</div>
-                    <div style={{ fontSize: '20px', color: '#ef4444', fontWeight: 'bold' }}>{formatRiel(assetData.bizExpRiel + (assetData.bizExpUsd * EXCHANGE_RATE))}</div>
-                    <div style={{ fontSize: '13px', color: '#64748b', marginTop: '6px', lineHeight: '1.4' }}>
-                      Riel: {formatRiel(assetData.bizExpRiel)} <br/> USD: {formatUSD(assetData.bizExpUsd)}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                      <div style={{ fontSize: '18px', color: '#ef4444', fontWeight: 'bold' }}>{formatRiel(assetData.bizExpRiel)}</div>
+                      <div style={{ fontSize: '18px', color: '#ef4444', fontWeight: 'bold' }}>{formatUSD(assetData.bizExpUsd)}</div>
                     </div>
                   </div>
 
                   <div style={{ padding: '16px', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
                     <div style={{ fontSize: '12px', color: '#64748b', fontWeight: 'bold', marginBottom: '8px' }}>PERSONAL EXPENSES</div>
-                    <div style={{ fontSize: '20px', color: '#f59e0b', fontWeight: 'bold' }}>{formatRiel(assetData.persExpRiel + (assetData.persExpUsd * EXCHANGE_RATE))}</div>
-                    <div style={{ fontSize: '13px', color: '#64748b', marginTop: '6px', lineHeight: '1.4' }}>
-                      Riel: {formatRiel(assetData.persExpRiel)} <br/> USD: {formatUSD(assetData.persExpUsd)}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                      <div style={{ fontSize: '18px', color: '#f59e0b', fontWeight: 'bold' }}>{formatRiel(assetData.persExpRiel)}</div>
+                      <div style={{ fontSize: '18px', color: '#f59e0b', fontWeight: 'bold' }}>{formatUSD(assetData.persExpUsd)}</div>
                     </div>
                   </div>
 
                   <div style={{ padding: '16px', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
                     <div style={{ fontSize: '12px', color: '#64748b', fontWeight: 'bold', marginBottom: '8px' }}>RICE / STOCK PURCHASES</div>
-                    <div style={{ fontSize: '20px', color: '#3b82f6', fontWeight: 'bold' }}>{formatRiel(assetData.riceExpRiel + (assetData.riceExpUsd * EXCHANGE_RATE))}</div>
-                    <div style={{ fontSize: '13px', color: '#64748b', marginTop: '6px', lineHeight: '1.4' }}>
-                      Riel: {formatRiel(assetData.riceExpRiel)} <br/> USD: {formatUSD(assetData.riceExpUsd)}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                      <div style={{ fontSize: '18px', color: '#3b82f6', fontWeight: 'bold' }}>{formatRiel(assetData.riceExpRiel)}</div>
+                      <div style={{ fontSize: '18px', color: '#3b82f6', fontWeight: 'bold' }}>{formatUSD(assetData.riceExpUsd)}</div>
                     </div>
                   </div>
 
@@ -699,23 +745,43 @@ export default function DashboardPage() {
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '14px', minWidth: '600px' }}>
                   <thead style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0' }}>
                     <tr>
-                      <th style={{ padding: '14px 20px', textAlign: 'left', color: '#64748b', fontWeight: 'bold' }}>Product Name</th>
+                      <th style={{ padding: '14px 20px', textAlign: 'left', color: '#64748b', fontWeight: 'bold' }}>Product & Batches</th>
                       <th style={{ padding: '14px 20px', textAlign: 'center', color: '#64748b', fontWeight: 'bold' }}>Stock Qty</th>
-                      <th style={{ padding: '14px 20px', textAlign: 'right', color: '#64748b', fontWeight: 'bold' }}>Avg. Cost Price (៛)</th>
+                      <th style={{ padding: '14px 20px', textAlign: 'right', color: '#64748b', fontWeight: 'bold' }}>Cost Price</th>
                       <th style={{ padding: '14px 20px', textAlign: 'right', color: '#64748b', fontWeight: 'bold' }}>Total Value (៛)</th>
                     </tr>
                   </thead>
                   <tbody>
                     {inventoryList.map(item => {
-                      const valData = assetData.productValuations[item.id] || { qty: Number(item.stock || 0), totalValue: Number(item.stock || 0) * Number(item.cost_price || 0), avgCost: Number(item.cost_price || 0) };
+                      const valData = assetData.productValuations[item.id];
+                      if (!valData) return null;
                       
                       return (
-                        <tr key={item.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                          <td style={{ padding: '14px 20px', color: '#334155', fontWeight: 'normal' }}>{item.name}</td>
-                          <td style={{ padding: '14px 20px', textAlign: 'center', color: valData.qty < 10 ? '#ef4444' : '#334155', fontWeight: 'normal' }}>{formatNumber(valData.qty)}</td>
-                          <td style={{ padding: '14px 20px', textAlign: 'right', color: '#334155', fontWeight: 'normal' }}>{formatRiel(valData.avgCost)}</td>
-                          <td style={{ padding: '14px 20px', textAlign: 'right', color: '#10b981', fontWeight: 'normal' }}>{formatRiel(valData.totalValue)}</td>
-                        </tr>
+                        <React.Fragment key={item.id}>
+                          <tr style={{ borderBottom: valData.batches.length > 0 ? 'none' : '1px solid #f1f5f9', background: '#ffffff' }}>
+                            <td style={{ padding: '14px 20px', color: '#1e293b', fontWeight: 'bold' }}>{item.name}</td>
+                            <td style={{ padding: '14px 20px', textAlign: 'center', color: valData.qty < 10 ? '#ef4444' : '#1e293b', fontWeight: 'bold' }}>{formatNumber(valData.qty)}</td>
+                            <td style={{ padding: '14px 20px', textAlign: 'right', color: '#64748b', fontWeight: 'normal' }}>Avg: {formatRiel(valData.avgCost)}</td>
+                            <td style={{ padding: '14px 20px', textAlign: 'right', color: '#10b981', fontWeight: 'bold' }}>{formatRiel(valData.totalValue)}</td>
+                          </tr>
+                          {valData.batches.map((b: any, idx: number) => {
+                             const rem = (b.imported_qty || 0) - (b.sold_qty || 0);
+                             const val = rem * Number(b.cost_price || 0);
+                             let label = "Current batch active stock";
+                             if (idx === 1) label = "1st New batch active stock";
+                             else if (idx === 2) label = "2nd batch new active stock";
+                             else if (idx > 2) label = `Queue #${idx + 1} active stock`;
+                             
+                             return (
+                               <tr key={b.id} style={{ borderBottom: idx === valData.batches.length - 1 ? '1px solid #f1f5f9' : 'none', background: '#f8fafc' }}>
+                                 <td style={{ padding: '8px 20px 8px 40px', color: '#64748b', fontSize: '12px' }}>↳ {label}</td>
+                                 <td style={{ padding: '8px 20px', textAlign: 'center', color: '#475569', fontSize: '13px' }}>{formatNumber(rem)}</td>
+                                 <td style={{ padding: '8px 20px', textAlign: 'right', color: '#475569', fontSize: '13px' }}>{formatRiel(b.cost_price)}</td>
+                                 <td style={{ padding: '8px 20px', textAlign: 'right', color: '#10b981', fontSize: '13px' }}>{formatRiel(val)}</td>
+                               </tr>
+                             )
+                          })}
+                        </React.Fragment>
                       )
                     })}
                   </tbody>
@@ -734,12 +800,30 @@ export default function DashboardPage() {
 
         {activeTab !== 'asset' && (
           <div className="fade-in">
+
+            {/* 🔥 NEW TOP PERFORMERS CARDS (SUMMARY ONLY) */}
+            {activeTab === 'summary' && (
+              <>
+                <h2 className="section-divider" style={{ fontWeight: 'bold' }}>🏆 MTD TOP PERFORMERS (WHOLESALE)</h2>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '16px', marginBottom: '32px' }}>
+                  <TopPerformersCard title="Top 3 Wholesale (By Volume)" data={wholesaleTopMTD.topByQty} type="qty" />
+                  <TopPerformersCard title="Top 3 Wholesale (By Profit)" data={wholesaleTopMTD.topByProfit} type="profit" />
+                </div>
+                
+                <h2 className="section-divider" style={{ fontWeight: 'bold' }}>🏆 MTD TOP PERFORMERS (RETAIL)</h2>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '16px', marginBottom: '32px' }}>
+                  <TopPerformersCard title="Top 3 Retail (By Volume)" data={retailTopMTD.topByQty} type="qty" />
+                  <TopPerformersCard title="Top 3 Retail (By Profit)" data={retailTopMTD.topByProfit} type="profit" />
+                </div>
+              </>
+            )}
+
             <h2 className="section-divider" style={{ fontWeight: 'bold' }}>📅 TODAY'S PERFORMANCE</h2>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '16px', marginBottom: '32px' }}>
               <ComplexCard title="Today Sales" total={todayM.totalSales} pich={todayM.pichSales} jing={todayM.jingSales} both={todayM.bothSales} mom={todayM.momSales} hideSubboxes={activeTab === 'retail'} color="#2563eb" />
-              {activeTab === 'retail' && <ExpenseBreakdownCard title="Retail Payments" cR={todayM.cR} cU={todayM.cU} qR={todayM.qR} qU={todayM.qU} color="#3b82f6" />}
+              {(activeTab === 'retail' || activeTab === 'summary') && <ExpenseBreakdownCard title="Retail Payments" cR={todayM.cR} cU={todayM.cU} qR={todayM.qR} qU={todayM.qU} color="#3b82f6" />}
               <ComplexCard title="Today Profit" total={todayM.totalProfit} pich={todayM.pichProfit} jing={todayM.jingProfit} both={todayM.bothProfit} mom={todayM.momProfit} hideSubboxes={activeTab === 'retail'} color="#10b981" />
-              {activeTab === 'wholesale' && (
+              {(activeTab === 'wholesale' || activeTab === 'summary') && (
                 <>
                   <ExpenseBreakdownCard title="Today Biz Expenses" cR={todayE.bizCashRiel} cU={todayE.bizCashUsd} qR={todayE.bizQrRiel} qU={todayE.bizQrUsd} color="#b91c1c" />
                   <ExpenseBreakdownCard title="Today Personal Exp" cR={todayE.persCashRiel} cU={todayE.persCashUsd} qR={todayE.persQrRiel} qU={todayE.persQrUsd} color="#f59e0b" />
@@ -750,9 +834,9 @@ export default function DashboardPage() {
             <h2 className="section-divider" style={{ fontWeight: 'bold' }}>📈 MONTH TO DATE (MTD)</h2>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '16px', marginBottom: '32px' }}>
               <ComplexCard title="MTD Sales" total={mtdM.totalSales} pich={mtdM.pichSales} jing={mtdM.jingSales} both={mtdM.bothSales} mom={mtdM.momSales} hideSubboxes={activeTab === 'retail'} color="#2563eb" />
-              {activeTab === 'retail' && <ExpenseBreakdownCard title="Retail Payments" cR={mtdM.cR} cU={mtdM.cU} qR={mtdM.qR} qU={mtdM.qU} color="#3b82f6" />}
+              {(activeTab === 'retail' || activeTab === 'summary') && <ExpenseBreakdownCard title="Retail Payments" cR={mtdM.cR} cU={mtdM.cU} qR={mtdM.qR} qU={mtdM.qU} color="#3b82f6" />}
               <ComplexCard title="MTD Profit" total={mtdM.totalProfit} pich={mtdM.pichProfit} jing={mtdM.jingProfit} both={mtdM.bothProfit} mom={mtdM.momProfit} hideSubboxes={activeTab === 'retail'} color="#10b981" />
-              {activeTab === 'wholesale' && (
+              {(activeTab === 'wholesale' || activeTab === 'summary') && (
                 <>
                   <ExpenseBreakdownCard title="MTD Biz Expenses" cR={mtdE.bizCashRiel} cU={mtdE.bizCashUsd} qR={mtdE.bizQrRiel} qU={mtdE.bizQrUsd} color="#b91c1c" />
                   <ExpenseBreakdownCard title="MTD Personal Exp" cR={mtdE.persCashRiel} cU={mtdE.persCashUsd} qR={mtdE.persQrRiel} qU={mtdE.persQrUsd} color="#f59e0b" />
@@ -764,7 +848,7 @@ export default function DashboardPage() {
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '20px', background: '#fff', padding: '24px', borderRadius: '12px', border: '1px solid #e2e8f0', marginBottom: '32px' }}>
               <HealthBar title="Sales" current={mtdM.totalSales} target={lastMonthM.totalSales} color="#2563eb" />
               <HealthBar title="Profit" current={mtdM.totalProfit} target={lastMonthM.totalProfit} color="#10b981" />
-              {activeTab === 'wholesale' && (
+              {(activeTab === 'wholesale' || activeTab === 'summary') && (
                 <>
                   <HealthBar title="Biz Expenses" current={mtdE.bizCashRiel + mtdE.bizQrRiel + (mtdE.bizCashUsd*EXCHANGE_RATE) + (mtdE.bizQrUsd*EXCHANGE_RATE)} target={lastMonthE.bizCashRiel + lastMonthE.bizQrRiel + (lastMonthE.bizCashUsd*EXCHANGE_RATE) + (lastMonthE.bizQrUsd*EXCHANGE_RATE)} color="#b91c1c" reverseLogic />
                   <HealthBar title="Personal Expenses" current={mtdE.persCashRiel + mtdE.persQrRiel + (mtdE.persCashUsd*EXCHANGE_RATE) + (mtdE.persQrUsd*EXCHANGE_RATE)} target={lastMonthE.persCashRiel + lastMonthE.persQrRiel + (lastMonthE.persCashUsd*EXCHANGE_RATE) + (lastMonthE.persQrUsd*EXCHANGE_RATE)} color="#f59e0b" reverseLogic />
@@ -774,8 +858,8 @@ export default function DashboardPage() {
 
             <h2 className="section-divider" style={{ fontWeight: 'bold' }}>📉 TREND ANALYSIS (Day 1 - 31)</h2>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '24px', marginBottom: '40px' }}>
-              <LineChartCard title={`${activeTab === 'wholesale' ? 'Wholesale' : 'Retail'} Sales: This Month vs Last Month`} dataCurrent={thisMonthData.dailySales} dataLast={lastMonthData.dailySales} color="#2563eb" />
-              <LineChartCard title={`${activeTab === 'wholesale' ? 'Wholesale' : 'Retail'} Profit: This Month vs Last Month`} dataCurrent={thisMonthData.dailyProfit} dataLast={lastMonthData.dailyProfit} color="#10b981" />
+              <LineChartCard title={`${activeTab === 'summary' ? 'Total' : activeTab === 'wholesale' ? 'Wholesale' : 'Retail'} Sales: This Month vs Last Month`} dataCurrent={thisMonthData.dailySales} dataLast={lastMonthData.dailySales} color="#2563eb" />
+              <LineChartCard title={`${activeTab === 'summary' ? 'Total' : activeTab === 'wholesale' ? 'Wholesale' : 'Retail'} Profit: This Month vs Last Month`} dataCurrent={thisMonthData.dailyProfit} dataLast={lastMonthData.dailyProfit} color="#10b981" />
             </div>
           </div>
         )}
@@ -827,6 +911,30 @@ export default function DashboardPage() {
           .header-left { flex-direction: column !important; align-items: flex-start !important; text-align: left !important; gap: 6px !important; }
         }
       `}</style>
+    </div>
+  )
+}
+
+function TopPerformersCard({ title, data, type }: { title: string, data: any[], type: 'qty' | 'profit' }) {
+  return (
+    <div style={{ background: '#ffffff', padding: '20px', borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: '0 4px 6px rgba(0,0,0,0.02)' }}>
+      <h3 style={{ margin: 0, fontSize: '13px', color: '#64748b', textTransform: 'uppercase', fontWeight: 'bold', marginBottom: '16px' }}>{title}</h3>
+      {data.length === 0 ? <div style={{ fontSize: '13px', color: '#94a3b8' }}>No data available.</div> : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+          {data.map((item, idx) => (
+            <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #f1f5f9', paddingBottom: '8px' }}>
+              <div style={{ fontSize: '14px', color: '#334155', fontWeight: 'bold' }}>{idx + 1}. {item.name}</div>
+              <div style={{ textAlign: 'right' }}>
+                <div style={{ fontSize: '15px', color: type === 'qty' ? '#2563eb' : '#10b981', fontWeight: 'bold' }}>
+                  {type === 'qty' ? `${formatNumber(item.qty)} Sold` : formatRiel(item.profit)}
+                </div>
+                {type === 'qty' && <div style={{ fontSize: '12px', color: '#10b981', fontWeight: 'bold' }}>Profit: {formatRiel(item.profit)}</div>}
+                {type === 'profit' && <div style={{ fontSize: '12px', color: '#2563eb', fontWeight: 'bold' }}>Vol: {formatNumber(item.qty)} Sold</div>}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

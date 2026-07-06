@@ -12,7 +12,6 @@ const LOGO_RIGHT_SRC = "/logo-right.png";
 const WATERMARK_SRC = "/watermark.png";
 
 // 🛠️ SAFARI INVOICE IMAGE CONVERTER 
-// Uses absolute URLs and provides a fallback if local fetch fails on mobile
 const fetchImageAsBase64 = async (path: string) => {
   try {
     const absoluteUrl = new URL(path, window.location.origin).href;
@@ -30,16 +29,13 @@ const fetchImageAsBase64 = async (path: string) => {
   }
 };
 
-// Constants
 const EXCHANGE_RATE = 4000;
-const RICE_CATEGORIES = ['All', 'មិញ', 'ខុន', 'ខ្ញី', 'ម្លិះ', 'រំដួល', 'បីកំណាត់', 'ដំណើប', 'សម្រូប', 'ផ្សេងៗ'];
+const RICE_CATEGORIES = ['🔥 Hot', 'All', 'មិញ', 'ខុន', 'ខ្ញី', 'ម្លិះ', 'រំដួល', 'បីកំណាត់', 'ដំណើប', 'សម្រូប', 'ផ្សេងៗ', '❌ Out of Stock'];
 const MAIN_KEYWORDS = ['មិញ', 'ខុន', 'ខ្ញី', 'ម្លិះ', 'រំដួល', 'បីកំណាត់', 'ដំណើប', 'សម្រូប'];
 
-// Global helper function 
 const formatRiel = (amount: number) => `${new Intl.NumberFormat('en-US').format(Math.round(amount))} ៛`;
 const formatUSD = (amount: number) => `$${new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(amount)}`;
 
-// Translations Dictionary
 const t: Record<'en' | 'kh', any> = {
   en: {
     title: "Point of Sale",
@@ -89,9 +85,6 @@ const t: Record<'en' | 'kh', any> = {
   }
 };
 
-// ==========================================
-// ROBUST LIVE COMMA FORMATTER (Stateless Display)
-// ==========================================
 function CurrencyInput({ value, onChange, placeholder, style, autoFocus, className, onFocus }: any) {
   const [inputValue, setInputValue] = useState('');
 
@@ -185,6 +178,7 @@ export default function POSPage() {
   const [cart, setCart] = useState<any[]>([])
   const [productOrder, setProductOrder] = useState<number[]>([])
   const [activeBatches, setActiveBatches] = useState<Record<number, any[]>>({})
+  const [mtdSalesStats, setMtdSalesStats] = useState<Record<number, number>>({})
   
   const [invoiceImages, setInvoiceImages] = useState({ left: LOGO_LEFT_SRC, right: LOGO_RIGHT_SRC, watermark: WATERMARK_SRC });
 
@@ -294,6 +288,7 @@ export default function POSPage() {
         await loadProductsAndSettings()
         await loadCustomers()
         await loadBatches()
+        await loadMtdSales()
 
         const urlParams = new URLSearchParams(window.location.search);
         const editId = urlParams.get('edit');
@@ -382,21 +377,22 @@ export default function POSPage() {
 
   useEffect(() => {
     if (completedSale && invoiceRef.current && !previewImageUrl && showInvoicePreview) {
-      const captureProcess = async () => {
+      const timer = setTimeout(async () => {
         try {
-          setIsGeneratingPreview(true);
           await document.fonts.ready;
           await new Promise(r => setTimeout(r, 800));
 
           const isMobile = window.innerWidth < 1024;
           
           if (isMobile) {
-            await htmlToImage.toPng(invoiceRef.current!, { pixelRatio: 1, backgroundColor: '#ffffff' });
+            await htmlToImage.toPng(invoiceRef.current!, { pixelRatio: 1, backgroundColor: '#ffffff', skipAutoScale: true, cacheBust: true });
           }
           
           const dataUrl = await htmlToImage.toPng(invoiceRef.current!, { 
             pixelRatio: 3, 
-            backgroundColor: '#ffffff' 
+            backgroundColor: '#ffffff',
+            skipAutoScale: true,
+            cacheBust: true
           });
           
           setPreviewImageUrl(dataUrl);
@@ -406,9 +402,8 @@ export default function POSPage() {
           console.error("Preview generation failed:", error);
           setIsGeneratingPreview(false);
         }
-      };
-
-      captureProcess();
+      }, 400);
+      return () => clearTimeout(timer);
     }
   }, [completedSale, previewImageUrl, showInvoicePreview])
 
@@ -436,6 +431,19 @@ export default function POSPage() {
         }
       });
       setActiveBatches(batchMap);
+    }
+  }
+
+  async function loadMtdSales() {
+    const today = new Date();
+    const firstDay = new Date(today.getFullYear(), today.getMonth(), 1).toISOString();
+    const { data } = await supabase.from('sales').select('product_id, qty').gte('created_at', firstDay);
+    if (data) {
+      const stats: Record<number, number> = {};
+      data.forEach(s => {
+        stats[s.product_id] = (stats[s.product_id] || 0) + Number(s.qty);
+      });
+      setMtdSalesStats(stats);
     }
   }
 
@@ -589,7 +597,18 @@ export default function POSPage() {
     const weightVal = parseFloat(p.weight || 0);
     if (activeTab === 'wholesale' && weightVal < 50) return false;
     if (activeTab === 'retail' && weightVal >= 50) return false;
-    if (activeTab !== 'retail' && activeCategory !== 'All') {
+    
+    if (activeTab === 'wholesale') {
+      if (activeCategory === '❌ Out of Stock') return Number(p.stock) <= 0;
+      if (Number(p.stock) <= 0) return false; 
+    }
+
+    if (activeTab !== 'retail' && activeCategory !== 'All' && activeCategory !== '❌ Out of Stock') {
+      if (activeCategory === '🔥 Hot') {
+        const top10Ids = Object.entries(mtdSalesStats).sort(([,a], [,b]) => b - a).slice(0, 10).map(([id]) => Number(id));
+        return top10Ids.includes(p.id);
+      }
+      
       const name = p.name || '';
       if (activeCategory === 'ផ្សេងៗ') {
         if (MAIN_KEYWORDS.some(kw => name.includes(kw))) return false;
@@ -599,6 +618,11 @@ export default function POSPage() {
     }
     return true;
   })
+
+  // 🔥 Explicitly sort the "🔥 Hot" tab by sales volume descending
+  if (activeCategory === '🔥 Hot') {
+    filteredProducts.sort((a, b) => (mtdSalesStats[b.id] || 0) - (mtdSalesStats[a.id] || 0));
+  }
 
   const filteredCustomers = customers.filter(c => 
     (c.name || '').toLowerCase().includes(customerSearchTerm.toLowerCase()) || (c.phone || '').includes(customerSearchTerm)
@@ -614,9 +638,13 @@ export default function POSPage() {
     return sum + amt;
   }, 0);
 
-  const getCategorizedItems = (cartItems: any[]) => {
+  // --- OMIT ZERO-PRICE ITEMS FROM INVOICE DISPLAY LOGIC ---
+  const getCategorizedItemsForInvoice = (cartItems: any[]) => {
     let normalItems: any[] = [], specialItems: any[] = [], negativeItems: any[] = [], serviceItems: any[] = [];
     cartItems.forEach(item => {
+      // 🚨 Skip mapping into the invoice if the price is exactly 0 
+      if (Number(item.custom_price_riel) === 0) return;
+
       const desc = item.custom_name;
       const total = item.custom_price_riel * item.quantity;
       if (desc.includes('សេវាឡាន (អតិថិជន)')) serviceItems.push({ ...item, total: total });
@@ -867,6 +895,7 @@ export default function POSPage() {
       window.history.replaceState({}, document.title, window.location.pathname);
       loadProductsAndSettings();
       loadBatches();
+      loadMtdSales();
 
       if (activeTab === 'wholesale') {
         const walkInCust = customers.find(c => c.name.toLowerCase() === 'walk-in' || c.name.toLowerCase() === 'walk in');
@@ -1040,10 +1069,29 @@ export default function POSPage() {
               )}
             </div>
 
+            {/* 🔥 SCROLLABLE CATEGORY TABS */}
             {activeTab !== 'retail' && (
-              <div className="hide-scrollbar" style={{ display: 'flex', overflowX: 'auto', gap: '8px', paddingBottom: '4px', marginTop: '16px', width: '100%' }}>
+              <div className="hide-scrollbar" style={{ display: 'flex', overflowX: 'auto', gap: '8px', paddingBottom: '8px', marginTop: '16px', width: '100%', WebkitOverflowScrolling: 'touch', scrollSnapType: 'x mandatory' }}>
                 {RICE_CATEGORIES.map(cat => (
-                  <button key={cat} onClick={() => setActiveCategory(cat)} style={{ padding: '6px 14px', borderRadius: '20px', border: activeCategory === cat ? 'none' : '1px solid #cbd5e1', backgroundColor: activeCategory === cat ? '#b58a3d' : '#ffffff', color: activeCategory === cat ? '#fff' : '#475569', cursor: 'pointer', fontSize: '13px', whiteSpace: 'nowrap' }}>{cat === 'All' ? (lang === 'kh' ? 'ទាំងអស់' : 'All') : cat}</button>
+                  <button 
+                    key={cat} 
+                    onClick={() => setActiveCategory(cat)} 
+                    style={{ 
+                      scrollSnapAlign: 'start',
+                      padding: '6px 14px', 
+                      borderRadius: '20px', 
+                      border: activeCategory === cat ? 'none' : '1px solid #cbd5e1', 
+                      backgroundColor: activeCategory === cat ? '#b58a3d' : '#ffffff', 
+                      color: activeCategory === cat ? '#fff' : '#475569', 
+                      cursor: 'pointer', 
+                      fontSize: '13px', 
+                      whiteSpace: 'nowrap',
+                      fontWeight: activeCategory === cat ? 'bold' : 'normal',
+                      boxShadow: activeCategory === cat ? '0 2px 4px rgba(181, 138, 61, 0.3)' : 'none'
+                    }}
+                  >
+                    {cat === 'All' ? (lang === 'kh' ? 'ទាំងអស់' : 'All') : cat}
+                  </button>
                 ))}
               </div>
             )}
@@ -1067,13 +1115,26 @@ export default function POSPage() {
                     onMouseUp={e => e.currentTarget.style.transform = 'scale(1)'}
                   >
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                      <div style={{ fontSize: '14px', color: '#334155', marginBottom: '8px' }}>{p.name}</div>
+                      <div style={{ fontSize: '14px', color: '#334155', marginBottom: '8px', fontWeight: 'bold' }}>{p.name}</div>
                     </div>
                     <div style={{ borderTop: '1px dashed #f1f5f9', paddingTop: '8px', marginTop: 'auto', position: 'relative', minHeight: activeTab === 'wholesale' ? '35px' : 'auto' }}>
-                      <div style={{ fontSize: '14px', color: '#b58a3d' }}>
+                      <div style={{ fontSize: '14px', color: '#b58a3d', fontWeight: 'bold' }}>
                         {formatRielSymbol(activeTab === 'retail' ? (p.price || 0) : (p.cost_price || 0))}
                       </div>
-                      {(activeTab === 'wholesale') && <div style={{ fontSize: '11px', marginTop: '4px', color: Number(p.stock) < 5 ? '#dc2626' : '#10b981' }}>📦 {currentT.stock}: {p.stock}</div>}
+                      
+                      {/* Retail Stock Emoji Logic */}
+                      {activeTab === 'retail' && (
+                        <div style={{ fontSize: '11px', marginTop: '4px', color: Number(p.stock) < 15 ? '#dc2626' : '#10b981', fontWeight: 'bold' }}>
+                          📦 {p.stock} kg left
+                        </div>
+                      )}
+
+                      {/* Wholesale Stock Logic */}
+                      {activeTab === 'wholesale' && (
+                        <div style={{ fontSize: '11px', marginTop: '4px', color: Number(p.stock) < 5 ? '#dc2626' : '#10b981', fontWeight: 'bold' }}>
+                          📦 {currentT.stock}: {p.stock}
+                        </div>
+                      )}
                       
                       {(activeTab === 'wholesale') && (
                         <button 
@@ -1583,7 +1644,7 @@ export default function POSPage() {
                 </thead>
                 <tbody>
                   {(() => {
-                    const displayItems = getCategorizedItems(completedSale.cartSnapshot);
+                    const displayItems = getCategorizedItemsForInvoice(completedSale.cartSnapshot);
                     const rows = [];
                     let grandTotal = 0;
                     let itemIndex = 0;

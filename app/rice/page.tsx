@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import { supabase } from '@/lib/supabaseClient'
 
 const formatRiel = (amount: number) => {
@@ -24,6 +24,7 @@ interface Product {
   linked_wholesale_id?: number | null
   mtd_kg_used?: number
   mtd_bags_used?: number
+  min_stock_level?: number
 }
 
 interface HistoryRecord {
@@ -52,10 +53,10 @@ interface FilterRule {
 type PaymentRow = { id: number, method: string, amount: number | '' };
 
 const DEFAULT_WIDTHS: Record<string, number> = {
-  id: 60, name: 240, price: 120, cost_price: 120, stock: 100, weight: 90, linked_wholesale: 220, mtd_kg_used: 120, mtd_bags_used: 120, actions: 180
+  id: 60, name: 240, price: 120, cost_price: 120, stock: 100, min_stock_level: 100, weight: 90, linked_wholesale: 220, mtd_kg_used: 120, mtd_bags_used: 120, actions: 260
 }
 
-const DEFAULT_ORDER: Array<keyof Product | 'linked_wholesale' | 'actions'> = ['id', 'name', 'price', 'cost_price', 'stock', 'weight', 'linked_wholesale', 'mtd_kg_used', 'mtd_bags_used', 'actions']
+const DEFAULT_ORDER: Array<keyof Product | 'linked_wholesale' | 'actions'> = ['id', 'name', 'price', 'cost_price', 'stock', 'min_stock_level', 'weight', 'linked_wholesale', 'mtd_kg_used', 'mtd_bags_used', 'actions']
 
 // ==========================================
 // ROBUST LIVE COMMA FORMATTER 
@@ -115,6 +116,7 @@ function CurrencyInput({ value, onChange, placeholder, style, autoFocus, onEnter
 }
 
 export default function RiceControl() {
+  // --- CORE STATE ---
   const [products, setProducts] = useState<Product[]>([])
   const [suppliers, setSuppliers] = useState<any[]>([])
   const [imports, setImports] = useState<any[]>([])
@@ -126,12 +128,18 @@ export default function RiceControl() {
   const [loading, setLoading] = useState(false)
   const [isProcessing, setIsProcessing] = useState(false) 
 
+  // --- CELL EDITING STATE ---
   const [editingCell, setEditingCell] = useState<{id: number, col: string} | null>(null)
   const [activeDropdownId, setActiveDropdownId] = useState<number | null>(null)
   const [dropdownSearch, setDropdownSearch] = useState('')
 
+  // --- VIEWS & TABS STATE ---
   const [activeView, setActiveView] = useState<'retail' | 'wholesale' | 'import' | 'pending' | 'suppliers'>('retail')
   const [activeCategory, setActiveCategory] = useState<string>('All')
+
+  // --- NEW BATCH ENGINE STATES ---
+  const [activeBatchesMap, setActiveBatchesMap] = useState<Record<number, HistoryRecord[]>>({})
+  const [expandedProductId, setExpandedProductId] = useState<number | null>(null)
 
   // --- IMPORT FORM STATE ---
   const [importForm, setImportForm] = useState({ supplier_id: '', product_id: '', qty: '', unit_cost: '', paid_amount: '', payment_method: 'Cash ៛' })
@@ -140,7 +148,6 @@ export default function RiceControl() {
   const [isAddSupplierOpen, setIsAddSupplierOpen] = useState(false)
   const [newSupplier, setNewSupplier] = useState({ name: '', phone: '', location: '' })
   
-  // Split Payment Pending Modal
   const [payPendingModal, setPayPendingModal] = useState<{isOpen: boolean, record: any, totalDue: number}>({ isOpen: false, record: null, totalDue: 0 })
   const [pendingPaymentRows, setPendingPaymentRows] = useState<PaymentRow[]>([{ id: Date.now(), method: 'Cash ៛', amount: '' }]);
 
@@ -154,7 +161,7 @@ export default function RiceControl() {
   const [filterRules, setFilterRules] = useState<FilterRule[]>([])
 
   const [isAddModalOpen, setIsAddModalOpen] = useState(false)
-  const [newItem, setNewItem] = useState({ name: '', price: '' as any, cost_price: '' as any, weight: '' as any, stock: '' as any })
+  const [newItem, setNewItem] = useState({ name: '', price: '' as any, cost_price: '' as any, weight: '' as any, stock: '' as any, min_stock_level: 10 as any })
 
   const [historyModal, setHistoryModal] = useState<{ isOpen: boolean; product: Product | null; data: HistoryRecord[] }>({
     isOpen: false, product: null, data: []
@@ -162,13 +169,16 @@ export default function RiceControl() {
   const [editingHistoryId, setEditingHistoryId] = useState<number | null>(null)
   const [historyEdits, setHistoryEdits] = useState<Record<number, Partial<HistoryRecord>>>({})
 
+  // --- LIFECYCLE ---
   useEffect(() => { 
     fetchProducts()
     fetchSettings()
     fetchSuppliers()
     fetchImports()
+    fetchBatches() 
   }, [])
 
+  // --- DATABASE OPERATIONS ---
   async function fetchSettings() {
     const { data } = await supabase.from('app_settings').select('*').in('setting_key', ['column_widths', 'column_order'])
     if (data) {
@@ -202,254 +212,33 @@ export default function RiceControl() {
     if (data) setImports(data)
   }
 
-  async function handleAddSupplier() {
-    if (!newSupplier.name) return alert('Supplier name is required');
-    setIsProcessing(true);
-    try {
-      const { error } = await supabase.from('suppliers').insert([{ name: newSupplier.name, phone: newSupplier.phone, location: newSupplier.location }]);
-      if (error) throw error;
-      setIsAddSupplierOpen(false);
-      setNewSupplier({ name: '', phone: '', location: '' });
-      await fetchSuppliers();
-    } catch (err: any) {
-      alert(`Error: ${err.message}`);
-    } finally {
-      setIsProcessing(false);
+  async function fetchBatches() {
+    const { data } = await supabase.from('price_history').select('*').order('created_at', { ascending: true })
+    if (data) {
+      const bMap: Record<number, HistoryRecord[]> = {}
+      data.forEach(b => {
+        if (!bMap[b.product_id]) bMap[b.product_id] = []
+        bMap[b.product_id].push(b)
+      })
+      setActiveBatchesMap(bMap)
     }
   }
 
-  // --- FLAWLESS IMPORT PROCESSING ---
-  async function handleProcessImport(isPayLater: boolean) {
-    if (!importForm.supplier_id || !importForm.product_id || !importForm.qty || !importForm.unit_cost) {
-      return alert('Please fill in all required fields (Supplier, Product, Qty, Cost).');
-    }
+  const handleSaveBatch = async (batchId: number) => {
+    const edits = historyEdits[batchId];
+    if (!edits) return setEditingHistoryId(null);
 
-    const qty = Number(importForm.qty);
-    const unitCost = Number(importForm.unit_cost);
-    const totalCost = qty * unitCost;
-    const paidAmount = isPayLater ? (Number(importForm.paid_amount) || 0) : totalCost;
+    const payload: any = {};
+    if (edits.price !== undefined) payload.price = Number(edits.price) || 0;
+    if (edits.cost_price !== undefined) payload.cost_price = Number(edits.cost_price) || 0;
+
+    const { error } = await supabase.from('price_history').update(payload).eq('id', batchId);
     
-    if (paidAmount > totalCost) return alert('Cannot pay more than the total cost.');
-
-    const status = paidAmount >= totalCost ? 'Paid' : 'Pending';
-    const remainingDebt = totalCost - paidAmount;
-
-    setIsProcessing(true);
-
-    try {
-      const supplierName = suppliers.find(s => String(s.id) === String(importForm.supplier_id))?.name || 'Unknown Supplier';
-
-      // 1. Log Import
-      const { error: importErr } = await supabase.from('imports').insert([{
-        supplier_id: Number(importForm.supplier_id),
-        product_id: Number(importForm.product_id),
-        qty: qty,
-        unit_cost: unitCost,
-        total_cost: totalCost,
-        paid_amount: paidAmount,
-        status: status
-      }]);
-      if (importErr) throw new Error("Import Logging Error: " + importErr.message);
-
-      // 2. GUARANTEED STOCK INCREMENT
-      const product = products.find(p => String(p.id) === String(importForm.product_id));
-      if (!product) throw new Error("Product not found in system.");
-      
-      const newStock = Number(product.stock || 0) + qty;
-      const { error: stockErr } = await supabase.from('products').update({ stock: newStock, cost_price: unitCost }).eq('id', product.id);
-      if (stockErr) throw new Error("Stock Update Error: " + stockErr.message);
-
-      // 3. Update Supplier Debt & Accounts Payable
-      if (remainingDebt > 0) {
-        const supplier = suppliers.find(s => String(s.id) === String(importForm.supplier_id));
-        const newTotalOwed = Number(supplier?.total_owed || 0) + remainingDebt;
-        
-        const { error: supErr } = await supabase.from('suppliers').update({ total_owed: newTotalOwed }).eq('id', supplier?.id);
-        if (supErr) throw new Error("Supplier Update Error: " + supErr.message);
-
-        // Instantly log to Dashboard AP
-        const { error: apErr } = await supabase.from('accounts_payable').insert([{
-          supplier_name: supplierName,
-          amount_riel: remainingDebt,
-          amount_usd: 0,
-          notes: `Stock Import: ${qty} bags`,
-          status: 'Unpaid'
-        }]);
-        if (apErr) throw new Error("Accounts Payable Error: " + apErr.message);
-      }
-
-      // 4. Create Batch
-      await supabase.from('price_history').insert([{
-        product_id: Number(importForm.product_id),
-        cost_price: unitCost,
-        price: product.price || 0,
-        imported_qty: qty,
-        sold_qty: 0
-      }]);
-
-      // 5. Log Expense (Deduct from Cash/QR) if money was paid today
-      if (paidAmount > 0) {
-        let amtUsd = 0;
-        let amtRiel = paidAmount;
-        if (importForm.payment_method.includes('$')) {
-          amtUsd = paidAmount;
-          amtRiel = paidAmount * EXCHANGE_RATE;
-        }
-
-        const { error: expErr } = await supabase.from('expenses').insert([{
-          expense_date: new Date().toISOString().split('T')[0],
-          spender: 'Both',
-          payment_method: importForm.payment_method,
-          remarks: `Stock Import: ${supplierName}`,
-          amount: Math.abs(amtUsd),
-          amount_riel: Math.abs(amtRiel),
-          description: 'BUSINESS'
-        }]);
-        if (expErr) throw new Error("Expense Logging Error: " + expErr.message);
-      }
-
-      setImportForm({ supplier_id: '', product_id: '', qty: '', unit_cost: '', paid_amount: '', payment_method: 'Cash ៛' });
-      alert('Import processed successfully! Stock updated.');
-      
-      // Force instant refresh
-      await Promise.all([fetchProducts(), fetchSuppliers(), fetchImports()]);
-
-      if (isPayLater) setActiveView('pending');
-      else setActiveView('wholesale');
-
-    } catch (err: any) {
-      alert(`Error processing import: ${err.message}`);
-    } finally {
-      setIsProcessing(false);
-    }
-  }
-
-  // --- FLAWLESS PAY PENDING WITH SPLIT LOGIC ---
-  async function handlePayPendingSubmit() {
-    const record = payPendingModal.record;
-    
-    let totalRielEq = 0;
-    let totalUsdFace = 0;
-    let totalRielFace = 0;
-    let methodStrings: string[] = [];
-
-    for (const r of pendingPaymentRows) {
-      const amt = Number(r.amount) || 0;
-      if (amt <= 0) continue;
-      
-      if (r.method.includes('$')) {
-        totalRielEq += (amt * EXCHANGE_RATE);
-        totalUsdFace += amt;
-      } else {
-        totalRielEq += amt;
-        totalRielFace += amt;
-      }
-      methodStrings.push(`${r.method}: ${amt}`);
-    }
-
-    if (totalRielEq <= 0) return alert('Enter a valid amount');
-    const remainingBefore = Number(record.total_cost) - Number(record.paid_amount);
-    if (totalRielEq > remainingBefore + 0.1) return alert('Cannot pay more than what is owed');
-
-    setIsProcessing(true); 
-
-    try {
-      const newPaidAmount = Number(record.paid_amount) + totalRielEq;
-      const newStatus = newPaidAmount >= Number(record.total_cost) ? 'Paid' : 'Pending';
-
-      // 1. Update Import Record
-      await supabase.from('imports').update({ paid_amount: newPaidAmount, status: newStatus }).eq('id', record.id);
-
-      // 2. Update Supplier Master Debt
-      const supplier = suppliers.find(s => String(s.id) === String(record.supplier_id));
-      const newTotalOwed = Math.max(0, Number(supplier?.total_owed || 0) - totalRielEq);
-      await supabase.from('suppliers').update({ total_owed: newTotalOwed }).eq('id', supplier?.id);
-
-      // 3. FIFO DRAIN ACCOUNTS PAYABLE DASHBOARD TABLE
-      const { data: apRows } = await supabase.from('accounts_payable')
-        .select('*')
-        .eq('supplier_name', supplier?.name)
-        .eq('status', 'Unpaid')
-        .order('created_at', { ascending: true });
-      
-      if (apRows && apRows.length > 0) {
-          let debtRemainingToOffset = totalRielEq;
-          for (let apRow of apRows) {
-              if (debtRemainingToOffset <= 0) break;
-              let apRowAmount = Number(apRow.amount_riel);
-              let apply = Math.min(apRowAmount, debtRemainingToOffset);
-              let newRowBalance = apRowAmount - apply;
-              
-              await supabase.from('accounts_payable').update({
-                  amount_riel: newRowBalance,
-                  status: newRowBalance <= 0 ? 'Paid' : 'Unpaid'
-              }).eq('id', apRow.id);
-              
-              debtRemainingToOffset -= apply;
-          }
-      }
-
-      // 4. Log Expense (Deduct Cash)
-      await supabase.from('expenses').insert([{
-        expense_date: new Date().toISOString().split('T')[0],
-        spender: 'Both',
-        payment_method: methodStrings.join(', '),
-        remarks: `Paid Debt: ${supplier?.name || 'Supplier'}`,
-        amount: Math.abs(totalUsdFace),
-        amount_riel: Math.abs(totalRielFace),
-        description: 'BUSINESS'
-      }]);
-
-      setPayPendingModal({ isOpen: false, record: null, totalDue: 0 });
-      setPendingPaymentRows([{ id: Date.now(), method: 'Cash ៛', amount: '' }]);
-      
-      await Promise.all([fetchSuppliers(), fetchImports()]);
-
-    } catch (err: any) {
-      alert(`Error: ${err.message}`);
-    } finally {
-      setIsProcessing(false);
-    }
-  }
-
-  const handleSaveRecord = async (id: number) => {
-    if (!edits[id]) return;
-    const payload = { ...edits[id] } as any;
-    ['price', 'cost_price', 'weight', 'stock', 'mtd_kg_used', 'mtd_bags_used'].forEach(key => {
-      if (payload[key] === '') payload[key] = 0;
-      else if (payload[key] !== undefined) payload[key] = Number(payload[key]);
-    });
-
-    const { error } = await supabase.from('products').update(payload).eq('id', id)
     if (!error) {
-      setEdits(prev => { const n = { ...prev }; delete n[id]; return n })
-      setEditingCell(null)
-      fetchProducts()
-    } else alert(`Error saving: ${error.message}`)
-  }
-
-  const handleDelete = async () => {
-    if (!confirm(`Are you sure you want to delete ${selectedToDelete.size} item(s)?`)) return
-    const { error } = await supabase.from('products').delete().in('id', Array.from(selectedToDelete))
-    if (!error) { setSelectedToDelete(new Set()); fetchProducts() }
-  }
-
-  const addProduct = async () => {
-    if (!newItem.name) return alert('Name is required')
-    const payload = {
-      name: newItem.name,
-      price: Number(newItem.price) || 0,
-      cost_price: Number(newItem.cost_price) || 0,
-      weight: Number(newItem.weight) || 0,
-      stock: Number(newItem.stock) || 0,
-      mtd_kg_used: 0,
-      mtd_bags_used: 0
-    }
-    const { error } = await supabase.from('products').insert([payload])
-    if (!error) {
-      setIsAddModalOpen(false)
-      setNewItem({ name: '', price: '', cost_price: '', weight: '', stock: '' })
-      fetchProducts()
+      fetchBatches();
+      setEditingHistoryId(null);
+    } else {
+      alert(`Error updating batch: ${error.message}`);
     }
   }
 
@@ -485,6 +274,7 @@ export default function RiceControl() {
         fetchProducts(); 
       }
       fetchHistory(historyModal.product);
+      fetchBatches(); // Keep global state synced
     } else {
       alert(`Error updating history: ${error?.message}`);
     }
@@ -507,6 +297,247 @@ export default function RiceControl() {
         fetchProducts(); 
       }
       fetchHistory(historyModal.product);
+      fetchBatches();
+    }
+  }
+
+  async function handleAddSupplier() {
+    if (!newSupplier.name) return alert('Supplier name is required');
+    setIsProcessing(true);
+    try {
+      const { error } = await supabase.from('suppliers').insert([{ name: newSupplier.name, phone: newSupplier.phone, location: newSupplier.location }]);
+      if (error) throw error;
+      setIsAddSupplierOpen(false);
+      setNewSupplier({ name: '', phone: '', location: '' });
+      await fetchSuppliers();
+    } catch (err: any) {
+      alert(`Error: ${err.message}`);
+    } finally {
+      setIsProcessing(false);
+    }
+  }
+
+  async function handleProcessImport(isPayLater: boolean) {
+    if (!importForm.supplier_id || !importForm.product_id || !importForm.qty || !importForm.unit_cost) {
+      return alert('Please fill in all required fields (Supplier, Product, Qty, Cost).');
+    }
+
+    const qty = Number(importForm.qty);
+    const unitCost = Number(importForm.unit_cost);
+    const totalCost = qty * unitCost;
+    const paidAmount = isPayLater ? (Number(importForm.paid_amount) || 0) : totalCost;
+    
+    if (paidAmount > totalCost) return alert('Cannot pay more than the total cost.');
+
+    const status = paidAmount >= totalCost ? 'Paid' : 'Pending';
+    const remainingDebt = totalCost - paidAmount;
+
+    setIsProcessing(true);
+
+    try {
+      const supplierName = suppliers.find(s => String(s.id) === String(importForm.supplier_id))?.name || 'Unknown Supplier';
+
+      const { error: importErr } = await supabase.from('imports').insert([{
+        supplier_id: Number(importForm.supplier_id),
+        product_id: Number(importForm.product_id),
+        qty: qty,
+        unit_cost: unitCost,
+        total_cost: totalCost,
+        paid_amount: paidAmount,
+        status: status
+      }]);
+      if (importErr) throw importErr;
+
+      if (remainingDebt > 0) {
+        const supplier = suppliers.find(s => String(s.id) === String(importForm.supplier_id));
+        const newTotalOwed = Number(supplier?.total_owed || 0) + remainingDebt;
+        await supabase.from('suppliers').update({ total_owed: newTotalOwed }).eq('id', supplier?.id);
+
+        await supabase.from('accounts_payable').insert([{
+          supplier_name: supplierName,
+          amount_riel: remainingDebt,
+          amount_usd: 0,
+          notes: `Stock Import: ${qty} bags`,
+          status: 'Unpaid'
+        }]);
+      }
+
+      const product = products.find(p => String(p.id) === String(importForm.product_id));
+      if (!product) throw new Error("Product ID mismatch");
+      
+      const newStock = Number(product.stock || 0) + qty;
+      const { error: stockErr } = await supabase.from('products').update({ stock: newStock, cost_price: unitCost }).eq('id', product.id);
+      if (stockErr) throw stockErr;
+
+      await supabase.from('price_history').insert([{
+        product_id: Number(importForm.product_id),
+        cost_price: unitCost,
+        price: product.price || 0,
+        imported_qty: qty,
+        sold_qty: 0
+      }]);
+
+      if (paidAmount > 0) {
+        let amtUsd = 0;
+        let amtRiel = paidAmount;
+        if (importForm.payment_method.includes('$')) {
+          amtUsd = paidAmount;
+          amtRiel = paidAmount * EXCHANGE_RATE;
+        }
+
+        await supabase.from('expenses').insert([{
+          expense_date: new Date().toISOString().split('T')[0],
+          spender: 'Both',
+          payment_method: importForm.payment_method,
+          remarks: `Stock Import: ${supplierName}`,
+          amount: Math.abs(amtUsd),
+          amount_riel: Math.abs(amtRiel),
+          description: 'BUSINESS'
+        }]);
+      }
+
+      setImportForm({ supplier_id: '', product_id: '', qty: '', unit_cost: '', paid_amount: '', payment_method: 'Cash ៛' });
+      alert('Import processed successfully!');
+      
+      await Promise.all([
+        fetchProducts(),
+        fetchSuppliers(),
+        fetchImports(),
+        fetchBatches()
+      ]);
+
+      if (isPayLater) setActiveView('pending');
+      else setActiveView('wholesale');
+
+    } catch (err: any) {
+      alert(`Error processing import: ${err.message}`);
+    } finally {
+      setIsProcessing(false);
+    }
+  }
+
+  async function handlePayPendingSubmit() {
+    const record = payPendingModal.record;
+    
+    let totalRielEq = 0;
+    let totalUsdFace = 0;
+    let totalRielFace = 0;
+    let methodStrings: string[] = [];
+
+    for (const r of pendingPaymentRows) {
+      const amt = Number(r.amount) || 0;
+      if (amt <= 0) continue;
+      
+      if (r.method.includes('$')) {
+        totalRielEq += (amt * EXCHANGE_RATE);
+        totalUsdFace += amt;
+      } else {
+        totalRielEq += amt;
+        totalRielFace += amt;
+      }
+      methodStrings.push(`${r.method}: ${amt}`);
+    }
+
+    if (totalRielEq <= 0) return alert('Enter a valid amount');
+    const remainingBefore = Number(record.total_cost) - Number(record.paid_amount);
+    if (totalRielEq > remainingBefore + 0.1) return alert('Cannot pay more than what is owed');
+
+    setIsProcessing(true);
+
+    try {
+      const newPaidAmount = Number(record.paid_amount) + totalRielEq;
+      const newStatus = newPaidAmount >= Number(record.total_cost) ? 'Paid' : 'Pending';
+
+      await supabase.from('imports').update({ paid_amount: newPaidAmount, status: newStatus }).eq('id', record.id);
+
+      const supplier = suppliers.find(s => String(s.id) === String(record.supplier_id));
+      const newTotalOwed = Math.max(0, Number(supplier?.total_owed || 0) - totalRielEq);
+      await supabase.from('suppliers').update({ total_owed: newTotalOwed }).eq('id', supplier?.id);
+
+      const { data: apRows } = await supabase.from('accounts_payable')
+        .select('*')
+        .eq('supplier_name', supplier?.name)
+        .eq('status', 'Unpaid')
+        .order('created_at', { ascending: true });
+      
+      if (apRows && apRows.length > 0) {
+          let debtRemainingToOffset = totalRielEq;
+          for (let apRow of apRows) {
+              if (debtRemainingToOffset <= 0) break;
+              let apRowAmount = Number(apRow.amount_riel);
+              let apply = Math.min(apRowAmount, debtRemainingToOffset);
+              let newRowBalance = apRowAmount - apply;
+              
+              await supabase.from('accounts_payable').update({
+                  amount_riel: newRowBalance,
+                  status: newRowBalance <= 0 ? 'Paid' : 'Unpaid'
+              }).eq('id', apRow.id);
+              
+              debtRemainingToOffset -= apply;
+          }
+      }
+
+      await supabase.from('expenses').insert([{
+        expense_date: new Date().toISOString().split('T')[0],
+        spender: 'Both',
+        payment_method: methodStrings.join(', '),
+        remarks: `Paid Debt: ${supplier?.name || 'Supplier'}`,
+        amount: Math.abs(totalUsdFace),
+        amount_riel: Math.abs(totalRielFace),
+        description: 'BUSINESS'
+      }]);
+
+      setPayPendingModal({ isOpen: false, record: null, totalDue: 0 });
+      setPendingPaymentRows([{ id: Date.now(), method: 'Cash ៛', amount: '' }]);
+      
+      await Promise.all([fetchSuppliers(), fetchImports()]);
+
+    } catch (err: any) {
+      alert(`Error: ${err.message}`);
+    } finally {
+      setIsProcessing(false);
+    }
+  }
+
+  const handleSaveRecord = async (id: number) => {
+    if (!edits[id]) return;
+    const payload = { ...edits[id] } as any;
+    ['price', 'cost_price', 'weight', 'stock', 'mtd_kg_used', 'mtd_bags_used', 'min_stock_level'].forEach(key => {
+      if (payload[key] === '') payload[key] = 0;
+      else if (payload[key] !== undefined) payload[key] = Number(payload[key]);
+    });
+
+    const { error } = await supabase.from('products').update(payload).eq('id', id)
+    if (!error) {
+      setEdits(prev => { const n = { ...prev }; delete n[id]; return n })
+      setEditingCell(null)
+      fetchProducts()
+    } else alert(`Error saving: ${error.message}`)
+  }
+
+  const handleDelete = async () => {
+    if (!confirm(`Are you sure you want to delete ${selectedToDelete.size} item(s)?`)) return
+    const { error } = await supabase.from('products').delete().in('id', Array.from(selectedToDelete))
+    if (!error) { setSelectedToDelete(new Set()); fetchProducts() }
+  }
+
+  const addProduct = async () => {
+    if (!newItem.name) return alert('Name is required')
+    const payload = {
+      name: newItem.name,
+      price: Number(newItem.price) || 0,
+      cost_price: Number(newItem.cost_price) || 0,
+      weight: Number(newItem.weight) || 0,
+      stock: Number(newItem.stock) || 0,
+      min_stock_level: Number(newItem.min_stock_level) || 10,
+      mtd_kg_used: 0,
+      mtd_bags_used: 0
+    }
+    const { error } = await supabase.from('products').insert([payload])
+    if (!error) {
+      setIsAddModalOpen(false)
+      setNewItem({ name: '', price: '', cost_price: '', weight: '', stock: '', min_stock_level: 10 })
+      fetchProducts()
     }
   }
 
@@ -539,6 +570,7 @@ export default function RiceControl() {
     }
   }
 
+  // --- COLUMN DRAG & DROP LOGIC ---
   const handleDragStart = (e: React.DragEvent, col: string) => {
     if (col === 'actions') return; 
     e.dataTransfer.setData('text/plain', col)
@@ -574,6 +606,7 @@ export default function RiceControl() {
     })
   }
 
+  // --- COLUMN RESIZE LOGIC ---
   const handleResizeStart = (e: React.MouseEvent | React.TouchEvent, columnKey: string) => {
     e.preventDefault()
     e.stopPropagation() 
@@ -614,6 +647,7 @@ export default function RiceControl() {
     setSortConfig({ key, direction });
   }
 
+  // --- DATA PROCESSING ---
   const processedProducts = products
     .map(p => ({ ...p, ...edits[p.id] }))
     .filter(p => {
@@ -651,10 +685,11 @@ export default function RiceControl() {
       return 0;
     })
 
+  // --- FORMATTERS ---
   const formatDisplayValue = (col: string, val: any) => {
     if (val === null || val === undefined) return '';
     if (['price', 'cost_price'].includes(col)) return `${new Intl.NumberFormat('en-US').format(val)} ៛`;
-    if (['stock', 'weight', 'id'].includes(col)) return new Intl.NumberFormat('en-US').format(val);
+    if (['stock', 'weight', 'id', 'min_stock_level'].includes(col)) return new Intl.NumberFormat('en-US').format(val);
     if (['mtd_kg_used'].includes(col)) return `${new Intl.NumberFormat('en-US').format(val)} kg`;
     if (['mtd_bags_used'].includes(col)) return `${new Intl.NumberFormat('en-US').format(val)} bags`;
     return String(val);
@@ -681,6 +716,8 @@ export default function RiceControl() {
 
   return (
     <div className="main-wrapper">
+      
+      {/* HEADER */}
       <div className="header-container">
         <h1 className="page-title">🌾 Rice Inventory & Suppliers</h1>
         <div className="header-actions">
@@ -702,6 +739,7 @@ export default function RiceControl() {
         </div>
       </div>
 
+      {/* TOOLBAR & TABS */}
       <div className="toolbar-container">
         <div className="toolbar-tabs" style={{ display: 'flex', overflowX: 'auto', whiteSpace: 'nowrap' }}>
           <button className={activeView === 'retail' ? 'tab active' : 'tab'} onClick={() => { setActiveView('retail'); setActiveCategory('All'); }}>🛍️ Retail</button>
@@ -730,13 +768,14 @@ export default function RiceControl() {
         )}
       </div>
 
+      {/* RICE CATEGORIES (ONLY WHOLESALE) - SCROLLABLE SWIPE TABS */}
       {activeView === 'wholesale' && (
-        <div className="hide-scrollbar" style={{ display: 'flex', overflowX: 'auto', gap: '8px', paddingBottom: '16px', marginBottom: '8px' }}>
+        <div className="hide-scrollbar" style={{ display: 'flex', overflowX: 'auto', gap: '8px', paddingBottom: '16px', marginBottom: '8px', WebkitOverflowScrolling: 'touch', scrollSnapType: 'x mandatory' }}>
           {RICE_CATEGORIES.map(cat => (
             <button 
               key={cat} 
               onClick={() => setActiveCategory(cat)} 
-              style={{ padding: '8px 16px', borderRadius: '20px', border: activeCategory === cat ? 'none' : '1px solid #cbd5e1', backgroundColor: activeCategory === cat ? '#b58a3d' : '#ffffff', color: activeCategory === cat ? '#fff' : '#475569', fontWeight: 'bold', cursor: 'pointer', fontSize: '13px', whiteSpace: 'nowrap' }}
+              style={{ scrollSnapAlign: 'start', padding: '8px 16px', borderRadius: '20px', border: activeCategory === cat ? 'none' : '1px solid #cbd5e1', backgroundColor: activeCategory === cat ? '#b58a3d' : '#ffffff', color: activeCategory === cat ? '#fff' : '#475569', fontWeight: 'bold', cursor: 'pointer', fontSize: '13px', whiteSpace: 'nowrap' }}
             >
               {cat}
             </button>
@@ -744,7 +783,12 @@ export default function RiceControl() {
         </div>
       )}
 
+      {/* =========================================
+          VIEW ROUTING ENGINE
+          ========================================= */}
+
       {(activeView === 'retail' || activeView === 'wholesale') && (
+        /* MAIN SPREADSHEET */
         <div className="table-wrapper fade-in">
           <table style={{ borderCollapse: 'collapse', tableLayout: 'fixed', width: 'max-content', minWidth: '100%' }}>
             <thead>
@@ -765,7 +809,7 @@ export default function RiceControl() {
                       onClick={() => handleSort(key)}
                       style={{ width: columnWidths[key] || 150, position: 'relative', padding: '16px 12px', textAlign: key === 'actions' ? 'center' : 'left', color: '#475569', fontSize: '13px', textTransform: 'uppercase', fontWeight: 'bold', borderRight: '1px solid #f1f5f9', cursor: isDraggable ? 'pointer' : 'default', whiteSpace: 'nowrap' }}
                     >
-                      {key === 'linked_wholesale' ? 'Linked Wholesale Bag' : key === 'mtd_kg_used' ? 'MTD Used (Kg)' : key === 'mtd_bags_used' ? 'MTD Used (Bags)' : key.replace('_', ' ')}
+                      {key === 'linked_wholesale' ? 'Linked Wholesale Bag' : key === 'mtd_kg_used' ? 'MTD Used (Kg)' : key === 'mtd_bags_used' ? 'MTD Used (Bags)' : key === 'min_stock_level' ? 'Min Stock' : key.replace('_', ' ')}
                       {isDraggable && (<span style={{ marginLeft: '6px', fontSize: '12px', opacity: sortConfig?.key === key ? 1 : 0.3 }}>{sortConfig?.key === key ? (sortConfig.direction === 'asc' ? '↑' : '↓') : '↕'}</span>)}
                       <Resizer columnKey={key} />
                     </th>
@@ -777,93 +821,194 @@ export default function RiceControl() {
               {processedProducts.length === 0 ? (
                 <tr><td colSpan={columnOrder.length} style={{ padding: '40px', textAlign: 'center', color: '#94a3b8' }}>No products found.</td></tr>
               ) : (
-                processedProducts.map(p => (
-                  <tr key={p.id} onMouseEnter={() => setHoveredId(p.id)} onMouseLeave={() => setHoveredId(null)} style={{ borderBottom: '1px solid #f1f5f9', background: edits[p.id] ? '#fefcf3' : 'transparent', transition: 'background 0.2s' }}>
-                    {columnOrder.map(col => {
-                      if ((col === 'linked_wholesale' || col === 'mtd_kg_used' || col === 'mtd_bags_used') && activeView !== 'retail') return null;
-                      if (col === 'actions') {
-                        if (activeView !== 'wholesale') return null;
-                        return (
-                          <td key={col} style={{ borderRight: '1px solid #f1f5f9', padding: '8px', overflow: 'hidden' }}>
-                            <div style={{ display: 'flex', gap: '8px', alignItems: 'center', justifyContent: 'center' }}>
-                              {edits[p.id] ? (
-                                <>
-                                  <button onMouseDown={() => handleSaveRecord(p.id)} style={{ color: '#fff', background: '#10b981', border: 'none', padding: '8px 12px', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', fontSize: '12px' }}>Save</button>
-                                  <button onMouseDown={() => setEdits(prev => { const n = { ...prev }; delete n[p.id]; return n })} style={{ color: '#ef4444', background: '#fee2e2', border: 'none', padding: '8px 12px', borderRadius: '6px', cursor: 'pointer', fontSize: '12px', fontWeight: 'bold' }}>Undo</button>
-                                </>
-                              ) : (
-                                <>
-                                  <button onClick={() => openImportModal(p)} style={{ color: '#fff', background: '#3b82f6', border: 'none', padding: '8px 12px', borderRadius: '6px', cursor: 'pointer', fontSize: '12px', fontWeight: 'bold' }}>📦 Import</button>
-                                  <button onClick={() => fetchHistory(p)} style={{ color: '#ca8a04', background: '#fef3c7', border: '1px solid #fde047', padding: '8px 12px', borderRadius: '6px', cursor: 'pointer', fontSize: '12px', fontWeight: 'bold' }}>🕒 Batches</button>
-                                </>
-                              )}
-                            </div>
-                          </td>
-                        )
-                      }
+                processedProducts.map(p => {
+                  // --- FIFO BATCH CALCULATIONS ---
+                  // 1. Get all active batches (Stock > 0)
+                  const pBatches = (activeBatchesMap[p.id] || []).filter(b => (b.imported_qty || 0) - (b.sold_qty || 0) > 0);
+                  // 2. The oldest active batch becomes the Main Row
+                  const currentBatch = pBatches.length > 0 ? pBatches[0] : null;
+                  // 3. The remaining batches go into the Dropdown Queue
+                  const queuedBatches = pBatches.slice(1);
+                  // 4. Total Stock calculated across all active batches
+                  const totalActiveStock = pBatches.reduce((sum, b) => sum + ((b.imported_qty || 0) - (b.sold_qty || 0)), 0);
 
-                      const isIdCol = col === 'id';
-                      const isEditing = editingCell?.id === p.id && editingCell?.col === col;
-                      const val = edits[p.id]?.[col as keyof Product] ?? p[col as keyof Product] ?? '';
-
-                      if (col === 'linked_wholesale') {
-                        const linkedProduct = products.find(wp => wp.id === p.linked_wholesale_id);
-                        const isDropdownOpen = activeDropdownId === p.id;
-                        return (
-                          <td key={col} style={{ borderRight: '1px solid #f1f5f9', position: 'relative', padding: '6px 12px', overflow: 'visible' }}>
-                            {isDropdownOpen ? (
-                              <div style={{ position: 'relative', zIndex: 100 }}>
-                                <input autoFocus className="dropdown-search-input" placeholder="Search 50kg bag..." value={dropdownSearch} onChange={e => setDropdownSearch(e.target.value)} onBlur={() => setTimeout(() => setActiveDropdownId(null), 200)} onKeyDown={e => e.key === 'Escape' && setActiveDropdownId(null)} />
-                                <div className="dropdown-results-tray">
-                                  <div className="dropdown-row clear-option" onMouseDown={() => handleLinkWholesaleBag(p.id, null)}>❌ Clear Linked Bag</div>
-                                  {products.filter(wp => wp.weight >= 50 && wp.name.toLowerCase().includes(dropdownSearch.toLowerCase())).map(wp => (
-                                    <div key={wp.id} className="dropdown-row" onMouseDown={() => handleLinkWholesaleBag(p.id, wp)}>
-                                      <span style={{ fontWeight: 'bold' }}>{wp.name}</span>
-                                      <span style={{ fontSize: '11px', color: '#64748b' }}> ({formatRiel(wp.cost_price)})</span>
-                                    </div>
-                                  ))}
+                  return (
+                    <React.Fragment key={p.id}>
+                      <tr onMouseEnter={() => setHoveredId(p.id)} onMouseLeave={() => setHoveredId(null)} style={{ borderBottom: '1px solid #f1f5f9', background: edits[p.id] ? '#fefcf3' : 'transparent', transition: 'background 0.2s' }}>
+                        {columnOrder.map(col => {
+                          if ((col === 'linked_wholesale' || col === 'mtd_kg_used' || col === 'mtd_bags_used') && activeView !== 'retail') return null;
+                          
+                          // --- ACTIONS COLUMN ---
+                          if (col === 'actions') {
+                            if (activeView !== 'wholesale') return null;
+                            return (
+                              <td key={col} style={{ borderRight: '1px solid #f1f5f9', padding: '8px', overflow: 'hidden' }}>
+                                <div style={{ display: 'flex', gap: '6px', alignItems: 'center', justifyContent: 'center' }}>
+                                  {edits[p.id] ? (
+                                    <>
+                                      <button onMouseDown={() => handleSaveRecord(p.id)} style={{ color: '#fff', background: '#10b981', border: 'none', padding: '8px 12px', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', fontSize: '12px' }}>Save</button>
+                                      <button onMouseDown={() => setEdits(prev => { const n = { ...prev }; delete n[p.id]; return n })} style={{ color: '#ef4444', background: '#fee2e2', border: 'none', padding: '8px 12px', borderRadius: '6px', cursor: 'pointer', fontSize: '12px', fontWeight: 'bold' }}>Undo</button>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <button onClick={() => openImportModal(p)} style={{ color: '#fff', background: '#3b82f6', border: 'none', padding: '8px 12px', borderRadius: '6px', cursor: 'pointer', fontSize: '12px', fontWeight: 'bold' }}>📦 Import</button>
+                                      
+                                      {/* QUEUE ACCORDION BUTTON */}
+                                      {queuedBatches.length > 0 && (
+                                        <button onClick={() => setExpandedProductId(expandedProductId === p.id ? null : p.id)} style={{ color: '#ca8a04', background: '#fef3c7', border: '1px solid #fde047', padding: '8px 12px', borderRadius: '6px', cursor: 'pointer', fontSize: '12px', fontWeight: 'bold' }}>
+                                          {expandedProductId === p.id ? '▲ Hide Queue' : `▼ Queue (${queuedBatches.length})`}
+                                        </button>
+                                      )}
+                                      
+                                      {/* HISTORY BUTTON RESTORED */}
+                                      <button onClick={() => fetchHistory(p)} style={{ color: '#475569', background: '#f1f5f9', border: '1px solid #cbd5e1', padding: '8px 12px', borderRadius: '6px', cursor: 'pointer', fontSize: '12px', fontWeight: 'bold' }}>🕒 History</button>
+                                    </>
+                                  )}
                                 </div>
-                              </div>
-                            ) : (
-                              <div className="interactive-select-trigger" onClick={() => { setActiveDropdownId(p.id); setDropdownSearch(''); }}>
-                                {linkedProduct ? `🌾 ${linkedProduct.name}` : '🔍 Click to link 50kg Bag...'}
-                              </div>
-                            )}
-                          </td>
-                        )
-                      }
+                              </td>
+                            )
+                          }
 
-                      return (
-                        <td key={col} className={isEditing ? 'cell-editing' : ''} style={{ borderRight: '1px solid #f1f5f9', overflow: 'hidden', position: 'relative', padding: 0 }}>
-                          {isIdCol && (hoveredId === p.id || selectedToDelete.has(p.id)) && (
-                            <div style={{ position: 'absolute', left: '8px', top: '50%', transform: 'translateY(-50%)', zIndex: 25, background: edits[p.id] ? '#fefcf3' : '#fff', paddingRight: '4px' }}>
-                              <input type="checkbox" checked={selectedToDelete.has(p.id)} onChange={() => { const next = new Set(selectedToDelete); next.has(p.id) ? next.delete(p.id) : next.add(p.id); setSelectedToDelete(next); }} style={{ cursor: 'pointer', width: '18px', height: '18px', margin: 0, accentColor: '#b58a3d' }} />
-                            </div>
-                          )}
-                          {isEditing ? (
-                            <input autoFocus type={['name'].includes(col as string) ? 'text' : 'number'} className="cell-input no-spinners" style={{ paddingLeft: isIdCol ? '36px' : '12px' }} value={val as any} onChange={(e) => { const newVal = e.target.type === 'number' ? (e.target.value === '' ? '' : Number(e.target.value)) : e.target.value; setEdits(prev => ({ ...prev, [p.id]: { ...(prev[p.id] || {}), [col]: newVal } })) }} onBlur={() => handleSaveRecord(p.id)} onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); if (e.key === 'Escape') { setEdits(prev => { const n = { ...prev }; delete n[p.id]; return n }); setEditingCell(null); } }} />
-                          ) : (
-                            <div className="cell-display" style={{ paddingLeft: isIdCol ? '36px' : '12px', fontWeight: col === 'name' ? 'bold' : 'normal', color: col === 'name' ? '#1e293b' : (['mtd_kg_used', 'mtd_bags_used'].includes(col) ? '#b58a3d' : '#334155'), cursor: ['mtd_kg_used', 'mtd_bags_used'].includes(col) ? 'default' : 'text' }} onClick={() => { if (!['mtd_kg_used', 'mtd_bags_used'].includes(col)) { setEditingCell({ id: p.id, col: col as string }) } }}>
-                              {formatDisplayValue(col as string, val)}
-                            </div>
-                          )}
-                        </td>
-                      )
-                    })}
-                  </tr>
-                ))
+                          const isIdCol = col === 'id';
+                          const isEditing = editingCell?.id === p.id && editingCell?.col === col;
+                          
+                          // DYNAMIC OVERRIDE: Wholesale Main Row adopts the "Current Active Batch" Data
+                          let val = edits[p.id]?.[col as keyof Product] ?? p[col as keyof Product] ?? '';
+                          
+                          if (activeView === 'wholesale' && !edits[p.id] && currentBatch) {
+                            if (col === 'price') val = currentBatch.price;
+                            if (col === 'cost_price') val = currentBatch.cost_price;
+                            if (col === 'stock') val = (currentBatch.imported_qty || 0) - (currentBatch.sold_qty || 0);
+                          } else if (activeView === 'wholesale' && !edits[p.id] && !currentBatch) {
+                            if (col === 'stock') val = 0; // Ensures out-of-stock products cleanly show 0
+                          }
+
+                          if (col === 'linked_wholesale') {
+                            const linkedProduct = products.find(wp => wp.id === p.linked_wholesale_id);
+                            const isDropdownOpen = activeDropdownId === p.id;
+                            return (
+                              <td key={col} style={{ borderRight: '1px solid #f1f5f9', position: 'relative', padding: '6px 12px', overflow: 'visible' }}>
+                                {isDropdownOpen ? (
+                                  <div style={{ position: 'relative', zIndex: 100 }}>
+                                    <input autoFocus className="dropdown-search-input" placeholder="Search 50kg bag..." value={dropdownSearch} onChange={e => setDropdownSearch(e.target.value)} onBlur={() => setTimeout(() => setActiveDropdownId(null), 200)} onKeyDown={e => e.key === 'Escape' && setActiveDropdownId(null)} />
+                                    <div className="dropdown-results-tray">
+                                      <div className="dropdown-row clear-option" onMouseDown={() => handleLinkWholesaleBag(p.id, null)}>❌ Clear Linked Bag</div>
+                                      {products.filter(wp => wp.weight >= 50 && wp.name.toLowerCase().includes(dropdownSearch.toLowerCase())).map(wp => (
+                                        <div key={wp.id} className="dropdown-row" onMouseDown={() => handleLinkWholesaleBag(p.id, wp)}>
+                                          <span style={{ fontWeight: 'bold' }}>{wp.name}</span>
+                                          <span style={{ fontSize: '11px', color: '#64748b' }}> ({formatRiel(wp.cost_price)})</span>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <div className="interactive-select-trigger" onClick={() => { setActiveDropdownId(p.id); setDropdownSearch(''); }}>
+                                    {linkedProduct ? `🌾 ${linkedProduct.name}` : '🔍 Click to link 50kg Bag...'}
+                                  </div>
+                                )}
+                              </td>
+                            )
+                          }
+
+                          return (
+                            <td key={col} className={isEditing ? 'cell-editing' : ''} style={{ borderRight: '1px solid #f1f5f9', overflow: 'hidden', position: 'relative', padding: 0 }}>
+                              {isIdCol && (hoveredId === p.id || selectedToDelete.has(p.id)) && (
+                                <div style={{ position: 'absolute', left: '8px', top: '50%', transform: 'translateY(-50%)', zIndex: 25, background: edits[p.id] ? '#fefcf3' : '#fff', paddingRight: '4px' }}>
+                                  <input type="checkbox" checked={selectedToDelete.has(p.id)} onChange={() => { const next = new Set(selectedToDelete); next.has(p.id) ? next.delete(p.id) : next.add(p.id); setSelectedToDelete(next); }} style={{ cursor: 'pointer', width: '18px', height: '18px', margin: 0, accentColor: '#b58a3d' }} />
+                                </div>
+                              )}
+                              
+                              {isEditing ? (
+                                <input autoFocus type={['name'].includes(col as string) ? 'text' : 'number'} className="cell-input no-spinners" style={{ paddingLeft: isIdCol ? '36px' : '12px' }} value={val as any} onChange={(e) => { const newVal = e.target.type === 'number' ? (e.target.value === '' ? '' : Number(e.target.value)) : e.target.value; setEdits(prev => ({ ...prev, [p.id]: { ...(prev[p.id] || {}), [col]: newVal } })) }} onBlur={() => handleSaveRecord(p.id)} onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); if (e.key === 'Escape') { setEdits(prev => { const n = { ...prev }; delete n[p.id]; return n }); setEditingCell(null); } }} />
+                              ) : (
+                                <div className="cell-display" style={{ paddingLeft: isIdCol ? '36px' : '12px', fontWeight: col === 'name' ? 'bold' : 'normal', color: col === 'name' ? '#1e293b' : (['mtd_kg_used', 'mtd_bags_used'].includes(col) ? '#b58a3d' : '#334155'), cursor: 'text' }} onClick={() => { setEditingCell({ id: p.id, col: col as string }) }}>
+                                  
+                                  {col === 'name' ? (
+                                    <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                      {formatDisplayValue(col as string, val)}
+                                      
+                                      {/* Total Stock Indicator */}
+                                      {activeView === 'wholesale' && pBatches.length > 1 && (
+                                        <span style={{ fontSize: '12px', color: '#b58a3d', fontWeight: 'bold' }}>
+                                          (Total: {totalActiveStock})
+                                        </span>
+                                      )}
+
+                                      {/* Clean Red Emoji Alert */}
+                                      {(Number(p.stock) <= Number(p.min_stock_level || 10)) && (
+                                        <span title="Low stock" style={{ fontSize: '14px' }}>🚨</span>
+                                      )}
+                                    </span>
+                                  ) : (
+                                    formatDisplayValue(col as string, val)
+                                  )}
+
+                                </div>
+                              )}
+                            </td>
+                          )
+                        })}
+                      </tr>
+
+                      {/* THE NEW BATCH QUEUE ACCORDION (Only maps queued batches) */}
+                      {expandedProductId === p.id && activeView === 'wholesale' && queuedBatches.length > 0 && (
+                        <tr style={{ background: '#f8fafc' }}>
+                          <td colSpan={columnOrder.length} style={{ padding: '16px', borderBottom: '2px solid #e2e8f0' }}>
+                             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', paddingLeft: '40px' }}>
+                               <div style={{ fontSize: '12px', fontWeight: 'bold', color: '#64748b', textTransform: 'uppercase', marginBottom: '8px' }}>Queued Batches (FIFO Order)</div>
+                               
+                               {queuedBatches.map((batch, index) => {
+                                 const remaining = (batch.imported_qty || 0) - (batch.sold_qty || 0);
+                                 let label = `Queue #${index + 1}`;
+                                 
+                                 const isEditBatch = editingHistoryId === batch.id;
+                                 const editData = historyEdits[batch.id] || { price: batch.price, cost_price: batch.cost_price };
+
+                                 return (
+                                   <div key={batch.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#fff', padding: '12px', borderRadius: '8px', border: '1px solid #cbd5e1' }}>
+                                     <div style={{ flex: 1 }}>
+                                       <span style={{ background: '#f59e0b', color: '#fff', padding: '2px 8px', borderRadius: '12px', fontSize: '11px', fontWeight: 'bold', marginRight: '10px' }}>{label}</span>
+                                       <span style={{ fontSize: '13px', color: '#334155' }}>Stock: <b>{remaining}</b> bags</span>
+                                     </div>
+                                     
+                                     {isEditBatch ? (
+                                       <div style={{ display: 'flex', gap: '8px', flex: 2, alignItems: 'center', justifyContent: 'flex-end' }}>
+                                         <CurrencyInput value={editData.price} onChange={(v:any) => setHistoryEdits({...historyEdits, [batch.id]: {...editData, price: v}})} style={{ width: '90px', padding: '6px', fontSize: '13px', borderRadius: '4px', border: '1px solid #b58a3d' }} placeholder="Price" />
+                                         <CurrencyInput value={editData.cost_price} onChange={(v:any) => setHistoryEdits({...historyEdits, [batch.id]: {...editData, cost_price: v}})} style={{ width: '90px', padding: '6px', fontSize: '13px', borderRadius: '4px', border: '1px solid #b58a3d' }} placeholder="Cost" />
+                                         <button onClick={() => handleSaveBatch(batch.id)} style={{ padding: '6px 12px', background: '#10b981', color: '#fff', border: 'none', borderRadius: '4px', fontWeight: 'bold', cursor: 'pointer' }}>Save</button>
+                                         <button onClick={() => setEditingHistoryId(null)} style={{ padding: '6px 12px', background: '#ef4444', color: '#fff', border: 'none', borderRadius: '4px', fontWeight: 'bold', cursor: 'pointer' }}>X</button>
+                                       </div>
+                                     ) : (
+                                       <div style={{ display: 'flex', gap: '20px', flex: 2, alignItems: 'center', justifyContent: 'flex-end' }}>
+                                         <span style={{ fontSize: '13px', color: '#0f172a' }}>Selling: <b style={{ color: '#b58a3d' }}>{formatRiel(batch.price)}</b></span>
+                                         <span style={{ fontSize: '13px', color: '#64748b' }}>Cost: <b>{formatRiel(batch.cost_price || 0)}</b></span>
+                                         <button onClick={() => { setEditingHistoryId(batch.id); setHistoryEdits({ [batch.id]: { price: batch.price, cost_price: batch.cost_price } }); }} style={{ padding: '4px 8px', background: '#e0f2fe', color: '#0284c7', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', fontSize: '12px' }}>✏️ Edit</button>
+                                       </div>
+                                     )}
+                                   </div>
+                                 )
+                               })}
+                             </div>
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
+                  )
+                })
               )}
             </tbody>
           </table>
         </div>
       )}
 
+      {/* IMPORT FORM TAB */}
       {activeView === 'import' && (
         <div className="fade-in" style={{ display: 'flex', justifyContent: 'center' }}>
           <div style={{ background: '#fff', padding: '32px', borderRadius: '16px', border: '1px solid #e2e8f0', boxShadow: '0 10px 25px rgba(0,0,0,0.05)', width: '100%', maxWidth: '600px' }}>
             <h2 style={{ marginTop: 0, color: '#1e293b', marginBottom: '24px', borderBottom: '2px solid #f1f5f9', paddingBottom: '12px' }}>🚚 Receive New Stock</h2>
             
             <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+              {/* Supplier */}
               <div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: '6px' }}>
                   <label style={{ fontSize: '13px', color: '#0f172a', fontWeight: 'bold' }}>Select Supplier</label>
@@ -875,6 +1020,7 @@ export default function RiceControl() {
                 </select>
               </div>
 
+              {/* Product */}
               <div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: '6px' }}>
                   <label style={{ fontSize: '13px', color: '#0f172a', fontWeight: 'bold' }}>Select Product (Rice)</label>
@@ -886,6 +1032,7 @@ export default function RiceControl() {
                 </select>
               </div>
 
+              {/* Qty & Cost */}
               <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap' }}>
                 <div style={{ flex: 1, minWidth: '150px' }}>
                   <label style={{ display: 'block', fontSize: '13px', color: '#0f172a', fontWeight: 'bold', marginBottom: '6px' }}>Quantity Imported</label>
@@ -897,11 +1044,13 @@ export default function RiceControl() {
                 </div>
               </div>
 
+              {/* Summary Block */}
               <div style={{ background: '#fefcf3', padding: '16px', borderRadius: '8px', border: '1px solid #fde047', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <span style={{ fontWeight: 'bold', color: '#854d0e' }}>Total Bill Cost:</span>
                 <span style={{ fontSize: '20px', fontWeight: 'bold', color: '#b58a3d' }}>{formatRiel(importTotalCalc)}</span>
               </div>
 
+              {/* Payment Section */}
               <div style={{ background: '#f8fafc', padding: '20px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
                 <h4 style={{ margin: '0 0 16px 0', fontSize: '14px', color: '#1e293b' }}>Payment Details</h4>
                 <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap' }}>
@@ -923,6 +1072,7 @@ export default function RiceControl() {
                 </div>
               </div>
 
+              {/* Actions */}
               <div style={{ display: 'flex', gap: '12px', marginTop: '10px' }}>
                 <button 
                   onClick={() => handleProcessImport(true)} 
@@ -945,6 +1095,7 @@ export default function RiceControl() {
         </div>
       )}
 
+      {/* PENDING PAYMENTS TAB (SUPPLIERS) */}
       {activeView === 'pending' && (
         <div className="table-wrapper fade-in">
           <table style={{ borderCollapse: 'collapse', width: '100%', minWidth: '900px' }}>
@@ -993,6 +1144,7 @@ export default function RiceControl() {
         </div>
       )}
 
+      {/* SUPPLIERS DATABASE TAB */}
       {activeView === 'suppliers' && (
         <div className="table-wrapper fade-in">
           <table style={{ borderCollapse: 'collapse', width: '100%', minWidth: '700px' }}>
@@ -1023,9 +1175,9 @@ export default function RiceControl() {
           </table>
         </div>
       )}
+{/* === GLOBAL MODALS === */}
 
-      {/* === GLOBAL MODALS === */}
-
+      {/* PAY PENDING MODAL (SUPPLIERS ONLY) */}
       {payPendingModal.isOpen && payPendingModal.record && (
         <div className="modal-overlay" onMouseDown={() => setPayPendingModal({ isOpen: false, record: null, totalDue: 0 })}>
           <div className="modal-content" style={{ maxWidth: '450px' }} onMouseDown={e => e.stopPropagation()}>
@@ -1066,7 +1218,7 @@ export default function RiceControl() {
                   
                   <div style={{ flex: 1 }}>
                     <CurrencyInput 
-                      placeholder="" 
+                      placeholder="Amount..." 
                       value={row.amount} 
                       onChange={(val: any) => {
                         const newRows = [...pendingPaymentRows];
@@ -1121,6 +1273,7 @@ export default function RiceControl() {
         </div>
       )}
 
+      {/* ADD SUPPLIER MODAL */}
       {isAddSupplierOpen && (
         <div className="modal-overlay" onMouseDown={() => setIsAddSupplierOpen(false)}>
           <div className="modal-content" style={{ maxWidth: '400px' }} onMouseDown={e => e.stopPropagation()}>
@@ -1147,6 +1300,7 @@ export default function RiceControl() {
         </div>
       )}
 
+      {/* FILTER MODAL */}
       {isFilterOpen && (
         <div className="modal-overlay" onMouseDown={() => setIsFilterOpen(false)}>
           <div className="modal-content" onMouseDown={e => e.stopPropagation()}>
@@ -1179,12 +1333,13 @@ export default function RiceControl() {
         </div>
       )}
 
+      {/* THE RESTORED GLOBAL HISTORY MODAL */}
       {historyModal.isOpen && historyModal.product && (
         <div className="modal-overlay" onMouseDown={() => setHistoryModal({ isOpen: false, product: null, data: [] })}>
           <div className="modal-content" style={{ maxWidth: '650px' }} onMouseDown={e => e.stopPropagation()}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #e2e8f0', paddingBottom: '16px', marginBottom: '16px' }}>
               <div>
-                <h2 style={{ margin: 0, color: '#1e293b', fontSize: '20px' }}>Live Batches & History</h2>
+                <h2 style={{ margin: 0, color: '#1e293b', fontSize: '20px' }}>📦 Live Batches & History</h2>
                 <p style={{ margin: '4px 0 0 0', color: '#64748b', fontSize: '14px' }}>Tracking: <b style={{ color: '#0f172a' }}>{historyModal.product.name}</b></p>
               </div>
               <button onClick={() => setHistoryModal({ isOpen: false, product: null, data: [] })} style={{ background: 'none', border: 'none', fontSize: '24px', cursor: 'pointer', color: '#94a3b8' }}>✕</button>
@@ -1192,105 +1347,129 @@ export default function RiceControl() {
             
             <div style={{ overflowY: 'auto', flex: 1, paddingRight: '8px', maxHeight: '60vh' }}>
               {historyModal.data.length === 0 ? (
-                <p style={{ textAlign: 'center', color: '#64748b', padding: '40px' }}>No history recorded yet.</p>
+                <p style={{ textAlign: 'center', color: '#64748b', padding: '40px' }}>No batches recorded yet.</p>
               ) : (
-                historyModal.data.map((h) => {
-                  const isEditing = editingHistoryId === h.id;
-                  const editData = historyEdits[h.id] || { imported_qty: h.imported_qty, price: h.price, cost_price: h.cost_price };
-                  
-                  const remaining = (h.imported_qty || 0) - (h.sold_qty || 0);
-                  const isActive = remaining > 0;
+                <>
+                  {/* ACTIVE BATCHES */}
+                  <h3 style={{ fontSize: '13px', color: '#475569', textTransform: 'uppercase', marginBottom: '12px' }}>🟢 Active Batches</h3>
+                  {historyModal.data.filter(h => (h.imported_qty || 0) - (h.sold_qty || 0) > 0).map((h, index) => {
+                    const isEditing = editingHistoryId === h.id;
+                    const editData = historyEdits[h.id] || { imported_qty: h.imported_qty, price: h.price, cost_price: h.cost_price };
+                    const remaining = (h.imported_qty || 0) - (h.sold_qty || 0);
+                    
+                    let batchLabel = "Current Active Batch";
+                    if (index === 1) batchLabel = "1st New Batch";
+                    if (index === 2) batchLabel = "2nd New Batch";
+                    if (index > 2) batchLabel = `Next Batch ${index}`;
 
-                  return (
-                    <div key={h.id} style={{ background: isEditing ? '#fefcf3' : (isActive ? '#f0fdf4' : '#f8fafc'), padding: '16px', borderRadius: '12px', border: isEditing ? '1px solid #b58a3d' : (isActive ? '1px solid #bbf7d0' : '1px solid #e2e8f0'), marginBottom: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px', transition: 'all 0.2s', opacity: isActive || isEditing ? 1 : 0.6 }}>
-                      {isEditing ? (
-                        <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', flex: 1 }}>
-                          <div style={{ flex: '1 1 80px' }}>
-                            <label style={{ fontSize: '11px', fontWeight: 'bold', color: '#64748b' }}>Import Qty</label>
-                            <input autoFocus type="number" className="no-spinners" value={editData.imported_qty} onChange={e => setHistoryEdits({...historyEdits, [h.id]: {...editData, imported_qty: Number(e.target.value)}})} onKeyDown={e => e.key === 'Enter' && handleSaveHistory(h.id)} style={{ width: '100%', padding: '6px', border: '1px solid #b58a3d', borderRadius: '4px', fontSize: '14px', color: '#0f172a', backgroundColor: '#fff' }} />
+                    return (
+                      <div key={h.id} style={{ background: isEditing ? '#fefcf3' : '#f0fdf4', padding: '16px', borderRadius: '12px', border: isEditing ? '1px solid #b58a3d' : '1px solid #bbf7d0', marginBottom: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px', transition: 'all 0.2s' }}>
+                        {isEditing ? (
+                          <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', flex: 1 }}>
+                            <div style={{ flex: '1 1 80px' }}>
+                              <label style={{ fontSize: '11px', fontWeight: 'bold', color: '#64748b' }}>Import Qty</label>
+                              <input autoFocus type="number" className="no-spinners" value={editData.imported_qty} onChange={e => setHistoryEdits({...historyEdits, [h.id]: {...editData, imported_qty: Number(e.target.value)}})} onKeyDown={e => e.key === 'Enter' && handleSaveHistory(h.id)} style={{ width: '100%', padding: '6px', border: '1px solid #b58a3d', borderRadius: '4px', fontSize: '14px', color: '#0f172a', backgroundColor: '#fff' }} />
+                            </div>
+                            <div style={{ flex: '1 1 100px' }}>
+                              <label style={{ fontSize: '11px', fontWeight: 'bold', color: '#64748b' }}>Selling (៛)</label>
+                              <input type="number" className="no-spinners" value={editData.price} onChange={e => setHistoryEdits({...historyEdits, [h.id]: {...editData, price: Number(e.target.value)}})} onKeyDown={e => e.key === 'Enter' && handleSaveHistory(h.id)} style={{ width: '100%', padding: '6px', border: '1px solid #b58a3d', borderRadius: '4px', fontSize: '14px', color: '#0f172a', backgroundColor: '#fff' }} />
+                            </div>
+                            <div style={{ flex: '1 1 100px' }}>
+                              <label style={{ fontSize: '11px', fontWeight: 'bold', color: '#64748b' }}>Cost (៛)</label>
+                              <input type="number" className="no-spinners" value={editData.cost_price} onChange={e => setHistoryEdits({...historyEdits, [h.id]: {...editData, cost_price: Number(e.target.value)}})} onKeyDown={e => e.key === 'Enter' && handleSaveHistory(h.id)} style={{ width: '100%', padding: '6px', border: '1px solid #b58a3d', borderRadius: '4px', fontSize: '14px', color: '#0f172a', backgroundColor: '#fff' }} />
+                            </div>
                           </div>
-                          <div style={{ flex: '1 1 100px' }}>
-                            <label style={{ fontSize: '11px', fontWeight: 'bold', color: '#64748b' }}>Selling (៛)</label>
-                            <input type="number" className="no-spinners" value={editData.price} onChange={e => setHistoryEdits({...historyEdits, [h.id]: {...editData, price: Number(e.target.value)}})} onKeyDown={e => e.key === 'Enter' && handleSaveHistory(h.id)} style={{ width: '100%', padding: '6px', border: '1px solid #b58a3d', borderRadius: '4px', fontSize: '14px', color: '#0f172a', backgroundColor: '#fff' }} />
+                        ) : (
+                          <div>
+                            <div style={{ fontSize: '12px', fontWeight: 'bold', color: '#15803d', marginBottom: '6px', display: 'inline-block', background: '#dcfce7', padding: '4px 8px', borderRadius: '12px' }}>
+                              {batchLabel} • {remaining} left
+                            </div>
+                            <div style={{ fontSize: '14px', fontWeight: 'bold', color: '#0f172a' }}>Selling: <span style={{ color: '#b58a3d' }}>{formatRiel(h.price)}</span></div>
+                            <div style={{ fontSize: '13px', color: '#64748b', marginTop: '4px', fontWeight: 'bold' }}>Cost: {formatRiel(h.cost_price || 0)}</div>
                           </div>
-                          <div style={{ flex: '1 1 100px' }}>
-                            <label style={{ fontSize: '11px', fontWeight: 'bold', color: '#64748b' }}>Cost (៛)</label>
-                            <input type="number" className="no-spinners" value={editData.cost_price} onChange={e => setHistoryEdits({...historyEdits, [h.id]: {...editData, cost_price: Number(e.target.value)}})} onKeyDown={e => e.key === 'Enter' && handleSaveHistory(h.id)} style={{ width: '100%', padding: '6px', border: '1px solid #b58a3d', borderRadius: '4px', fontSize: '14px', color: '#0f172a', backgroundColor: '#fff' }} />
-                          </div>
-                        </div>
-                      ) : (
-                        <div>
-                          <div style={{ fontSize: '14px', fontWeight: 'bold', color: isActive ? '#15803d' : '#64748b', marginBottom: '6px', display: 'flex', gap: '8px', alignItems: 'center' }}>
-                            {isActive ? (
-                              <><span style={{ padding: '2px 8px', background: '#dcfce7', borderRadius: '12px', fontSize: '12px' }}>🔥 Active</span> {remaining} bags left</>
+                        )}
+
+                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '8px' }}>
+                          <div style={{ fontSize: '12px', color: '#94a3b8', fontWeight: 'bold' }}>{new Date(h.created_at).toLocaleDateString()}</div>
+                          <div style={{ display: 'flex', gap: '8px' }}>
+                            {isEditing ? (
+                              <>
+                                <button onClick={() => handleSaveHistory(h.id)} style={{ padding: '6px 12px', background: '#10b981', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', fontSize: '12px' }}>Save</button>
+                                <button onClick={() => setEditingHistoryId(null)} style={{ padding: '6px 12px', background: '#f1f5f9', color: '#64748b', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', fontSize: '12px' }}>Cancel</button>
+                              </>
                             ) : (
-                              <><span style={{ padding: '2px 8px', background: '#e2e8f0', borderRadius: '12px', fontSize: '12px' }}>📦 Depleted</span> 0 / {h.imported_qty} bags</>
+                              <>
+                                <button onClick={() => { setEditingHistoryId(h.id); setHistoryEdits({ [h.id]: { imported_qty: h.imported_qty, price: h.price, cost_price: h.cost_price } }); }} style={{ padding: '4px 8px', background: '#e0f2fe', color: '#0284c7', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', fontSize: '12px' }}>✏️ Edit</button>
+                                <button onClick={() => handleDeleteHistory(h.id)} style={{ padding: '4px 8px', background: '#fee2e2', color: '#dc2626', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', fontSize: '12px' }}>🗑️ Del</button>
+                              </>
                             )}
                           </div>
-                          <div style={{ fontSize: '14px', fontWeight: 'bold', color: '#0f172a' }}>Selling: <span style={{ color: '#b58a3d' }}>{formatRiel(h.price)}</span></div>
-                          <div style={{ fontSize: '13px', color: '#64748b', marginTop: '4px', fontWeight: 'bold' }}>Cost: {formatRiel(h.cost_price || 0)}</div>
-                        </div>
-                      )}
-
-                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '8px' }}>
-                        <div style={{ fontSize: '12px', color: '#94a3b8', fontWeight: 'bold' }}>
-                          {new Date(h.created_at).toLocaleString()}
-                        </div>
-                        <div style={{ display: 'flex', gap: '8px' }}>
-                          {isEditing ? (
-                            <>
-                              <button onClick={() => handleSaveHistory(h.id)} style={{ padding: '6px 12px', background: '#10b981', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', fontSize: '12px' }}>Save</button>
-                              <button onClick={() => setEditingHistoryId(null)} style={{ padding: '6px 12px', background: '#f1f5f9', color: '#64748b', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', fontSize: '12px' }}>Cancel</button>
-                            </>
-                          ) : (
-                            <>
-                              <button onClick={() => { setEditingHistoryId(h.id); setHistoryEdits({ [h.id]: { imported_qty: h.imported_qty, price: h.price, cost_price: h.cost_price } }); }} style={{ padding: '4px 8px', background: '#e0f2fe', color: '#0284c7', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', fontSize: '12px' }}>✏️ Edit</button>
-                              <button onClick={() => handleDeleteHistory(h.id)} style={{ padding: '4px 8px', background: '#fee2e2', color: '#dc2626', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', fontSize: '12px' }}>🗑️ Delete</button>
-                            </>
-                          )}
                         </div>
                       </div>
-                    </div>
-                  );
-                })
+                    );
+                  })}
+
+                  {/* DEPLETED HISTORY ACCORDION */}
+                  {historyModal.data.filter(h => (h.imported_qty || 0) - (h.sold_qty || 0) <= 0).length > 0 && (
+                    <details style={{ marginTop: '24px', background: '#f8fafc', borderRadius: '12px', border: '1px solid #e2e8f0', padding: '12px' }}>
+                      <summary style={{ fontSize: '13px', fontWeight: 'bold', color: '#64748b', cursor: 'pointer', outline: 'none' }}>
+                        🕰️ Show Depleted History ({historyModal.data.filter(h => (h.imported_qty || 0) - (h.sold_qty || 0) <= 0).length})
+                      </summary>
+                      <div style={{ marginTop: '12px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                        {historyModal.data.filter(h => (h.imported_qty || 0) - (h.sold_qty || 0) <= 0).map((h) => (
+                          <div key={h.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px', borderBottom: '1px dashed #cbd5e1', fontSize: '13px' }}>
+                            <span style={{ color: '#64748b' }}>{new Date(h.created_at).toLocaleDateString()}</span>
+                            <span style={{ color: '#0f172a', fontWeight: 'bold' }}>{h.imported_qty} Bags Sold Out</span>
+                          </div>
+                        ))}
+                      </div>
+                    </details>
+                  )}
+                </>
               )}
             </div>
           </div>
         </div>
       )}
 
+      {/* NEW PRODUCT CREATION MODAL WITH MIN STOCK LEVEL */}
       {isAddModalOpen && (
         <div className="modal-overlay" onMouseDown={() => setIsAddModalOpen(false)}>
-          <div className="modal-content" style={{ maxWidth: '400px' }} onMouseDown={e => e.stopPropagation()}>
-            <h2 style={{ marginTop: 0, marginBottom: '20px', color: '#1e293b' }}>Add New Product</h2>
+          <div className="modal-content" style={{ maxWidth: '500px' }} onMouseDown={e => e.stopPropagation()}>
+            <h2 style={{ marginTop: 0, color: '#1e293b', marginBottom: '20px' }}>📦 Add New Product</h2>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
               <div>
                 <label style={{ display: 'block', fontSize: '13px', color: '#0f172a', fontWeight: 'bold', marginBottom: '6px' }}>Product Name</label>
-                <input placeholder="e.g. Jasmine Rice" value={newItem.name} onChange={e => setNewItem({...newItem, name: e.target.value})} style={{ width: '100%', padding: '10px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', fontSize: '16px', color: '#0f172a', backgroundColor: '#ffffff' }} />
+                <input autoFocus placeholder="e.g. ម្លិះលេខ១" value={newItem.name} onChange={e => setNewItem({...newItem, name: e.target.value})} style={{ width: '100%', padding: '10px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', fontSize: '16px' }} />
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+                <div>
+                  <label style={{ display: 'block', fontSize: '13px', color: '#0f172a', fontWeight: 'bold', marginBottom: '6px' }}>Selling Price (៛)</label>
+                  <CurrencyInput value={newItem.price} onChange={(v:any) => setNewItem({...newItem, price: v})} style={{ width: '100%', padding: '10px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box' }} />
+                </div>
+                <div>
+                  <label style={{ display: 'block', fontSize: '13px', color: '#0f172a', fontWeight: 'bold', marginBottom: '6px' }}>Cost Price (៛)</label>
+                  <CurrencyInput value={newItem.cost_price} onChange={(v:any) => setNewItem({...newItem, cost_price: v})} style={{ width: '100%', padding: '10px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box' }} />
+                </div>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '8px' }}>
+                <div>
+                  <label style={{ display: 'block', fontSize: '13px', color: '#0f172a', fontWeight: 'bold', marginBottom: '6px' }}>Weight (kg)</label>
+                  <input type="number" className="no-spinners" value={newItem.weight} onChange={e => setNewItem({...newItem, weight: e.target.value})} style={{ width: '100%', padding: '10px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box' }} />
+                </div>
+                <div>
+                  <label style={{ display: 'block', fontSize: '13px', color: '#0f172a', fontWeight: 'bold', marginBottom: '6px' }}>Initial Stock</label>
+                  <input type="number" className="no-spinners" value={newItem.stock} onChange={e => setNewItem({...newItem, stock: e.target.value})} style={{ width: '100%', padding: '10px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box' }} />
+                </div>
               </div>
               
-              <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
-                <div style={{ flex: '1 1 130px' }}>
-                  <label style={{ display: 'block', fontSize: '13px', color: '#0f172a', fontWeight: 'bold', marginBottom: '6px' }}>Selling Price (៛)</label>
-                  <input type="number" className="no-spinners" value={newItem.price} onChange={e => setNewItem({...newItem, price: e.target.value})} style={{ width: '100%', padding: '10px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', fontSize: '16px', color: '#0f172a', backgroundColor: '#ffffff' }} />
-                </div>
-                <div style={{ flex: '1 1 130px' }}>
-                  <label style={{ display: 'block', fontSize: '13px', color: '#0f172a', fontWeight: 'bold', marginBottom: '6px' }}>COGS (៛)</label>
-                  <input type="number" className="no-spinners" value={newItem.cost_price} onChange={e => setNewItem({...newItem, cost_price: e.target.value})} style={{ width: '100%', padding: '10px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', fontSize: '16px', color: '#0f172a', backgroundColor: '#ffffff' }} />
-                </div>
-              </div>
-
-              <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
-                <div style={{ flex: '1 1 130px' }}>
-                  <label style={{ display: 'block', fontSize: '13px', color: '#0f172a', fontWeight: 'bold', marginBottom: '6px' }}>Weight (kg)</label>
-                  <input type="number" className="no-spinners" value={newItem.weight} onChange={e => setNewItem({...newItem, weight: e.target.value})} style={{ width: '100%', padding: '10px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', fontSize: '16px', color: '#0f172a', backgroundColor: '#ffffff' }} />
-                </div>
-                <div style={{ flex: '1 1 130px' }}>
-                  <label style={{ display: 'block', fontSize: '13px', color: '#0f172a', fontWeight: 'bold', marginBottom: '6px' }}>Initial Stock</label>
-                  <input type="number" className="no-spinners" value={newItem.stock} onChange={e => setNewItem({...newItem, stock: e.target.value})} style={{ width: '100%', padding: '10px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', fontSize: '16px', color: '#0f172a', backgroundColor: '#ffffff' }} />
-                </div>
+              <div style={{ background: '#fef2f2', padding: '16px', borderRadius: '8px', border: '1px solid #fecaca' }}>
+                <label style={{ display: 'block', fontSize: '13px', color: '#991b1b', fontWeight: 'bold', marginBottom: '6px' }}>🚨 Min Stock Alert Level</label>
+                <input type="number" className="no-spinners" value={newItem.min_stock_level} onChange={e => setNewItem({...newItem, min_stock_level: e.target.value})} style={{ width: '100%', padding: '10px 12px', borderRadius: '6px', border: '1px solid #fca5a5', boxSizing: 'border-box', background: '#fff' }} />
+                <p style={{ fontSize: '11px', color: '#ef4444', marginTop: '6px', marginBottom: 0 }}>Triggers a Restock Alert if current stock falls below this amount.</p>
               </div>
             </div>
+
             <div style={{ marginTop: '24px', display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
               <button onClick={() => setIsAddModalOpen(false)} style={{ padding: '10px 16px', background: '#f1f5f9', color: '#475569', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', fontSize: '14px' }}>Cancel</button>
               <button onClick={addProduct} style={{ padding: '10px 16px', background: '#10b981', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', fontSize: '14px' }}>Save Product</button>
@@ -1548,45 +1727,10 @@ export default function RiceControl() {
           box-shadow: 0 10px 25px rgba(0,0,0,0.2);
         }
 
-        @media (max-width: 1023px) {
-          .main-wrapper {
-            padding: max(80px, env(safe-area-inset-top, 80px)) 16px 16px 16px !important; 
-          }
-          .header-container {
-            flex-direction: column;
-            align-items: stretch;
-            gap: 16px;
-          }
-          .header-actions {
-            flex-direction: column;
-            width: 100%;
-          }
-          .delete-btn, .add-btn {
-            width: 100%;
-            padding: 14px;
-            font-size: 15px;
-          }
-          .toolbar-container {
-            flex-direction: column;
-            align-items: stretch;
-          }
-          .toolbar-tabs {
-            width: 100%;
-          }
-          .tab {
-            flex: 1;
-            text-align: center;
-          }
-          .toolbar-search {
-            width: 100%;
-            box-sizing: border-box;
-          }
-          .toolbar-filters {
-            width: 100%;
-          }
-          .filter-btn {
-            flex: 1;
-            text-align: center;
+        @media (max-width: 1023px) { 
+          .main-wrapper { 
+            padding: max(80px, env(safe-area-inset-top, 80px)) 16px 140px 16px !important; 
+            min-height: auto;
           }
         }
       `}</style>

@@ -1,36 +1,57 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import React, { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabaseClient'
 
+const defaultMenuItems = [
+  // 1. Daily Operations
+  { label: '📊 Dashboard', href: '/dashboard' },
+  { label: '🛒 POS System', href: '/pos' },
+  { label: '🚚 Delivery & Credit', href: '/delivery' },
+  
+  // 2. Money & Inventory
+  { label: '💵 Expense & Payroll', href: '/expense' },
+  { label: '🌾 Rice Control', href: '/rice' },
+  { label: '🧮 Mix Calculator', href: '/calculator' },
+  
+  // 3. Records & Accounting
+  { label: '🖼️ Invoice Gallery', href: '/invoices' },
+  { label: '🧾 COGS Accounting', href: '/cogs-report' },
+  
+  // 4. Databases & Config
+  { label: '👥 Customer Database', href: '/customerdatabase' },
+  { label: '💼 Master Biz Database', href: '/bizdatabase' },
+  { label: '⚙️ Settings', href: '/settings' }
+]
+
 export default function Sidebar() {
   const [isOpen, setIsOpen] = useState(false)
+  const [menuItems, setMenuItems] = useState(defaultMenuItems)
   const pathname = usePathname()
   const router = useRouter()
 
-  // Navigation paths logically arranged by business workflow
-  const menuItems = [
-    // 1. Daily Operations
-    { label: '📊 Dashboard', href: '/dashboard' },
-    { label: '🛒 POS System', href: '/pos' },
-    { label: '🚚 Delivery & Credit', href: '/delivery' },
-    
-    // 2. Money & Inventory
-    { label: '💵 Expense & Payroll', href: '/expense' },
-    { label: '🌾 Rice Control', href: '/rice' },
-    { label: '🧮 Mix Calculator', href: '/calculator' },
-    
-    // 3. Records & Accounting
-    { label: '🖼️ Invoice Gallery', href: '/invoices' },
-    { label: '🧾 COGS Accounting', href: '/cogs-report' },
-    
-    // 4. Databases & Config
-    { label: '👥 Customer Database', href: '/customerdatabase' },
-    { label: '💼 Master Biz Database', href: '/bizdatabase' },
-    { label: '⚙️ Settings', href: '/settings' }
-  ]
+  // Load user's custom drag-and-drop order on mount
+  useEffect(() => {
+    const saved = localStorage.getItem('sidebar_menu_order')
+    if (saved) {
+      try {
+        const savedOrder = JSON.parse(saved)
+        const sorted = [...defaultMenuItems].sort((a, b) => {
+          const idxA = savedOrder.indexOf(a.label)
+          const idxB = savedOrder.indexOf(b.label)
+          if (idxA === -1 && idxB === -1) return 0
+          if (idxA === -1) return 1
+          if (idxB === -1) return -1
+          return idxA - idxB
+        })
+        setMenuItems(sorted)
+      } catch (e) {
+        // Fallback to default if parsing fails
+      }
+    }
+  }, [])
 
   // Automatically secure screens: if user logs out, boot them back to root login page
   useEffect(() => {
@@ -45,6 +66,31 @@ export default function Sidebar() {
   const handleLogout = async () => {
     await supabase.auth.signOut()
     router.push('/')
+  }
+
+  // --- DRAG AND DROP ENGINE ---
+  const handleDragStart = (e: React.DragEvent, index: number) => {
+    e.dataTransfer.setData('text/plain', index.toString())
+    e.dataTransfer.effectAllowed = 'move'
+  }
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'move'
+  }
+
+  const handleDrop = (e: React.DragEvent, targetIndex: number) => {
+    e.preventDefault()
+    const sourceIndex = parseInt(e.dataTransfer.getData('text/plain'), 10)
+    if (isNaN(sourceIndex) || sourceIndex === targetIndex) return
+
+    const newItems = [...menuItems]
+    const [draggedItem] = newItems.splice(sourceIndex, 1)
+    newItems.splice(targetIndex, 0, draggedItem)
+
+    setMenuItems(newItems)
+    // Instantly persist the new layout
+    localStorage.setItem('sidebar_menu_order', JSON.stringify(newItems.map(i => i.label)))
   }
 
   // Prevents the hamburger from showing up on the login screen
@@ -93,29 +139,39 @@ export default function Sidebar() {
           </div>
           
           <nav style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            {menuItems.map((item) => {
+            {menuItems.map((item, index) => {
               const isActive = pathname === item.href
               return (
-                <Link 
-                  key={item.href} 
-                  href={item.href}
-                  onClick={() => setIsOpen(false)} 
-                  style={{
-                    color: 'white',
-                    textDecoration: 'none',
-                    fontSize: '14px',
-                    padding: '10px 12px',
-                    borderRadius: '6px',
-                    display: 'block',
-                    whiteSpace: 'nowrap',
-                    background: isActive ? '#1f2937' : 'transparent',
-                    borderLeft: isActive ? '4px solid #38bdf8' : '4px solid transparent',
-                    fontWeight: isActive ? 'bold' : 'normal',
-                    transition: 'background 0.2s'
-                  }}
+                <div
+                  key={item.href}
+                  draggable
+                  onDragStart={(e) => handleDragStart(e, index)}
+                  onDragOver={handleDragOver}
+                  onDrop={(e) => handleDrop(e, index)}
+                  style={{ cursor: 'grab', userSelect: 'none' }}
+                  title="Drag up or down to reorder"
                 >
-                  {item.label}
-                </Link>
+                  <Link 
+                    href={item.href}
+                    onClick={() => setIsOpen(false)} 
+                    draggable={false} // Crucial: Stops the browser from accidentally dragging the URL
+                    style={{
+                      color: 'white',
+                      textDecoration: 'none',
+                      fontSize: '14px',
+                      padding: '10px 12px',
+                      borderRadius: '6px',
+                      display: 'block',
+                      whiteSpace: 'nowrap',
+                      background: isActive ? '#1f2937' : 'transparent',
+                      borderLeft: isActive ? '4px solid #38bdf8' : '4px solid transparent',
+                      fontWeight: isActive ? 'bold' : 'normal',
+                      transition: 'background 0.2s'
+                    }}
+                  >
+                    {item.label}
+                  </Link>
+                </div>
               )
             })}
           </nav>

@@ -10,7 +10,7 @@ const EXCHANGE_RATE = 4000;
 // ==========================================
 // ROBUST LIVE COMMA FORMATTER (Stateless Display)
 // ==========================================
-function CurrencyInput({ value, onChange, placeholder, style, autoFocus }: any) {
+function CurrencyInput({ value, onChange, placeholder, style, autoFocus, onEnter }: any) {
   const [inputValue, setInputValue] = useState('');
 
   // Sync state when parent value changes externally
@@ -48,6 +48,11 @@ function CurrencyInput({ value, onChange, placeholder, style, autoFocus }: any) 
       value={inputValue}
       onChange={handleChange}
       autoFocus={autoFocus}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' && onEnter) {
+          onEnter();
+        }
+      }}
       onBlur={() => {
         setTimeout(() => {
           window.scrollTo(0, 0);
@@ -123,7 +128,6 @@ export default function ExpenseDashboard() {
         let saveRiel = 0;
         let saveUsd = 0;
 
-        // Log specifically to the bucket the user selected
         if (row.method.includes('$')) {
           saveUsd = rawAmount;
         } else {
@@ -135,7 +139,7 @@ export default function ExpenseDashboard() {
           spender: spender,
           payment_method: row.method,
           remarks: activePayments.length > 1 ? `${remarks} (Split Payment)` : remarks,                     
-          amount_usd: saveUsd,               
+          amount: saveUsd,              
           amount_riel: saveRiel,         
           description: activeTab.toUpperCase(), 
         }]);
@@ -189,7 +193,7 @@ export default function ExpenseDashboard() {
 
     const method = debtMethods[staff.id] || 'Cash ៛'
     
-    // We convert USD advances to Riel purely for the Staff's Total Debt display
+    // Convert USD advances to Riel purely for the Staff's Total Debt display
     const amountInRielEquiv = method.includes('$') ? rawAmount * EXCHANGE_RATE : rawAmount;
     const newTotalDebt = Number(staff.total_debt || 0) + amountInRielEquiv;
 
@@ -199,33 +203,55 @@ export default function ExpenseDashboard() {
 
     // 1. Update total debt
     const { error: staffErr } = await supabase.from('staff').update({ total_debt: newTotalDebt }).eq('id', staff.id)
-    
-    // 2. Log History
-    await supabase.from('staff_debt_history').insert([{ staff_id: staff.id, amount: rawAmount, payment_method: method }])
-
-    // 3. Log as an Expense (since the business is giving them an advance)
-    let saveRiel = 0;
-    let saveUsd = 0;
-    
-    if (method.includes('$')) {
-      saveUsd = rawAmount;
-    } else {
-      saveRiel = rawAmount;
+    if (staffErr) {
+      alert(`Error updating debt: ${staffErr.message}`)
+      fetchStaff() 
+      return;
     }
 
-    await supabase.from('expenses').insert([{
+    // 2. Log History
+    const { error: histErr } = await supabase.from('staff_debt_history').insert([{ staff_id: staff.id, amount: rawAmount, payment_method: method }])
+    if (histErr) alert(`Debt updated, but history log failed: ${histErr.message}`);
+
+    // 3. Log as an Expense (business gave an advance)
+    let saveRiel = 0;
+    let saveUsd = 0;
+    if (method.includes('$')) saveUsd = rawAmount;
+    else saveRiel = rawAmount;
+
+    const { error: expErr } = await supabase.from('expenses').insert([{
       expense_date: new Date().toISOString().split('T')[0],
       spender: 'Both', 
       payment_method: method,
       remarks: `Staff Advance: ${staff.name}`,
-      amount_usd: saveUsd,
+      amount: saveUsd,
       amount_riel: saveRiel,
       description: 'STAFF'
     }])
 
-    if (staffErr) {
-      alert(`Error updating debt: ${staffErr.message}`)
-      fetchStaff() // Revert
+    if (expErr) alert(`History logged, but expense record failed: ${expErr.message}`);
+  }
+
+  // --- Action: Manual Debt Reset (End of Month) ---
+  async function handleResetDebt(staff: any) {
+    const confirmReset = window.confirm(`Are you sure you want to completely clear the debt for ${staff.name}?`);
+    if (!confirmReset) return;
+
+    const oldDebt = Number(staff.total_debt) || 0;
+    
+    setStaffList(prev => prev.map(s => s.id === staff.id ? { ...s, total_debt: 0 } : s));
+
+    const { error } = await supabase.from('staff').update({ total_debt: 0 }).eq('id', staff.id);
+    
+    if (!error && oldDebt > 0) {
+       await supabase.from('staff_debt_history').insert([{ 
+           staff_id: staff.id, 
+           amount: oldDebt, 
+           payment_method: 'Cleared / Monthly Reset' 
+       }]);
+    } else if (error) {
+       alert(`Error clearing debt: ${error.message}`);
+       fetchStaff();
     }
   }
 
@@ -249,14 +275,29 @@ export default function ExpenseDashboard() {
       finalValue = Number(editValue.replace(/,/g, '')) || 0;
     }
 
+    const staff = staffList.find(s => s.id === id);
+
     // Optimistic UI Update
     setStaffList(prev => prev.map(s => s.id === id ? { ...s, [field]: finalValue } : s));
     setEditingCell(null);
 
     const { error } = await supabase.from('staff').update({ [field]: finalValue }).eq('id', id);
+    
+    // If total debt was edited manually, track it in the history log automatically
+    if (!error && field === 'total_debt' && staff) {
+        const difference = finalValue - (Number(staff.total_debt) || 0);
+        if (difference !== 0) {
+            await supabase.from('staff_debt_history').insert([{ 
+                staff_id: id, 
+                amount: Math.abs(difference), 
+                payment_method: difference > 0 ? 'Manual Increase ៛' : 'Manual Reduction ៛' 
+            }]);
+        }
+    }
+
     if (error) {
       alert(`Failed to update ${field}: ${error.message}`);
-      fetchStaff(); // Revert
+      fetchStaff(); // Revert on failure
     }
   }
 
@@ -264,7 +305,6 @@ export default function ExpenseDashboard() {
   async function handleDeleteStaff(id: number, name: string) {
     if (!confirm(`Are you sure you want to remove ${name} from the payroll?`)) return;
     
-    // Optimistic UI
     setStaffList(prev => prev.filter(s => s.id !== id));
 
     const { error } = await supabase.from('staff').delete().eq('id', id);
@@ -299,12 +339,8 @@ export default function ExpenseDashboard() {
     return diffDays > 0 ? diffDays : 0;
   }
 
-  // Live Math for Expenses Tab
-  const totalExpenseRiel = paymentRows.reduce((sum, row) => {
-    const amt = Number(row.amount) || 0;
-    if (row.method.includes('$')) return sum + (amt * EXCHANGE_RATE);
-    return sum + amt;
-  }, 0);
+  // Active payments check for button
+  const hasPayments = paymentRows.some(r => Number(r.amount) > 0);
 
   return (
     <div className="main-wrapper">
@@ -322,12 +358,9 @@ export default function ExpenseDashboard() {
         boxSizing: 'border-box'
       }} className="content-card">
         
-        {/* HEADER BRANDING */}
+        {/* HEADER BRANDING - CENTERED */}
         <div className="header-container">
-          <div>
-            <h1 className="page-title">Daily Dashboard</h1>
-            <p style={{ color: '#64748b', fontSize: '14px', margin: '4px 0 0 0', fontWeight: 'normal' }}>Tracker, Ledger & Payroll Management</p>
-          </div>
+          <h1 className="page-title">💸 Daily Expense & Payroll</h1>
         </div>
 
         {/* THREE TAB HEADER */}
@@ -349,7 +382,7 @@ export default function ExpenseDashboard() {
             
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
               <label style={{ color: '#475569', fontSize: '12px', fontWeight: 'bold', textTransform: 'uppercase' }}>Transaction Date</label>
-              <input type="date" value={expenseDate} onChange={(e) => setExpenseDate(e.target.value)} required style={{ backgroundColor: '#ffffff', borderColor: '#cbd5e1', borderWidth: '1px', borderStyle: 'solid', borderRadius: '8px', padding: '12px 14px', color: '#334155', outline: 'none', width: '100%', boxSizing: 'border-box', fontWeight: 'normal' }} className="mobile-input-field" />
+              <input type="date" value={expenseDate} onChange={(e) => setExpenseDate(e.target.value)} required style={{ backgroundColor: '#ffffff', borderColor: '#cbd5e1', borderWidth: '1px', borderStyle: 'solid', borderRadius: '8px', padding: '12px 14px', color: '#334155', outline: 'none', width: '100%', maxWidth: '100%', boxSizing: 'border-box', fontWeight: 'normal' }} className="mobile-input-field" />
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
@@ -367,7 +400,8 @@ export default function ExpenseDashboard() {
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
               <label style={{ color: '#475569', fontSize: '12px', fontWeight: 'bold', textTransform: 'uppercase' }}>Remarks / What did you buy?</label>
-              <input type="text" placeholder="e.g. Electricity Bill, Lunch..." value={remarks} onChange={(e) => setRemarks(e.target.value)} required style={{ backgroundColor: '#ffffff', borderColor: '#cbd5e1', borderWidth: '1px', borderStyle: 'solid', borderRadius: '8px', padding: '12px 14px', color: '#334155', outline: 'none', width: '100%', boxSizing: 'border-box', fontWeight: 'normal' }} className="mobile-input-field" onBlur={() => { setTimeout(() => { window.scrollTo(0, 0); document.body.scrollTop = 0; }, 100); }} />
+              {/* Removed "e.g." / "sample" text */}
+              <input type="text" placeholder="Electricity Bill, Lunch..." value={remarks} onChange={(e) => setRemarks(e.target.value)} required style={{ backgroundColor: '#ffffff', borderColor: '#cbd5e1', borderWidth: '1px', borderStyle: 'solid', borderRadius: '8px', padding: '12px 14px', color: '#334155', outline: 'none', width: '100%', boxSizing: 'border-box', fontWeight: 'normal' }} className="mobile-input-field" onBlur={() => { setTimeout(() => { window.scrollTo(0, 0); document.body.scrollTop = 0; }, 100); }} />
             </div>
 
             {/* DYNAMIC SPLIT PAYMENT METHOD FOR EXPENSES */}
@@ -413,17 +447,10 @@ export default function ExpenseDashboard() {
                   )}
                 </div>
               ))}
-
-              {paymentRows.some(r => Number(r.amount) > 0) && (
-                <div style={{ marginTop: '12px', paddingTop: '12px', borderTop: '1px dashed #cbd5e1', display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-                  <span style={{ color: '#475569', fontSize: '13px', fontWeight: 'bold' }}>Total Expense (៛):</span>
-                  <span style={{ color: '#ef4444', fontSize: '16px', fontWeight: 'normal' }}>{formatRiel(totalExpenseRiel)}</span>
-                </div>
-              )}
             </div>
 
-            <button type="submit" disabled={loading || totalExpenseRiel === 0} style={{ backgroundColor: '#b59410', color: '#ffffff', padding: '15px', border: 'none', borderRadius: '8px', fontSize: '14px', fontWeight: 'bold', cursor: 'pointer', transition: 'background 0.2s ease', marginTop: '10px', opacity: (loading || totalExpenseRiel === 0) ? 0.7 : 1 }}>
-              {loading ? 'Processing Entry...' : `Securely Log ${activeTab === 'business' ? 'Business' : 'Personal'} Expense`}
+            <button type="submit" disabled={loading || !hasPayments} style={{ backgroundColor: '#b59410', color: '#ffffff', padding: '15px', border: 'none', borderRadius: '8px', fontSize: '14px', fontWeight: 'bold', cursor: 'pointer', transition: 'background 0.2s ease', marginTop: '10px', opacity: (loading || !hasPayments) ? 0.7 : 1 }}>
+              {loading ? 'Processing...' : `Log ${activeTab === 'business' ? 'Business' : 'Personal'} Expense`}
             </button>
           </form>
         )}
@@ -441,7 +468,8 @@ export default function ExpenseDashboard() {
                 </div>
                 <div style={{ flex: '1 1 150px' }}>
                   <label style={{ fontSize: '11px', fontWeight: 'bold', color: '#475569', textTransform: 'uppercase', marginBottom: '6px', display: 'block' }}>Monthly Salary (៛)</label>
-                  <CurrencyInput value={newStaffSalary} onChange={(v: any) => setNewStaffSalary(v)} style={{ backgroundColor: '#ffffff', borderColor: '#cbd5e1', borderWidth: '1px', borderStyle: 'solid', borderRadius: '8px', padding: '12px 14px', color: '#334155', outline: 'none', width: '100%', boxSizing: 'border-box', fontWeight: 'normal' }} placeholder="e.g. 1,200,000" />
+                  {/* Removed "e.g." / "sample" text */}
+                  <CurrencyInput value={newStaffSalary} onChange={(v: any) => setNewStaffSalary(v)} style={{ backgroundColor: '#ffffff', borderColor: '#cbd5e1', borderWidth: '1px', borderStyle: 'solid', borderRadius: '8px', padding: '12px 14px', color: '#334155', outline: 'none', width: '100%', boxSizing: 'border-box', fontWeight: 'normal' }} placeholder="1,200,000" />
                 </div>
                 <button type="submit" disabled={loading} style={{ backgroundColor: '#b59410', color: '#ffffff', padding: '12px 24px', border: 'none', borderRadius: '8px', fontSize: '14px', fontWeight: 'bold', cursor: 'pointer', height: '44px' }}>Add Staff</button>
               </div>
@@ -510,7 +538,7 @@ export default function ExpenseDashboard() {
                             onClick={() => { setEditingCell({ id: staff.id, field: 'salary' }); setEditValue(String(staff.salary || 0)); }}
                           >
                             {editingCell?.id === staff.id && editingCell?.field === 'salary' ? (
-                              <CurrencyInput autoFocus value={Number(editValue)} onChange={(v:any) => setEditValue(String(v))} onBlur={() => saveInlineEdit(staff.id, 'salary')} onKeyDown={(e:any) => e.key === 'Enter' && saveInlineEdit(staff.id, 'salary')} style={{ backgroundColor: '#ffffff', borderColor: '#cbd5e1', borderWidth: '1px', borderStyle: 'solid', borderRadius: '6px', padding: '8px 10px', color: '#334155', outline: '2px solid #b58a3d', width: '100%', boxSizing: 'border-box', fontWeight: 'normal', textAlign: 'right' }} />
+                              <CurrencyInput autoFocus value={Number(editValue)} onChange={(v:any) => setEditValue(String(v))} onEnter={() => saveInlineEdit(staff.id, 'salary')} style={{ backgroundColor: '#ffffff', borderColor: '#cbd5e1', borderWidth: '1px', borderStyle: 'solid', borderRadius: '6px', padding: '8px 10px', color: '#334155', outline: '2px solid #b58a3d', width: '100%', boxSizing: 'border-box', fontWeight: 'normal', textAlign: 'right' }} />
                             ) : formatRiel(monthlySalary)}
                           </td>
 
@@ -519,18 +547,31 @@ export default function ExpenseDashboard() {
                             {formatRiel(totalEarned)}
                           </td>
 
-                          {/* 5. Total Debt */}
-                          <td 
-                            style={{ padding: '12px', color: '#ef4444', textAlign: 'right', cursor: 'text', fontSize: '14px', fontWeight: 'normal' }}
-                            onClick={() => { setEditingCell({ id: staff.id, field: 'total_debt' }); setEditValue(String(staff.total_debt || 0)); }}
-                          >
-                            {editingCell?.id === staff.id && editingCell?.field === 'total_debt' ? (
-                              <CurrencyInput autoFocus value={Number(editValue)} onChange={(v:any) => setEditValue(String(v))} onBlur={() => saveInlineEdit(staff.id, 'total_debt')} onKeyDown={(e:any) => e.key === 'Enter' && saveInlineEdit(staff.id, 'total_debt')} style={{ backgroundColor: '#ffffff', borderColor: '#cbd5e1', borderWidth: '1px', borderStyle: 'solid', borderRadius: '6px', padding: '8px 10px', outline: '2px solid #b58a3d', width: '100%', boxSizing: 'border-box', textAlign: 'right', color: '#ef4444', fontWeight: 'normal' }} />
-                            ) : formatRiel(totalDebt)}
+                          {/* 5. Total Debt & RESET Button */}
+                          <td style={{ padding: '12px', textAlign: 'right' }}>
+                             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px' }}>
+                                <div 
+                                    style={{ color: '#ef4444', cursor: 'text', fontSize: '14px', fontWeight: 'bold' }}
+                                    onClick={() => { setEditingCell({ id: staff.id, field: 'total_debt' }); setEditValue(String(staff.total_debt || 0)); }}
+                                >
+                                  {editingCell?.id === staff.id && editingCell?.field === 'total_debt' ? (
+                                    <CurrencyInput autoFocus value={Number(editValue)} onChange={(v:any) => setEditValue(String(v))} onEnter={() => saveInlineEdit(staff.id, 'total_debt')} style={{ backgroundColor: '#ffffff', borderColor: '#cbd5e1', borderWidth: '1px', borderStyle: 'solid', borderRadius: '6px', padding: '8px 10px', outline: '2px solid #b58a3d', width: '100%', boxSizing: 'border-box', textAlign: 'right', color: '#ef4444', fontWeight: 'normal' }} />
+                                  ) : formatRiel(totalDebt)}
+                                </div>
+                                {totalDebt > 0 && (
+                                    <button 
+                                      onClick={() => handleResetDebt(staff)}
+                                      style={{ background: '#fee2e2', color: '#dc2626', border: '1px solid #fecaca', borderRadius: '4px', padding: '2px 6px', fontSize: '10px', cursor: 'pointer', fontWeight: 'bold' }}
+                                      title="Reset debt to zero for the end of the month"
+                                    >
+                                      Reset
+                                    </button>
+                                )}
+                             </div>
                           </td>
 
                           {/* 6. Net Payout */}
-                          <td style={{ padding: '12px', color: isNegativePayout ? '#ef4444' : '#3b82f6', textAlign: 'right', fontSize: '14px', fontWeight: 'normal' }}>
+                          <td style={{ padding: '12px', color: isNegativePayout ? '#ef4444' : '#3b82f6', textAlign: 'right', fontSize: '14px', fontWeight: 'bold' }}>
                             {isNegativePayout ? '-' : ''}{formatRiel(Math.abs(netPayout))}
                           </td>
 
@@ -553,12 +594,12 @@ export default function ExpenseDashboard() {
                                 value={debtAdditions[staff.id] || ''} 
                                 onChange={(v:any) => setDebtAdditions({ ...debtAdditions, [staff.id]: v })} 
                                 onEnter={() => handleAddDebt(staff)}
-                                style={{ backgroundColor: '#ffffff', borderColor: '#cbd5e1', borderWidth: '1px', borderStyle: 'solid', borderRadius: '6px', color: '#334155', outline: 'none', boxSizing: 'border-box', fontWeight: 'normal', flex: 1, padding: '6px', fontSize: '13px' }} 
+                                style={{ backgroundColor: '#ffffff', borderColor: '#cbd5e1', borderWidth: '1px', borderStyle: 'solid', borderRadius: '6px', color: '#334155', outline: 'none', boxSizing: 'border-box', fontWeight: 'normal', flex: 1, padding: '6px', fontSize: '13px', textAlign: 'right' }} 
                               />
                               <button 
                                 onClick={() => handleAddDebt(staff)}
                                 disabled={!debtAdditions[staff.id]}
-                                style={{ border: 'none', borderRadius: '6px', fontSize: '13px', transition: 'background 0.2s', fontWeight: 'normal', background: debtAdditions[staff.id] ? '#b59410' : '#e2e8f0', color: debtAdditions[staff.id] ? '#fff' : '#94a3b8', cursor: debtAdditions[staff.id] ? 'pointer' : 'not-allowed', padding: '6px 12px' }}
+                                style={{ border: 'none', borderRadius: '6px', fontSize: '13px', transition: 'background 0.2s', fontWeight: 'bold', background: debtAdditions[staff.id] ? '#10b981' : '#e2e8f0', color: debtAdditions[staff.id] ? '#fff' : '#94a3b8', cursor: debtAdditions[staff.id] ? 'pointer' : 'not-allowed', padding: '6px 12px' }}
                               >
                                 Add
                               </button>
@@ -593,7 +634,7 @@ export default function ExpenseDashboard() {
               </table>
             </div>
             <p style={{ fontSize: '12px', color: '#94a3b8', marginTop: '16px', textAlign: 'center', fontWeight: 'normal' }}>
-              💡 <b>Tip:</b> Click on any Name, Start Date, Monthly Salary, or Total Debt to edit it directly.
+              💡 <b>Tip:</b> Click on any Name, Start Date, Monthly Salary, or Total Debt to edit it directly. Press Enter to save.
             </p>
           </div>
         )}
@@ -617,8 +658,8 @@ export default function ExpenseDashboard() {
                   <thead>
                     <tr style={{ borderBottom: '1px solid #cbd5e1' }}>
                       <th style={{ padding: '8px 0', textAlign: 'left', color: '#475569', fontWeight: 'bold', fontSize: '12px' }}>Date</th>
-                      <th style={{ padding: '8px 0', textAlign: 'left', color: '#475569', fontWeight: 'bold', fontSize: '12px' }}>Payment Method</th>
-                      <th style={{ padding: '8px 0', textAlign: 'right', color: '#475569', fontWeight: 'bold', fontSize: '12px' }}>Amount (៛)</th>
+                      <th style={{ padding: '8px 0', textAlign: 'left', color: '#475569', fontWeight: 'bold', fontSize: '12px' }}>Action Type</th>
+                      <th style={{ padding: '8px 0', textAlign: 'right', color: '#475569', fontWeight: 'bold', fontSize: '12px' }}>Amount</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -685,6 +726,7 @@ export default function ExpenseDashboard() {
           gap: 12px;
           text-align: center;
         }
+
         .page-title { 
           font-size: 26px; 
           color: #1e293b; 

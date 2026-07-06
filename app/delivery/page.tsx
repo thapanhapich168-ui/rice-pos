@@ -163,7 +163,6 @@ export default function DeliveryPage() {
     }
 
     if (totalRielEq <= 0) return;
-    if (totalRielEq > d.balance_due + 0.1) return alert('Cannot pay more than the balance due.');
 
     setIsProcessing(true);
 
@@ -206,6 +205,33 @@ export default function DeliveryPage() {
     } catch (error: any) {
       alert(`Error processing payment: ${error.message}`);
       fetchDeliveries(); 
+    } finally {
+      setIsProcessing(false);
+    }
+  }
+
+  // --- REAL UNDO CAPABILITY ---
+  async function handleUndoProcess(d: any) {
+    if (!confirm('Are you sure you want to undo? This will permanently delete the collected payment records and revert your Dashboard Cash.')) return;
+    
+    setIsProcessing(true);
+    try {
+      // 1. Delete all payments from the ledger to reverse the Dashboard numbers
+      const { error: delErr } = await supabase.from('invoice_payments').delete().eq('invoice_id', d.invoice_id);
+      if (delErr) throw delErr;
+
+      // 2. Reset the invoice summary back to its original state
+      const { error: updErr } = await supabase.from('invoice_summaries').update({
+          balance_due: d.total_sales,
+          payment_method: '-',
+          is_done: false,
+          delivery_status: 'Pending'
+      }).eq('invoice_id', d.invoice_id);
+      if (updErr) throw updErr;
+
+      fetchDeliveries();
+    } catch (error: any) {
+      alert(`Error undoing payment: ${error.message}`);
     } finally {
       setIsProcessing(false);
     }
@@ -257,7 +283,6 @@ export default function DeliveryPage() {
     }
 
     if (totalRielEq <= 0) return;
-    if (totalRielEq > debtor.totalOwed + 0.1) return alert('Cannot pay more than the total remaining debt.');
 
     setIsProcessing(true);
 
@@ -350,7 +375,10 @@ export default function DeliveryPage() {
 
   const debtorsMap = deliveries.reduce((acc: any, curr: any) => {
     const balance = Number(curr.balance_due) || 0;
-    if (balance > 0) {
+    const totalSale = Number(curr.total_sales) || 0;
+    
+    // Credit tab logic: ONLY show if they paid partially!
+    if (balance > 0 && balance < totalSale) {
       let owner = (curr.owner || '').trim();
       if (!owner) owner = 'Unassigned';
       owner = owner.charAt(0).toUpperCase() + owner.slice(1).toLowerCase();
@@ -412,7 +440,7 @@ export default function DeliveryPage() {
                   <th style={{ padding: '16px 20px', textAlign: 'right', color: '#64748b', fontWeight: 'bold', textTransform: 'uppercase', fontSize: '12px', letterSpacing: '0.5px' }}>Total (៛)</th>
                   <th style={{ padding: '16px 20px', textAlign: 'center', color: '#64748b', fontWeight: 'bold', textTransform: 'uppercase', fontSize: '12px', letterSpacing: '0.5px' }}>Status</th>
                   <th style={{ padding: '16px 20px', textAlign: 'center', color: '#64748b', fontWeight: 'bold', textTransform: 'uppercase', fontSize: '12px', letterSpacing: '0.5px', width: '160px' }}>Payment Method</th>
-                  <th style={{ padding: '16px 20px', textAlign: 'right', color: '#64748b', fontWeight: 'bold', textTransform: 'uppercase', fontSize: '12px', letterSpacing: '0.5px', width: '180px' }}>Pay Amount (៛)</th>
+                  <th style={{ padding: '16px 20px', textAlign: 'right', color: '#64748b', fontWeight: 'bold', textTransform: 'uppercase', fontSize: '12px', letterSpacing: '0.5px', width: '180px' }}>Pay Amount</th>
                   <th style={{ padding: '16px 20px', textAlign: 'center', color: '#64748b', fontWeight: 'bold', textTransform: 'uppercase', fontSize: '12px', letterSpacing: '0.5px', width: '120px' }}>Complete</th>
                 </tr>
               </thead>
@@ -499,18 +527,16 @@ export default function DeliveryPage() {
                                 </div>
                               ))}
                             </div>
-                          ) : (
-                            <div style={{ color: '#10b981', fontSize: '14px', fontWeight: 'normal' }}>Paid & Done ✅</div>
-                          )}
+                          ) : null}
                         </td>
 
                         <td style={{ padding: '16px 20px', textAlign: 'center', verticalAlign: 'top' }}>
                           <button 
                             onClick={() => {
-                              if (balanceDue > 0) {
-                                handleInlineProcess(d, paymentState);
+                              if (isDone) {
+                                handleUndoProcess(d);
                               } else {
-                                updateInvoiceField(d.invoice_id, 'is_done', !d.is_done);
+                                handleInlineProcess(d, paymentState);
                               }
                             }}
                             style={{

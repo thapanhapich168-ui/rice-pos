@@ -1,6 +1,7 @@
 import './globals.css'
 import Sidebar from '@/components/Sidebar'
 import SplashScreen from '@/components/SplashScreen'
+import PullToRefresh from '@/components/PullToRefresh' // 👈 Added the import
 
 export const metadata = {
   title: 'Angkor Radiant Rice POS',
@@ -21,7 +22,10 @@ export default function RootLayout({
             <Sidebar />
 
             <main className="app-scroller">
-              {children}
+              {/* 👈 WRAPPED THE CHILDREN IN THE PULL-TO-REFRESH COMPONENT */}
+              <PullToRefresh>
+                {children}
+              </PullToRefresh>
             </main>
             
           </div>
