@@ -64,6 +64,7 @@ export default function DashboardPage() {
   const [familyOweRiel, setFamilyOweRiel] = useState<number>(0)
   const [familyOweUsd, setFamilyOweUsd] = useState<number>(0)
   const [persOweRiel, setPersOweRiel] = useState<number>(0) 
+  const [persOweUsd, setPersOweUsd] = useState<number>(0) 
 
   const [activeTab, setActiveTab] = useState<'summary' | 'wholesale' | 'retail' | 'asset'>('summary')
   const [assetFilter, setAssetFilter] = useState<'today' | 'yesterday' | 'week' | 'month' | 'all'>('month')
@@ -76,10 +77,10 @@ export default function DashboardPage() {
 
   async function loadData() {
     const [{data: salesData}, {data: sumData}, {data: retData}, {data: expData}, {data: staffData}, {data: prodData}, {data: apData}, {data: cogsData}, {data: batchData}, {data: invPayData}] = await Promise.all([
-      supabase.from('sales').select('*'),
-      supabase.from('invoice_summaries').select('*'),
-      supabase.from('retail_sales').select('*'),
-      supabase.from('expenses').select('*'),
+      supabase.from('sales').select('*').limit(5000),
+      supabase.from('invoice_summaries').select('*').limit(5000),
+      supabase.from('retail_sales').select('*').limit(5000),
+      supabase.from('expenses').select('*').limit(5000),
       supabase.from('staff').select('*'),
       supabase.from('products').select('*').order('id'),
       supabase.from('accounts_payable').select('*').order('created_at', { ascending: false }),
@@ -90,7 +91,7 @@ export default function DashboardPage() {
 
     setWholesaleSales(salesData || []); setInvoiceSummaries(sumData || []); setRetailSales(retData || []); setExpenses(expData || []); setStaffList(staffData || []); setInventoryList(prodData || []); setAccountsPayable(apData || []); setCogsSettlements(cogsData || []); setPriceHistory(batchData || []); setInvoicePayments(invPayData || []);
 
-    const keys = ['base_capital', 'initial_cash_riel', 'initial_cash_usd', 'initial_qr_riel', 'initial_qr_usd', 'personal_owe_riel', 'family_owe_riel', 'family_owe_usd'];
+    const keys = ['base_capital', 'initial_cash_riel', 'initial_cash_usd', 'initial_qr_riel', 'initial_qr_usd', 'personal_owe_riel', 'personal_owe_usd', 'family_owe_riel', 'family_owe_usd'];
     const { data: capData } = await supabase.from('app_settings').select('*').in('setting_key', keys)
     if (capData) {
       capData.forEach(s => {
@@ -100,6 +101,7 @@ export default function DashboardPage() {
         if (s.setting_key === 'initial_qr_riel') setInitQrRiel(Number(s.setting_value) || 0)
         if (s.setting_key === 'initial_qr_usd') setInitQrUsd(Number(s.setting_value) || 0)
         if (s.setting_key === 'personal_owe_riel') setPersOweRiel(Number(s.setting_value) || 0)
+        if (s.setting_key === 'personal_owe_usd') setPersOweUsd(Number(s.setting_value) || 0)
         if (s.setting_key === 'family_owe_riel') setFamilyOweRiel(Number(s.setting_value) || 0)
         if (s.setting_key === 'family_owe_usd') setFamilyOweUsd(Number(s.setting_value) || 0)
       })
@@ -128,23 +130,6 @@ export default function DashboardPage() {
     return true;
   }
 
-  function calculateDaysWorked(startDateStr: string, filter: string) {
-    if (!startDateStr) return 0;
-    const start = new Date(startDateStr); start.setHours(0,0,0,0);
-    const today = new Date(); today.setHours(0,0,0,0);
-    if (filter === 'today' || filter === 'yesterday') return 1;
-    if (filter === 'week') return 7; 
-    if (filter === 'month') {
-      const firstOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
-      const actualStart = start > firstOfMonth ? start : firstOfMonth;
-      const diffTime = today.getTime() - actualStart.getTime();
-      return Math.max(0, Math.floor(diffTime / 86400000) + 1);
-    }
-    if (filter === 'all') return Math.max(0, Math.floor((today.getTime() - start.getTime()) / 86400000) + 1);
-    return 0;
-  }
-
-  // --- DYNAMIC DATA SELECTION BASED ON TAB ---
   let activeSalesData: any[] = [];
   if (activeTab === 'wholesale') activeSalesData = wholesaleSales;
   else if (activeTab === 'retail') activeSalesData = retailSales;
@@ -158,14 +143,26 @@ export default function DashboardPage() {
 
     filtered.forEach(sale => {
       const qty = Number(sale.qty || 0); const price = Number(sale.price_per_bag || 0); const cogs = Number(sale.cogs_price || 0);
-      const revenue = qty * price; const profit = (price - cogs) * qty;
+      const isNegative = (sale.custom_rice_type || sale.rice_type || '').includes('ដូរ') || (sale.custom_rice_type || sale.rice_type || '').includes('បញ្ចុះតម្លៃ') || (sale.custom_rice_type || sale.rice_type || '').includes('កក់');
+      
+      const revenue = isNegative ? -Math.abs(qty * price) : Math.abs(qty * price); 
+      const profit = isNegative ? -Math.abs((price - cogs) * qty) : Math.abs((price - cogs) * qty);
+      
       const owner = parseOwner(sale.owner); const methodStr = (sale.payment_method || 'Cash ៛');
 
-      if (activeTab === 'retail' || activeTab === 'summary') {
+      const isWalkIn = (sale.customer_name || '').toLowerCase().includes('walk-in') || (sale.customer_name || '').toLowerCase().includes('walk in');
+      const isRetail = !sale.invoice_id; 
+      const isDirectCash = isRetail || isWalkIn;
+
+      if (isDirectCash && (activeTab === 'retail' || activeTab === 'summary' || activeTab === 'wholesale')) {
         if (methodStr.includes(':')) {
            methodStr.split(',').forEach((p: string) => {
-             const [m, amtStr] = p.split(':'); const pAmt = Number(amtStr) || 0;
-             if (m.includes('Cash ៛')) cR += pAmt; else if (m.includes('Cash $')) cU += pAmt; else if (m.includes('QR ៛') || m.includes('Mom QR ៛')) qR += pAmt; else if (m.includes('QR $') || m.includes('Mom QR $')) qU += pAmt; else cR += pAmt;
+             const [m, amtStr] = p.split(':'); const pAmtFace = Number(amtStr) || 0;
+             if (m.includes('Cash ៛')) cR += pAmtFace; 
+             else if (m.includes('Cash $')) cU += pAmtFace; 
+             else if (m.includes('QR ៛') || m.includes('Mom QR ៛')) qR += pAmtFace; 
+             else if (m.includes('QR $') || m.includes('Mom QR $')) qU += pAmtFace; 
+             else cR += pAmtFace;
            });
         } else {
            if (methodStr.includes('Cash ៛')) cR += revenue; else if (methodStr.includes('Cash $')) cU += (revenue / EXCHANGE_RATE); else if (methodStr.includes('QR ៛') || methodStr.includes('Mom QR ៛')) qR += revenue; else if (methodStr.includes('QR $') || methodStr.includes('Mom QR $')) qU += (revenue / EXCHANGE_RATE); else cR += revenue; 
@@ -188,7 +185,11 @@ export default function DashboardPage() {
 
     filtered.forEach(exp => {
       if (parseOwner(exp.spender) === 'mom') return; 
-      let amtRiel = Number(exp.amount_riel || 0); let amtUsd = Number(exp.amount_usd || exp.amount || 0);
+      
+      const desc = (exp.description || '').toUpperCase();
+      if (desc === 'RETAIL' || desc === 'WHOLESALE') return; 
+
+      let amtRiel = Number(exp.amount_riel || 0); let amtUsd = Number(exp.amount_usd || 0);
       if (amtRiel < 0 && amtUsd <= 0) return;
 
       const methodStr = (exp.payment_method || '').toLowerCase();
@@ -217,7 +218,6 @@ export default function DashboardPage() {
     return { bizCashRiel, bizCashUsd, bizQrRiel, bizQrUsd, persCashRiel, persCashUsd, persQrRiel, persQrUsd }
   }
 
-  // --- TOP PERFORMER CALCULATION ENGINE ---
   function getTopPerformers(dataSet: any[], timeFilter: (d: string) => boolean) {
     const filtered = dataSet.filter(s => timeFilter(s.created_at) && parseOwner(s.owner) !== 'mom');
     const map: Record<string, { name: string, qty: number, profit: number }> = {};
@@ -252,40 +252,77 @@ export default function DashboardPage() {
     let liveCashRiel = initCashRiel, liveCashUsd = initCashUsd;
     let liveQrRiel = initQrRiel, liveQrUsd = initQrUsd;
     
-    let bizCredit = 0;
-    let totalSupplierAP = 0;
-    let momTotalCogs = 0;
-    let momTotalPaid = 0;
-    let momCollected = 0;
-    let momPaidOut = 0;
-    let liabilityOffsetUsed = 0; 
+    let bizCreditRiel = 0, bizCreditUsd = 0;
+    let totalSupplierAPRiel = 0;
+    let totalSupplierAPUsd = 0;
+    
+    let momTotalCogsRiel = 0;
+    let momTotalPaidRiel = 0;
+    
+    let momCollectedRiel = 0, momCollectedUsd = 0;
+    let momPaidOutRiel = 0, momPaidOutUsd = 0;
+    let liabilityOffsetUsedRiel = 0, liabilityOffsetUsedUsd = 0; 
+    
     let riceStockValue = 0;
     let staffDebtRiel = 0; 
+    let staffDebtUsd = 0; 
 
     staffList.forEach(staff => {
-      staffDebtRiel += Number(staff.total_debt) || 0;
+      staffDebtRiel += Number(staff.total_debt_riel) || 0;
+      staffDebtUsd += Number(staff.total_debt_usd) || 0;
     });
 
-    const productValuations: Record<number, { qty: number, totalValue: number, avgCost: number, batches: any[] }> = {};
+    const productValuations: Record<number, { qty: number, totalValue: number, avgCost: number, batches: any[], unaccountedQty: number, unaccountedPrice: number }> = {};
+    
     inventoryList.forEach(p => {
-      let pStock = Number(p.stock || 0); let pValue = 0; let accountedStock = 0;
-      const activeBatches = priceHistory.filter(b => b.product_id === p.id && ((b.imported_qty || 0) - (b.sold_qty || 0)) > 0);
+      let pStock = Math.max(0, Number(p.stock || 0)); 
+      let pValue = 0; 
       
+      const activeBatches = priceHistory.filter(b => b.product_id === p.id && ((b.imported_qty || 0) - (b.sold_qty || 0)) > 0);
       activeBatches.sort((a,b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
 
-      activeBatches.forEach(b => {
-        const rem = (b.imported_qty || 0) - (b.sold_qty || 0);
-        pValue += (rem * Number(b.cost_price || 0)); accountedStock += rem;
-      });
+      const allocatedBatches = [];
+      let remainingToAllocate = pStock;
 
-      if (pStock > accountedStock) pValue += (pStock - accountedStock) * Number(p.cost_price || 0);
-      else if (pStock < accountedStock && accountedStock > 0) pValue = pStock * (pValue / accountedStock);
+      // strictly allocate the physical stock (pStock) across the FIFO batches
+      for (const b of activeBatches) {
+          if (remainingToAllocate <= 0) break;
+          let rem = (b.imported_qty || 0) - (b.sold_qty || 0);
+          let take = Math.min(rem, remainingToAllocate);
+          
+          pValue += (take * Number(b.cost_price || 0));
+          remainingToAllocate -= take;
+          
+          allocatedBatches.push({
+              ...b,
+              display_qty: take
+          });
+      }
+
+      // If we have more physical stock than our batches recorded (e.g. manual adjustments)
+      let unaccountedQty = remainingToAllocate;
+      let unaccountedPrice = Number(p.cost_price || 0);
+      if (unaccountedQty > 0) {
+          pValue += (unaccountedQty * unaccountedPrice);
+      }
 
       riceStockValue += pValue;
-      productValuations[p.id] = { qty: pStock, totalValue: pValue, avgCost: pStock > 0 ? pValue / pStock : Number(p.cost_price || 0), batches: activeBatches };
+      productValuations[p.id] = { 
+        qty: pStock, 
+        totalValue: pValue, 
+        avgCost: pStock > 0 ? pValue / pStock : Number(p.cost_price || 0), 
+        batches: allocatedBatches,
+        unaccountedQty: unaccountedQty,
+        unaccountedPrice: unaccountedPrice
+      };
     });
 
-    accountsPayable.forEach(ap => { if (ap.status === 'Unpaid') totalSupplierAP += Number(ap.amount_riel || 0); });
+    accountsPayable.forEach(ap => { 
+      if (ap.status === 'Unpaid') {
+        totalSupplierAPRiel += Number(ap.amount_riel || 0);
+        totalSupplierAPUsd += Number(ap.amount_usd || 0);
+      } 
+    });
 
     const isBusinessMethod = (m: string) => {
         const lowerM = m.toLowerCase();
@@ -294,58 +331,76 @@ export default function DashboardPage() {
     };
 
     const addFunds = (amtRiel: number, method: string) => {
-      const m = method || 'Cash ៛';
-      const lowerM = m.toLowerCase();
+      const lowerM = (method || 'cash ៛').toLowerCase();
       if (lowerM.includes('liability') || lowerM.includes('mom qr')) return; 
       
-      if (m.includes('Cash ៛')) liveCashRiel += amtRiel;
-      else if (m.includes('Cash $')) liveCashUsd += (amtRiel / EXCHANGE_RATE);
-      else if (m.includes('QR ៛')) liveQrRiel += amtRiel;
-      else if (m.includes('QR $')) liveQrUsd += (amtRiel / EXCHANGE_RATE);
-      else liveCashRiel += amtRiel;
+      if (lowerM.includes('qr')) {
+          if (lowerM.includes('$')) liveQrUsd += (amtRiel / EXCHANGE_RATE);
+          else liveQrRiel += amtRiel;
+      } else {
+          if (lowerM.includes('$')) liveCashUsd += (amtRiel / EXCHANGE_RATE);
+          else liveCashRiel += amtRiel;
+      }
     }
 
     const subFunds = (amtRiel: number, method: string) => {
-      const m = method || 'Cash ៛';
-      const lowerM = m.toLowerCase();
+      const lowerM = (method || 'cash ៛').toLowerCase();
       if (lowerM.includes('liability') || lowerM.includes('mom qr')) return; 
 
-      if (m.includes('Cash ៛')) liveCashRiel -= amtRiel;
-      else if (m.includes('Cash $')) liveCashUsd -= (amtRiel / EXCHANGE_RATE);
-      else if (m.includes('QR ៛')) liveQrRiel -= amtRiel;
-      else if (m.includes('QR $')) liveQrUsd -= (amtRiel / EXCHANGE_RATE);
-      else liveCashRiel -= amtRiel;
+      if (lowerM.includes('qr')) {
+          if (lowerM.includes('$')) liveQrUsd -= (amtRiel / EXCHANGE_RATE);
+          else liveQrRiel -= amtRiel;
+      } else {
+          if (lowerM.includes('$')) liveCashUsd -= (amtRiel / EXCHANGE_RATE);
+          else liveCashRiel -= amtRiel;
+      }
     }
 
     retailSales.forEach(r => {
       const owner = parseOwner(r.owner);
       const methodStr = r.payment_method || 'Cash ៛';
 
+      const desc = (r.custom_rice_type || r.rice_type || '').toLowerCase();
+      const isNegative = desc.includes('ដូរ') || desc.includes('បញ្ចុះតម្លៃ') || desc.includes('កក់');
+      let rawTotal = Number(r.qty || 0) * Number(r.price_per_bag || 0);
+      let finalSaleAmount = isNegative ? -Math.abs(rawTotal) : Math.abs(rawTotal);
+
       if (methodStr.includes(':')) {
           methodStr.split(',').forEach((pStr: string) => {
               const [mName, amtStr] = pStr.split(':');
-              let bAmt = Number(amtStr) || 0;
-              if (mName.includes('$')) bAmt *= EXCHANGE_RATE;
+              let bAmtFace = Number(amtStr) || 0;
+              let isUsd = mName.includes('$');
+              let bAmtEq = isUsd ? bAmtFace * EXCHANGE_RATE : bAmtFace;
+              if (isNegative) { bAmtFace = -Math.abs(bAmtFace); bAmtEq = -Math.abs(bAmtEq); }
 
               if (isBusinessMethod(mName.trim())) {
-                  addFunds(bAmt, mName.trim());
-                  if (owner === 'mom') momCollected += bAmt; 
+                  addFunds(bAmtEq, mName.trim());
+                  
+                  if (owner === 'mom') {
+                      if (isUsd) momCollectedUsd += bAmtFace;
+                      else momCollectedRiel += bAmtFace;
+                  }
               }
           });
       } else {
           if (isBusinessMethod(methodStr)) {
-              addFunds(Number(r.qty || 0) * Number(r.price_per_bag || 0), methodStr);
-              if (owner === 'mom') momCollected += Number(r.qty || 0) * Number(r.price_per_bag || 0);
+              let isUsd = methodStr.includes('$');
+              if (finalSaleAmount < 0) subFunds(Math.abs(finalSaleAmount), methodStr);
+              else addFunds(Math.abs(finalSaleAmount), methodStr);
+              if (owner === 'mom') {
+                  let faceValue = isUsd ? finalSaleAmount / EXCHANGE_RATE : finalSaleAmount;
+                  if (isUsd) momCollectedUsd += faceValue;
+                  else momCollectedRiel += faceValue;
+              }
           }
       }
 
       if (owner === 'mom') {
         let cogsAmt = Number(r.qty || 0) * Number(r.cogs_price || 0);
-        let desc = r.custom_rice_type || r.rice_type || '';
         if (!desc.includes('សេវាដឹក') && !(desc.includes('បាវ') && cogsAmt === 0)) {
-           if (desc.includes('ដូរ') || desc.includes('បញ្ចុះតម្លៃ') || desc.includes('កក់')) cogsAmt = -Math.abs(cogsAmt);
+           if (isNegative) cogsAmt = -Math.abs(cogsAmt);
            else cogsAmt = Math.abs(cogsAmt);
-           momTotalCogs += cogsAmt;
+           momTotalCogsRiel += cogsAmt;
         }
       }
     });
@@ -358,71 +413,135 @@ export default function DashboardPage() {
         if (!desc.includes('សេវាដឹក') && !(desc.includes('បាវ') && cogsAmt === 0)) {
            if (desc.includes('ដូរ') || desc.includes('បញ្ចុះតម្លៃ') || desc.includes('កក់')) cogsAmt = -Math.abs(cogsAmt);
            else cogsAmt = Math.abs(cogsAmt);
-           momTotalCogs += cogsAmt;
+           momTotalCogsRiel += cogsAmt;
         }
       }
     });
 
     invoicePayments.forEach(p => {
-       const amt = Number(p.amount_paid || 0);
        const methodStr = p.payment_method || 'Cash ៛';
        
        if (methodStr.includes(':')) {
            methodStr.split(',').forEach((pStr: string) => {
               const [mName, amtStr] = pStr.split(':');
-              let bAmt = Number(amtStr) || 0;
-              if (mName.includes('$')) bAmt *= EXCHANGE_RATE;
+              let bAmtFace = Number(amtStr) || 0;
+              let isUsd = mName.includes('$');
+              let bAmtEq = isUsd ? bAmtFace * EXCHANGE_RATE : bAmtFace;
               
               if (isBusinessMethod(mName.trim())) {
-                  addFunds(bAmt, mName.trim());
+                  addFunds(bAmtEq, mName.trim());
                   const parentInv = invoiceSummaries.find(i => i.invoice_id === p.invoice_id);
-                  if (parentInv && parseOwner(parentInv.owner) === 'mom') momCollected += bAmt;
+                  if (parentInv && parseOwner(parentInv.owner) === 'mom') {
+                      if (isUsd) momCollectedUsd += bAmtFace;
+                      else momCollectedRiel += bAmtFace;
+                  }
               }
            });
        } else {
+           let isUsd = methodStr.includes('$');
+           let bAmtEq = Number(p.amount_paid_riel || 0); 
+           let faceValue = isUsd ? bAmtEq / EXCHANGE_RATE : bAmtEq;
+
            if (isBusinessMethod(methodStr)) {
-               addFunds(amt, methodStr);
+               addFunds(bAmtEq, methodStr);
                const parentInv = invoiceSummaries.find(i => i.invoice_id === p.invoice_id);
-               if (parentInv && parseOwner(parentInv.owner) === 'mom') momCollected += amt;
+               if (parentInv && parseOwner(parentInv.owner) === 'mom') {
+                   if (isUsd) momCollectedUsd += faceValue;
+                   else momCollectedRiel += faceValue;
+               }
            }
        }
     });
 
     invoiceSummaries.forEach(inv => {
        const owner = parseOwner(inv.owner);
-       if (owner !== 'mom') bizCredit += Number(inv.balance_due || 0);
+       const isWalkIn = (inv.customer_name || '').toLowerCase().includes('walk-in') || (inv.customer_name || '').toLowerCase().includes('walk in');
+       
+       if (isWalkIn) {
+           const methodStr = inv.payment_method || 'Cash ៛';
+           const finalSaleAmount = Number(inv.total_sales || 0);
+           const isNegative = finalSaleAmount < 0;
+
+           if (methodStr.includes(':')) {
+               methodStr.split(',').forEach((pStr: string) => {
+                   const [mName, amtStr] = pStr.split(':');
+                   let bAmtFace = Number(amtStr) || 0;
+                   let isUsd = mName.includes('$');
+                   let bAmtEq = isUsd ? bAmtFace * EXCHANGE_RATE : bAmtFace;
+                   if (isNegative) { bAmtFace = -Math.abs(bAmtFace); bAmtEq = -Math.abs(bAmtEq); }
+
+                   if (isBusinessMethod(mName.trim())) {
+                       addFunds(bAmtEq, mName.trim());
+                       
+                       if (owner === 'mom') {
+                           if (isUsd) momCollectedUsd += bAmtFace;
+                           else momCollectedRiel += bAmtFace;
+                       }
+                   }
+               });
+           } else {
+               let isUsd = methodStr.includes('$');
+               if (isBusinessMethod(methodStr)) {
+                   if (finalSaleAmount < 0) subFunds(Math.abs(finalSaleAmount), methodStr);
+                   else addFunds(Math.abs(finalSaleAmount), methodStr);
+                   if (owner === 'mom') {
+                       let faceValue = isUsd ? finalSaleAmount / EXCHANGE_RATE : finalSaleAmount;
+                       if (isUsd) momCollectedUsd += faceValue;
+                       else momCollectedRiel += faceValue;
+                   }
+               }
+           }
+       } else {
+           if (owner !== 'mom') {
+               bizCreditRiel += Number(inv.balance_due || 0);
+           }
+       }
     });
 
     cogsSettlements.forEach(c => {
        const owner = parseOwner(c.owner_name);
        const methodStr = (c.payment_method || '').toLowerCase();
-       const totalAmt = Number(c.paid_amount || 0);
-
-       if (owner === 'mom') momTotalPaid += totalAmt;
+       const totalAmtEq = Number(c.paid_amount_riel || 0);
 
        if (methodStr.includes(':')) {
           methodStr.split(',').forEach((p: string) => {
              const [mName, amtStr] = p.split(':');
              const lowerM = mName.trim().toLowerCase();
-             let bAmt = Number(amtStr) || 0;
-             if (mName.includes('$')) bAmt *= EXCHANGE_RATE;
+             let bAmtFace = Number(amtStr) || 0;
+             let isUsd = lowerM.includes('$');
+             let bAmtEq = isUsd ? bAmtFace * EXCHANGE_RATE : bAmtFace;
 
              if (lowerM.includes('liability')) {
-                 if (owner === 'mom') liabilityOffsetUsed += bAmt;
+                 if (owner === 'mom') {
+                     if (isUsd) liabilityOffsetUsedUsd += bAmtFace;
+                     else liabilityOffsetUsedRiel += bAmtFace;
+                     momTotalPaidRiel += bAmtEq;
+                 }
              } else {
-                 subFunds(bAmt, mName.trim());
+                 subFunds(bAmtEq, mName.trim());
                  if (owner === 'mom' && !lowerM.includes('mom qr')) {
-                     momPaidOut += bAmt; 
+                     if (isUsd) momPaidOutUsd += bAmtFace;
+                     else momPaidOutRiel += bAmtFace;
+                     momTotalPaidRiel += bAmtEq;
                  }
              }
           });
        } else {
+           let isUsd = methodStr.includes('$');
+           let faceValue = isUsd ? totalAmtEq / EXCHANGE_RATE : totalAmtEq;
+
            if (methodStr.includes('liability')) {
-               if (owner === 'mom') liabilityOffsetUsed += totalAmt;
+               if (owner === 'mom') {
+                   if (isUsd) liabilityOffsetUsedUsd += faceValue;
+                   else liabilityOffsetUsedRiel += faceValue;
+                   momTotalPaidRiel += totalAmtEq;
+               }
            } else {
-               subFunds(totalAmt, c.payment_method);
+               subFunds(totalAmtEq, c.payment_method);
                if (owner === 'mom' && !methodStr.includes('mom qr')) {
-                   momPaidOut += totalAmt;
+                   if (isUsd) momPaidOutUsd += faceValue;
+                   else momPaidOutRiel += faceValue;
+                   momTotalPaidRiel += totalAmtEq;
                }
            }
        }
@@ -432,10 +551,16 @@ export default function DashboardPage() {
       const owner = parseOwner(e.spender);
       if (owner === 'mom') return;
 
+      const desc = (e.description || '').toUpperCase();
+      if (desc === 'RETAIL' || desc === 'WHOLESALE') return; 
+
       let amtRiel = Number(e.amount_riel || 0);
+      let amtUsd = Number(e.amount_usd || 0);
       const paymentMethod = e.payment_method || 'Cash ៛';
 
-      if (amtRiel < 0) {
+      const totalRielValue = amtRiel !== 0 ? Math.abs(amtRiel) : Math.abs(amtUsd) * EXCHANGE_RATE;
+
+      if (amtRiel < 0 || amtUsd < 0) {
          const remarks = (e.remarks || '').toLowerCase();
          if (remarks.includes('payment from') && !remarks.includes('cogs')) return;
          if (remarks.includes('account settled') && !remarks.includes('cogs')) return;
@@ -447,11 +572,24 @@ export default function DashboardPage() {
               if (m.includes('$')) bucketAmt *= EXCHANGE_RATE;
               addFunds(Math.abs(bucketAmt), m.trim());
             });
-         } else addFunds(Math.abs(amtRiel), paymentMethod);
+         } else addFunds(totalRielValue, paymentMethod);
       } else {
          const remarks = (e.remarks || '').toLowerCase();
          if (remarks.includes("settled mom's account liability")) {
-             momPaidOut += Math.abs(amtRiel) + (Math.abs(Number(e.amount_usd || 0)) * EXCHANGE_RATE);
+             if (paymentMethod.includes(':')) {
+                 paymentMethod.split(',').forEach((p: string) => {
+                     const [mName, amtStr] = p.split(':');
+                     let bAmtFace = Number(amtStr) || 0;
+                     let isUsd = mName.includes('$');
+                     if (isUsd) momPaidOutUsd += bAmtFace;
+                     else momPaidOutRiel += bAmtFace;
+                 });
+             } else {
+                 let isUsd = paymentMethod.includes('$');
+                 let faceValue = isUsd ? totalRielValue / EXCHANGE_RATE : totalRielValue;
+                 if (isUsd) momPaidOutUsd += faceValue;
+                 else momPaidOutRiel += faceValue;
+             }
          }
 
          if (paymentMethod.includes(':')) {
@@ -461,7 +599,7 @@ export default function DashboardPage() {
               if (m.includes('$')) bucketAmt *= EXCHANGE_RATE;
               subFunds(Math.abs(bucketAmt), m.trim());
             });
-         } else subFunds(Math.abs(amtRiel), paymentMethod);
+         } else subFunds(totalRielValue, paymentMethod);
       }
     });
 
@@ -473,12 +611,14 @@ export default function DashboardPage() {
         const owner = parseOwner(e.spender);
         if (owner === 'mom') return;
 
+        const desc = (e.description || '').toUpperCase();
+        if (desc === 'RETAIL' || desc === 'WHOLESALE') return;
+
         let amtRiel = Number(e.amount_riel || 0); let amtUsd = Number(e.amount_usd || 0);
         if (amtRiel < 0 && amtUsd <= 0) return;
         
         const methodStr = (e.payment_method || '').toLowerCase();
         const remarks = (e.remarks || '').toLowerCase();
-        const desc = (e.description || '').toUpperCase();
         
         let isRice = false, isBiz = false;
         if (remarks.includes('stock import') || remarks.includes('rice') || desc.includes('RICE') || desc.includes('COGS')) isRice = true;
@@ -501,17 +641,22 @@ export default function DashboardPage() {
         } else distributeToBuckets(methodStr, Math.abs(amtRiel), Math.abs(amtUsd));
     });
 
-    const momCogsAr = Math.max(0, momTotalCogs - momTotalPaid);
-    const liveMomLiability = Math.max(0, persOweRiel + momCollected - momPaidOut - liabilityOffsetUsed);
-    const familyArRielEq = familyOweRiel + (familyOweUsd * EXCHANGE_RATE);
+    const liveMomLiabilityRiel = Math.max(0, persOweRiel + momCollectedRiel - momPaidOutRiel - liabilityOffsetUsedRiel);
+    const liveMomLiabilityUsd = Math.max(0, persOweUsd + momCollectedUsd - momPaidOutUsd - liabilityOffsetUsedUsd);
 
-    const liquidAssets = baseCapital + (liveCashRiel + (liveCashUsd * EXCHANGE_RATE)) + (liveQrRiel + (liveQrUsd * EXCHANGE_RATE));
-    const netWorth = liquidAssets + bizCredit + familyArRielEq + momCogsAr + staffDebtRiel - totalSupplierAP - liveMomLiability;
+    const momCogsArRiel = Math.max(0, momTotalCogsRiel - momTotalPaidRiel);
+
+    const netWorthRiel = baseCapital + liveCashRiel + liveQrRiel + bizCreditRiel + familyOweRiel + momCogsArRiel + staffDebtRiel - totalSupplierAPRiel - liveMomLiabilityRiel;
+    const netWorthUsd = liveCashUsd + liveQrUsd + familyOweUsd + staffDebtUsd - totalSupplierAPUsd - liveMomLiabilityUsd;
+
+    const totalArRiel = bizCreditRiel + familyOweRiel + momCogsArRiel + staffDebtRiel;
+    const totalArUsd = familyOweUsd + staffDebtUsd;
 
     return {
       liveCashRiel, liveCashUsd, liveQrRiel, liveQrUsd,
-      bizCredit, familyArRielEq, momCogsAr, liveMomLiability, totalSupplierAP, staffDebtRiel,
-      netWorth, riceStockValue, productValuations,
+      bizCreditRiel, bizCreditUsd, momCogsArRiel, liveMomLiabilityRiel, liveMomLiabilityUsd, totalSupplierAPRiel, totalSupplierAPUsd, staffDebtRiel, staffDebtUsd,
+      familyOweRiel, familyOweUsd,
+      netWorthRiel, netWorthUsd, totalArRiel, totalArUsd, riceStockValue, productValuations,
       bizExpRiel, bizExpUsd, persExpRiel, persExpUsd, riceExpRiel, riceExpUsd
     };
   }
@@ -625,6 +770,10 @@ export default function DashboardPage() {
                     <label style={{ display: 'block', fontSize: '12px', color: '#475569', marginBottom: '6px', fontWeight: 'bold' }}>Mom Starting Owe (៛)</label>
                     <CurrencyInput value={persOweRiel} onChange={(v: number) => setPersOweRiel(v)} onBlur={() => updateSetting('personal_owe_riel', persOweRiel)} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', outline: 'none', color: '#334155', boxSizing: 'border-box', fontSize: '14px' }} />
                   </div>
+                  <div>
+                    <label style={{ display: 'block', fontSize: '12px', color: '#475569', marginBottom: '6px', fontWeight: 'bold' }}>Mom Starting Owe ($)</label>
+                    <CurrencyInput value={persOweUsd} onChange={(v: number) => setPersOweUsd(v)} onBlur={() => updateSetting('personal_owe_usd', persOweUsd)} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', outline: 'none', color: '#334155', boxSizing: 'border-box', fontSize: '14px' }} />
+                  </div>
                 </div>
               )}
             </div>
@@ -632,7 +781,16 @@ export default function DashboardPage() {
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '16px', marginBottom: '16px' }}>
               <div style={{ background: '#10b981', padding: '24px', borderRadius: '16px', color: '#fff', boxShadow: '0 10px 15px -3px rgba(16, 185, 129, 0.3)' }}>
                 <div style={{ fontSize: '13px', fontWeight: 'bold', textTransform: 'uppercase', opacity: 0.9, letterSpacing: '0.5px' }}>Total Net Worth</div>
-                <div style={{ fontSize: '32px', margin: '8px 0 0 0', fontWeight: 'normal' }}>{formatRiel(assetData.netWorth)}</div>
+                <div style={{ display: 'flex', gap: '16px', margin: '12px 0 0 0' }}>
+                  <div>
+                    <div style={{ fontSize: '11px', color: '#d1fae5', fontWeight: 'bold', textTransform: 'uppercase', marginBottom: '2px' }}>Total ៛</div>
+                    <div style={{ fontSize: '24px', fontWeight: 'bold' }}>{formatRiel(assetData.netWorthRiel)}</div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: '11px', color: '#d1fae5', fontWeight: 'bold', textTransform: 'uppercase', marginBottom: '2px' }}>Total $</div>
+                    <div style={{ fontSize: '24px', fontWeight: 'bold' }}>{formatUSD(assetData.netWorthUsd)}</div>
+                  </div>
+                </div>
               </div>
               <div style={{ background: '#fff', padding: '24px', borderRadius: '16px', border: '1px solid #e2e8f0', boxShadow: '0 4px 6px rgba(0,0,0,0.02)' }}>
                 <div style={{ fontSize: '13px', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 'bold' }}>📦 Total Rice Stock Asset</div>
@@ -669,42 +827,49 @@ export default function DashboardPage() {
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '16px', marginBottom: '32px' }}>
               <div style={{ background: '#fff', padding: '24px', borderRadius: '16px', border: '1px solid #e2e8f0', boxShadow: '0 4px 6px rgba(0,0,0,0.02)' }}>
                 <div style={{ fontSize: '13px', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 'bold' }}>📒 Accounts Receivable (AR)</div>
-                <div style={{ fontSize: '24px', margin: '8px 0', color: '#f59e0b', fontWeight: 'bold' }}>{formatRiel(assetData.bizCredit + assetData.familyArRielEq + assetData.momCogsAr + assetData.staffDebtRiel)}</div>
+                <div style={{ display: 'flex', gap: '16px', margin: '12px 0' }}>
+                  <div>
+                    <div style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 'bold', textTransform: 'uppercase', marginBottom: '2px' }}>Total ៛</div>
+                    <div style={{ fontSize: '24px', color: '#f59e0b', fontWeight: 'bold' }}>{formatRiel(assetData.totalArRiel)}</div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 'bold', textTransform: 'uppercase', marginBottom: '2px' }}>Total $</div>
+                    <div style={{ fontSize: '24px', color: '#f59e0b', fontWeight: 'bold' }}>{formatUSD(assetData.totalArUsd)}</div>
+                  </div>
+                </div>
                 
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(100px, 1fr))', gap: '8px', borderTop: '1px dashed #e2e8f0', paddingTop: '12px' }}>
                   <div>
                     <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 'bold', textTransform: 'uppercase' }}>Biz AR</span>
-                    <div style={{ fontSize: '14px', color: '#334155', fontWeight: 'bold' }}>{formatRiel(assetData.bizCredit)}</div>
-                    <div style={{ fontSize: '12px', color: '#64748b' }}>{formatUSD(assetData.bizCredit / EXCHANGE_RATE)}</div>
+                    <div style={{ fontSize: '14px', color: '#334155', fontWeight: 'bold' }}>{formatRiel(assetData.bizCreditRiel)}</div>
                   </div>
                   <div>
                     <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 'bold', textTransform: 'uppercase' }}>Pers. AR</span>
-                    <div style={{ fontSize: '14px', color: '#334155', fontWeight: 'bold' }}>{formatRiel(assetData.familyArRielEq)}</div>
-                    <div style={{ fontSize: '12px', color: '#64748b' }}>{formatUSD(assetData.familyArRielEq / EXCHANGE_RATE)}</div>
+                    <div style={{ fontSize: '14px', color: '#334155', fontWeight: 'bold' }}>{formatRiel(assetData.familyOweRiel)}</div>
+                    <div style={{ fontSize: '14px', color: '#334155', fontWeight: 'bold' }}>{formatUSD(assetData.familyOweUsd)}</div>
                   </div>
                   <div>
                     <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 'bold', textTransform: 'uppercase' }}>Mom AR (COGS)</span>
-                    <div style={{ fontSize: '14px', color: '#334155', fontWeight: 'bold' }}>{formatRiel(assetData.momCogsAr)}</div>
-                    <div style={{ fontSize: '12px', color: '#64748b' }}>{formatUSD(assetData.momCogsAr / EXCHANGE_RATE)}</div>
+                    <div style={{ fontSize: '14px', color: '#334155', fontWeight: 'bold' }}>{formatRiel(assetData.momCogsArRiel)}</div>
                   </div>
                   <div>
                     <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 'bold', textTransform: 'uppercase' }}>Staff Debt</span>
                     <div style={{ fontSize: '14px', color: '#334155', fontWeight: 'bold' }}>{formatRiel(assetData.staffDebtRiel)}</div>
-                    <div style={{ fontSize: '12px', color: '#64748b' }}>{formatUSD(assetData.staffDebtRiel / EXCHANGE_RATE)}</div>
+                    <div style={{ fontSize: '14px', color: '#334155', fontWeight: 'bold' }}>{formatUSD(assetData.staffDebtUsd)}</div>
                   </div>
                 </div>
               </div>
               
               <div style={{ background: '#fff', padding: '24px', borderRadius: '16px', border: '1px solid #fecaca', boxShadow: '0 4px 6px rgba(0,0,0,0.02)' }}>
                 <div style={{ fontSize: '13px', color: '#be123c', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 'bold' }}>📉 Accounts Payable (Suppliers)</div>
-                <div style={{ fontSize: '24px', margin: '8px 0 4px 0', color: '#e11d48', fontWeight: 'bold' }}>{formatRiel(assetData.totalSupplierAP)}</div>
-                <div style={{ fontSize: '14px', color: '#be123c' }}>{formatUSD(assetData.totalSupplierAP / EXCHANGE_RATE)}</div>
+                <div style={{ fontSize: '24px', margin: '8px 0 4px 0', color: '#e11d48', fontWeight: 'bold' }}>{formatRiel(assetData.totalSupplierAPRiel)}</div>
+                <div style={{ fontSize: '20px', color: '#e11d48', fontWeight: 'bold' }}>{formatUSD(assetData.totalSupplierAPUsd)}</div>
               </div>
 
               <div style={{ background: '#fff', padding: '24px', borderRadius: '16px', border: '1px solid #fecaca', boxShadow: '0 4px 6px rgba(0,0,0,0.02)' }}>
                 <div style={{ fontSize: '13px', color: '#be123c', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 'bold' }}>📉 Personal Liability (Owe Mom)</div>
-                <div style={{ fontSize: '24px', margin: '8px 0 4px 0', color: '#e11d48', fontWeight: 'bold' }}>{formatRiel(assetData.liveMomLiability)}</div>
-                <div style={{ fontSize: '14px', color: '#be123c' }}>{formatUSD(assetData.liveMomLiability / EXCHANGE_RATE)}</div>
+                <div style={{ fontSize: '24px', margin: '8px 0 4px 0', color: '#e11d48', fontWeight: 'bold' }}>{formatRiel(assetData.liveMomLiabilityRiel)}</div>
+                <div style={{ fontSize: '20px', color: '#e11d48', fontWeight: 'bold' }}>{formatUSD(assetData.liveMomLiabilityUsd)}</div>
               </div>
 
               <div style={{ background: '#fff', padding: '24px', borderRadius: '16px', border: '1px solid #e2e8f0', boxShadow: '0 4px 6px rgba(0,0,0,0.02)', gridColumn: '1 / -1' }}>
@@ -756,24 +921,32 @@ export default function DashboardPage() {
                       const valData = assetData.productValuations[item.id];
                       if (!valData) return null;
                       
+                      const hasSubRows = valData.batches.length > 0 || valData.unaccountedQty > 0;
+
                       return (
                         <React.Fragment key={item.id}>
-                          <tr style={{ borderBottom: valData.batches.length > 0 ? 'none' : '1px solid #f1f5f9', background: '#ffffff' }}>
+                          <tr style={{ borderBottom: hasSubRows ? 'none' : '1px solid #f1f5f9', background: '#ffffff' }}>
                             <td style={{ padding: '14px 20px', color: '#1e293b', fontWeight: 'bold' }}>{item.name}</td>
                             <td style={{ padding: '14px 20px', textAlign: 'center', color: valData.qty < 10 ? '#ef4444' : '#1e293b', fontWeight: 'bold' }}>{formatNumber(valData.qty)}</td>
-                            <td style={{ padding: '14px 20px', textAlign: 'right', color: '#64748b', fontWeight: 'normal' }}>Avg: {formatRiel(valData.avgCost)}</td>
+                            <td style={{ padding: '14px 20px', textAlign: 'right', color: '#64748b', fontWeight: 'normal' }}>
+                              {hasSubRows ? `Avg: ${formatRiel(valData.avgCost)}` : formatRiel(valData.avgCost)}
+                            </td>
                             <td style={{ padding: '14px 20px', textAlign: 'right', color: '#10b981', fontWeight: 'bold' }}>{formatRiel(valData.totalValue)}</td>
                           </tr>
+                          
                           {valData.batches.map((b: any, idx: number) => {
-                             const rem = (b.imported_qty || 0) - (b.sold_qty || 0);
+                             const rem = b.display_qty;
                              const val = rem * Number(b.cost_price || 0);
-                             let label = "Current batch active stock";
-                             if (idx === 1) label = "1st New batch active stock";
-                             else if (idx === 2) label = "2nd batch new active stock";
-                             else if (idx > 2) label = `Queue #${idx + 1} active stock`;
+                             let label = "current batch";
+                             if (idx === 1) label = "1st batch";
+                             else if (idx === 2) label = "2nd batch";
+                             else if (idx === 3) label = "3rd batch";
+                             else if (idx > 3) label = `${idx}th batch`;
                              
+                             const isLast = idx === valData.batches.length - 1 && valData.unaccountedQty === 0;
+
                              return (
-                               <tr key={b.id} style={{ borderBottom: idx === valData.batches.length - 1 ? '1px solid #f1f5f9' : 'none', background: '#f8fafc' }}>
+                               <tr key={b.id} style={{ borderBottom: isLast ? '1px solid #f1f5f9' : 'none', background: '#f8fafc' }}>
                                  <td style={{ padding: '8px 20px 8px 40px', color: '#64748b', fontSize: '12px' }}>↳ {label}</td>
                                  <td style={{ padding: '8px 20px', textAlign: 'center', color: '#475569', fontSize: '13px' }}>{formatNumber(rem)}</td>
                                  <td style={{ padding: '8px 20px', textAlign: 'right', color: '#475569', fontSize: '13px' }}>{formatRiel(b.cost_price)}</td>
@@ -781,6 +954,15 @@ export default function DashboardPage() {
                                </tr>
                              )
                           })}
+                          
+                          {valData.unaccountedQty > 0 && (
+                             <tr style={{ borderBottom: '1px solid #f1f5f9', background: '#f8fafc' }}>
+                               <td style={{ padding: '8px 20px 8px 40px', color: '#64748b', fontSize: '12px' }}>↳ unlinked batch</td>
+                               <td style={{ padding: '8px 20px', textAlign: 'center', color: '#475569', fontSize: '13px' }}>{formatNumber(valData.unaccountedQty)}</td>
+                               <td style={{ padding: '8px 20px', textAlign: 'right', color: '#475569', fontSize: '13px' }}>{formatRiel(valData.unaccountedPrice)}</td>
+                               <td style={{ padding: '8px 20px', textAlign: 'right', color: '#10b981', fontSize: '13px' }}>{formatRiel(valData.unaccountedQty * valData.unaccountedPrice)}</td>
+                             </tr>
+                          )}
                         </React.Fragment>
                       )
                     })}
@@ -801,7 +983,36 @@ export default function DashboardPage() {
         {activeTab !== 'asset' && (
           <div className="fade-in">
 
-            {/* 🔥 NEW TOP PERFORMERS CARDS (SUMMARY ONLY) */}
+            <h2 className="section-divider" style={{ fontWeight: 'bold' }}>📅 TODAY'S PERFORMANCE</h2>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '16px', marginBottom: '32px' }}>
+              <ComplexCard title="Today Sales" total={todayM.totalSales} pich={todayM.pichSales} jing={todayM.jingSales} both={todayM.bothSales} mom={todayM.momSales} hideSubboxes={activeTab === 'retail'} color="#2563eb" hideUsdEquiv={true} />
+              <ComplexCard title="Today Profit" total={todayM.totalProfit} pich={todayM.pichProfit} jing={todayM.jingProfit} both={todayM.bothProfit} mom={todayM.momProfit} hideSubboxes={activeTab === 'retail'} color="#10b981" hideUsdEquiv={true} />
+              
+              <ExpenseBreakdownCard title="Cash Collected (Direct)" cR={todayM.cR} cU={todayM.cU} qR={todayM.qR} qU={todayM.qU} color="#3b82f6" />
+              
+              {(activeTab === 'wholesale' || activeTab === 'summary') && (
+                <>
+                  <ExpenseBreakdownCard title="Today Biz Expenses" cR={todayE.bizCashRiel} cU={todayE.bizCashUsd} qR={todayE.bizQrRiel} qU={todayE.bizQrUsd} color="#b91c1c" />
+                  <ExpenseBreakdownCard title="Today Personal Exp" cR={todayE.persCashRiel} cU={todayE.persCashUsd} qR={todayE.persQrRiel} qU={todayE.persQrUsd} color="#f59e0b" />
+                </>
+              )}
+            </div>
+
+            <h2 className="section-divider" style={{ fontWeight: 'bold' }}>📈 MONTH TO DATE (MTD)</h2>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '16px', marginBottom: '32px' }}>
+              <ComplexCard title="MTD Sales" total={mtdM.totalSales} pich={mtdM.pichSales} jing={mtdM.jingSales} both={mtdM.bothSales} mom={mtdM.momSales} hideSubboxes={activeTab === 'retail'} color="#2563eb" />
+              <ComplexCard title="MTD Profit" total={mtdM.totalProfit} pich={mtdM.pichProfit} jing={mtdM.jingProfit} both={mtdM.bothProfit} mom={mtdM.momProfit} hideSubboxes={activeTab === 'retail'} color="#10b981" />
+              
+              <ExpenseBreakdownCard title="Cash Collected (Direct)" cR={mtdM.cR} cU={mtdM.cU} qR={mtdM.qR} qU={mtdM.qU} color="#3b82f6" />
+              
+              {(activeTab === 'wholesale' || activeTab === 'summary') && (
+                <>
+                  <ExpenseBreakdownCard title="MTD Biz Expenses" cR={mtdE.bizCashRiel} cU={mtdE.bizCashUsd} qR={mtdE.bizQrRiel} qU={mtdE.bizQrUsd} color="#b91c1c" />
+                  <ExpenseBreakdownCard title="MTD Personal Exp" cR={mtdE.persCashRiel} cU={mtdE.persCashUsd} qR={mtdE.persQrRiel} qU={mtdE.persQrUsd} color="#f59e0b" />
+                </>
+              )}
+            </div>
+
             {activeTab === 'summary' && (
               <>
                 <h2 className="section-divider" style={{ fontWeight: 'bold' }}>🏆 MTD TOP PERFORMERS (WHOLESALE)</h2>
@@ -817,32 +1028,6 @@ export default function DashboardPage() {
                 </div>
               </>
             )}
-
-            <h2 className="section-divider" style={{ fontWeight: 'bold' }}>📅 TODAY'S PERFORMANCE</h2>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '16px', marginBottom: '32px' }}>
-              <ComplexCard title="Today Sales" total={todayM.totalSales} pich={todayM.pichSales} jing={todayM.jingSales} both={todayM.bothSales} mom={todayM.momSales} hideSubboxes={activeTab === 'retail'} color="#2563eb" />
-              {(activeTab === 'retail' || activeTab === 'summary') && <ExpenseBreakdownCard title="Retail Payments" cR={todayM.cR} cU={todayM.cU} qR={todayM.qR} qU={todayM.qU} color="#3b82f6" />}
-              <ComplexCard title="Today Profit" total={todayM.totalProfit} pich={todayM.pichProfit} jing={todayM.jingProfit} both={todayM.bothProfit} mom={todayM.momProfit} hideSubboxes={activeTab === 'retail'} color="#10b981" />
-              {(activeTab === 'wholesale' || activeTab === 'summary') && (
-                <>
-                  <ExpenseBreakdownCard title="Today Biz Expenses" cR={todayE.bizCashRiel} cU={todayE.bizCashUsd} qR={todayE.bizQrRiel} qU={todayE.bizQrUsd} color="#b91c1c" />
-                  <ExpenseBreakdownCard title="Today Personal Exp" cR={todayE.persCashRiel} cU={todayE.persCashUsd} qR={todayE.persQrRiel} qU={todayE.persQrUsd} color="#f59e0b" />
-                </>
-              )}
-            </div>
-
-            <h2 className="section-divider" style={{ fontWeight: 'bold' }}>📈 MONTH TO DATE (MTD)</h2>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '16px', marginBottom: '32px' }}>
-              <ComplexCard title="MTD Sales" total={mtdM.totalSales} pich={mtdM.pichSales} jing={mtdM.jingSales} both={mtdM.bothSales} mom={mtdM.momSales} hideSubboxes={activeTab === 'retail'} color="#2563eb" />
-              {(activeTab === 'retail' || activeTab === 'summary') && <ExpenseBreakdownCard title="Retail Payments" cR={mtdM.cR} cU={mtdM.cU} qR={mtdM.qR} qU={mtdM.qU} color="#3b82f6" />}
-              <ComplexCard title="MTD Profit" total={mtdM.totalProfit} pich={mtdM.pichProfit} jing={mtdM.jingProfit} both={mtdM.bothProfit} mom={mtdM.momProfit} hideSubboxes={activeTab === 'retail'} color="#10b981" />
-              {(activeTab === 'wholesale' || activeTab === 'summary') && (
-                <>
-                  <ExpenseBreakdownCard title="MTD Biz Expenses" cR={mtdE.bizCashRiel} cU={mtdE.bizCashUsd} qR={mtdE.bizQrRiel} qU={mtdE.bizQrUsd} color="#b91c1c" />
-                  <ExpenseBreakdownCard title="MTD Personal Exp" cR={mtdE.persCashRiel} cU={mtdE.persCashUsd} qR={mtdE.persQrRiel} qU={mtdE.persQrUsd} color="#f59e0b" />
-                </>
-              )}
-            </div>
 
             <h2 className="section-divider" style={{ fontWeight: 'bold' }}>⚖️ COMPARE MTD VS LAST MONTH</h2>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '20px', background: '#fff', padding: '24px', borderRadius: '12px', border: '1px solid #e2e8f0', marginBottom: '32px' }}>
@@ -939,14 +1124,18 @@ function TopPerformersCard({ title, data, type }: { title: string, data: any[], 
   )
 }
 
-function ComplexCard({ title, total, pich = 0, jing = 0, both = 0, mom = 0, hideSubboxes = false, color = '#1e293b' }: any) {
+function ComplexCard({ title, total, pich = 0, jing = 0, both = 0, mom = 0, hideSubboxes = false, hideUsdEquiv = false, color = '#1e293b' }: any) {
   return (
     <div style={{ background: '#ffffff', padding: '20px', borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: '0 4px 6px rgba(0,0,0,0.02)' }}>
       <h3 style={{ margin: 0, fontSize: '13px', color: '#64748b', textTransform: 'uppercase', fontWeight: 'bold' }}>{title}</h3>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px' }}>
         <h2 style={{ margin: '8px 0 4px 0', fontSize: '22px', color: color, fontWeight: 'normal' }}>{formatRiel(total)}</h2>
       </div>
-      <div style={{ fontSize: '13px', color: '#94a3b8', marginBottom: '16px', fontWeight: 'normal' }}>{formatUSDEquiv(total)}</div>
+      {!hideUsdEquiv && (
+        <div style={{ fontSize: '13px', color: '#94a3b8', marginBottom: '16px', fontWeight: 'normal' }}>{formatUSDEquiv(total)}</div>
+      )}
+      {hideUsdEquiv && <div style={{ height: '16px', marginBottom: '16px' }}></div>}
+      
       {!hideSubboxes && (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '6px', borderTop: '1px solid #f1f5f9', paddingTop: '16px' }}>
           <div style={{ background: '#f8fafc', padding: '6px', borderRadius: '6px', textAlign: 'center' }}>
@@ -972,21 +1161,24 @@ function ComplexCard({ title, total, pich = 0, jing = 0, both = 0, mom = 0, hide
 }
 
 function ExpenseBreakdownCard({ title, cR = 0, cU = 0, qR = 0, qU = 0, color = '#1e293b' }: any) {
-  const totalRielEquiv = cR + qR + (cU * 4000) + (qU * 4000);
+  const totalRiel = cR + qR;
+  const totalUsd = cU + qU;
+  
   return (
     <div style={{ background: '#ffffff', padding: '20px', borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: '0 4px 6px rgba(0,0,0,0.02)' }}>
       <h3 style={{ margin: 0, fontSize: '13px', color: '#64748b', textTransform: 'uppercase', fontWeight: 'bold' }}>{title}</h3>
-      <div style={{ margin: '8px 0 16px 0', fontSize: '22px', color: color, fontWeight: 'normal' }}>
-        {formatRiel(totalRielEquiv)}
+      
+      <div style={{ display: 'flex', gap: '16px', margin: '12px 0 16px 0' }}>
+        <div style={{ fontSize: '22px', color: color, fontWeight: 'bold' }}>{formatRiel(totalRiel)}</div>
+        {totalUsd > 0 && <div style={{ fontSize: '22px', color: color, fontWeight: 'bold' }}>{formatUSD(totalUsd)}</div>}
       </div>
+      
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', borderTop: '1px solid #f1f5f9', paddingTop: '16px' }}>
         <div>
-          <div style={{ fontSize: '11px', color: '#64748b', fontWeight: 'bold', marginBottom: '6px' }}>RIEL (៛)</div>
           <div style={{ fontSize: '12px', color: '#64748b', marginBottom: '4px', fontWeight: 'bold' }}>Cash: <span style={{fontWeight: 'normal', color: '#334155'}}>{formatRiel(cR)}</span></div>
           <div style={{ fontSize: '12px', color: '#64748b', fontWeight: 'bold' }}>QR: <span style={{fontWeight: 'normal', color: '#334155'}}>{formatRiel(qR)}</span></div>
         </div>
         <div>
-          <div style={{ fontSize: '11px', color: '#64748b', fontWeight: 'bold', marginBottom: '6px' }}>USD ($)</div>
           <div style={{ fontSize: '12px', color: '#64748b', marginBottom: '4px', fontWeight: 'bold' }}>Cash: <span style={{fontWeight: 'normal', color: '#334155'}}>{formatUSD(cU)}</span></div>
           <div style={{ fontSize: '12px', color: '#64748b', fontWeight: 'bold' }}>QR: <span style={{fontWeight: 'normal', color: '#334155'}}>{formatUSD(qU)}</span></div>
         </div>

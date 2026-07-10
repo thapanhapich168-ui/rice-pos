@@ -89,12 +89,12 @@ function CurrencyInput({ value, onChange, placeholder, style, autoFocus, classNa
   const [inputValue, setInputValue] = useState('');
 
   useEffect(() => {
-    if (value === '' || value === 0) {
+    if (value === '' || value === undefined) {
       setInputValue('');
     } else {
       const parsed = parseFloat(inputValue.replace(/,/g, ''));
-      if (parsed !== value) {
-        setInputValue(new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 }).format(value));
+      if (parsed !== Number(value)) {
+        setInputValue(new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 }).format(Number(value)));
       }
     }
   }, [value]);
@@ -129,16 +129,16 @@ function CurrencyInput({ value, onChange, placeholder, style, autoFocus, classNa
   )
 }
 
-function CartInput({ value, onChange, isQty, fontSize = '14px' }: { value: number, onChange: (val: number) => void, isQty: boolean, fontSize?: string }) {
+function CartInput({ value, onChange, isQty, fontSize = '14px' }: { value: number | '', onChange: (val: number | '') => void, isQty: boolean, fontSize?: string }) {
   const [inputValue, setInputValue] = useState('');
 
   useEffect(() => {
-    if (value === 0) {
+    if (value === '' || value === undefined) {
       setInputValue('');
     } else {
       const parsed = parseFloat(inputValue.replace(/,/g, ''));
-      if (parsed !== value) {
-        setInputValue(new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 }).format(value));
+      if (parsed !== Number(value)) {
+        setInputValue(new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 }).format(Number(value)));
       }
     }
   }, [value]);
@@ -154,7 +154,7 @@ function CartInput({ value, onChange, isQty, fontSize = '14px' }: { value: numbe
 
     setInputValue(formatted);
     const num = parseFloat(raw);
-    onChange(isNaN(num) ? 0 : num);
+    onChange(isNaN(num) ? '' : num);
   };
 
   return (
@@ -224,11 +224,18 @@ export default function POSPage() {
 
   const totalRiel = cart.reduce((sum, item) => {
     const isReturn = item.custom_name.includes('ដូរ');
-    const itemTotal = Number(item.custom_price_riel) * Number(item.quantity);
+    const price = Number(item.custom_price_riel) || 0;
+    const qty = Number(item.quantity) || 0;
+    const itemTotal = price * qty;
     return isReturn ? sum - Math.abs(itemTotal) : sum + itemTotal;
   }, 0);
 
   const totalUSD = totalRiel / EXCHANGE_RATE; 
+
+  const isCartValid = cart.length > 0 && cart.every(item => 
+    item.quantity !== '' && Number(item.quantity) > 0 && 
+    item.custom_price_riel !== '' && Number(item.custom_price_riel) >= 0
+  );
 
   useEffect(() => {
     const loadImages = async () => {
@@ -377,7 +384,11 @@ export default function POSPage() {
 
   useEffect(() => {
     if (completedSale && invoiceRef.current && !previewImageUrl && showInvoicePreview) {
+      const nodeToCapture = invoiceRef.current;
+
       const timer = setTimeout(async () => {
+        if (!nodeToCapture) return;
+
         try {
           await document.fonts.ready;
           await new Promise(r => setTimeout(r, 800));
@@ -385,10 +396,15 @@ export default function POSPage() {
           const isMobile = window.innerWidth < 1024;
           
           if (isMobile) {
-            await htmlToImage.toPng(invoiceRef.current!, { pixelRatio: 1, backgroundColor: '#ffffff', skipAutoScale: true, cacheBust: true });
+            await htmlToImage.toPng(nodeToCapture, { 
+              pixelRatio: 1, 
+              backgroundColor: '#ffffff', 
+              skipAutoScale: true, 
+              cacheBust: true 
+            });
           }
           
-          const dataUrl = await htmlToImage.toPng(invoiceRef.current!, { 
+          const dataUrl = await htmlToImage.toPng(nodeToCapture, { 
             pixelRatio: 3, 
             backgroundColor: '#ffffff',
             skipAutoScale: true,
@@ -452,22 +468,22 @@ export default function POSPage() {
 
   function handleProductClick(product: any) {
     const isMobile = typeof window !== 'undefined' && window.innerWidth < 1024;
-    const defaultQty = activeTab === 'wholesale' ? 0 : 1;
+    const defaultQty = activeTab === 'wholesale' ? '' : 1;
     if (isMobile) {
       setSelectedMobileProduct(product);
       setMobileName(product.name);
       setMobilePrice(Number(product.price));
-      setMobileQty(defaultQty === 0 ? '' : defaultQty);
+      setMobileQty(defaultQty);
     } else {
-      addToCartDirect(product, defaultQty);
+      addToCartDirect(product, defaultQty === '' ? '' : defaultQty);
     }
   }
 
-  function addToCartDirect(product: any, qtyToAdd: number = 1) {
+  function addToCartDirect(product: any, qtyToAdd: number | '' = 1) {
     const existing = cart.find((item) => item.product_id === product.id && !item.isSpecial)
     const priceInRiel = Number(product.price); 
     if (existing) {
-      setCart(cart.map((item) => item.product_id === product.id && !item.isSpecial ? { ...item, quantity: item.quantity + qtyToAdd } : item))
+      setCart(cart.map((item) => item.product_id === product.id && !item.isSpecial ? { ...item, quantity: (Number(item.quantity) || 0) + (Number(qtyToAdd) || 0) } : item))
     } else {
       setCart([...cart, { 
         ...product, product_id: product.id, id: Math.random(), quantity: qtyToAdd, custom_name: product.name, custom_price_riel: priceInRiel,
@@ -481,10 +497,12 @@ export default function POSPage() {
     const finalQty = typeof mobileQty === 'number' ? mobileQty : (parseFloat(mobileQty as string) || 0);
     const finalPrice = typeof mobilePrice === 'number' ? mobilePrice : (parseFloat(mobilePrice as string) || 0);
     
+    if (finalQty <= 0) return alert("Please enter a valid quantity.");
+
     const existing = cart.find((item) => item.product_id === selectedMobileProduct.id && !item.isSpecial);
     if (existing) {
       setCart(cart.map((item) => item.product_id === selectedMobileProduct.id && !item.isSpecial ? { 
-        ...item, custom_name: mobileName, custom_price_riel: finalPrice, quantity: item.quantity + finalQty 
+        ...item, custom_name: mobileName, custom_price_riel: finalPrice, quantity: (Number(item.quantity) || 0) + finalQty 
       } : item));
     } else {
       setCart([...cart, { 
@@ -619,7 +637,6 @@ export default function POSPage() {
     return true;
   })
 
-  // 🔥 Explicitly sort the "🔥 Hot" tab by sales volume descending
   if (activeCategory === '🔥 Hot') {
     filteredProducts.sort((a, b) => (mtdSalesStats[b.id] || 0) - (mtdSalesStats[a.id] || 0));
   }
@@ -638,17 +655,17 @@ export default function POSPage() {
     return sum + amt;
   }, 0);
 
-  // --- OMIT ZERO-PRICE ITEMS FROM INVOICE DISPLAY LOGIC ---
+  const hasValidPayment = !showPaymentSelector || liveTotalReceivedInRiel >= totalRiel;
+
   const getCategorizedItemsForInvoice = (cartItems: any[]) => {
     let normalItems: any[] = [], specialItems: any[] = [], negativeItems: any[] = [], serviceItems: any[] = [];
     cartItems.forEach(item => {
-      // 🚨 Skip mapping into the invoice if the price is exactly 0 
       if (Number(item.custom_price_riel) === 0) return;
 
       const desc = item.custom_name;
       const total = item.custom_price_riel * item.quantity;
       if (desc.includes('សេវាឡាន (អតិថិជន)')) serviceItems.push({ ...item, total: total });
-      else if (desc.includes('សេវាឡាន')) { /* skip hidden */ }
+      else if (desc.includes('សេវាឡាន')) {  }
       else if (desc.includes('ដូរ') || desc.includes('បញ្ចុះតម្លៃ') || desc.includes('កក់')) negativeItems.push({ ...item, total: -Math.abs(total) });
       else if (desc.includes('ថ្លៃបាវ') || desc.includes('បានប្រើ')) specialItems.push({ ...item, total: total });
       else normalItems.push({ ...item, total: total });
@@ -666,8 +683,9 @@ export default function POSPage() {
   }
 
   async function confirmCheckout() {
-    if (cart.length === 0) return alert(lang === 'kh' ? 'សូមជ្រើសរើសទំនិញក្នុងកន្ត្រក!' : 'Cart is empty');
+    if (!isCartValid) return alert("Please ensure all items have a valid quantity and price.");
     if (activeTab === 'wholesale' && !selectedCustomerId) return alert(lang === 'kh' ? 'សូមជ្រើសរើសអតិថិជនសម្រាប់ដុំ!' : 'Please select a customer for wholesale');
+    if (showPaymentSelector && liveTotalReceivedInRiel < totalRiel && !editingInvoiceId) return alert("Amount received must be equal to or greater than the total due.");
 
     setIsProcessing(true);
 
@@ -680,53 +698,58 @@ export default function POSPage() {
       const actualTotalReceived = showPaymentSelector ? liveTotalReceivedInRiel : 0;
       const actualRemaining = currentTotalRiel - actualTotalReceived;
 
-      let effectiveSplits: { method: string, amount: number, paid: number }[] = [];
+      // --- 🚀 NEW MATH ENGINE FOR DUAL CURRENCY CHANGE RETURN ---
+      let effectiveSplits: { method: string, amount_usd: number, amount_riel: number, face_amount: number }[] = [];
 
       if (activePayments.length === 0) {
         if (!isSimpleCustomer) {
-          effectiveSplits.push({ method: 'Unpaid / Debt', amount: currentTotalRiel, paid: 0 });
+          effectiveSplits.push({ method: 'Unpaid / Debt', amount_usd: 0, amount_riel: currentTotalRiel, face_amount: currentTotalRiel });
         } else {
-          effectiveSplits.push({ method: 'Cash ៛', amount: currentTotalRiel, paid: 0 });
+          effectiveSplits.push({ method: 'Cash ៛', amount_usd: 0, amount_riel: currentTotalRiel, face_amount: currentTotalRiel });
         }
-      } else if (actualRemaining > 0) {
-        activePayments.forEach(p => {
-            let amt = Number(p.amount);
-            if (p.method.includes('$')) amt *= EXCHANGE_RATE;
-            effectiveSplits.push({ method: p.method, amount: amt, paid: amt });
-        });
-        effectiveSplits.push({ method: 'Unpaid / Debt', amount: actualRemaining, paid: 0 });
       } else {
-        let totalPaidRiel = actualTotalReceived;
+        // Log all income exactly as handed to us
         activePayments.forEach(p => {
-            let amt = Number(p.amount);
-            if (p.method.includes('$')) amt *= EXCHANGE_RATE;
-            const ratio = totalPaidRiel > 0 ? (amt / totalPaidRiel) : 0;
-            effectiveSplits.push({ method: p.method, amount: currentTotalRiel * ratio, paid: amt });
+            let amtFace = Number(p.amount);
+            if (p.method.includes('$')) {
+               effectiveSplits.push({ method: p.method, amount_usd: amtFace, amount_riel: 0, face_amount: amtFace });
+            } else {
+               effectiveSplits.push({ method: p.method, amount_usd: 0, amount_riel: amtFace, face_amount: amtFace });
+            }
         });
+
+        if (actualRemaining > 0 && !isSimpleCustomer) {
+            effectiveSplits.push({ method: 'Unpaid / Debt', amount_usd: 0, amount_riel: actualRemaining, face_amount: actualRemaining });
+        }
+
+        // If they paid too much, we log the negative change OUT of the Riel drawer natively into the Payment String
+        if (actualRemaining < 0) {
+           const changeAmountRiel = Math.abs(actualRemaining);
+           effectiveSplits.push({ method: 'Cash ៛', amount_usd: 0, amount_riel: -changeAmountRiel, face_amount: -changeAmountRiel });
+        }
       }
 
-      if (effectiveSplits.length === 0) effectiveSplits.push({ method: 'Cash ៛', amount: currentTotalRiel, paid: 0 });
-
+      // --- DATABASE INSERTIONS ---
       if (activeTab === 'retail') {
         const retailTxId = `RET-${Date.now().toString().slice(-6)}`;
         const retailRows = [];
 
-        for (let sIdx = 0; sIdx < effectiveSplits.length; sIdx++) {
-           const split = effectiveSplits[sIdx];
-           const ratio = currentTotalRiel !== 0 ? (split.amount / currentTotalRiel) : (1 / effectiveSplits.length);
-           const splitTxId = effectiveSplits.length > 1 ? `${retailTxId}-${sIdx + 1}` : retailTxId;
+        // Build native multi-currency string (e.g. "Cash $: 1, Cash ៛: -1300")
+        let primaryMethodStr = effectiveSplits.map(s => {
+          if (s.method === 'Unpaid / Debt') return s.method;
+          return `${s.method}: ${s.face_amount}`;
+        }).join(', ');
 
-           for (const item of currentCart) {
-              retailRows.push({
-                 transaction_id: splitTxId,
-                 rice_type: item.name,
-                 custom_rice_type: item.custom_name !== item.name ? item.custom_name : null,
-                 qty: item.quantity,
-                 price_per_bag: Math.round(item.custom_price_riel * ratio),
-                 cogs_price: Math.round((item.cost_price || 0) * ratio),
-                 payment_method: split.method
-              });
-           }
+        for (const item of currentCart) {
+           retailRows.push({
+              transaction_id: retailTxId,
+              rice_type: item.name,
+              custom_rice_type: item.custom_name !== item.name ? item.custom_name : null,
+              qty: item.quantity,
+              price_per_bag: item.custom_price_riel,
+              cogs_price: item.cost_price || 0,
+              payment_method: primaryMethodStr
+           });
         }
 
         const { error: retailErr } = await supabase.from('retail_sales').insert(retailRows);
@@ -739,6 +762,8 @@ export default function POSPage() {
         for (const [prodId, newStock] of Object.entries(stockUpdates)) {
             await supabase.from('products').update({ stock: newStock }).eq('id', prodId);
         }
+
+        // NO FAKE EXPENSE ENTRIES HERE ANYMORE. Handled 100% via the sales string native parsing!
 
       } else {
         const displayInvoiceNo = editingInvoiceId ? editingInvoiceId : `INV-${Date.now().toString().slice(-6)}`;
@@ -792,53 +817,35 @@ export default function POSPage() {
           }
         }
 
-        const finalSaleRows = [];
-        const finalSummaries = [];
-
-        for (let sIdx = 0; sIdx < effectiveSplits.length; sIdx++) {
-           const split = effectiveSplits[sIdx];
-           const ratio = currentTotalRiel !== 0 ? (split.amount / currentTotalRiel) : (1 / effectiveSplits.length);
-           const splitTxId = effectiveSplits.length > 1 ? `${displayInvoiceNo}-${sIdx + 1}` : displayInvoiceNo;
-
-           let splitSalesSum = 0;
-           let splitCogsSum = 0;
-
-           for (const baseRow of baseSaleRows) {
-              const proratedPrice = Math.round(baseRow.price_per_bag * ratio);
-              const proratedCogs = Math.round(baseRow.cogs_price * ratio);
-
-              finalSaleRows.push({
-                 ...baseRow,
-                 invoice_id: splitTxId,
-                 price_per_bag: proratedPrice,
-                 cogs_price: proratedCogs,
-                 payment_method: split.method
-              });
-              splitSalesSum += proratedPrice * baseRow.qty;
-              splitCogsSum += proratedCogs * baseRow.qty;
-           }
-
-           finalSummaries.push({
-              invoice_id: splitTxId,
-              customer_name: finalCustomerName,
-              owner: finalOwner,
-              rice_types: combinedRiceTypes,
-              total_sales: splitSalesSum,
-              total_cogs: splitCogsSum,
-              total_profit: splitSalesSum - splitCogsSum,
-              delivery_status: (split.method === 'Unpaid / Debt' && !isSimpleCustomer) ? 'Pending' : 'Delivered',
-              payment_method: split.method,
-              balance_due: split.method === 'Unpaid / Debt' ? splitSalesSum : 0,
-              customer_location: finalLocation
-           });
-        }
-
         if (editingInvoiceId) {
           await supabase.from('sales').delete().like('invoice_id', `${editingInvoiceId}%`);
           await supabase.from('invoice_summaries').delete().like('invoice_id', `${editingInvoiceId}%`);
         }
 
-        const { error: summaryErr } = await supabase.from('invoice_summaries').insert(finalSummaries);
+        // Generate combined method string for Wholesale table logs
+        const finalCombinedMethodString = effectiveSplits.map(s => {
+           if (s.method === 'Unpaid / Debt') return s.method;
+           return `${s.method}: ${s.face_amount}`;
+        }).join(', ');
+
+        const finalSaleRows = baseSaleRows.map(r => ({ ...r, invoice_id: displayInvoiceNo, payment_method: finalCombinedMethodString }));
+        let splitCogsSum = baseSaleRows.reduce((sum, r) => sum + (r.cogs_price * r.qty), 0);
+
+        const summaryRow = {
+           invoice_id: displayInvoiceNo,
+           customer_name: finalCustomerName,
+           owner: finalOwner,
+           rice_types: combinedRiceTypes,
+           total_sales: currentTotalRiel,
+           total_cogs: splitCogsSum,
+           total_profit: currentTotalRiel - splitCogsSum,
+           delivery_status: (!isSimpleCustomer && actualRemaining > 0) ? 'Pending' : 'Delivered',
+           payment_method: finalCombinedMethodString,
+           balance_due: actualRemaining > 0 && !isSimpleCustomer ? actualRemaining : 0,
+           customer_location: finalLocation
+        };
+
+        const { error: summaryErr } = await supabase.from('invoice_summaries').insert([summaryRow]);
         if (summaryErr) throw new Error(`Failed to save to Summaries table: ${summaryErr.message}`);
 
         const { error: salesErr } = await supabase.from('sales').insert(finalSaleRows);
@@ -849,6 +856,19 @@ export default function POSPage() {
         }
         for (const [batchId, newSold] of Object.entries(fifoUpdates)) {
            await supabase.from('price_history').update({ sold_qty: newSold }).eq('id', batchId);
+        }
+
+        if (showPaymentSelector) {
+           for (const split of effectiveSplits) {
+              if (split.method === 'Unpaid / Debt') continue;
+              await supabase.from('invoice_payments').insert([{
+                invoice_id: displayInvoiceNo,
+                amount_paid_usd: split.amount_usd, 
+                amount_paid_riel: split.amount_riel, 
+                payment_method: split.method,
+                recorded_by: 'System'
+              }]);
+           }
         }
 
         const currentDate = new Date();
@@ -862,14 +882,6 @@ export default function POSPage() {
         });
       }
 
-      let cR = 0, qR = 0, cUsd = 0, qUsd = 0;
-      activePayments.forEach(r => {
-        if (r.method === 'Cash ៛') cR += Number(r.amount);
-        if (r.method === 'QR ៛' || r.method === 'Mom QR ៛') qR += Number(r.amount);
-        if (r.method === 'Cash $') cUsd += Number(r.amount);
-        if (r.method === 'QR $' || r.method === 'Mom QR $') qUsd += Number(r.amount);
-      });
-
       if (activeTab === 'wholesale' && !isSimpleCustomer) {
         setIsGeneratingPreview(true);
         setShowInvoicePreview(true);
@@ -878,14 +890,14 @@ export default function POSPage() {
         setShowInvoicePreview(false);
         setSaleSummary({ 
           total: currentTotalRiel, 
-          receivedRiel: cR + qR, 
-          receivedUsd: cUsd + qUsd, 
+          receivedRiel: 0, 
+          receivedUsd: 0, 
           totalReceivedInRiel: actualTotalReceived,
           change: actualRemaining < 0 ? Math.abs(actualRemaining) : 0, 
           type: activeTab, 
           isCashless: actualTotalReceived === 0, 
           items: currentCart,
-          isDebt: actualRemaining > 0
+          isDebt: actualRemaining > 0 && !isSimpleCustomer
         });
       }
 
@@ -1213,12 +1225,12 @@ export default function POSPage() {
                   
                   <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-end' }}>
                     <div style={{ flex: 1 }}>
-                      <span style={{ display: 'block', fontSize: '10px', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '4px' }}>{currentT.unitPrice} (៛)</span>
-                      <CartInput value={item.custom_price_riel} onChange={(v) => updateCartItem(item.id, 'custom_price_riel', v)} isQty={false} fontSize="13px" />
-                    </div>
-                    <div style={{ flex: 1 }}>
                       <span style={{ display: 'block', fontSize: '10px', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '4px' }}>{currentT.quantity}</span>
                       <CartInput value={item.quantity} onChange={(v) => updateCartItem(item.id, 'quantity', v)} isQty={true} fontSize="13px" />
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <span style={{ display: 'block', fontSize: '10px', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '4px' }}>{currentT.unitPrice} (៛)</span>
+                      <CartInput value={item.custom_price_riel} onChange={(v) => updateCartItem(item.id, 'custom_price_riel', v)} isQty={false} fontSize="13px" />
                     </div>
                   </div>
                 </div>
@@ -1241,17 +1253,17 @@ export default function POSPage() {
           
           <button 
             onClick={confirmCheckout} 
-            disabled={cart.length === 0 || isProcessing} 
+            disabled={!isCartValid || !hasValidPayment || isProcessing} 
             style={{ 
               width: '100%', 
               padding: '14px', 
-              backgroundColor: (cart.length === 0 || isProcessing) ? '#e2e8f0' : '#10b981', 
-              color: (cart.length === 0 || isProcessing) ? '#64748b' : '#ffffff', 
+              backgroundColor: (!isCartValid || !hasValidPayment || isProcessing) ? '#e2e8f0' : '#10b981', 
+              color: (!isCartValid || !hasValidPayment || isProcessing) ? '#64748b' : '#ffffff', 
               border: 'none', 
               borderRadius: '8px', 
               fontWeight: 'bold', 
               fontSize: '15px',
-              cursor: (cart.length === 0 || isProcessing) ? 'not-allowed' : 'pointer',
+              cursor: (!isCartValid || !hasValidPayment || isProcessing) ? 'not-allowed' : 'pointer',
               boxShadow: '0 4px 6px rgba(16, 185, 129, 0.2)'
             }}
           >
@@ -1325,12 +1337,12 @@ export default function POSPage() {
 
                     <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-end' }}>
                       <div style={{ flex: 1 }}>
-                        <span style={{ display: 'block', fontSize: '10px', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '4px' }}>{currentT.unitPrice}</span>
-                        <CartInput fontSize="16px" value={item.custom_price_riel} onChange={(v) => updateCartItem(item.id, 'custom_price_riel', v)} isQty={false} />
-                      </div>
-                      <div style={{ flex: 1 }}>
                         <span style={{ display: 'block', fontSize: '10px', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '4px' }}>{currentT.quantity}</span>
                         <CartInput fontSize="16px" value={item.quantity} onChange={(v) => updateCartItem(item.id, 'quantity', v)} isQty={true} />
+                      </div>
+                      <div style={{ flex: 1 }}>
+                        <span style={{ display: 'block', fontSize: '10px', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '4px' }}>{currentT.unitPrice}</span>
+                        <CartInput fontSize="16px" value={item.custom_price_riel} onChange={(v) => updateCartItem(item.id, 'custom_price_riel', v)} isQty={false} />
                       </div>
                     </div>
                   </div>
@@ -1352,17 +1364,17 @@ export default function POSPage() {
 
               <button 
                 onClick={confirmCheckout} 
-                disabled={cart.length === 0 || isProcessing} 
+                disabled={!isCartValid || !hasValidPayment || isProcessing} 
                 style={{ 
                   width: '100%', 
                   padding: '14px', 
-                  backgroundColor: (cart.length === 0 || isProcessing) ? '#e2e8f0' : '#10b981', 
-                  color: (cart.length === 0 || isProcessing) ? '#64748b' : '#ffffff', 
+                  backgroundColor: (!isCartValid || !hasValidPayment || isProcessing) ? '#e2e8f0' : '#10b981', 
+                  color: (!isCartValid || !hasValidPayment || isProcessing) ? '#64748b' : '#ffffff', 
                   border: 'none', 
                   borderRadius: '10px', 
                   fontWeight: 'bold', 
                   fontSize: '16px', 
-                  cursor: (cart.length === 0 || isProcessing) ? 'not-allowed' : 'pointer',
+                  cursor: (!isCartValid || !hasValidPayment || isProcessing) ? 'not-allowed' : 'pointer',
                   boxShadow: '0 4px 12px rgba(16, 185, 129, 0.25)'
                 }}
               >
@@ -1514,12 +1526,12 @@ export default function POSPage() {
             </div>
             <div style={{ display: 'flex', gap: '12px', marginBottom: '20px' }}>
               <div style={{ flex: 1 }}>
-                <label style={{ display: 'block', fontSize: '12px', color: '#64748b', marginBottom: '4px' }}>Price (៛)</label>
-                <CurrencyInput value={mobilePrice} onChange={(v: any) => setMobilePrice(v)} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', color: '#334155', backgroundColor: '#ffffff' }} className="mobile-input-field" />
-              </div>
-              <div style={{ flex: 1 }}>
                 <label style={{ display: 'block', fontSize: '12px', color: '#64748b', marginBottom: '4px' }}>Quantity</label>
                 <CurrencyInput value={mobileQty} onChange={(v: any) => setMobileQty(v)} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', color: '#334155', backgroundColor: '#ffffff' }} className="mobile-input-field" />
+              </div>
+              <div style={{ flex: 1 }}>
+                <label style={{ display: 'block', fontSize: '12px', color: '#64748b', marginBottom: '4px' }}>Price (៛)</label>
+                <CurrencyInput value={mobilePrice} onChange={(v: any) => setMobilePrice(v)} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', color: '#334155', backgroundColor: '#ffffff' }} className="mobile-input-field" />
               </div>
             </div>
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
@@ -1530,7 +1542,7 @@ export default function POSPage() {
         </div>
       )}
 
-      {/* 💰 SALE SUMMARY MODAL (NOW SHOWS CHANGE CLEARLY) */}
+      {/* 💰 SALE SUMMARY MODAL */}
       {saleSummary && (
         <div className="modal-overlay" style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.85)', zIndex: 10005, display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '20px', boxSizing: 'border-box' }}>
           <div className="modal-content" style={{ backgroundColor: '#ffffff', width: '100%', maxWidth: '400px', borderRadius: '16px', padding: '30px', boxShadow: '0 10px 25px rgba(0,0,0,0.2)' }}>
@@ -1538,7 +1550,6 @@ export default function POSPage() {
               {saleSummary.isCashless ? 'Sale Recorded! ✅' : saleSummary.isDebt ? 'Partial Payment Logged ⏳' : 'Sale Complete! ✅'}
             </h2>
               
-            {/* 🛑 THE NEW CHANGE DUE BOX 🛑 */}
             {saleSummary.change > 0 && (
               <div style={{ background: '#ecfdf5', padding: '20px', borderRadius: '12px', border: '2px dashed #10b981', marginBottom: '20px', textAlign: 'center' }}>
                 <div style={{ fontSize: '13px', color: '#047857', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '1px' }}>Change to Return</div>
@@ -1723,7 +1734,6 @@ export default function POSPage() {
       {showInvoicePreview && completedSale && (
         <div className="invoice-modal-overlay" style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.85)', zIndex: 10006, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
           
-          {/* 💰 THE NEW FLOATING CHANGE BANNER 💰 */}
           {completedSale.changeDue > 0 && (
             <div style={{ width: '100%', maxWidth: '850px', background: '#ecfdf5', border: '2px dashed #10b981', borderRadius: '12px', padding: '16px 24px', marginBottom: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div>

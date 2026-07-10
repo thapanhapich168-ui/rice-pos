@@ -165,7 +165,11 @@ export default function CogsReportPage() {
 
     // 2. Wholesale Invoices paid to Business
     (payData || []).forEach((p: any) => {
-       const amt = Number(p.amount_paid || 0);
+       // 🚀 UPDATED SCHEMA to calculate correctly regardless if USD or Riel payment
+       const amtUsd = Number(p.amount_paid_usd || 0);
+       const amtRiel = Number(p.amount_paid_riel || 0);
+       const amtRielEq = amtRiel + (amtUsd * EXCHANGE_RATE);
+       
        const methodStr = p.payment_method || 'Cash ៛';
        const parentInv = (invData || []).find((i: any) => i.invoice_id === p.invoice_id);
        
@@ -178,7 +182,7 @@ export default function CogsReportPage() {
                   if (isBusinessMethod(mName.trim())) momCollectedRiel += bAmt;
                });
            } else {
-               if (isBusinessMethod(methodStr)) momCollectedRiel += amt;
+               if (isBusinessMethod(methodStr)) momCollectedRiel += amtRielEq;
            }
        }
     });
@@ -204,7 +208,10 @@ export default function CogsReportPage() {
                  if (!mName.toLowerCase().includes('mom qr')) momCogsSettledRiel += bAmt;
               });
           } else {
-              if (!method.includes('mom qr')) momCogsSettledRiel += Number(c.paid_amount || 0);
+              // 🚀 UPDATED SCHEMA reading safely
+              const rielPaid = Number(c.paid_amount_riel || 0);
+              const usdPaid = Number(c.paid_amount_usd || 0) * EXCHANGE_RATE;
+              if (!method.includes('mom qr')) momCogsSettledRiel += (rielPaid + usdPaid);
           }
       }
     });
@@ -398,7 +405,11 @@ export default function CogsReportPage() {
     const displayOwner = owner.charAt(0).toUpperCase() + owner.slice(1);
     const key = `${c.settlement_date}_${displayOwner}`;
     if (dailyMap[key]) {
-      dailyMap[key].totalPaid += Number(c.paid_amount || 0);
+      // 🚀 UPDATED SCHEMA to catch both currencies back to Riel math for the UI tracker
+      const rielPaid = Number(c.paid_amount_riel || 0);
+      const usdPaid = Number(c.paid_amount_usd || 0) * EXCHANGE_RATE;
+      dailyMap[key].totalPaid += (rielPaid + usdPaid);
+      
       if (c.payment_method) dailyMap[key].methods.add(c.payment_method);
     }
   });
@@ -424,10 +435,14 @@ export default function CogsReportPage() {
   async function processPayments(rows: PaymentRow[], targetDays: any[], isBulk: boolean) {
     if (isProcessing) return;
 
-    let totalAppliedRiel = 0;
+    let totalAppliedRielEq = 0;
     let liabilityUsedRiel = 0;
     let liabilityUsedUsd = 0;
     let methodStrings: string[] = [];
+
+    // Storage buckets for the new schema
+    let totalUsdFace = 0;
+    let totalRielFace = 0;
 
     const totalDue = targetDays.reduce((sum, d) => sum + (d.totalCogs - d.totalPaid), 0);
 
@@ -438,23 +453,27 @@ export default function CogsReportPage() {
 
        if (r.method === 'Mom Liability ៛') {
          liabilityUsedRiel += amt;
-         totalAppliedRiel += amt;
+         totalAppliedRielEq += amt;
+         totalRielFace += amt;
        } else if (r.method === 'Mom Liability $') {
          liabilityUsedUsd += amt;
-         totalAppliedRiel += (amt * EXCHANGE_RATE);
+         totalAppliedRielEq += (amt * EXCHANGE_RATE);
+         totalUsdFace += amt;
        } else if (r.method.includes('$')) {
-         totalAppliedRiel += (amt * EXCHANGE_RATE);
+         totalAppliedRielEq += (amt * EXCHANGE_RATE);
+         totalUsdFace += amt;
        } else {
-         totalAppliedRiel += amt;
+         totalAppliedRielEq += amt;
+         totalRielFace += amt;
        }
     }
 
-    if (totalAppliedRiel <= 0) return;
-    if (totalAppliedRiel > totalDue + 0.1) return alert("Cannot pay more than the total COGS balance.");
+    if (totalAppliedRielEq <= 0) return;
+    if (totalAppliedRielEq > totalDue + 0.1) return alert("Cannot pay more than the total COGS balance.");
     
     // 🔥 STRICT LIABILITY GUARDRAIL
-    const liabilityUsedRielEq = liabilityUsedRiel + (liabilityUsedUsd * EXCHANGE_RATE);
-    if (liabilityUsedRielEq > liveMomLiability + 0.1) {
+    const liabilityUsedRielEqSum = liabilityUsedRiel + (liabilityUsedUsd * EXCHANGE_RATE);
+    if (liabilityUsedRielEqSum > liveMomLiability + 0.1) {
         alert(`Not enough Mom Liability available! You only have ${formatRiel(liveMomLiability)}`);
         setIsProcessing(false);
         return; 
@@ -463,7 +482,7 @@ export default function CogsReportPage() {
     setIsProcessing(true);
 
     try {
-      let remainingToDistribute = totalAppliedRiel;
+      let remainingToDistribute = totalAppliedRielEq;
       const settlesToInsert = [];
       const daysToSettle = [...targetDays].sort((a,b) => a.date.localeCompare(b.date));
 
@@ -472,11 +491,17 @@ export default function CogsReportPage() {
          const owed = day.totalCogs - day.totalPaid;
          const apply = Math.min(owed, remainingToDistribute);
 
+         // We distribute the USD and Riel proportionally into the database so it mirrors correctly
+         const pctOfTotal = apply / totalAppliedRielEq;
+         const allocatedUsd = totalUsdFace * pctOfTotal;
+         const allocatedRiel = totalRielFace * pctOfTotal;
+
          settlesToInsert.push({
            settlement_date: day.date,
            owner_name: day.owner,
            source_type: 'Batch',
-           paid_amount: apply,
+           paid_amount_usd: allocatedUsd, // 🚀 UPDATED SCHEMA 
+           paid_amount_riel: allocatedRiel, // 🚀 UPDATED SCHEMA 
            payment_method: methodStrings.join(', '),
            status: apply >= owed ? 'Settled' : 'Partial',
            remarks: isBulk ? `Bulk via COGS Dashboard` : `Inline via COGS Dashboard`
@@ -949,9 +974,9 @@ export default function CogsReportPage() {
 
               {activeOwnerTab === 'mom' && (
                 <div style={{ fontSize: '12px', color: '#64748b', marginTop: '12px', padding: '8px', background: '#f8fafc', borderRadius: '6px', border: '1px dashed #cbd5e1' }}>
-                  <b>💡 Tip:</b> Select <i>"Mom Liability ៛"</i> to pay this COGS using the money you collected from Mom's deliveries. 
+                  <b>💡 Tip:</b> Select <i>"Mom Liability"</i> to pay this COGS using the money you collected from Mom's deliveries. 
                   <br/><br/>
-                  <b>Available Liability:</b> <span style={{color: '#b58a3d', fontWeight: 'bold'}}>{formatRiel(liveMomLiability)}</span> / <span style={{color: '#b58a3d', fontWeight: 'bold'}}>{formatUSD(liveMomLiability / EXCHANGE_RATE)}</span>
+                  <b>Available Liability:</b> <span style={{color: '#b58a3d', fontWeight: 'bold'}}>{formatRiel(liveMomLiability)}</span>
                 </div>
               )}
             </div>

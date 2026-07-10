@@ -7,6 +7,10 @@ const formatRiel = (amount: number) => {
   return `${new Intl.NumberFormat('en-US').format(Math.round(amount))} ៛`;
 };
 
+const formatUSD = (amount: number) => `$${new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(amount)}`;
+
+const formatNumber = (v: number) => new Intl.NumberFormat('en-US').format(v);
+
 const EXCHANGE_RATE = 4000;
 
 // --- CATEGORIES ---
@@ -169,14 +173,81 @@ export default function RiceControl() {
   const [editingHistoryId, setEditingHistoryId] = useState<number | null>(null)
   const [historyEdits, setHistoryEdits] = useState<Record<number, Partial<HistoryRecord>>>({})
 
-  // --- LIFECYCLE ---
+  // --- LIFECYCLE & REALTIME SYNC ---
   useEffect(() => { 
     fetchProducts()
     fetchSettings()
     fetchSuppliers()
     fetchImports()
     fetchBatches() 
+
+    const productsSub = supabase.channel('products-channel')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'products' }, fetchProducts)
+      .subscribe()
+
+    const batchesSub = supabase.channel('batches-channel')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'price_history' }, fetchBatches)
+      .subscribe()
+      
+    const importsSub = supabase.channel('imports-channel')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'imports' }, fetchImports)
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(productsSub)
+      supabase.removeChannel(batchesSub)
+      supabase.removeChannel(importsSub)
+    }
   }, [])
+
+  // --- BULLETPROOF MANUAL PULL BAG LOGIC ---
+  const handleManualPull = async (retailId: number, wholesaleId: number) => {
+    setIsProcessing(true);
+    try {
+      // 1. Fetch strict LIVE data directly from DB to prevent state de-sync math bugs
+      const { data: liveWholesale } = await supabase.from('products').select('*').eq('id', wholesaleId).single();
+      const { data: liveRetail } = await supabase.from('products').select('*').eq('id', retailId).single();
+
+      if (!liveWholesale || !liveRetail) throw new Error('Data link error. Products not found.');
+      if (Number(liveWholesale.stock) < 1) throw new Error('Not enough stock in the wholesale bag to pull from.');
+
+      // 2. Fetch live batches for the wholesale product, ordered OLD -> NEW
+      const { data: liveBatches } = await supabase.from('price_history')
+        .select('*')
+        .eq('product_id', wholesaleId)
+        .order('created_at', { ascending: true });
+
+      const activeBatches = (liveBatches || []).filter(b => (b.imported_qty || 0) - (b.sold_qty || 0) > 0);
+      if (activeBatches.length === 0) throw new Error('No active batch found to pull from.');
+
+      const targetBatch = activeBatches[0]; // The Current Batch (Oldest)
+
+      const refillAmount = Number(liveWholesale.weight) || 50; 
+      const newRetailStock = Number(liveRetail.stock || 0) + refillAmount;
+      const newWholesaleStock = Number(liveWholesale.stock || 0) - 1;
+      const newMtdBagsUsed = Number(liveWholesale.mtd_bags_used || 0) + 1;
+      const newSoldQty = Number(targetBatch.sold_qty || 0) + 1;
+
+      // 3. Update all 3 tables sequentially
+      const { error: err1 } = await supabase.from('products').update({ stock: newRetailStock }).eq('id', retailId);
+      if (err1) throw err1;
+
+      const { error: err2 } = await supabase.from('products').update({ stock: newWholesaleStock, mtd_bags_used: newMtdBagsUsed }).eq('id', wholesaleId);
+      if (err2) throw err2;
+
+      const { error: err3 } = await supabase.from('price_history').update({ sold_qty: newSoldQty }).eq('id', targetBatch.id);
+      if (err3) throw err3;
+
+      // 4. Force UI refresh instantly
+      await fetchProducts();
+      await fetchBatches();
+
+    } catch (err: any) {
+      alert(`Error pulling bag: ${err.message}`);
+    } finally {
+      setIsProcessing(false);
+    }
+  }
 
   // --- DATABASE OPERATIONS ---
   async function fetchSettings() {
@@ -195,7 +266,6 @@ export default function RiceControl() {
   async function fetchProducts() {
     const { data } = await supabase.from('products').select('*').order('id', { ascending: true })
     if (data) setProducts(data)
-    setEdits({})
   }
 
   async function fetchSuppliers() {
@@ -204,15 +274,12 @@ export default function RiceControl() {
   }
 
   async function fetchImports() {
-    const { data } = await supabase.from('imports').select(`
-      *,
-      suppliers (name),
-      products (name)
-    `).order('created_at', { ascending: false })
+    const { data } = await supabase.from('imports').select(`*, suppliers (name), products (name)`).order('created_at', { ascending: false })
     if (data) setImports(data)
   }
 
   async function fetchBatches() {
+    // 🚀 STRICT FIFO SORTING: Oldest batches first.
     const { data } = await supabase.from('price_history').select('*').order('created_at', { ascending: true })
     if (data) {
       const bMap: Record<number, HistoryRecord[]> = {}
@@ -235,15 +302,20 @@ export default function RiceControl() {
     const { error } = await supabase.from('price_history').update(payload).eq('id', batchId);
     
     if (!error) {
-      fetchBatches();
       setEditingHistoryId(null);
+      fetchBatches();
     } else {
       alert(`Error updating batch: ${error.message}`);
     }
   }
 
   const fetchHistory = async (product: Product) => {
-    const { data } = await supabase.from('price_history').select('*').eq('product_id', product.id).order('created_at', { ascending: false })
+    // 🚀 FIX: Sort ASCENDING so the History Modal shows the Oldest (Current) Batch at the top!
+    const { data } = await supabase.from('price_history')
+      .select('*')
+      .eq('product_id', product.id)
+      .order('created_at', { ascending: true }) 
+
     setHistoryModal({ isOpen: true, product, data: data || [] })
     setEditingHistoryId(null)
     setHistoryEdits({})
@@ -251,9 +323,14 @@ export default function RiceControl() {
 
   const handleSaveHistory = async (historyId: number) => {
     const edits = historyEdits[historyId];
-    if (!edits || !historyModal.product) return setEditingHistoryId(null);
+    if (!edits || (!historyModal.product && !products.find(p => p.id === activeBatchesMap[historyModal.product?.id || 0]?.[0]?.product_id))) return setEditingHistoryId(null);
 
-    const originalRecord = historyModal.data.find(h => h.id === historyId);
+    const originalRecord = historyModal.data.find(h => h.id === historyId) || Object.values(activeBatchesMap).flat().find(b => b.id === historyId);
+    if (!originalRecord) return setEditingHistoryId(null);
+    
+    const targetProduct = products.find(p => p.id === originalRecord.product_id);
+    if (!targetProduct) return setEditingHistoryId(null);
+
     const originalQty = originalRecord?.imported_qty || 0;
     const newQty = edits.imported_qty !== undefined ? Number(edits.imported_qty) : originalQty;
     
@@ -268,35 +345,47 @@ export default function RiceControl() {
     
     if (!error) {
       if (qtyDifference !== 0) {
-        const newStock = Number(historyModal.product.stock) + qtyDifference;
-        await supabase.from('products').update({ stock: newStock }).eq('id', historyModal.product.id);
-        setHistoryModal(prev => ({...prev, product: {...prev.product!, stock: newStock}}));
-        fetchProducts(); 
+        const newStock = Number(targetProduct.stock) + qtyDifference;
+        await supabase.from('products').update({ stock: newStock }).eq('id', targetProduct.id);
+        if (historyModal.product) {
+            setHistoryModal(prev => ({...prev, product: {...prev.product!, stock: newStock}}));
+        }
       }
-      fetchHistory(historyModal.product);
-      fetchBatches(); // Keep global state synced
+      if (historyModal.isOpen) {
+          fetchHistory(targetProduct);
+      } else {
+          setEditingHistoryId(null);
+      }
+      fetchProducts();
+      fetchBatches();
     } else {
       alert(`Error updating history: ${error?.message}`);
     }
   }
 
   const handleDeleteHistory = async (historyId: number) => {
-    if (!historyModal.product) return;
+    const originalRecord = historyModal.data.find(h => h.id === historyId) || Object.values(activeBatchesMap).flat().find(b => b.id === historyId);
+    if (!originalRecord) return;
+    
+    const targetProduct = products.find(p => p.id === originalRecord.product_id);
+    if (!targetProduct) return;
+
     if (!confirm("Are you sure you want to delete this historical record? The imported quantity will be deducted from your stock.")) return;
     
-    const recordToDelete = historyModal.data.find(h => h.id === historyId);
-    const qtyToReverse = recordToDelete?.imported_qty || 0;
+    const qtyToReverse = originalRecord?.imported_qty || 0;
 
     const { error } = await supabase.from('price_history').delete().eq('id', historyId);
     
     if (!error) {
       if (qtyToReverse > 0) {
-        const newStock = Number(historyModal.product.stock) - qtyToReverse;
-        await supabase.from('products').update({ stock: newStock }).eq('id', historyModal.product.id);
-        setHistoryModal(prev => ({...prev, product: {...prev.product!, stock: newStock}}));
-        fetchProducts(); 
+        const newStock = Number(targetProduct.stock) - qtyToReverse;
+        await supabase.from('products').update({ stock: newStock }).eq('id', targetProduct.id);
+        if (historyModal.product) {
+            setHistoryModal(prev => ({...prev, product: {...prev.product!, stock: newStock}}));
+        }
       }
-      fetchHistory(historyModal.product);
+      if (historyModal.isOpen) fetchHistory(targetProduct);
+      fetchProducts();
       fetchBatches();
     }
   }
@@ -350,8 +439,8 @@ export default function RiceControl() {
 
       if (remainingDebt > 0) {
         const supplier = suppliers.find(s => String(s.id) === String(importForm.supplier_id));
-        const newTotalOwed = Number(supplier?.total_owed || 0) + remainingDebt;
-        await supabase.from('suppliers').update({ total_owed: newTotalOwed }).eq('id', supplier?.id);
+        const newTotalOwed = Number(supplier?.total_owed_riel || 0) + remainingDebt;
+        await supabase.from('suppliers').update({ total_owed_riel: newTotalOwed }).eq('id', supplier?.id);
 
         await supabase.from('accounts_payable').insert([{
           supplier_name: supplierName,
@@ -390,7 +479,7 @@ export default function RiceControl() {
           spender: 'Both',
           payment_method: importForm.payment_method,
           remarks: `Stock Import: ${supplierName}`,
-          amount: Math.abs(amtUsd),
+          amount_usd: Math.abs(amtUsd),
           amount_riel: Math.abs(amtRiel),
           description: 'BUSINESS'
         }]);
@@ -399,13 +488,6 @@ export default function RiceControl() {
       setImportForm({ supplier_id: '', product_id: '', qty: '', unit_cost: '', paid_amount: '', payment_method: 'Cash ៛' });
       alert('Import processed successfully!');
       
-      await Promise.all([
-        fetchProducts(),
-        fetchSuppliers(),
-        fetchImports(),
-        fetchBatches()
-      ]);
-
       if (isPayLater) setActiveView('pending');
       else setActiveView('wholesale');
 
@@ -442,7 +524,7 @@ export default function RiceControl() {
     const remainingBefore = Number(record.total_cost) - Number(record.paid_amount);
     if (totalRielEq > remainingBefore + 0.1) return alert('Cannot pay more than what is owed');
 
-    setIsProcessing(true);
+    setIsProcessing(true); 
 
     try {
       const newPaidAmount = Number(record.paid_amount) + totalRielEq;
@@ -451,8 +533,8 @@ export default function RiceControl() {
       await supabase.from('imports').update({ paid_amount: newPaidAmount, status: newStatus }).eq('id', record.id);
 
       const supplier = suppliers.find(s => String(s.id) === String(record.supplier_id));
-      const newTotalOwed = Math.max(0, Number(supplier?.total_owed || 0) - totalRielEq);
-      await supabase.from('suppliers').update({ total_owed: newTotalOwed }).eq('id', supplier?.id);
+      const newTotalOwed = Math.max(0, Number(supplier?.total_owed_riel || 0) - totalRielEq);
+      await supabase.from('suppliers').update({ total_owed_riel: newTotalOwed }).eq('id', supplier?.id);
 
       const { data: apRows } = await supabase.from('accounts_payable')
         .select('*')
@@ -482,7 +564,7 @@ export default function RiceControl() {
         spender: 'Both',
         payment_method: methodStrings.join(', '),
         remarks: `Paid Debt: ${supplier?.name || 'Supplier'}`,
-        amount: Math.abs(totalUsdFace),
+        amount_usd: Math.abs(totalUsdFace),
         amount_riel: Math.abs(totalRielFace),
         description: 'BUSINESS'
       }]);
@@ -490,8 +572,6 @@ export default function RiceControl() {
       setPayPendingModal({ isOpen: false, record: null, totalDue: 0 });
       setPendingPaymentRows([{ id: Date.now(), method: 'Cash ៛', amount: '' }]);
       
-      await Promise.all([fetchSuppliers(), fetchImports()]);
-
     } catch (err: any) {
       alert(`Error: ${err.message}`);
     } finally {
@@ -502,17 +582,48 @@ export default function RiceControl() {
   const handleSaveRecord = async (id: number) => {
     if (!edits[id]) return;
     const payload = { ...edits[id] } as any;
-    ['price', 'cost_price', 'weight', 'stock', 'mtd_kg_used', 'mtd_bags_used', 'min_stock_level'].forEach(key => {
-      if (payload[key] === '') payload[key] = 0;
-      else if (payload[key] !== undefined) payload[key] = Number(payload[key]);
-    });
+    
+    // Check if there's an active batch being edited from the wholesale screen
+    const pBatches = (activeBatchesMap[id] || []).filter(b => (b.imported_qty || 0) - (b.sold_qty || 0) > 0);
+    pBatches.sort((a,b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+    const currentB = pBatches.length > 0 ? pBatches[0] : null;
 
-    const { error } = await supabase.from('products').update(payload).eq('id', id)
-    if (!error) {
-      setEdits(prev => { const n = { ...prev }; delete n[id]; return n })
-      setEditingCell(null)
-      fetchProducts()
-    } else alert(`Error saving: ${error.message}`)
+    if (activeView === 'wholesale' && currentB) {
+       const batchPayload: any = {};
+       let updateBatch = false;
+       
+       if (payload.price !== undefined) { batchPayload.price = Number(payload.price); updateBatch = true; delete payload.price; }
+       if (payload.cost_price !== undefined) { batchPayload.cost_price = Number(payload.cost_price); updateBatch = true; delete payload.cost_price; }
+       if (payload.stock !== undefined) {
+          const desiredTotalStock = Number(payload.stock);
+          const mainProd = products.find(p => p.id === id);
+          const currentTotalStock = Number(mainProd?.stock || 0);
+          
+          const diff = desiredTotalStock - currentTotalStock;
+          
+          batchPayload.imported_qty = (currentB.imported_qty || 0) + diff;
+          updateBatch = true;
+       }
+
+       if (updateBatch) {
+          await supabase.from('price_history').update(batchPayload).eq('id', currentB.id);
+       }
+    } else {
+       ['price', 'cost_price', 'weight', 'stock', 'mtd_kg_used', 'mtd_bags_used', 'min_stock_level'].forEach(key => {
+         if (payload[key] === '') payload[key] = 0;
+         else if (payload[key] !== undefined) payload[key] = Number(payload[key]);
+       });
+    }
+
+    if (Object.keys(payload).length > 0) {
+       const { error } = await supabase.from('products').update(payload).eq('id', id);
+       if (error) alert(`Error saving to products: ${error.message}`);
+    }
+
+    setEdits(prev => { const n = { ...prev }; delete n[id]; return n });
+    setEditingCell(null);
+    fetchProducts();
+    fetchBatches();
   }
 
   const handleDelete = async () => {
@@ -537,7 +648,6 @@ export default function RiceControl() {
     if (!error) {
       setIsAddModalOpen(false)
       setNewItem({ name: '', price: '', cost_price: '', weight: '', stock: '', min_stock_level: 10 })
-      fetchProducts()
     }
   }
 
@@ -548,8 +658,7 @@ export default function RiceControl() {
 
   const handleLinkWholesaleBag = async (retailId: number, wholesaleProduct: Product | null) => {
     if (!wholesaleProduct) {
-      const { error } = await supabase.from('products').update({ linked_wholesale_id: null }).eq('id', retailId);
-      if (!error) fetchProducts();
+      await supabase.from('products').update({ linked_wholesale_id: null }).eq('id', retailId);
       return;
     }
 
@@ -564,13 +673,11 @@ export default function RiceControl() {
     if (!error) {
       setActiveDropdownId(null);
       setDropdownSearch('');
-      fetchProducts();
     } else {
       alert(`Error linking wholesale product: ${error.message}`);
     }
   }
 
-  // --- COLUMN DRAG & DROP LOGIC ---
   const handleDragStart = (e: React.DragEvent, col: string) => {
     if (col === 'actions') return; 
     e.dataTransfer.setData('text/plain', col)
@@ -606,7 +713,6 @@ export default function RiceControl() {
     })
   }
 
-  // --- COLUMN RESIZE LOGIC ---
   const handleResizeStart = (e: React.MouseEvent | React.TouchEvent, columnKey: string) => {
     e.preventDefault()
     e.stopPropagation() 
@@ -647,7 +753,6 @@ export default function RiceControl() {
     setSortConfig({ key, direction });
   }
 
-  // --- DATA PROCESSING ---
   const processedProducts = products
     .map(p => ({ ...p, ...edits[p.id] }))
     .filter(p => {
@@ -685,7 +790,6 @@ export default function RiceControl() {
       return 0;
     })
 
-  // --- FORMATTERS ---
   const formatDisplayValue = (col: string, val: any) => {
     if (val === null || val === undefined) return '';
     if (['price', 'cost_price'].includes(col)) return `${new Intl.NumberFormat('en-US').format(val)} ៛`;
@@ -706,7 +810,6 @@ export default function RiceControl() {
   const pendingImports = imports.filter(i => i.status === 'Pending');
   const importTotalCalc = (Number(importForm.qty) || 0) * (Number(importForm.unit_cost) || 0);
 
-  // Live modal math
   const liveTotalPendingReceived = pendingPaymentRows.reduce((sum, row) => {
     const amt = Number(row.amount) || 0;
     if (row.method.includes('$')) return sum + (amt * EXCHANGE_RATE);
@@ -775,7 +878,7 @@ export default function RiceControl() {
             <button 
               key={cat} 
               onClick={() => setActiveCategory(cat)} 
-              style={{ scrollSnapAlign: 'start', padding: '8px 16px', borderRadius: '20px', border: activeCategory === cat ? 'none' : '1px solid #cbd5e1', backgroundColor: activeCategory === cat ? '#b58a3d' : '#ffffff', color: activeCategory === cat ? '#fff' : '#475569', fontWeight: 'bold', cursor: 'pointer', fontSize: '13px', whiteSpace: 'nowrap' }}
+              style={{ scrollSnapAlign: 'start', padding: '8px 16px', borderRadius: '20px', border: activeCategory === cat ? 'none' : '1px solid #cbd5e1', backgroundColor: activeCategory === cat ? '#b58a3d' : '#ffffff', color: activeCategory === cat ? '#fff' : '#475569', fontWeight: 'bold', cursor: 'pointer', fontSize: '13px', whiteSpace: 'nowrap', boxShadow: activeCategory === cat ? '0 2px 4px rgba(181, 138, 61, 0.3)' : 'none' }}
             >
               {cat}
             </button>
@@ -825,12 +928,15 @@ export default function RiceControl() {
                   // --- FIFO BATCH CALCULATIONS ---
                   // 1. Get all active batches (Stock > 0)
                   const pBatches = (activeBatchesMap[p.id] || []).filter(b => (b.imported_qty || 0) - (b.sold_qty || 0) > 0);
-                  // 2. The oldest active batch becomes the Main Row
+                  
+                  // Sort batches oldest first
+                  pBatches.sort((a,b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+                  
                   const currentBatch = pBatches.length > 0 ? pBatches[0] : null;
-                  // 3. The remaining batches go into the Dropdown Queue
                   const queuedBatches = pBatches.slice(1);
-                  // 4. Total Stock calculated across all active batches
                   const totalActiveStock = pBatches.reduce((sum, b) => sum + ((b.imported_qty || 0) - (b.sold_qty || 0)), 0);
+                  const isExpanded = expandedProductId === p.id;
+                  const isLowStock = (Number(p.stock) <= Number(p.min_stock_level || 10));
 
                   return (
                     <React.Fragment key={p.id}>
@@ -840,10 +946,27 @@ export default function RiceControl() {
                           
                           // --- ACTIONS COLUMN ---
                           if (col === 'actions') {
-                            if (activeView !== 'wholesale') return null;
+                            if (activeView === 'retail') {
+                               return (
+                                 <td key={col} style={{ borderRight: '1px solid #f1f5f9', padding: '8px', overflow: 'hidden', textAlign: 'center' }}>
+                                   {p.linked_wholesale_id ? (
+                                     <button 
+                                       onClick={() => handleManualPull(p.id, p.linked_wholesale_id!)}
+                                       disabled={isProcessing}
+                                       style={{ background: '#10b981', color: '#fff', border: 'none', padding: '6px 12px', borderRadius: '6px', fontSize: '12px', fontWeight: 'bold', cursor: isProcessing ? 'not-allowed' : 'pointer' }}
+                                     >
+                                       ♻️ Pull 1 Bag
+                                     </button>
+                                   ) : (
+                                      <span style={{ fontSize: '12px', color: '#94a3b8' }}>No Link</span>
+                                   )}
+                                 </td>
+                               )
+                            }
+                            
                             return (
                               <td key={col} style={{ borderRight: '1px solid #f1f5f9', padding: '8px', overflow: 'hidden' }}>
-                                <div style={{ display: 'flex', gap: '6px', alignItems: 'center', justifyContent: 'center' }}>
+                                <div style={{ display: 'flex', gap: '8px', alignItems: 'center', justifyContent: 'center' }}>
                                   {edits[p.id] ? (
                                     <>
                                       <button onMouseDown={() => handleSaveRecord(p.id)} style={{ color: '#fff', background: '#10b981', border: 'none', padding: '8px 12px', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', fontSize: '12px' }}>Save</button>
@@ -851,16 +974,7 @@ export default function RiceControl() {
                                     </>
                                   ) : (
                                     <>
-                                      <button onClick={() => openImportModal(p)} style={{ color: '#fff', background: '#3b82f6', border: 'none', padding: '8px 12px', borderRadius: '6px', cursor: 'pointer', fontSize: '12px', fontWeight: 'bold' }}>📦 Import</button>
-                                      
-                                      {/* QUEUE ACCORDION BUTTON */}
-                                      {queuedBatches.length > 0 && (
-                                        <button onClick={() => setExpandedProductId(expandedProductId === p.id ? null : p.id)} style={{ color: '#ca8a04', background: '#fef3c7', border: '1px solid #fde047', padding: '8px 12px', borderRadius: '6px', cursor: 'pointer', fontSize: '12px', fontWeight: 'bold' }}>
-                                          {expandedProductId === p.id ? '▲ Hide Queue' : `▼ Queue (${queuedBatches.length})`}
-                                        </button>
-                                      )}
-                                      
-                                      {/* HISTORY BUTTON RESTORED */}
+                                      <button onClick={() => openImportModal(p)} style={{ color: '#fff', background: '#3b82f6', border: 'none', padding: '6px 12px', borderRadius: '6px', cursor: 'pointer', fontSize: '12px', fontWeight: 'bold' }}>📦 Import</button>
                                       <button onClick={() => fetchHistory(p)} style={{ color: '#475569', background: '#f1f5f9', border: '1px solid #cbd5e1', padding: '8px 12px', borderRadius: '6px', cursor: 'pointer', fontSize: '12px', fontWeight: 'bold' }}>🕒 History</button>
                                     </>
                                   )}
@@ -872,15 +986,25 @@ export default function RiceControl() {
                           const isIdCol = col === 'id';
                           const isEditing = editingCell?.id === p.id && editingCell?.col === col;
                           
-                          // DYNAMIC OVERRIDE: Wholesale Main Row adopts the "Current Active Batch" Data
                           let val = edits[p.id]?.[col as keyof Product] ?? p[col as keyof Product] ?? '';
-                          
-                          if (activeView === 'wholesale' && !edits[p.id] && currentBatch) {
-                            if (col === 'price') val = currentBatch.price;
-                            if (col === 'cost_price') val = currentBatch.cost_price;
-                            if (col === 'stock') val = (currentBatch.imported_qty || 0) - (currentBatch.sold_qty || 0);
-                          } else if (activeView === 'wholesale' && !edits[p.id] && !currentBatch) {
-                            if (col === 'stock') val = 0; // Ensures out-of-stock products cleanly show 0
+
+                          // 🚀 WHOLESALE OVERRIDE LOGIC
+                          // Force the parent row to strictly display the Current Batch pricing data
+                          if (!isEditing && !edits[p.id] && activeView === 'wholesale' && currentBatch) {
+                             if (col === 'price') val = currentBatch.price;
+                             if (col === 'cost_price') val = currentBatch.cost_price;
+                             // We DO NOT override the total stock here. The parent row should show the overall stock of the product.
+                          }
+
+                          if (!isEditing && !edits[p.id] && activeView === 'retail' && col === 'cost_price' && p.linked_wholesale_id) {
+                            const parentWholesale = products.find(wp => wp.id === p.linked_wholesale_id);
+                            if (parentWholesale) {
+                              const parentBatches = (activeBatchesMap[parentWholesale.id] || []).filter(b => (b.imported_qty || 0) - (b.sold_qty || 0) > 0);
+                              parentBatches.sort((a,b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+                              const liveParentCogs = parentBatches.length > 0 ? parentBatches[0].cost_price : (parentWholesale.cost_price || 0);
+                              const parentWeight = parentWholesale.weight || 50;
+                              val = Math.round(liveParentCogs / parentWeight);
+                            }
                           }
 
                           if (col === 'linked_wholesale') {
@@ -926,17 +1050,28 @@ export default function RiceControl() {
                                   {col === 'name' ? (
                                     <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                                       {formatDisplayValue(col as string, val)}
-                                      
-                                      {/* Total Stock Indicator */}
-                                      {activeView === 'wholesale' && pBatches.length > 1 && (
-                                        <span style={{ fontSize: '12px', color: '#b58a3d', fontWeight: 'bold' }}>
-                                          (Total: {totalActiveStock})
+
+                                      {/* Total Stock Next to Name */}
+                                      {activeView === 'wholesale' && (
+                                        <span style={{ fontSize: '13px', color: '#b58a3d', fontWeight: 'bold' }}>
+                                          ({formatNumber(totalActiveStock)} Total)
                                         </span>
                                       )}
 
                                       {/* Clean Red Emoji Alert */}
                                       {(Number(p.stock) <= Number(p.min_stock_level || 10)) && (
-                                        <span title="Low stock" style={{ fontSize: '14px' }}>🚨</span>
+                                        <span title="Low stock alert" style={{ fontSize: '14px' }}>🚨</span>
+                                      )}
+
+                                      {/* The Dropdown Icon for Active Batches */}
+                                      {activeView === 'wholesale' && queuedBatches.length > 0 && (
+                                        <button 
+                                          onClick={(e) => { e.stopPropagation(); setExpandedProductId(expandedProductId === p.id ? null : p.id); }} 
+                                          style={{ background: '#fef3c7', border: '1px solid #fde047', borderRadius: '4px', cursor: 'pointer', fontSize: '11px', color: '#ca8a04', padding: '2px 6px', fontWeight: 'bold', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                                          title="View batches"
+                                        >
+                                          {expandedProductId === p.id ? '▲ Close' : `▼ Next Batches (${queuedBatches.length})`}
+                                        </button>
                                       )}
                                     </span>
                                   ) : (
@@ -950,47 +1085,62 @@ export default function RiceControl() {
                         })}
                       </tr>
 
-                      {/* THE NEW BATCH QUEUE ACCORDION (Only maps queued batches) */}
+                      {/* THE FULL BATCH QUEUE RENDERED AS IDENTICAL TABLE ROWS */}
                       {expandedProductId === p.id && activeView === 'wholesale' && queuedBatches.length > 0 && (
-                        <tr style={{ background: '#f8fafc' }}>
-                          <td colSpan={columnOrder.length} style={{ padding: '16px', borderBottom: '2px solid #e2e8f0' }}>
-                             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', paddingLeft: '40px' }}>
-                               <div style={{ fontSize: '12px', fontWeight: 'bold', color: '#64748b', textTransform: 'uppercase', marginBottom: '8px' }}>Queued Batches (FIFO Order)</div>
-                               
-                               {queuedBatches.map((batch, index) => {
-                                 const remaining = (batch.imported_qty || 0) - (batch.sold_qty || 0);
-                                 let label = `Queue #${index + 1}`;
-                                 
-                                 const isEditBatch = editingHistoryId === batch.id;
-                                 const editData = historyEdits[batch.id] || { price: batch.price, cost_price: batch.cost_price };
+                        queuedBatches.map((batch, index) => {
+                          const remaining = (batch.imported_qty || 0) - (batch.sold_qty || 0);
+                          let label = index === 0 ? "↳ 1st Next Batch" : index === 1 ? "↳ 2nd Next Batch" : `↳ ${index + 1}th Next Batch`;
+                          
+                          const isEditBatch = editingHistoryId === batch.id;
+                          const editData = historyEdits[batch.id] || { imported_qty: batch.imported_qty, price: batch.price, cost_price: batch.cost_price };
 
-                                 return (
-                                   <div key={batch.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#fff', padding: '12px', borderRadius: '8px', border: '1px solid #cbd5e1' }}>
-                                     <div style={{ flex: 1 }}>
-                                       <span style={{ background: '#f59e0b', color: '#fff', padding: '2px 8px', borderRadius: '12px', fontSize: '11px', fontWeight: 'bold', marginRight: '10px' }}>{label}</span>
-                                       <span style={{ fontSize: '13px', color: '#334155' }}>Stock: <b>{remaining}</b> bags</span>
-                                     </div>
-                                     
-                                     {isEditBatch ? (
-                                       <div style={{ display: 'flex', gap: '8px', flex: 2, alignItems: 'center', justifyContent: 'flex-end' }}>
-                                         <CurrencyInput value={editData.price} onChange={(v:any) => setHistoryEdits({...historyEdits, [batch.id]: {...editData, price: v}})} style={{ width: '90px', padding: '6px', fontSize: '13px', borderRadius: '4px', border: '1px solid #b58a3d' }} placeholder="Price" />
-                                         <CurrencyInput value={editData.cost_price} onChange={(v:any) => setHistoryEdits({...historyEdits, [batch.id]: {...editData, cost_price: v}})} style={{ width: '90px', padding: '6px', fontSize: '13px', borderRadius: '4px', border: '1px solid #b58a3d' }} placeholder="Cost" />
-                                         <button onClick={() => handleSaveBatch(batch.id)} style={{ padding: '6px 12px', background: '#10b981', color: '#fff', border: 'none', borderRadius: '4px', fontWeight: 'bold', cursor: 'pointer' }}>Save</button>
-                                         <button onClick={() => setEditingHistoryId(null)} style={{ padding: '6px 12px', background: '#ef4444', color: '#fff', border: 'none', borderRadius: '4px', fontWeight: 'bold', cursor: 'pointer' }}>X</button>
-                                       </div>
-                                     ) : (
-                                       <div style={{ display: 'flex', gap: '20px', flex: 2, alignItems: 'center', justifyContent: 'flex-end' }}>
-                                         <span style={{ fontSize: '13px', color: '#0f172a' }}>Selling: <b style={{ color: '#b58a3d' }}>{formatRiel(batch.price)}</b></span>
-                                         <span style={{ fontSize: '13px', color: '#64748b' }}>Cost: <b>{formatRiel(batch.cost_price || 0)}</b></span>
-                                         <button onClick={() => { setEditingHistoryId(batch.id); setHistoryEdits({ [batch.id]: { price: batch.price, cost_price: batch.cost_price } }); }} style={{ padding: '4px 8px', background: '#e0f2fe', color: '#0284c7', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', fontSize: '12px' }}>✏️ Edit</button>
-                                       </div>
-                                     )}
-                                   </div>
-                                 )
-                               })}
-                             </div>
-                          </td>
-                        </tr>
+                          return (
+                            <tr key={`batch-${batch.id}`} style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0' }}>
+                              {columnOrder.map(col => {
+                                if ((col === 'linked_wholesale' || col === 'mtd_kg_used' || col === 'mtd_bags_used') && activeView !== 'retail') return null;
+                                
+                                if (col === 'actions') {
+                                  return (
+                                    <td key={col} style={{ borderRight: '1px solid #f1f5f9', padding: '8px' }}>
+                                      <div style={{ display: 'flex', gap: '8px', justifyContent: 'center' }}>
+                                        {isEditBatch ? (
+                                          <>
+                                            <button onClick={() => handleSaveHistory(batch.id)} style={{ padding: '6px 12px', background: '#10b981', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', fontSize: '12px' }}>Save</button>
+                                            <button onClick={() => setEditingHistoryId(null)} style={{ padding: '6px 12px', background: '#f1f5f9', color: '#64748b', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', fontSize: '12px' }}>Cancel</button>
+                                          </>
+                                        ) : (
+                                          <>
+                                            <button onClick={() => { setEditingHistoryId(batch.id); setHistoryEdits({ [batch.id]: { imported_qty: batch.imported_qty, price: batch.price, cost_price: batch.cost_price } }); }} style={{ padding: '4px 8px', background: '#e0f2fe', color: '#0284c7', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', fontSize: '12px' }}>✏️ Edit</button>
+                                            <button onClick={() => handleDeleteHistory(batch.id)} style={{ padding: '4px 8px', background: '#fee2e2', color: '#dc2626', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', fontSize: '12px' }}>🗑️ Del</button>
+                                          </>
+                                        )}
+                                      </div>
+                                    </td>
+                                  );
+                                }
+                                
+                                if (col === 'name') return <td key={col} style={{ paddingLeft: '48px', color: '#64748b', fontSize: '13px', borderRight: '1px solid #f1f5f9' }}>{label}</td>;
+                                
+                                if (col === 'price') {
+                                  if (isEditBatch) return <td key={col} style={{ padding: '4px', borderRight: '1px solid #f1f5f9' }}><CurrencyInput value={editData.price} onChange={(v:any) => setHistoryEdits({...historyEdits, [batch.id]: {...editData, price: v}})} style={{ width: '100%', padding: '6px', fontSize: '13px', borderRadius: '4px', border: '1px solid #b58a3d', boxSizing: 'border-box' }} /></td>;
+                                  return <td key={col} style={{ padding: '16px 12px', color: '#475569', fontSize: '13px', borderRight: '1px solid #f1f5f9' }}>{formatRiel(batch.price)}</td>;
+                                }
+                                
+                                if (col === 'cost_price') {
+                                  if (isEditBatch) return <td key={col} style={{ padding: '4px', borderRight: '1px solid #f1f5f9' }}><CurrencyInput value={editData.cost_price} onChange={(v:any) => setHistoryEdits({...historyEdits, [batch.id]: {...editData, cost_price: v}})} style={{ width: '100%', padding: '6px', fontSize: '13px', borderRadius: '4px', border: '1px solid #b58a3d', boxSizing: 'border-box' }} /></td>;
+                                  return <td key={col} style={{ padding: '16px 12px', color: '#475569', fontSize: '13px', borderRight: '1px solid #f1f5f9' }}>{formatRiel(batch.cost_price || 0)}</td>;
+                                }
+                                
+                                if (col === 'stock') {
+                                  if (isEditBatch) return <td key={col} style={{ padding: '4px', borderRight: '1px solid #f1f5f9' }}><input type="number" className="no-spinners" value={editData.imported_qty} onChange={e => setHistoryEdits({...historyEdits, [batch.id]: {...editData, imported_qty: Number(e.target.value)}})} style={{ width: '100%', padding: '6px', fontSize: '13px', borderRadius: '4px', border: '1px solid #b58a3d', boxSizing: 'border-box' }} /></td>;
+                                  return <td key={col} style={{ padding: '16px 12px', color: '#475569', fontSize: '13px', borderRight: '1px solid #f1f5f9', fontWeight: 'bold' }}>{remaining}</td>;
+                                }
+                                
+                                return <td key={col} style={{ borderRight: '1px solid #f1f5f9' }}></td>;
+                              })}
+                            </tr>
+                          );
+                        })
                       )}
                     </React.Fragment>
                   )
@@ -1165,8 +1315,9 @@ export default function RiceControl() {
                     <td style={{ padding: '16px', fontWeight: 'bold', color: '#0f172a' }}>{s.name}</td>
                     <td style={{ padding: '16px', color: '#475569' }}>{s.phone || '-'}</td>
                     <td style={{ padding: '16px', color: '#475569' }}>{s.location || '-'}</td>
-                    <td style={{ padding: '16px', textAlign: 'right', fontWeight: 'bold', color: Number(s.total_owed) > 0 ? '#ef4444' : '#10b981', fontSize: '16px' }}>
-                      {formatRiel(s.total_owed || 0)}
+                    <td style={{ padding: '16px', textAlign: 'right', fontWeight: 'bold', color: Number(s.total_owed_riel) > 0 ? '#ef4444' : '#10b981', fontSize: '16px' }}>
+                      {formatRiel(s.total_owed_riel || 0)}
+                      {Number(s.total_owed_usd) > 0 && <div style={{ fontSize: '14px', marginTop: '4px' }}>{formatUSD(s.total_owed_usd)}</div>}
                     </td>
                   </tr>
                 ))
@@ -1175,7 +1326,8 @@ export default function RiceControl() {
           </table>
         </div>
       )}
-{/* === GLOBAL MODALS === */}
+
+      {/* === GLOBAL MODALS === */}
 
       {/* PAY PENDING MODAL (SUPPLIERS ONLY) */}
       {payPendingModal.isOpen && payPendingModal.record && (
@@ -1357,10 +1509,11 @@ export default function RiceControl() {
                     const editData = historyEdits[h.id] || { imported_qty: h.imported_qty, price: h.price, cost_price: h.cost_price };
                     const remaining = (h.imported_qty || 0) - (h.sold_qty || 0);
                     
-                    let batchLabel = "Current Active Batch";
-                    if (index === 1) batchLabel = "1st New Batch";
-                    if (index === 2) batchLabel = "2nd New Batch";
-                    if (index > 2) batchLabel = `Next Batch ${index}`;
+                    let batchLabel = "Current Batch";
+                    if (index === 1) batchLabel = "1st Next Batch";
+                    else if (index === 2) batchLabel = "2nd Next Batch";
+                    else if (index === 3) batchLabel = "3rd Next Batch";
+                    else if (index > 3) batchLabel = `${index}th Next Batch`;
 
                     return (
                       <div key={h.id} style={{ background: isEditing ? '#fefcf3' : '#f0fdf4', padding: '16px', borderRadius: '12px', border: isEditing ? '1px solid #b58a3d' : '1px solid #bbf7d0', marginBottom: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px', transition: 'all 0.2s' }}>

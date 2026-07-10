@@ -61,7 +61,7 @@ function CurrencyInput({ value, onChange, placeholder, style, autoFocus, onEnter
           document.body.scrollTop = 0;
         }, 100);
       }}
-      style={{ ...style, color: '#000000', fontWeight: 'normal' }}
+      style={{ ...style, color: '#334155', fontWeight: 'normal' }}
       className="mobile-input-field"
     />
   )
@@ -152,7 +152,6 @@ export default function DeliveryPage() {
       totalRielEq += convertedAmt;
       methodStrings.push(`${r.method}: ${amt}`);
 
-      // Prepare ledger entry
       paymentRecordsToInsert.push({
         invoice_id: d.invoice_id,
         amount_paid: convertedAmt,
@@ -167,11 +166,9 @@ export default function DeliveryPage() {
     setIsProcessing(true);
 
     try {
-      // 1. Log to the Accounts Receivable Ledger (invoice_payments)
       const { error: ledgerError } = await supabase.from('invoice_payments').insert(paymentRecordsToInsert);
       if (ledgerError) throw new Error("Failed to log payment ledger: " + ledgerError.message);
 
-      // 2. Update the Invoice Summary
       const newBalance = d.balance_due - totalRielEq;
       let newPaymentMethodStr = d.payment_method;
       
@@ -181,24 +178,23 @@ export default function DeliveryPage() {
 
       const isDone = newBalance <= 0;
 
-      // 3. Update Local State
+      // Update Local State. It always marks as delivered so it grays out and drops down!
       setDeliveries(prev => prev.map(inv => inv.invoice_id === d.invoice_id ? {
         ...inv,
         balance_due: newBalance,
         payment_method: newPaymentMethodStr,
         is_done: isDone,
-        delivery_status: isDone ? 'Delivered' : d.delivery_status
+        delivery_status: 'Delivered' 
       } : inv));
       
       setInlinePayments(prev => { const n = {...prev}; delete n[d.invoice_id]; return n; });
 
-      // 4. Save Invoice updates to Database
       await supabase.from('invoice_summaries')
         .update({
             balance_due: newBalance,
             payment_method: newPaymentMethodStr,
             is_done: isDone,
-            delivery_status: isDone ? 'Delivered' : d.delivery_status
+            delivery_status: 'Delivered'
         })
         .eq('invoice_id', d.invoice_id);
 
@@ -216,13 +212,11 @@ export default function DeliveryPage() {
     
     setIsProcessing(true);
     try {
-      // 1. Delete all payments from the ledger to reverse the Dashboard numbers
       const { error: delErr } = await supabase.from('invoice_payments').delete().eq('invoice_id', d.invoice_id);
       if (delErr) throw delErr;
 
-      // 2. Reset the invoice summary back to its original state
       const { error: updErr } = await supabase.from('invoice_summaries').update({
-          balance_due: d.total_sales,
+          balance_due: d.total_sales, // Resets math to original total sale
           payment_method: '-',
           is_done: false,
           delivery_status: 'Pending'
@@ -301,7 +295,6 @@ export default function DeliveryPage() {
         let amountToApply = Math.min(invBalance, remainingToDistribute);
         let newBalance = invBalance - amountToApply;
 
-        // Log the ledger entry for this specific invoice
         paymentRecordsToInsert.push({
           invoice_id: inv.invoice_id,
           amount_paid: amountToApply,
@@ -330,13 +323,11 @@ export default function DeliveryPage() {
         remainingToDistribute -= amountToApply;
       }
 
-      // 1. Save all ledger records to invoice_payments
       if (paymentRecordsToInsert.length > 0) {
         const { error: ledgerError } = await supabase.from('invoice_payments').insert(paymentRecordsToInsert);
         if (ledgerError) throw new Error("Failed to log payment ledger: " + ledgerError.message);
       }
 
-      // 2. Update local state
       const uniqueKey = `${debtor.owner}_${debtor.name}`;
       setDeliveries(prev => prev.map(d => {
         const matched = updatedInvoices.find(u => u.invoice_id === d.invoice_id);
@@ -344,7 +335,6 @@ export default function DeliveryPage() {
       }));
       setCreditPayments(prev => { const n = {...prev}; delete n[uniqueKey]; return n; });
 
-      // 3. Save all updated balances to invoice_summaries
       for (const u of updatedInvoices) {
         await supabase.from('invoice_summaries').update({
           balance_due: u.balance_due,
@@ -364,10 +354,12 @@ export default function DeliveryPage() {
 
   // --- DATA PROCESSING & SORTING ---
   const isFullyComplete = (d: any) => d.is_done === true;
+  const isDeliveredVisual = (d: any) => d.delivery_status === 'Delivered';
 
+  // Rule: Sort Delivered invoices entirely to the bottom of the delivery tab.
   const sortedDeliveries = [...deliveries].sort((a: any, b: any) => {
-    const aDone = isFullyComplete(a);
-    const bDone = isFullyComplete(b);
+    const aDone = isDeliveredVisual(a);
+    const bDone = isDeliveredVisual(b);
     if (!aDone && bDone) return -1;
     if (aDone && !bDone) return 1;
     return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
@@ -375,10 +367,9 @@ export default function DeliveryPage() {
 
   const debtorsMap = deliveries.reduce((acc: any, curr: any) => {
     const balance = Number(curr.balance_due) || 0;
-    const totalSale = Number(curr.total_sales) || 0;
     
-    // Credit tab logic: ONLY show if they paid partially!
-    if (balance > 0 && balance < totalSale) {
+    // Credit tab logic: ONLY show if they owe money AND the physical delivery is finished!
+    if (balance > 0 && curr.delivery_status === 'Delivered' && !isFullyComplete(curr)) {
       let owner = (curr.owner || '').trim();
       if (!owner) owner = 'Unassigned';
       owner = owner.charAt(0).toUpperCase() + owner.slice(1).toLowerCase();
@@ -424,7 +415,7 @@ export default function DeliveryPage() {
 
   function sidebarContent() {
     if (loading) {
-      return <div style={{ textAlign: 'center', padding: '40px', color: '#94a3b8', fontSize: '14px', fontWeight: '500' }}>Loading records...</div>;
+      return <div style={{ textAlign: 'center', padding: '40px', color: '#94a3b8', fontSize: '14px' }}>Loading records...</div>;
     }
     
     if (activeTab === 'delivery') {
@@ -434,14 +425,14 @@ export default function DeliveryPage() {
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '14px', minWidth: '1050px' }}>
               <thead style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0' }}>
                 <tr>
-                  <th style={{ padding: '16px 20px', textAlign: 'left', color: '#64748b', fontWeight: 'bold', textTransform: 'uppercase', fontSize: '12px', letterSpacing: '0.5px' }}>Date & INV</th>
-                  <th style={{ padding: '16px 20px', textAlign: 'left', color: '#64748b', fontWeight: 'bold', textTransform: 'uppercase', fontSize: '12px', letterSpacing: '0.5px' }}>Customer</th>
-                  <th style={{ padding: '16px 20px', textAlign: 'left', color: '#64748b', fontWeight: 'bold', textTransform: 'uppercase', fontSize: '12px', letterSpacing: '0.5px', width: '25%' }}>Items Ordered</th>
-                  <th style={{ padding: '16px 20px', textAlign: 'right', color: '#64748b', fontWeight: 'bold', textTransform: 'uppercase', fontSize: '12px', letterSpacing: '0.5px' }}>Total (៛)</th>
-                  <th style={{ padding: '16px 20px', textAlign: 'center', color: '#64748b', fontWeight: 'bold', textTransform: 'uppercase', fontSize: '12px', letterSpacing: '0.5px' }}>Status</th>
-                  <th style={{ padding: '16px 20px', textAlign: 'center', color: '#64748b', fontWeight: 'bold', textTransform: 'uppercase', fontSize: '12px', letterSpacing: '0.5px', width: '160px' }}>Payment Method</th>
-                  <th style={{ padding: '16px 20px', textAlign: 'right', color: '#64748b', fontWeight: 'bold', textTransform: 'uppercase', fontSize: '12px', letterSpacing: '0.5px', width: '180px' }}>Pay Amount</th>
-                  <th style={{ padding: '16px 20px', textAlign: 'center', color: '#64748b', fontWeight: 'bold', textTransform: 'uppercase', fontSize: '12px', letterSpacing: '0.5px', width: '120px' }}>Complete</th>
+                  <th style={{ padding: '16px 20px', textAlign: 'left', color: '#64748b', textTransform: 'uppercase', fontSize: '12px', letterSpacing: '0.5px' }}>Date & INV</th>
+                  <th style={{ padding: '16px 20px', textAlign: 'left', color: '#64748b', textTransform: 'uppercase', fontSize: '12px', letterSpacing: '0.5px' }}>Customer</th>
+                  <th style={{ padding: '16px 20px', textAlign: 'left', color: '#64748b', textTransform: 'uppercase', fontSize: '12px', letterSpacing: '0.5px', width: '25%' }}>Items Ordered</th>
+                  <th style={{ padding: '16px 20px', textAlign: 'right', color: '#64748b', textTransform: 'uppercase', fontSize: '12px', letterSpacing: '0.5px' }}>Total (៛)</th>
+                  <th style={{ padding: '16px 20px', textAlign: 'center', color: '#64748b', textTransform: 'uppercase', fontSize: '12px', letterSpacing: '0.5px' }}>Status</th>
+                  <th style={{ padding: '16px 20px', textAlign: 'center', color: '#64748b', textTransform: 'uppercase', fontSize: '12px', letterSpacing: '0.5px', width: '160px' }}>Payment Method</th>
+                  <th style={{ padding: '16px 20px', textAlign: 'right', color: '#64748b', textTransform: 'uppercase', fontSize: '12px', letterSpacing: '0.5px', width: '180px' }}>Pay Amount</th>
+                  <th style={{ padding: '16px 20px', textAlign: 'center', color: '#64748b', textTransform: 'uppercase', fontSize: '12px', letterSpacing: '0.5px', width: '120px' }}>Complete</th>
                 </tr>
               </thead>
               <tbody>
@@ -449,30 +440,30 @@ export default function DeliveryPage() {
                   <tr><td colSpan={8} style={{ textAlign: 'center', padding: '60px', color: '#94a3b8', fontSize: '15px' }}>No active wholesale deliveries.</td></tr>
                 ) : (
                   sortedDeliveries.map((d: any) => {
-                    const isDone = isFullyComplete(d);
+                    const isDoneVisual = isDeliveredVisual(d);
                     const totalSale = Number(d.total_sales) || 0;
                     const balanceDue = Number(d.balance_due) || 0;
                     const paymentState = getInlinePaymentState(d.invoice_id, balanceDue);
                     
                     return (
-                      <tr key={d.invoice_id} style={{ borderBottom: '1px solid #f1f5f9', background: isDone ? '#f8fafc' : '#ffffff', opacity: isDone ? 0.6 : 1, transition: 'all 0.3s ease' }}>
-                        <td style={{ padding: '16px 20px', color: '#475569', fontSize: '14px', verticalAlign: 'top', fontWeight: 'normal' }}>
+                      <tr key={d.invoice_id} style={{ borderBottom: '1px solid #f1f5f9', background: isDoneVisual ? '#f8fafc' : '#ffffff', opacity: isDoneVisual ? 0.6 : 1, transition: 'all 0.3s ease' }}>
+                        <td style={{ padding: '16px 20px', color: '#475569', fontSize: '14px', verticalAlign: 'top' }}>
                           <div style={{ color: '#3b82f6', marginBottom: '4px' }}>{d.invoice_id}</div>
                           <div style={{ fontSize: '12px' }}>{new Date(d.created_at).toLocaleDateString('en-GB')}</div>
                         </td>
-                        <td style={{ padding: '16px 20px', verticalAlign: 'top', fontWeight: 'normal' }}>
+                        <td style={{ padding: '16px 20px', verticalAlign: 'top' }}>
                           <div style={{ color: '#334155', fontSize: '15px', marginBottom: '4px' }}>{d.customer_name}</div>
                           <div style={{ color: '#64748b', fontSize: '12px' }}>📍 {d.customer_location || 'No location'}</div>
                         </td>
-                        <td style={{ padding: '16px 20px', color: '#475569', lineHeight: '1.6', fontSize: '13px', verticalAlign: 'top', fontWeight: 'normal' }}>{d.rice_types}</td>
+                        <td style={{ padding: '16px 20px', color: '#475569', lineHeight: '1.6', fontSize: '13px', verticalAlign: 'top' }}>{d.rice_types}</td>
                         
-                        <td style={{ padding: '16px 20px', textAlign: 'right', color: '#000000', fontSize: '15px', verticalAlign: 'top', fontWeight: 'normal' }}>{formatRiel(totalSale)}</td>
+                        <td style={{ padding: '16px 20px', textAlign: 'right', color: '#334155', fontSize: '15px', verticalAlign: 'top' }}>{formatRiel(totalSale)}</td>
                         
                         <td style={{ padding: '16px 20px', textAlign: 'center', verticalAlign: 'top' }}>
                           <button 
                             onClick={() => updateInvoiceField(d.invoice_id, 'delivery_status', d.delivery_status === 'Pending' ? 'Delivered' : 'Pending')}
                             style={{
-                              padding: '6px 12px', borderRadius: '20px', border: 'none', fontSize: '13px', fontWeight: 'normal', cursor: 'pointer',
+                              padding: '6px 12px', borderRadius: '20px', border: 'none', fontSize: '13px', cursor: 'pointer',
                               background: d.delivery_status === 'Pending' ? '#fef3c7' : '#dcfce7',
                               color: d.delivery_status === 'Pending' ? '#d97706' : '#15803d',
                               transition: 'all 0.2s', display: 'flex', alignItems: 'center', gap: '6px', width: '100px', justifyContent: 'center', margin: '0 auto'
@@ -484,14 +475,14 @@ export default function DeliveryPage() {
 
                         {/* PAYMENT METHOD COLUMN */}
                         <td style={{ padding: '16px 20px', textAlign: 'center', verticalAlign: 'top' }}>
-                          {balanceDue > 0 ? (
+                          {balanceDue > 0 && !isDoneVisual ? (
                              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                                {paymentState.map((row) => (
                                  <select 
                                    key={row.id}
                                    value={row.method}
                                    onChange={(e) => updateInlineRow(d.invoice_id, row.id, 'method', e.target.value, balanceDue)}
-                                   style={{ padding: '10px 12px', borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '14px', outline: 'none', backgroundColor: '#fff', color: '#475569', cursor: 'pointer', width: '100%', fontWeight: 'normal', height: '40px', boxSizing: 'border-box' }}
+                                   style={{ padding: '10px 12px', borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '14px', outline: 'none', backgroundColor: '#fff', color: '#334155', cursor: 'pointer', width: '100%', height: '40px', boxSizing: 'border-box' }}
                                  >
                                     <option value="Cash ៛">💵 Cash ៛</option>
                                     <option value="Cash $">💵 Cash $</option>
@@ -504,13 +495,13 @@ export default function DeliveryPage() {
                                <button onClick={() => addInlineSplit(d.invoice_id, balanceDue)} style={{ background: 'none', border: 'none', color: '#3b82f6', fontSize: '12px', cursor: 'pointer', textAlign: 'left', fontWeight: 'bold' }}>+ Add Split</button>
                              </div>
                           ) : (
-                            <div style={{ color: '#475569', fontSize: '13px', fontWeight: 'normal' }}>{d.payment_method}</div>
+                            <div style={{ color: '#475569', fontSize: '13px' }}>{d.payment_method}</div>
                           )}
                         </td>
 
                         {/* PAY AMOUNT COLUMN */}
                         <td style={{ padding: '16px 20px', textAlign: 'right', verticalAlign: 'top' }}>
-                          {balanceDue > 0 ? (
+                          {balanceDue > 0 && !isDoneVisual ? (
                             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                               {paymentState.map((row) => (
                                 <div key={row.id} style={{ display: 'flex', alignItems: 'center', gap: '6px', height: '40px' }}>
@@ -519,7 +510,7 @@ export default function DeliveryPage() {
                                     value={row.amount}
                                     onChange={(v: any) => updateInlineRow(d.invoice_id, row.id, 'amount', v, balanceDue)}
                                     onEnter={() => handleInlineProcess(d, paymentState)}
-                                    style={{ padding: '10px 12px', borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '14px', textAlign: 'right', outline: 'none', width: '100%', backgroundColor: '#fff', color: '#000000', fontWeight: 'normal', height: '100%', boxSizing: 'border-box' }}
+                                    style={{ padding: '10px 12px', borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '14px', textAlign: 'right', outline: 'none', width: '100%', backgroundColor: '#fff', color: '#334155', height: '100%', boxSizing: 'border-box' }}
                                   />
                                   {paymentState.length > 1 && (
                                     <button onClick={() => removeInlineSplit(d.invoice_id, row.id, balanceDue)} style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', fontSize: '16px', padding: '0 4px' }}>✕</button>
@@ -533,20 +524,21 @@ export default function DeliveryPage() {
                         <td style={{ padding: '16px 20px', textAlign: 'center', verticalAlign: 'top' }}>
                           <button 
                             onClick={() => {
-                              if (isDone) {
+                              if (isDoneVisual) {
                                 handleUndoProcess(d);
                               } else {
                                 handleInlineProcess(d, paymentState);
                               }
                             }}
+                            disabled={isProcessing}
                             style={{
-                              padding: '8px 12px', width: '100%', borderRadius: '6px', border: 'none', cursor: 'pointer', fontSize: '13px',
-                              background: isDone ? '#e2e8f0' : '#10b981',
-                              color: isDone ? '#475569' : '#ffffff',
-                              transition: 'all 0.2s', fontWeight: 'normal', height: '40px'
+                              padding: '8px 12px', width: '100%', borderRadius: '6px', border: 'none', cursor: isProcessing ? 'not-allowed' : 'pointer', fontSize: '13px',
+                              background: isDoneVisual ? '#e2e8f0' : '#10b981',
+                              color: isDoneVisual ? '#475569' : '#ffffff',
+                              transition: 'all 0.2s', height: '40px'
                             }}
                           >
-                            {isDone ? 'Undo' : '✔ Done'}
+                            {isProcessing ? '...' : isDoneVisual ? 'Undo' : '✔ Done'}
                           </button>
                         </td>
 
@@ -562,33 +554,33 @@ export default function DeliveryPage() {
     }
 
     return (
-      <div style={{ background: '#fff', borderRadius: '16px', border: '1px solid #f1f5f9', overflow: 'hidden', boxShadow: '0 4px 20px rgba(0,0,0,0.03)' }}>
+      <div style={{ background: '#fff', borderRadius: '16px', border: '1px solid #e2e8f0', overflow: 'hidden', boxShadow: '0 4px 6px rgba(0,0,0,0.02)' }}>
         <div style={{ overflowX: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '14px', minWidth: '950px' }}>
             <thead style={{ background: '#fff1f2', borderBottom: '1px solid #ffe4e6' }}>
               <tr>
-                <th style={{ padding: '16px 20px', textAlign: 'left', color: '#be123c', fontWeight: 'bold', textTransform: 'uppercase', fontSize: '12px', letterSpacing: '0.5px' }}>Date</th>
-                <th style={{ padding: '16px 20px', textAlign: 'left', color: '#be123c', fontWeight: 'bold', textTransform: 'uppercase', fontSize: '12px', letterSpacing: '0.5px' }}>Owner</th>
-                <th style={{ padding: '16px 20px', textAlign: 'left', color: '#be123c', fontWeight: 'bold', textTransform: 'uppercase', fontSize: '12px', letterSpacing: '0.5px' }}>Customer Name</th>
-                <th style={{ padding: '16px 20px', textAlign: 'right', color: '#be123c', fontWeight: 'bold', textTransform: 'uppercase', fontSize: '12px', letterSpacing: '0.5px' }}>Remaining Debt (៛)</th>
-                <th style={{ padding: '16px 20px', textAlign: 'center', color: '#be123c', fontWeight: 'bold', textTransform: 'uppercase', fontSize: '12px', letterSpacing: '0.5px', width: '160px' }}>Method</th>
-                <th style={{ padding: '16px 20px', textAlign: 'right', color: '#be123c', fontWeight: 'bold', textTransform: 'uppercase', fontSize: '12px', letterSpacing: '0.5px', width: '180px' }}>Pay Amount (៛)</th>
-                <th style={{ padding: '16px 20px', textAlign: 'center', color: '#be123c', fontWeight: 'bold', textTransform: 'uppercase', fontSize: '12px', letterSpacing: '0.5px', width: '120px' }}>Complete</th>
+                <th style={{ padding: '16px 20px', textAlign: 'left', color: '#be123c', textTransform: 'uppercase', fontSize: '12px', letterSpacing: '0.5px' }}>Date</th>
+                <th style={{ padding: '16px 20px', textAlign: 'left', color: '#be123c', textTransform: 'uppercase', fontSize: '12px', letterSpacing: '0.5px' }}>Owner</th>
+                <th style={{ padding: '16px 20px', textAlign: 'left', color: '#be123c', textTransform: 'uppercase', fontSize: '12px', letterSpacing: '0.5px' }}>Customer & Invoices</th>
+                <th style={{ padding: '16px 20px', textAlign: 'right', color: '#be123c', textTransform: 'uppercase', fontSize: '12px', letterSpacing: '0.5px' }}>Total Debt (៛)</th>
+                <th style={{ padding: '16px 20px', textAlign: 'center', color: '#be123c', textTransform: 'uppercase', fontSize: '12px', letterSpacing: '0.5px', width: '160px' }}>Method</th>
+                <th style={{ padding: '16px 20px', textAlign: 'right', color: '#be123c', textTransform: 'uppercase', fontSize: '12px', letterSpacing: '0.5px', width: '180px' }}>Pay Amount (៛)</th>
+                <th style={{ padding: '16px 20px', textAlign: 'center', color: '#be123c', textTransform: 'uppercase', fontSize: '12px', letterSpacing: '0.5px', width: '120px' }}>Complete</th>
               </tr>
             </thead>
             {activeOwners.length === 0 ? (
-              <tbody><tr><td colSpan={7} style={{ textAlign: 'center', padding: '60px', color: '#10b981', fontSize: '15px', fontWeight: 'normal' }}>🎉 All customers are fully paid up!</td></tr></tbody>
+              <tbody><tr><td colSpan={7} style={{ textAlign: 'center', padding: '60px', color: '#10b981', fontSize: '15px' }}>🎉 All customers are fully paid up!</td></tr></tbody>
             ) : (
               activeOwners.map(ownerName => {
                 const list = groupedDebtors[ownerName];
                 const ownerTotalOwed = list.reduce((sum: number, d: any) => sum + d.totalOwed, 0);
                 return (
                   <tbody key={ownerName}>
-                    <tr style={{ background: '#f8fafc' }}>
-                      <td colSpan={3} style={{ padding: '14px 20px', color: '#334155', fontSize: '14px', borderBottom: '1px solid #e2e8f0', fontWeight: 'normal' }}>
+                    <tr style={{ background: '#f1f5f9' }}>
+                      <td colSpan={3} style={{ padding: '14px 20px', color: '#334155', fontSize: '14px', borderBottom: '1px solid #e2e8f0' }}>
                         👤 Owner: {ownerName}
                       </td>
-                      <td style={{ padding: '14px 20px', textAlign: 'right', color: '#000000', fontSize: '15px', borderBottom: '1px solid #e2e8f0', fontWeight: 'normal' }}>
+                      <td style={{ padding: '14px 20px', textAlign: 'right', color: '#334155', fontSize: '15px', borderBottom: '1px solid #e2e8f0' }}>
                         {formatRiel(ownerTotalOwed)}
                       </td>
                       <td colSpan={3} style={{ borderBottom: '1px solid #e2e8f0' }}></td>
@@ -599,20 +591,33 @@ export default function DeliveryPage() {
                       
                       return (
                         <tr key={uniqueKey} style={{ borderBottom: '1px solid #f1f5f9', background: '#ffffff', transition: 'background 0.2s ease' }}>
-                          <td style={{ padding: '20px', color: '#64748b', fontSize: '14px', verticalAlign: 'top', fontWeight: 'normal' }}>
+                          <td style={{ padding: '20px', color: '#64748b', fontSize: '14px', verticalAlign: 'top' }}>
                             {new Date(debtor.oldestDate).toLocaleDateString('en-GB')}
-                            <div style={{ fontSize: '12px', color: '#94a3b8', marginTop: '4px' }}>Oldest Invoice</div>
+                            <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '4px', textTransform: 'uppercase' }}>Oldest Date</div>
                           </td>
-                          <td style={{ padding: '20px', color: '#475569', fontSize: '15px', verticalAlign: 'top', fontWeight: 'normal' }}>
+                          <td style={{ padding: '20px', color: '#475569', fontSize: '15px', verticalAlign: 'top' }}>
                             {debtor.owner}
                           </td>
-                          <td style={{ padding: '20px', color: '#334155', fontSize: '15px', verticalAlign: 'top', fontWeight: 'normal' }}>
-                            {debtor.name}
-                            <div style={{ fontSize: '13px', color: '#64748b', marginTop: '4px' }}>
-                              {debtor.invoices.length} Unpaid Invoice(s)
+
+                          {/* BEAUTIFUL NESTED INVOICE LIST */}
+                          <td style={{ padding: '20px', verticalAlign: 'top' }}>
+                            <div style={{ color: '#334155', fontSize: '15px', marginBottom: '10px' }}>
+                              {debtor.name}
+                            </div>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                              {debtor.invoices.map((inv: any) => (
+                                <div key={inv.invoice_id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '12px', background: '#f8fafc', padding: '8px 12px', borderRadius: '6px', border: '1px solid #e2e8f0' }}>
+                                  <span style={{ color: '#3b82f6', fontWeight: 'bold' }}>#{inv.invoice_id.replace('INV-', '')}</span>
+                                  <div style={{ display: 'flex', gap: '16px', alignItems: 'center' }}>
+                                    <span style={{ color: '#64748b', fontSize: '11px' }}>Orig: {formatRiel(inv.total_sales)}</span>
+                                    <span style={{ color: '#ef4444', fontWeight: 'bold' }}>Debt: {formatRiel(inv.balance_due)}</span>
+                                  </div>
+                                </div>
+                              ))}
                             </div>
                           </td>
-                          <td style={{ padding: '20px', textAlign: 'right', color: '#000000', fontSize: '16px', verticalAlign: 'top', fontWeight: 'normal' }}>
+
+                          <td style={{ padding: '20px', textAlign: 'right', color: '#ef4444', fontSize: '16px', verticalAlign: 'top', fontWeight: 'bold' }}>
                             {formatRiel(debtor.totalOwed)}
                           </td>
                           
@@ -623,7 +628,7 @@ export default function DeliveryPage() {
                                   key={row.id}
                                   value={row.method}
                                   onChange={(e) => updateCreditRow(uniqueKey, row.id, 'method', e.target.value, debtor.totalOwed)}
-                                  style={{ padding: '10px 12px', borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '14px', outline: 'none', backgroundColor: '#fff', color: '#475569', cursor: 'pointer', width: '100%', fontWeight: 'normal', height: '40px', boxSizing: 'border-box' }}
+                                  style={{ padding: '8px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '13px', outline: 'none', backgroundColor: '#fff', color: '#334155', cursor: 'pointer', width: '100%', height: '40px', boxSizing: 'border-box' }}
                                 >
                                    <option value="Cash ៛">💵 Cash ៛</option>
                                    <option value="Cash $">💵 Cash $</option>
@@ -646,7 +651,7 @@ export default function DeliveryPage() {
                                     value={row.amount}
                                     onChange={(v: any) => updateCreditRow(uniqueKey, row.id, 'amount', v, debtor.totalOwed)}
                                     onEnter={() => handleProcessCreditPayment(debtor, paymentState)}
-                                    style={{ padding: '10px 12px', borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '15px', textAlign: 'right', outline: 'none', width: '100%', backgroundColor: '#fff', color: '#000000', fontWeight: 'normal', height: '100%', boxSizing: 'border-box' }}
+                                    style={{ padding: '8px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '14px', textAlign: 'right', outline: 'none', width: '100%', backgroundColor: '#fff', color: '#334155', height: '100%', boxSizing: 'border-box' }}
                                   />
                                   {paymentState.length > 1 && (
                                     <button onClick={() => removeCreditSplit(uniqueKey, row.id, debtor.totalOwed)} style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', fontSize: '16px', padding: '0 4px' }}>✕</button>
@@ -659,12 +664,13 @@ export default function DeliveryPage() {
                           <td style={{ padding: '20px', textAlign: 'center', verticalAlign: 'top' }}>
                             <button 
                               onClick={() => handleProcessCreditPayment(debtor, paymentState)}
+                              disabled={isProcessing}
                               style={{
-                                padding: '8px 12px', width: '100%', borderRadius: '6px', border: 'none', cursor: 'pointer', fontSize: '13px',
-                                background: '#10b981', color: '#ffffff', transition: 'all 0.2s', fontWeight: 'normal', height: '40px'
+                                padding: '8px 12px', width: '100%', borderRadius: '8px', border: 'none', cursor: isProcessing ? 'not-allowed' : 'pointer', fontSize: '13px',
+                                background: '#10b981', color: '#ffffff', transition: 'all 0.2s', height: '40px'
                               }}
                             >
-                              ✔ Done
+                              {isProcessing ? '...' : '✔ Done'}
                             </button>
                           </td>
                         </tr>
@@ -724,10 +730,9 @@ export default function DeliveryPage() {
         }
 
         .page-title { 
-          font-size: 24px; 
+          font-size: 26px; 
           color: #334155; 
           margin: 0; 
-          font-weight: 600;
           letter-spacing: -0.5px;
         }
 
@@ -749,7 +754,6 @@ export default function DeliveryPage() {
           padding: 12px; 
           border-radius: 8px; 
           border: none; 
-          font-weight: 500; 
           cursor: pointer; 
           font-size: 14px;
           background: transparent;
@@ -762,7 +766,6 @@ export default function DeliveryPage() {
         .active-tab {
           background: #b58a3d !important;
           color: #ffffff !important;
-          font-weight: 600 !important;
           box-shadow: 0 4px 10px rgba(181, 138, 61, 0.2);
         }
 
@@ -773,8 +776,8 @@ export default function DeliveryPage() {
         }
 
         .mobile-input-field:focus, .mobile-select-menu:focus {
-          border-color: #94a3b8 !important;
-          box-shadow: 0 0 0 2px rgba(148, 163, 184, 0.2);
+          border-color: #b58a3d !important;
+          box-shadow: 0 0 0 2px rgba(181, 138, 61, 0.2) !important;
         }
 
         @media (max-width: 1023px) { 
