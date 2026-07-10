@@ -204,7 +204,7 @@ export default function RiceControl() {
   const handleManualPull = async (retailId: number, wholesaleId: number) => {
     setIsProcessing(true);
     try {
-      // 1. Fetch strict LIVE data directly from DB to prevent state de-sync math bugs
+      // 1. Fetch strict LIVE data to prevent state de-sync math bugs
       const { data: liveWholesale } = await supabase.from('products').select('*').eq('id', wholesaleId).single();
       const { data: liveRetail } = await supabase.from('products').select('*').eq('id', retailId).single();
 
@@ -279,7 +279,6 @@ export default function RiceControl() {
   }
 
   async function fetchBatches() {
-    // 🚀 STRICT FIFO SORTING: Oldest batches first.
     const { data } = await supabase.from('price_history').select('*').order('created_at', { ascending: true })
     if (data) {
       const bMap: Record<number, HistoryRecord[]> = {}
@@ -310,7 +309,6 @@ export default function RiceControl() {
   }
 
   const fetchHistory = async (product: Product) => {
-    // 🚀 FIX: Sort ASCENDING so the History Modal shows the Oldest (Current) Batch at the top!
     const { data } = await supabase.from('price_history')
       .select('*')
       .eq('product_id', product.id)
@@ -613,6 +611,44 @@ export default function RiceControl() {
          if (payload[key] === '') payload[key] = 0;
          else if (payload[key] !== undefined) payload[key] = Number(payload[key]);
        });
+
+       // 🚀 AUTO RESTOCK LOGIC: If retail stock reduces to 0, automatically pull 1 bag from wholesale
+       if (activeView === 'retail' && payload.stock !== undefined && payload.stock <= 0) {
+           const retailProduct = products.find(p => p.id === id);
+           
+           if (retailProduct && retailProduct.linked_wholesale_id) {
+               const wholesaleId = retailProduct.linked_wholesale_id;
+               const { data: liveWholesale } = await supabase.from('products').select('*').eq('id', wholesaleId).single();
+
+               if (liveWholesale && Number(liveWholesale.stock) >= 1) {
+                   const { data: liveBatches } = await supabase.from('price_history')
+                       .select('*')
+                       .eq('product_id', wholesaleId)
+                       .order('created_at', { ascending: true });
+
+                   const activeBatchesLive = (liveBatches || []).filter(b => (b.imported_qty || 0) - (b.sold_qty || 0) > 0);
+
+                   if (activeBatchesLive.length > 0) {
+                       const targetBatch = activeBatchesLive[0];
+                       const refillAmount = Number(liveWholesale.weight) || 50;
+
+                       // Inject the refilled stock amount into the current save action
+                       payload.stock = payload.stock + refillAmount;
+
+                       // Instantly deduct 1 bag from the wholesale products stock
+                       await supabase.from('products').update({
+                           stock: Number(liveWholesale.stock) - 1,
+                           mtd_bags_used: Number(liveWholesale.mtd_bags_used || 0) + 1
+                       }).eq('id', wholesaleId);
+
+                       // Deduct the batch equivalent (increasing sold_qty by 1)
+                       await supabase.from('price_history').update({
+                           sold_qty: Number(targetBatch.sold_qty || 0) + 1
+                       }).eq('id', targetBatch.id);
+                   }
+               }
+           }
+       }
     }
 
     if (Object.keys(payload).length > 0) {
@@ -775,12 +811,12 @@ export default function RiceControl() {
         const val = p[rule.column as keyof Product]
         const checkVal = String(rule.value).toLowerCase()
         
-        if (rule.operator === 'contains' && !String(val).toLowerCase().includes(checkVal)) return false
-        if (rule.operator === 'equals' && String(val).toLowerCase() !== checkVal) return false
-        if (rule.operator === 'gt' && Number(val) <= Number(rule.value)) return false
-        if (rule.operator === 'lt' && Number(val) >= Number(rule.value)) return false
+        if (rule.operator === 'contains' && !String(val).toLowerCase().includes(checkVal)) return false;
+        if (rule.operator === 'equals' && String(val).toLowerCase() !== checkVal) return false;
+        if (rule.operator === 'gt' && Number(val) <= Number(rule.value)) return false;
+        if (rule.operator === 'lt' && Number(val) >= Number(rule.value)) return false;
       }
-      return true
+      return true;
     })
     .sort((a, b) => {
       if (!sortConfig) return 0;
@@ -788,7 +824,7 @@ export default function RiceControl() {
       if ((a as any)[key] < (b as any)[key]) return direction === 'asc' ? -1 : 1;
       if ((a as any)[key] > (b as any)[key]) return direction === 'asc' ? 1 : -1;
       return 0;
-    })
+    });
 
   const formatDisplayValue = (col: string, val: any) => {
     if (val === null || val === undefined) return '';
@@ -797,7 +833,7 @@ export default function RiceControl() {
     if (['mtd_kg_used'].includes(col)) return `${new Intl.NumberFormat('en-US').format(val)} kg`;
     if (['mtd_bags_used'].includes(col)) return `${new Intl.NumberFormat('en-US').format(val)} bags`;
     return String(val);
-  }
+  };
 
   const Resizer = ({ columnKey }: { columnKey: string }) => (
     <div
@@ -805,7 +841,7 @@ export default function RiceControl() {
       onTouchStart={(e) => handleResizeStart(e, columnKey)}
       style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: '14px', cursor: 'col-resize', background: 'transparent', zIndex: 10, transform: 'translateX(50%)' }}
     />
-  )
+  );
 
   const pendingImports = imports.filter(i => i.status === 'Pending');
   const importTotalCalc = (Number(importForm.qty) || 0) * (Number(importForm.unit_cost) || 0);
@@ -886,12 +922,8 @@ export default function RiceControl() {
         </div>
       )}
 
-      {/* =========================================
-          VIEW ROUTING ENGINE
-          ========================================= */}
-
+      {/* SPREADSHEET VIEWS */}
       {(activeView === 'retail' || activeView === 'wholesale') && (
-        /* MAIN SPREADSHEET */
         <div className="table-wrapper fade-in">
           <table style={{ borderCollapse: 'collapse', tableLayout: 'fixed', width: 'max-content', minWidth: '100%' }}>
             <thead>
@@ -925,18 +957,16 @@ export default function RiceControl() {
                 <tr><td colSpan={columnOrder.length} style={{ padding: '40px', textAlign: 'center', color: '#94a3b8' }}>No products found.</td></tr>
               ) : (
                 processedProducts.map(p => {
-                  // --- FIFO BATCH CALCULATIONS ---
-                  // 1. Get all active batches (Stock > 0)
                   const pBatches = (activeBatchesMap[p.id] || []).filter(b => (b.imported_qty || 0) - (b.sold_qty || 0) > 0);
-                  
-                  // Sort batches oldest first
                   pBatches.sort((a,b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
                   
                   const currentBatch = pBatches.length > 0 ? pBatches[0] : null;
                   const queuedBatches = pBatches.slice(1);
-                  const totalActiveStock = pBatches.reduce((sum, b) => sum + ((b.imported_qty || 0) - (b.sold_qty || 0)), 0);
                   const isExpanded = expandedProductId === p.id;
                   const isLowStock = (Number(p.stock) <= Number(p.min_stock_level || 10));
+
+                  // 🚀 REQUIREMENT 3: Live calculate sum total of all active batches
+                  const totalActiveBatchStock = pBatches.reduce((sum, b) => sum + ((b.imported_qty || 0) - (b.sold_qty || 0)), 0);
 
                   return (
                     <React.Fragment key={p.id}>
@@ -944,7 +974,6 @@ export default function RiceControl() {
                         {columnOrder.map(col => {
                           if ((col === 'linked_wholesale' || col === 'mtd_kg_used' || col === 'mtd_bags_used') && activeView !== 'retail') return null;
                           
-                          // --- ACTIONS COLUMN ---
                           if (col === 'actions') {
                             if (activeView === 'retail') {
                                return (
@@ -988,12 +1017,9 @@ export default function RiceControl() {
                           
                           let val = edits[p.id]?.[col as keyof Product] ?? p[col as keyof Product] ?? '';
 
-                          // 🚀 WHOLESALE OVERRIDE LOGIC
-                          // Force the parent row to strictly display the Current Batch pricing data
                           if (!isEditing && !edits[p.id] && activeView === 'wholesale' && currentBatch) {
                              if (col === 'price') val = currentBatch.price;
                              if (col === 'cost_price') val = currentBatch.cost_price;
-                             // We DO NOT override the total stock here. The parent row should show the overall stock of the product.
                           }
 
                           if (!isEditing && !edits[p.id] && activeView === 'retail' && col === 'cost_price' && p.linked_wholesale_id) {
@@ -1051,19 +1077,17 @@ export default function RiceControl() {
                                     <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                                       {formatDisplayValue(col as string, val)}
 
-                                      {/* Total Stock Next to Name */}
+                                      {/* 🚀 REQUIREMENT 3 DISPLAY MAP */}
                                       {activeView === 'wholesale' && (
                                         <span style={{ fontSize: '13px', color: '#b58a3d', fontWeight: 'bold' }}>
-                                          ({formatNumber(totalActiveStock)} Total)
+                                          ({formatNumber(totalActiveBatchStock)} Total)
                                         </span>
                                       )}
 
-                                      {/* Clean Red Emoji Alert */}
-                                      {(Number(p.stock) <= Number(p.min_stock_level || 10)) && (
+                                      {isLowStock && (
                                         <span title="Low stock alert" style={{ fontSize: '14px' }}>🚨</span>
                                       )}
 
-                                      {/* The Dropdown Icon for Active Batches */}
                                       {activeView === 'wholesale' && queuedBatches.length > 0 && (
                                         <button 
                                           onClick={(e) => { e.stopPropagation(); setExpandedProductId(expandedProductId === p.id ? null : p.id); }} 
@@ -1085,7 +1109,6 @@ export default function RiceControl() {
                         })}
                       </tr>
 
-                      {/* THE FULL BATCH QUEUE RENDERED AS IDENTICAL TABLE ROWS */}
                       {expandedProductId === p.id && activeView === 'wholesale' && queuedBatches.length > 0 && (
                         queuedBatches.map((batch, index) => {
                           const remaining = (batch.imported_qty || 0) - (batch.sold_qty || 0);
@@ -1107,7 +1130,7 @@ export default function RiceControl() {
                                           <>
                                             <button onClick={() => handleSaveHistory(batch.id)} style={{ padding: '6px 12px', background: '#10b981', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', fontSize: '12px' }}>Save</button>
                                             <button onClick={() => setEditingHistoryId(null)} style={{ padding: '6px 12px', background: '#f1f5f9', color: '#64748b', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', fontSize: '12px' }}>Cancel</button>
-                                          </>
+                                          </           >
                                         ) : (
                                           <>
                                             <button onClick={() => { setEditingHistoryId(batch.id); setHistoryEdits({ [batch.id]: { imported_qty: batch.imported_qty, price: batch.price, cost_price: batch.cost_price } }); }} style={{ padding: '4px 8px', background: '#e0f2fe', color: '#0284c7', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', fontSize: '12px' }}>✏️ Edit</button>
@@ -1158,7 +1181,6 @@ export default function RiceControl() {
             <h2 style={{ marginTop: 0, color: '#1e293b', marginBottom: '24px', borderBottom: '2px solid #f1f5f9', paddingBottom: '12px' }}>🚚 Receive New Stock</h2>
             
             <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-              {/* Supplier */}
               <div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: '6px' }}>
                   <label style={{ fontSize: '13px', color: '#0f172a', fontWeight: 'bold' }}>Select Supplier</label>
@@ -1170,7 +1192,6 @@ export default function RiceControl() {
                 </select>
               </div>
 
-              {/* Product */}
               <div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: '6px' }}>
                   <label style={{ fontSize: '13px', color: '#0f172a', fontWeight: 'bold' }}>Select Product (Rice)</label>
@@ -1182,7 +1203,6 @@ export default function RiceControl() {
                 </select>
               </div>
 
-              {/* Qty & Cost */}
               <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap' }}>
                 <div style={{ flex: 1, minWidth: '150px' }}>
                   <label style={{ display: 'block', fontSize: '13px', color: '#0f172a', fontWeight: 'bold', marginBottom: '6px' }}>Quantity Imported</label>
@@ -1194,13 +1214,11 @@ export default function RiceControl() {
                 </div>
               </div>
 
-              {/* Summary Block */}
               <div style={{ background: '#fefcf3', padding: '16px', borderRadius: '8px', border: '1px solid #fde047', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <span style={{ fontWeight: 'bold', color: '#854d0e' }}>Total Bill Cost:</span>
                 <span style={{ fontSize: '20px', fontWeight: 'bold', color: '#b58a3d' }}>{formatRiel(importTotalCalc)}</span>
               </div>
 
-              {/* Payment Section */}
               <div style={{ background: '#f8fafc', padding: '20px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
                 <h4 style={{ margin: '0 0 16px 0', fontSize: '14px', color: '#1e293b' }}>Payment Details</h4>
                 <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap' }}>
@@ -1222,7 +1240,6 @@ export default function RiceControl() {
                 </div>
               </div>
 
-              {/* Actions */}
               <div style={{ display: 'flex', gap: '12px', marginTop: '10px' }}>
                 <button 
                   onClick={() => handleProcessImport(true)} 
@@ -1245,7 +1262,7 @@ export default function RiceControl() {
         </div>
       )}
 
-      {/* PENDING PAYMENTS TAB (SUPPLIERS) */}
+      {/* PENDING PAYMENTS TAB */}
       {activeView === 'pending' && (
         <div className="table-wrapper fade-in">
           <table style={{ borderCollapse: 'collapse', width: '100%', minWidth: '900px' }}>
@@ -1329,7 +1346,7 @@ export default function RiceControl() {
 
       {/* === GLOBAL MODALS === */}
 
-      {/* PAY PENDING MODAL (SUPPLIERS ONLY) */}
+      {/* SETTLE SUPPLIER BILL MODAL */}
       {payPendingModal.isOpen && payPendingModal.record && (
         <div className="modal-overlay" onMouseDown={() => setPayPendingModal({ isOpen: false, record: null, totalDue: 0 })}>
           <div className="modal-content" style={{ maxWidth: '450px' }} onMouseDown={e => e.stopPropagation()}>
@@ -1485,7 +1502,7 @@ export default function RiceControl() {
         </div>
       )}
 
-      {/* THE RESTORED GLOBAL HISTORY MODAL */}
+      {/* GLOBAL HISTORY MODAL */}
       {historyModal.isOpen && historyModal.product && (
         <div className="modal-overlay" onMouseDown={() => setHistoryModal({ isOpen: false, product: null, data: [] })}>
           <div className="modal-content" style={{ maxWidth: '650px' }} onMouseDown={e => e.stopPropagation()}>
@@ -1502,7 +1519,6 @@ export default function RiceControl() {
                 <p style={{ textAlign: 'center', color: '#64748b', padding: '40px' }}>No batches recorded yet.</p>
               ) : (
                 <>
-                  {/* ACTIVE BATCHES */}
                   <h3 style={{ fontSize: '13px', color: '#475569', textTransform: 'uppercase', marginBottom: '12px' }}>🟢 Active Batches</h3>
                   {historyModal.data.filter(h => (h.imported_qty || 0) - (h.sold_qty || 0) > 0).map((h, index) => {
                     const isEditing = editingHistoryId === h.id;
@@ -1585,7 +1601,7 @@ export default function RiceControl() {
         </div>
       )}
 
-      {/* NEW PRODUCT CREATION MODAL WITH MIN STOCK LEVEL */}
+      {/* NEW PRODUCT CREATION MODAL */}
       {isAddModalOpen && (
         <div className="modal-overlay" onMouseDown={() => setIsAddModalOpen(false)}>
           <div className="modal-content" style={{ maxWidth: '500px' }} onMouseDown={e => e.stopPropagation()}>
@@ -1888,5 +1904,5 @@ export default function RiceControl() {
         }
       `}</style>
     </div>
-  )
+  );
 }
