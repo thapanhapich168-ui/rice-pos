@@ -31,14 +31,12 @@ interface Product {
   min_stock_level?: number
 }
 
-interface HistoryRecord {
+interface InventoryBatch {
   id: number
   product_id: number
-  price: number
   cost_price: number
+  remaining_qty: number
   created_at: string
-  imported_qty?: number
-  sold_qty?: number
 }
 
 type SortConfig = {
@@ -56,11 +54,13 @@ interface FilterRule {
 
 type PaymentRow = { id: number, method: string, amount: number | '' };
 
+type ColumnKey = keyof Product | 'expand' | 'linked_wholesale' | 'actions';
+
 const DEFAULT_WIDTHS: Record<string, number> = {
-  id: 60, name: 240, price: 120, cost_price: 120, stock: 100, min_stock_level: 100, weight: 90, linked_wholesale: 220, mtd_kg_used: 120, mtd_bags_used: 120, actions: 260
+  expand: 40, id: 60, name: 240, price: 120, cost_price: 120, stock: 100, min_stock_level: 100, weight: 90, linked_wholesale: 220, mtd_kg_used: 120, mtd_bags_used: 120, actions: 160
 }
 
-const DEFAULT_ORDER: Array<keyof Product | 'linked_wholesale' | 'actions'> = ['id', 'name', 'price', 'cost_price', 'stock', 'min_stock_level', 'weight', 'linked_wholesale', 'mtd_kg_used', 'mtd_bags_used', 'actions']
+const DEFAULT_ORDER: ColumnKey[] = ['expand', 'id', 'name', 'price', 'cost_price', 'stock', 'min_stock_level', 'weight', 'linked_wholesale', 'mtd_kg_used', 'mtd_bags_used', 'actions']
 
 // ==========================================
 // ROBUST LIVE COMMA FORMATTER 
@@ -129,7 +129,6 @@ export default function RiceControl() {
   const [selectedToDelete, setSelectedToDelete] = useState<Set<number>>(new Set())
   const [hoveredId, setHoveredId] = useState<number | null>(null)
   
-  const [loading, setLoading] = useState(false)
   const [isProcessing, setIsProcessing] = useState(false) 
 
   // --- CELL EDITING STATE ---
@@ -141,8 +140,8 @@ export default function RiceControl() {
   const [activeView, setActiveView] = useState<'retail' | 'wholesale' | 'import' | 'pending' | 'suppliers'>('retail')
   const [activeCategory, setActiveCategory] = useState<string>('All')
 
-  // --- NEW BATCH ENGINE STATES ---
-  const [activeBatchesMap, setActiveBatchesMap] = useState<Record<number, HistoryRecord[]>>({})
+  // --- BATCH ENGINE STATES ---
+  const [activeBatchesMap, setActiveBatchesMap] = useState<Record<number, InventoryBatch[]>>({})
   const [expandedProductId, setExpandedProductId] = useState<number | null>(null)
 
   // --- IMPORT FORM STATE ---
@@ -156,7 +155,7 @@ export default function RiceControl() {
   const [pendingPaymentRows, setPendingPaymentRows] = useState<PaymentRow[]>([{ id: Date.now(), method: 'Cash ៛', amount: '' }]);
 
   const [columnWidths, setColumnWidths] = useState<Record<string, number>>(DEFAULT_WIDTHS)
-  const [columnOrder, setColumnOrder] = useState<Array<keyof Product | 'linked_wholesale' | 'actions'>>(DEFAULT_ORDER)
+  const [columnOrder, setColumnOrder] = useState<ColumnKey[]>(DEFAULT_ORDER)
   const widthsRef = useRef(columnWidths)
   widthsRef.current = columnWidths
 
@@ -167,11 +166,12 @@ export default function RiceControl() {
   const [isAddModalOpen, setIsAddModalOpen] = useState(false)
   const [newItem, setNewItem] = useState({ name: '', price: '' as any, cost_price: '' as any, weight: '' as any, stock: '' as any, min_stock_level: 10 as any })
 
-  const [historyModal, setHistoryModal] = useState<{ isOpen: boolean; product: Product | null; data: HistoryRecord[] }>({
-    isOpen: false, product: null, data: []
+  const [historyModal, setHistoryModal] = useState<{ isOpen: boolean; product: Product | null; data: any[]; activeBatches: InventoryBatch[] }>({
+    isOpen: false, product: null, data: [], activeBatches: []
   })
+  
   const [editingHistoryId, setEditingHistoryId] = useState<number | null>(null)
-  const [historyEdits, setHistoryEdits] = useState<Record<number, Partial<HistoryRecord>>>({})
+  const [historyEdits, setHistoryEdits] = useState<Record<number, Partial<InventoryBatch>>>({})
 
   // --- LIFECYCLE & REALTIME SYNC ---
   useEffect(() => { 
@@ -179,71 +179,41 @@ export default function RiceControl() {
     fetchSettings()
     fetchSuppliers()
     fetchImports()
-    fetchBatches() 
+    fetchBatches()
 
     const productsSub = supabase.channel('products-channel')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'products' }, fetchProducts)
-      .subscribe()
-
-    const batchesSub = supabase.channel('batches-channel')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'price_history' }, fetchBatches)
       .subscribe()
       
     const importsSub = supabase.channel('imports-channel')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'imports' }, fetchImports)
       .subscribe()
 
+    const batchesSub = supabase.channel('batches-channel')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'inventory_batches' }, fetchBatches)
+      .subscribe()
+
     return () => {
       supabase.removeChannel(productsSub)
-      supabase.removeChannel(batchesSub)
       supabase.removeChannel(importsSub)
+      supabase.removeChannel(batchesSub)
     }
   }, [])
 
-  // --- BULLETPROOF MANUAL PULL BAG LOGIC ---
+  // --- UNBREAKABLE RPC MANUAL PULL ---
   const handleManualPull = async (retailId: number, wholesaleId: number) => {
     setIsProcessing(true);
     try {
-      // 1. Fetch strict LIVE data to prevent state de-sync math bugs
-      const { data: liveWholesale } = await supabase.from('products').select('*').eq('id', wholesaleId).single();
-      const { data: liveRetail } = await supabase.from('products').select('*').eq('id', retailId).single();
+      const { error } = await supabase.rpc('pull_wholesale_bags', {
+         p_retail_id: retailId,
+         p_wholesale_id: wholesaleId,
+         p_bags_needed: 1
+      });
 
-      if (!liveWholesale || !liveRetail) throw new Error('Data link error. Products not found.');
-      if (Number(liveWholesale.stock) < 1) throw new Error('Not enough stock in the wholesale bag to pull from.');
-
-      // 2. Fetch live batches for the wholesale product, ordered OLD -> NEW
-      const { data: liveBatches } = await supabase.from('price_history')
-        .select('*')
-        .eq('product_id', wholesaleId)
-        .order('created_at', { ascending: true });
-
-      const activeBatches = (liveBatches || []).filter(b => (b.imported_qty || 0) - (b.sold_qty || 0) > 0);
-      if (activeBatches.length === 0) throw new Error('No active batch found to pull from.');
-
-      const targetBatch = activeBatches[0]; // The Current Batch (Oldest)
-
-      const refillAmount = Number(liveWholesale.weight) || 50; 
-      const newRetailStock = Number(liveRetail.stock || 0) + refillAmount;
-      const newWholesaleStock = Number(liveWholesale.stock || 0) - 1;
-      const newMtdBagsUsed = Number(liveWholesale.mtd_bags_used || 0) + 1;
-      const newSoldQty = Number(targetBatch.sold_qty || 0) + 1;
-
-      // 3. Update all 3 tables sequentially
-      const { error: err1 } = await supabase.from('products').update({ stock: newRetailStock }).eq('id', retailId);
-      if (err1) throw err1;
-
-      const { error: err2 } = await supabase.from('products').update({ stock: newWholesaleStock, mtd_bags_used: newMtdBagsUsed }).eq('id', wholesaleId);
-      if (err2) throw err2;
-
-      const { error: err3 } = await supabase.from('price_history').update({ sold_qty: newSoldQty }).eq('id', targetBatch.id);
-      if (err3) throw err3;
-
-      // 4. Force UI refresh instantly
-      await fetchProducts();
-      await fetchBatches();
+      if (error) throw new Error(error.message);
 
     } catch (err: any) {
-      alert(`Error pulling bag: ${err.message}`);
+      alert(`❌ ERROR: ${err.message}`);
     } finally {
       setIsProcessing(false);
     }
@@ -257,7 +227,8 @@ export default function RiceControl() {
       const order = data.find((d: any) => d.setting_key === 'column_order')
       if (widths && widths.setting_value) setColumnWidths(widths.setting_value)
       if (order && order.setting_value) {
-        const cleanOrder = order.setting_value.filter((o: string) => o !== 'actions');
+        const cleanOrder = order.setting_value.filter((o: string) => o !== 'actions' && o !== 'expand');
+        cleanOrder.unshift('expand');
         setColumnOrder([...cleanOrder, 'actions'] as any);
       }
     }
@@ -279,9 +250,13 @@ export default function RiceControl() {
   }
 
   async function fetchBatches() {
-    const { data } = await supabase.from('price_history').select('*').order('created_at', { ascending: true })
+    const { data } = await supabase.from('inventory_batches')
+      .select('*')
+      .gt('remaining_qty', 0) 
+      .order('id', { ascending: true }); 
+
     if (data) {
-      const bMap: Record<number, HistoryRecord[]> = {}
+      const bMap: Record<number, InventoryBatch[]> = {}
       data.forEach(b => {
         if (!bMap[b.product_id]) bMap[b.product_id] = []
         bMap[b.product_id].push(b)
@@ -290,101 +265,93 @@ export default function RiceControl() {
     }
   }
 
-  const handleSaveBatch = async (batchId: number) => {
+  const fetchHistory = async (product: Product) => {
+    const { data: importLog } = await supabase.from('imports')
+      .select(`*, suppliers(name)`)
+      .eq('product_id', product.id)
+      .order('created_at', { ascending: false });
+
+    const { data: activeBatches } = await supabase.from('inventory_batches')
+      .select('*')
+      .eq('product_id', product.id)
+      .gt('remaining_qty', 0)
+      .order('id', { ascending: true });
+
+    setHistoryModal({ isOpen: true, product, data: importLog || [], activeBatches: activeBatches || [] })
+    setEditingHistoryId(null);
+    setHistoryEdits({});
+  }
+
+  const handleSaveHistory = async (batchId: number) => {
     const edits = historyEdits[batchId];
     if (!edits) return setEditingHistoryId(null);
 
-    const payload: any = {};
-    if (edits.price !== undefined) payload.price = Number(edits.price) || 0;
-    if (edits.cost_price !== undefined) payload.cost_price = Number(edits.cost_price) || 0;
-
-    const { error } = await supabase.from('price_history').update(payload).eq('id', batchId);
+    const originalBatch = historyModal.activeBatches.find(b => b.id === batchId);
+    if (!originalBatch) return setEditingHistoryId(null);
     
-    if (!error) {
-      setEditingHistoryId(null);
-      fetchBatches();
-    } else {
-      alert(`Error updating batch: ${error.message}`);
-    }
-  }
-
-  const fetchHistory = async (product: Product) => {
-    const { data } = await supabase.from('price_history')
-      .select('*')
-      .eq('product_id', product.id)
-      .order('created_at', { ascending: true }) 
-
-    setHistoryModal({ isOpen: true, product, data: data || [] })
-    setEditingHistoryId(null)
-    setHistoryEdits({})
-  }
-
-  const handleSaveHistory = async (historyId: number) => {
-    const edits = historyEdits[historyId];
-    if (!edits || (!historyModal.product && !products.find(p => p.id === activeBatchesMap[historyModal.product?.id || 0]?.[0]?.product_id))) return setEditingHistoryId(null);
-
-    const originalRecord = historyModal.data.find(h => h.id === historyId) || Object.values(activeBatchesMap).flat().find(b => b.id === historyId);
-    if (!originalRecord) return setEditingHistoryId(null);
-    
-    const targetProduct = products.find(p => p.id === originalRecord.product_id);
+    const targetProduct = products.find(p => p.id === originalBatch.product_id);
     if (!targetProduct) return setEditingHistoryId(null);
 
-    const originalQty = originalRecord?.imported_qty || 0;
-    const newQty = edits.imported_qty !== undefined ? Number(edits.imported_qty) : originalQty;
-    
+    const originalQty = Number(originalBatch.remaining_qty) || 0;
+    const newQty = edits.remaining_qty !== undefined ? Number(edits.remaining_qty) : originalQty;
     const qtyDifference = newQty - originalQty;
 
     const payload: any = {};
-    if (edits.imported_qty !== undefined) payload.imported_qty = newQty;
-    if (edits.price !== undefined) payload.price = Number(edits.price) || 0;
+    if (edits.remaining_qty !== undefined) payload.remaining_qty = newQty;
     if (edits.cost_price !== undefined) payload.cost_price = Number(edits.cost_price) || 0;
 
-    const { error } = await supabase.from('price_history').update(payload).eq('id', historyId);
+    const { error } = await supabase.from('inventory_batches').update(payload).eq('id', batchId);
     
     if (!error) {
       if (qtyDifference !== 0) {
         const newStock = Number(targetProduct.stock) + qtyDifference;
         await supabase.from('products').update({ stock: newStock }).eq('id', targetProduct.id);
+        
         if (historyModal.product) {
             setHistoryModal(prev => ({...prev, product: {...prev.product!, stock: newStock}}));
         }
       }
-      if (historyModal.isOpen) {
-          fetchHistory(targetProduct);
-      } else {
-          setEditingHistoryId(null);
-      }
-      fetchProducts();
-      fetchBatches();
+      
+      const { data: updatedBatches } = await supabase.from('inventory_batches')
+        .select('*').eq('product_id', targetProduct.id).gt('remaining_qty', 0).order('id', { ascending: true });
+      
+      setHistoryModal(prev => ({...prev, activeBatches: updatedBatches || []}));
+      setEditingHistoryId(null);
     } else {
-      alert(`Error updating history: ${error?.message}`);
+      alert(`Error updating batch: ${error.message}`);
     }
   }
 
-  const handleDeleteHistory = async (historyId: number) => {
-    const originalRecord = historyModal.data.find(h => h.id === historyId) || Object.values(activeBatchesMap).flat().find(b => b.id === historyId);
-    if (!originalRecord) return;
+  const handleDeleteHistory = async (batchId: number) => {
+    const originalBatch = historyModal.activeBatches.find(b => b.id === batchId);
+    if (!originalBatch) return;
     
-    const targetProduct = products.find(p => p.id === originalRecord.product_id);
+    const targetProduct = products.find(p => p.id === originalBatch.product_id);
     if (!targetProduct) return;
 
-    if (!confirm("Are you sure you want to delete this historical record? The imported quantity will be deducted from your stock.")) return;
+    if (!confirm("Are you sure you want to delete this active batch? The remaining quantity will be deducted from your master stock.")) return;
     
-    const qtyToReverse = originalRecord?.imported_qty || 0;
+    const qtyToReverse = Number(originalBatch.remaining_qty) || 0;
 
-    const { error } = await supabase.from('price_history').delete().eq('id', historyId);
+    const { error } = await supabase.from('inventory_batches').delete().eq('id', batchId);
     
     if (!error) {
       if (qtyToReverse > 0) {
         const newStock = Number(targetProduct.stock) - qtyToReverse;
         await supabase.from('products').update({ stock: newStock }).eq('id', targetProduct.id);
+        
         if (historyModal.product) {
             setHistoryModal(prev => ({...prev, product: {...prev.product!, stock: newStock}}));
         }
       }
-      if (historyModal.isOpen) fetchHistory(targetProduct);
-      fetchProducts();
-      fetchBatches();
+      
+      const { data: updatedBatches } = await supabase.from('inventory_batches')
+        .select('*').eq('product_id', targetProduct.id).gt('remaining_qty', 0).order('id', { ascending: true });
+      
+      setHistoryModal(prev => ({...prev, activeBatches: updatedBatches || []}));
+      
+    } else {
+      alert(`Delete failed: ${error.message}`);
     }
   }
 
@@ -396,7 +363,6 @@ export default function RiceControl() {
       if (error) throw error;
       setIsAddSupplierOpen(false);
       setNewSupplier({ name: '', phone: '', location: '' });
-      await fetchSuppliers();
     } catch (err: any) {
       alert(`Error: ${err.message}`);
     } finally {
@@ -423,6 +389,8 @@ export default function RiceControl() {
 
     try {
       const supplierName = suppliers.find(s => String(s.id) === String(importForm.supplier_id))?.name || 'Unknown Supplier';
+      const product = products.find(p => String(p.id) === String(importForm.product_id));
+      if (!product) throw new Error("Product ID mismatch");
 
       const { error: importErr } = await supabase.from('imports').insert([{
         supplier_id: Number(importForm.supplier_id),
@@ -448,20 +416,15 @@ export default function RiceControl() {
           status: 'Unpaid'
         }]);
       }
-
-      const product = products.find(p => String(p.id) === String(importForm.product_id));
-      if (!product) throw new Error("Product ID mismatch");
       
       const newStock = Number(product.stock || 0) + qty;
       const { error: stockErr } = await supabase.from('products').update({ stock: newStock, cost_price: unitCost }).eq('id', product.id);
       if (stockErr) throw stockErr;
 
-      await supabase.from('price_history').insert([{
+      await supabase.from('inventory_batches').insert([{
         product_id: Number(importForm.product_id),
         cost_price: unitCost,
-        price: product.price || 0,
-        imported_qty: qty,
-        sold_qty: 0
+        remaining_qty: qty
       }]);
 
       if (paidAmount > 0) {
@@ -581,75 +544,44 @@ export default function RiceControl() {
     if (!edits[id]) return;
     const payload = { ...edits[id] } as any;
     
-    // Check if there's an active batch being edited from the wholesale screen
-    const pBatches = (activeBatchesMap[id] || []).filter(b => (b.imported_qty || 0) - (b.sold_qty || 0) > 0);
-    pBatches.sort((a,b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
-    const currentB = pBatches.length > 0 ? pBatches[0] : null;
+    const mainProd = products.find(p => p.id === id);
+    if (!mainProd) return;
 
-    if (activeView === 'wholesale' && currentB) {
-       const batchPayload: any = {};
-       let updateBatch = false;
-       
-       if (payload.price !== undefined) { batchPayload.price = Number(payload.price); updateBatch = true; delete payload.price; }
-       if (payload.cost_price !== undefined) { batchPayload.cost_price = Number(payload.cost_price); updateBatch = true; delete payload.cost_price; }
-       if (payload.stock !== undefined) {
-          const desiredTotalStock = Number(payload.stock);
-          const mainProd = products.find(p => p.id === id);
-          const currentTotalStock = Number(mainProd?.stock || 0);
-          
-          const diff = desiredTotalStock - currentTotalStock;
-          
-          batchPayload.imported_qty = (currentB.imported_qty || 0) + diff;
-          updateBatch = true;
-       }
+    if (activeView === 'wholesale') {
+      const pBatches = activeBatchesMap[id] || [];
+      pBatches.sort((a,b) => a.id - b.id);
+      const currentBatch = pBatches.length > 0 ? pBatches[0] : null;
 
-       if (updateBatch) {
-          await supabase.from('price_history').update(batchPayload).eq('id', currentB.id);
-       }
-    } else {
-       ['price', 'cost_price', 'weight', 'stock', 'mtd_kg_used', 'mtd_bags_used', 'min_stock_level'].forEach(key => {
-         if (payload[key] === '') payload[key] = 0;
-         else if (payload[key] !== undefined) payload[key] = Number(payload[key]);
-       });
+      if (currentBatch) {
+        const batchPayload: any = {};
+        let updateBatch = false;
 
-       // 🚀 AUTO RESTOCK LOGIC: If retail stock reduces to 0, automatically pull 1 bag from wholesale
-       if (activeView === 'retail' && payload.stock !== undefined && payload.stock <= 0) {
-           const retailProduct = products.find(p => p.id === id);
+        if (payload.cost_price !== undefined) { 
+           batchPayload.cost_price = Number(payload.cost_price); 
+           updateBatch = true; 
+        }
+
+        if (payload.stock !== undefined) {
+           const newBatchQty = Number(payload.stock);
+           const oldBatchQty = Number(currentBatch.remaining_qty);
+           const diff = newBatchQty - oldBatchQty;
            
-           if (retailProduct && retailProduct.linked_wholesale_id) {
-               const wholesaleId = retailProduct.linked_wholesale_id;
-               const { data: liveWholesale } = await supabase.from('products').select('*').eq('id', wholesaleId).single();
+           batchPayload.remaining_qty = newBatchQty;
+           updateBatch = true;
+           
+           payload.stock = Number(mainProd.stock) + diff;
+        }
 
-               if (liveWholesale && Number(liveWholesale.stock) >= 1) {
-                   const { data: liveBatches } = await supabase.from('price_history')
-                       .select('*')
-                       .eq('product_id', wholesaleId)
-                       .order('created_at', { ascending: true });
-
-                   const activeBatchesLive = (liveBatches || []).filter(b => (b.imported_qty || 0) - (b.sold_qty || 0) > 0);
-
-                   if (activeBatchesLive.length > 0) {
-                       const targetBatch = activeBatchesLive[0];
-                       const refillAmount = Number(liveWholesale.weight) || 50;
-
-                       // Inject the refilled stock amount into the current save action
-                       payload.stock = payload.stock + refillAmount;
-
-                       // Instantly deduct 1 bag from the wholesale products stock
-                       await supabase.from('products').update({
-                           stock: Number(liveWholesale.stock) - 1,
-                           mtd_bags_used: Number(liveWholesale.mtd_bags_used || 0) + 1
-                       }).eq('id', wholesaleId);
-
-                       // Deduct the batch equivalent (increasing sold_qty by 1)
-                       await supabase.from('price_history').update({
-                           sold_qty: Number(targetBatch.sold_qty || 0) + 1
-                       }).eq('id', targetBatch.id);
-                   }
-               }
-           }
-       }
+        if (updateBatch) {
+           await supabase.from('inventory_batches').update(batchPayload).eq('id', currentBatch.id);
+        }
+      }
     }
+
+    ['price', 'cost_price', 'weight', 'stock', 'mtd_kg_used', 'mtd_bags_used', 'min_stock_level'].forEach(key => {
+      if (payload[key] === '') payload[key] = 0;
+      else if (payload[key] !== undefined) payload[key] = Number(payload[key]);
+    });
 
     if (Object.keys(payload).length > 0) {
        const { error } = await supabase.from('products').update(payload).eq('id', id);
@@ -658,14 +590,12 @@ export default function RiceControl() {
 
     setEdits(prev => { const n = { ...prev }; delete n[id]; return n });
     setEditingCell(null);
-    fetchProducts();
-    fetchBatches();
   }
 
   const handleDelete = async () => {
     if (!confirm(`Are you sure you want to delete ${selectedToDelete.size} item(s)?`)) return
     const { error } = await supabase.from('products').delete().in('id', Array.from(selectedToDelete))
-    if (!error) { setSelectedToDelete(new Set()); fetchProducts() }
+    if (!error) { setSelectedToDelete(new Set()); }
   }
 
   const addProduct = async () => {
@@ -693,17 +623,8 @@ export default function RiceControl() {
   }
 
   const handleLinkWholesaleBag = async (retailId: number, wholesaleProduct: Product | null) => {
-    if (!wholesaleProduct) {
-      await supabase.from('products').update({ linked_wholesale_id: null }).eq('id', retailId);
-      return;
-    }
-
-    const wholesaleWeight = wholesaleProduct.weight || 50; 
-    const calculated1kgCogs = Math.round(wholesaleProduct.cost_price / wholesaleWeight);
-
     const { error } = await supabase.from('products').update({ 
-      linked_wholesale_id: wholesaleProduct.id,
-      cost_price: calculated1kgCogs 
+      linked_wholesale_id: wholesaleProduct ? wholesaleProduct.id : null,
     }).eq('id', retailId);
     
     if (!error) {
@@ -715,7 +636,7 @@ export default function RiceControl() {
   }
 
   const handleDragStart = (e: React.DragEvent, col: string) => {
-    if (col === 'actions') return; 
+    if (col === 'actions' || col === 'expand') return; 
     e.dataTransfer.setData('text/plain', col)
     e.dataTransfer.effectAllowed = 'move'
   }
@@ -727,29 +648,31 @@ export default function RiceControl() {
 
   const handleDrop = async (e: React.DragEvent, targetCol: string) => {
     e.preventDefault()
-    if (targetCol === 'actions') return;
+    if (targetCol === 'actions' || targetCol === 'expand') return;
 
-    const sourceCol = e.dataTransfer.getData('text/plain') as keyof Product | 'linked_wholesale' | 'actions'
-    if (!sourceCol || sourceCol === targetCol || sourceCol === 'actions') return
+    const sourceCol = e.dataTransfer.getData('text/plain') as ColumnKey;
+    if (!sourceCol || sourceCol === targetCol || sourceCol === 'actions' || sourceCol === 'expand') return
 
     setColumnOrder(prev => {
-      const orderWithoutActions = prev.filter(c => c !== 'actions');
-      const newOrder = orderWithoutActions.filter(c => c !== sourceCol);
+      const staticCols = ['expand', 'actions'];
+      const movableOrder = prev.filter(c => !staticCols.includes(c as string));
+      const newOrder = movableOrder.filter(c => c !== sourceCol);
       const targetIdx = newOrder.indexOf(targetCol as any);
       
       newOrder.splice(targetIdx, 0, sourceCol);
-      const finalOrder = [...newOrder, 'actions'];
+      const finalOrder = ['expand', ...newOrder, 'actions'] as ColumnKey[];
       
       supabase.from('app_settings').upsert({
         setting_key: 'column_order',
         setting_value: finalOrder
       }, { onConflict: 'setting_key' }).then()
       
-      return finalOrder as any;
+      return finalOrder;
     })
   }
 
   const handleResizeStart = (e: React.MouseEvent | React.TouchEvent, columnKey: string) => {
+    if (columnKey === 'expand') return;
     e.preventDefault()
     e.stopPropagation() 
     const startX = 'touches' in e ? e.touches[0].pageX : e.pageX
@@ -764,6 +687,7 @@ export default function RiceControl() {
     const handleUp = async () => {
       document.removeEventListener('mousemove', handleMove)
       document.removeEventListener('mouseup', handleUp)
+      document.removeEventListener('touchmove', handleMove)
       document.removeEventListener('touchmove', handleMove)
       document.removeEventListener('touchend', handleUp)
       
@@ -781,7 +705,7 @@ export default function RiceControl() {
   }
 
   const handleSort = (key: any) => {
-    if (key === 'linked_wholesale' || key === 'actions') return;
+    if (key === 'linked_wholesale' || key === 'actions' || key === 'expand') return;
     let direction: 'asc' | 'desc' = 'asc';
     if (sortConfig && sortConfig.key === key && sortConfig.direction === 'asc') {
       direction = 'desc';
@@ -792,11 +716,10 @@ export default function RiceControl() {
   const processedProducts = products
     .map(p => ({ ...p, ...edits[p.id] }))
     .filter(p => {
-      if (searchQuery && !p.name?.toLowerCase().includes(searchQuery.toLowerCase())) return false
+      if (searchQuery && !p.name?.toLowerCase().includes(searchQuery.toLowerCase())) return false;
+      if (activeView === 'retail' && p.weight >= 50) return false;
+      if (activeView === 'wholesale' && p.weight < 50) return false;
       
-      if (activeView === 'retail' && p.weight >= 50) return false
-      if (activeView === 'wholesale' && p.weight < 50) return false
-
       if (activeView === 'wholesale' && activeCategory !== 'All') {
         const name = p.name || '';
         if (activeCategory === 'ផ្សេងៗ') {
@@ -805,12 +728,10 @@ export default function RiceControl() {
           if (!name.includes(activeCategory)) return false;
         }
       }
-
       for (const rule of filterRules) {
-        if (!rule.value && rule.value !== 0) continue
-        const val = p[rule.column as keyof Product]
-        const checkVal = String(rule.value).toLowerCase()
-        
+        if (!rule.value && rule.value !== 0) continue;
+        const val = p[rule.column as keyof Product];
+        const checkVal = String(rule.value).toLowerCase();
         if (rule.operator === 'contains' && !String(val).toLowerCase().includes(checkVal)) return false;
         if (rule.operator === 'equals' && String(val).toLowerCase() !== checkVal) return false;
         if (rule.operator === 'gt' && Number(val) <= Number(rule.value)) return false;
@@ -851,6 +772,7 @@ export default function RiceControl() {
     if (row.method.includes('$')) return sum + (amt * EXCHANGE_RATE);
     return sum + amt;
   }, 0);
+  
   const livePendingRemaining = payPendingModal.totalDue - liveTotalPendingReceived;
 
   return (
@@ -907,7 +829,7 @@ export default function RiceControl() {
         )}
       </div>
 
-      {/* RICE CATEGORIES (ONLY WHOLESALE) - SCROLLABLE SWIPE TABS */}
+      {/* RICE CATEGORIES (ONLY WHOLESALE) */}
       {activeView === 'wholesale' && (
         <div className="hide-scrollbar" style={{ display: 'flex', overflowX: 'auto', gap: '8px', paddingBottom: '16px', marginBottom: '8px', WebkitOverflowScrolling: 'touch', scrollSnapType: 'x mandatory' }}>
           {RICE_CATEGORIES.map(cat => (
@@ -929,24 +851,29 @@ export default function RiceControl() {
             <thead>
               <tr style={{ background: '#f8fafc', borderBottom: '2px solid #e2e8f0' }}>
                 {columnOrder.map(key => {
+                  if (key === 'expand' && activeView !== 'wholesale') return null;
                   if ((key === 'linked_wholesale' || key === 'mtd_kg_used' || key === 'mtd_bags_used') && activeView !== 'retail') return null;
                   if (key === 'actions' && activeView !== 'wholesale') return null; 
                   
-                  const isDraggable = key !== 'actions' && key !== 'linked_wholesale';
+                  const isDraggable = key !== 'actions' && key !== 'linked_wholesale' && key !== 'expand';
+
+                  if (key === 'expand') {
+                    return <th key={key} style={{ width: '40px', minWidth: '40px', maxWidth: '40px', padding: '16px 8px', borderRight: '1px solid #f1f5f9' }}></th>;
+                  }
 
                   return (
                     <th 
                       key={key} 
                       draggable={isDraggable}
-                      onDragStart={(e) => handleDragStart(e, key)}
+                      onDragStart={(e) => handleDragStart(e, key as string)}
                       onDragOver={handleDragOver}
-                      onDrop={(e) => handleDrop(e, key)}
+                      onDrop={(e) => handleDrop(e, key as string)}
                       onClick={() => handleSort(key)}
-                      style={{ width: columnWidths[key] || 150, position: 'relative', padding: '16px 12px', textAlign: key === 'actions' ? 'center' : 'left', color: '#475569', fontSize: '13px', textTransform: 'uppercase', fontWeight: 'bold', borderRight: '1px solid #f1f5f9', cursor: isDraggable ? 'pointer' : 'default', whiteSpace: 'nowrap' }}
+                      style={{ width: columnWidths[key as string] || 150, position: 'relative', padding: '16px 12px', textAlign: key === 'actions' ? 'center' : 'left', color: '#475569', fontSize: '13px', textTransform: 'uppercase', fontWeight: 'bold', borderRight: '1px solid #f1f5f9', cursor: isDraggable ? 'pointer' : 'default', whiteSpace: 'nowrap' }}
                     >
-                      {key === 'linked_wholesale' ? 'Linked Wholesale Bag' : key === 'mtd_kg_used' ? 'MTD Used (Kg)' : key === 'mtd_bags_used' ? 'MTD Used (Bags)' : key === 'min_stock_level' ? 'Min Stock' : key.replace('_', ' ')}
+                      {key === 'linked_wholesale' ? 'Linked Wholesale Bag' : key === 'mtd_kg_used' ? 'MTD Used (Kg)' : key === 'mtd_bags_used' ? 'MTD Used (Bags)' : key === 'min_stock_level' ? 'Min Stock' : (key as string).replace('_', ' ')}
                       {isDraggable && (<span style={{ marginLeft: '6px', fontSize: '12px', opacity: sortConfig?.key === key ? 1 : 0.3 }}>{sortConfig?.key === key ? (sortConfig.direction === 'asc' ? '↑' : '↓') : '↕'}</span>)}
-                      <Resizer columnKey={key} />
+                      {isDraggable && <Resizer columnKey={key as string} />}
                     </th>
                   )
                 })}
@@ -957,23 +884,35 @@ export default function RiceControl() {
                 <tr><td colSpan={columnOrder.length} style={{ padding: '40px', textAlign: 'center', color: '#94a3b8' }}>No products found.</td></tr>
               ) : (
                 processedProducts.map(p => {
-                  const pBatches = (activeBatchesMap[p.id] || []).filter(b => (b.imported_qty || 0) - (b.sold_qty || 0) > 0);
-                  pBatches.sort((a,b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
-                  
+                  const pBatches = activeBatchesMap[p.id] || [];
+                  pBatches.sort((a,b) => a.id - b.id); 
                   const currentBatch = pBatches.length > 0 ? pBatches[0] : null;
-                  const queuedBatches = pBatches.slice(1);
                   const isExpanded = expandedProductId === p.id;
-                  const isLowStock = (Number(p.stock) <= Number(p.min_stock_level || 10));
-
-                  // 🚀 REQUIREMENT 3: Live calculate sum total of all active batches
-                  const totalActiveBatchStock = pBatches.reduce((sum, b) => sum + ((b.imported_qty || 0) - (b.sold_qty || 0)), 0);
+                  const totalActiveBatchStock = pBatches.reduce((sum, b) => sum + Number(b.remaining_qty), 0);
 
                   return (
                     <React.Fragment key={p.id}>
+                      {/* Parent Row */}
                       <tr onMouseEnter={() => setHoveredId(p.id)} onMouseLeave={() => setHoveredId(null)} style={{ borderBottom: '1px solid #f1f5f9', background: edits[p.id] ? '#fefcf3' : 'transparent', transition: 'background 0.2s' }}>
                         {columnOrder.map(col => {
+                          if (col === 'expand' && activeView !== 'wholesale') return null;
                           if ((col === 'linked_wholesale' || col === 'mtd_kg_used' || col === 'mtd_bags_used') && activeView !== 'retail') return null;
                           
+                          if (col === 'expand') {
+                             return (
+                               <td key={col} style={{ width: '40px', minWidth: '40px', maxWidth: '40px', borderRight: '1px solid #f1f5f9', padding: '8px 4px', textAlign: 'center', verticalAlign: 'middle' }}>
+                                 {pBatches.length > 1 && (
+                                   <button 
+                                     onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); setExpandedProductId(isExpanded ? null : p.id); }} 
+                                     style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '12px', color: '#64748b', display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%', height: '100%' }}
+                                   >
+                                     {isExpanded ? '▼' : '▶'}
+                                   </button>
+                                 )}
+                               </td>
+                             )
+                          }
+
                           if (col === 'actions') {
                             if (activeView === 'retail') {
                                return (
@@ -998,13 +937,13 @@ export default function RiceControl() {
                                 <div style={{ display: 'flex', gap: '8px', alignItems: 'center', justifyContent: 'center' }}>
                                   {edits[p.id] ? (
                                     <>
-                                      <button onMouseDown={() => handleSaveRecord(p.id)} style={{ color: '#fff', background: '#10b981', border: 'none', padding: '8px 12px', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', fontSize: '12px' }}>Save</button>
-                                      <button onMouseDown={() => setEdits(prev => { const n = { ...prev }; delete n[p.id]; return n })} style={{ color: '#ef4444', background: '#fee2e2', border: 'none', padding: '8px 12px', borderRadius: '6px', cursor: 'pointer', fontSize: '12px', fontWeight: 'bold' }}>Undo</button>
+                                      <button onMouseDown={(e) => { e.stopPropagation(); handleSaveRecord(p.id); }} style={{ color: '#fff', background: '#10b981', border: 'none', padding: '8px 12px', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', fontSize: '12px' }}>Save</button>
+                                      <button onMouseDown={(e) => { e.stopPropagation(); setEdits(prev => { const n = { ...prev }; delete n[p.id]; return n }) }} style={{ color: '#ef4444', background: '#fee2e2', border: 'none', padding: '8px 12px', borderRadius: '6px', cursor: 'pointer', fontSize: '12px', fontWeight: 'bold' }}>Undo</button>
                                     </>
                                   ) : (
                                     <>
-                                      <button onClick={() => openImportModal(p)} style={{ color: '#fff', background: '#3b82f6', border: 'none', padding: '6px 12px', borderRadius: '6px', cursor: 'pointer', fontSize: '12px', fontWeight: 'bold' }}>📦 Import</button>
-                                      <button onClick={() => fetchHistory(p)} style={{ color: '#475569', background: '#f1f5f9', border: '1px solid #cbd5e1', padding: '8px 12px', borderRadius: '6px', cursor: 'pointer', fontSize: '12px', fontWeight: 'bold' }}>🕒 History</button>
+                                      <button onClick={(e) => { e.stopPropagation(); openImportModal(p); }} style={{ color: '#fff', background: '#3b82f6', border: 'none', padding: '6px 12px', borderRadius: '6px', cursor: 'pointer', fontSize: '12px', fontWeight: 'bold' }}>📦 Import</button>
+                                      <button onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); fetchHistory(p); }} title="View Import Log" style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '20px', padding: 0 }}>🕒</button>
                                     </>
                                   )}
                                 </div>
@@ -1016,17 +955,16 @@ export default function RiceControl() {
                           const isEditing = editingCell?.id === p.id && editingCell?.col === col;
                           
                           let val = edits[p.id]?.[col as keyof Product] ?? p[col as keyof Product] ?? '';
-
-                          if (!isEditing && !edits[p.id] && activeView === 'wholesale' && currentBatch) {
-                             if (col === 'price') val = currentBatch.price;
-                             if (col === 'cost_price') val = currentBatch.cost_price;
+                          if (activeView === 'wholesale' && currentBatch) {
+                             if (col === 'cost_price') val = edits[p.id]?.cost_price ?? currentBatch.cost_price;
+                             if (col === 'stock') val = edits[p.id]?.stock ?? currentBatch.remaining_qty;
                           }
 
                           if (!isEditing && !edits[p.id] && activeView === 'retail' && col === 'cost_price' && p.linked_wholesale_id) {
                             const parentWholesale = products.find(wp => wp.id === p.linked_wholesale_id);
                             if (parentWholesale) {
-                              const parentBatches = (activeBatchesMap[parentWholesale.id] || []).filter(b => (b.imported_qty || 0) - (b.sold_qty || 0) > 0);
-                              parentBatches.sort((a,b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+                              const parentBatches = (activeBatchesMap[parentWholesale.id] || []);
+                              parentBatches.sort((a,b) => a.id - b.id);
                               const liveParentCogs = parentBatches.length > 0 ? parentBatches[0].cost_price : (parentWholesale.cost_price || 0);
                               const parentWeight = parentWholesale.weight || 50;
                               val = Math.round(liveParentCogs / parentWeight);
@@ -1034,30 +972,35 @@ export default function RiceControl() {
                           }
 
                           if (col === 'linked_wholesale') {
-                            const linkedProduct = products.find(wp => wp.id === p.linked_wholesale_id);
-                            const isDropdownOpen = activeDropdownId === p.id;
-                            return (
-                              <td key={col} style={{ borderRight: '1px solid #f1f5f9', position: 'relative', padding: '6px 12px', overflow: 'visible' }}>
-                                {isDropdownOpen ? (
-                                  <div style={{ position: 'relative', zIndex: 100 }}>
-                                    <input autoFocus className="dropdown-search-input" placeholder="Search 50kg bag..." value={dropdownSearch} onChange={e => setDropdownSearch(e.target.value)} onBlur={() => setTimeout(() => setActiveDropdownId(null), 200)} onKeyDown={e => e.key === 'Escape' && setActiveDropdownId(null)} />
-                                    <div className="dropdown-results-tray">
-                                      <div className="dropdown-row clear-option" onMouseDown={() => handleLinkWholesaleBag(p.id, null)}>❌ Clear Linked Bag</div>
-                                      {products.filter(wp => wp.weight >= 50 && wp.name.toLowerCase().includes(dropdownSearch.toLowerCase())).map(wp => (
-                                        <div key={wp.id} className="dropdown-row" onMouseDown={() => handleLinkWholesaleBag(p.id, wp)}>
-                                          <span style={{ fontWeight: 'bold' }}>{wp.name}</span>
-                                          <span style={{ fontSize: '11px', color: '#64748b' }}> ({formatRiel(wp.cost_price)})</span>
+                            if (activeView === 'retail') {
+                                const linkedProduct = products.find(wp => wp.id === p.linked_wholesale_id);
+                                const isDropdownOpen = activeDropdownId === p.id;
+                                return (
+                                  <td key={col} style={{ borderRight: '1px solid #f1f5f9', position: 'relative', padding: '6px 12px', overflow: 'visible' }}>
+                                    {isDropdownOpen ? (
+                                      <div style={{ position: 'relative', zIndex: 100 }}>
+                                        <input autoFocus className="dropdown-search-input" placeholder="Search 50kg bag..." value={dropdownSearch} onChange={e => setDropdownSearch(e.target.value)} onBlur={() => setTimeout(() => setActiveDropdownId(null), 200)} onKeyDown={e => e.key === 'Escape' && setActiveDropdownId(null)} />
+                                        <div className="dropdown-results-tray">
+                                          <div className="dropdown-row clear-option" onMouseDown={(e) => { e.stopPropagation(); handleLinkWholesaleBag(p.id, null); }}>❌ Clear Linked Bag</div>
+                                          {products.filter(wp => wp.weight >= 50 && wp.name.toLowerCase().includes(dropdownSearch.toLowerCase())).map(wp => (
+                                            <div key={wp.id} className="dropdown-row" onMouseDown={(e) => { e.stopPropagation(); handleLinkWholesaleBag(p.id, wp); }}>
+                                              <span style={{ fontWeight: 'bold' }}>{wp.name}</span>
+                                              <span style={{ fontSize: '11px', color: '#64748b' }}> ({formatRiel(wp.cost_price)})</span>
+                                            </div>
+                                          ))}
                                         </div>
-                                      ))}
-                                    </div>
-                                  </div>
-                                ) : (
-                                  <div className="interactive-select-trigger" onClick={() => { setActiveDropdownId(p.id); setDropdownSearch(''); }}>
-                                    {linkedProduct ? `🌾 ${linkedProduct.name}` : '🔍 Click to link 50kg Bag...'}
-                                  </div>
-                                )}
-                              </td>
-                            )
+                                      </div>
+                                    ) : (
+                                      <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                                        <div className="interactive-select-trigger" onClick={(e) => { e.stopPropagation(); setActiveDropdownId(p.id); setDropdownSearch(''); }} style={{ flex: 1 }}>
+                                          {linkedProduct ? `🌾 ${linkedProduct.name}` : '🔍 Click to link 50kg Bag...'}
+                                        </div>
+                                      </div>
+                                    )}
+                                  </td>
+                                )
+                            }
+                            return null;
                           }
 
                           return (
@@ -1075,28 +1018,12 @@ export default function RiceControl() {
                                   
                                   {col === 'name' ? (
                                     <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                      {formatDisplayValue(col as string, val)}
-
-                                      {/* 🚀 REQUIREMENT 3 DISPLAY MAP */}
                                       {activeView === 'wholesale' && (
-                                        <span style={{ fontSize: '13px', color: '#b58a3d', fontWeight: 'bold' }}>
-                                          ({formatNumber(totalActiveBatchStock)} Total)
+                                        <span style={{ fontSize: '11px', background: '#fef3c7', color: '#b45309', padding: '2px 6px', borderRadius: '4px', fontWeight: 'bold' }}>
+                                          📦 {totalActiveBatchStock} Total
                                         </span>
                                       )}
-
-                                      {isLowStock && (
-                                        <span title="Low stock alert" style={{ fontSize: '14px' }}>🚨</span>
-                                      )}
-
-                                      {activeView === 'wholesale' && queuedBatches.length > 0 && (
-                                        <button 
-                                          onClick={(e) => { e.stopPropagation(); setExpandedProductId(expandedProductId === p.id ? null : p.id); }} 
-                                          style={{ background: '#fef3c7', border: '1px solid #fde047', borderRadius: '4px', cursor: 'pointer', fontSize: '11px', color: '#ca8a04', padding: '2px 6px', fontWeight: 'bold', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-                                          title="View batches"
-                                        >
-                                          {expandedProductId === p.id ? '▲ Close' : `▼ Next Batches (${queuedBatches.length})`}
-                                        </button>
-                                      )}
+                                      {formatDisplayValue(col as string, val)}
                                     </span>
                                   ) : (
                                     formatDisplayValue(col as string, val)
@@ -1109,62 +1036,39 @@ export default function RiceControl() {
                         })}
                       </tr>
 
-                      {expandedProductId === p.id && activeView === 'wholesale' && queuedBatches.length > 0 && (
-                        queuedBatches.map((batch, index) => {
-                          const remaining = (batch.imported_qty || 0) - (batch.sold_qty || 0);
-                          let label = index === 0 ? "↳ 1st Next Batch" : index === 1 ? "↳ 2nd Next Batch" : `↳ ${index + 1}th Next Batch`;
-                          
-                          const isEditBatch = editingHistoryId === batch.id;
-                          const editData = historyEdits[batch.id] || { imported_qty: batch.imported_qty, price: batch.price, cost_price: batch.cost_price };
-
-                          return (
-                            <tr key={`batch-${batch.id}`} style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0' }}>
-                              {columnOrder.map(col => {
-                                if ((col === 'linked_wholesale' || col === 'mtd_kg_used' || col === 'mtd_bags_used') && activeView !== 'retail') return null;
-                                
-                                if (col === 'actions') {
-                                  return (
-                                    <td key={col} style={{ borderRight: '1px solid #f1f5f9', padding: '8px' }}>
-                                      <div style={{ display: 'flex', gap: '8px', justifyContent: 'center' }}>
-                                        {isEditBatch ? (
-                                          <>
-                                            <button onClick={() => handleSaveHistory(batch.id)} style={{ padding: '6px 12px', background: '#10b981', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', fontSize: '12px' }}>Save</button>
-                                            <button onClick={() => setEditingHistoryId(null)} style={{ padding: '6px 12px', background: '#f1f5f9', color: '#64748b', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', fontSize: '12px' }}>Cancel</button>
-                                          </           >
-                                        ) : (
-                                          <>
-                                            <button onClick={() => { setEditingHistoryId(batch.id); setHistoryEdits({ [batch.id]: { imported_qty: batch.imported_qty, price: batch.price, cost_price: batch.cost_price } }); }} style={{ padding: '4px 8px', background: '#e0f2fe', color: '#0284c7', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', fontSize: '12px' }}>✏️ Edit</button>
-                                            <button onClick={() => handleDeleteHistory(batch.id)} style={{ padding: '4px 8px', background: '#fee2e2', color: '#dc2626', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', fontSize: '12px' }}>🗑️ Del</button>
-                                          </>
-                                        )}
-                                      </div>
-                                    </td>
-                                  );
-                                }
-                                
-                                if (col === 'name') return <td key={col} style={{ paddingLeft: '48px', color: '#64748b', fontSize: '13px', borderRight: '1px solid #f1f5f9' }}>{label}</td>;
-                                
-                                if (col === 'price') {
-                                  if (isEditBatch) return <td key={col} style={{ padding: '4px', borderRight: '1px solid #f1f5f9' }}><CurrencyInput value={editData.price} onChange={(v:any) => setHistoryEdits({...historyEdits, [batch.id]: {...editData, price: v}})} style={{ width: '100%', padding: '6px', fontSize: '13px', borderRadius: '4px', border: '1px solid #b58a3d', boxSizing: 'border-box' }} /></td>;
-                                  return <td key={col} style={{ padding: '16px 12px', color: '#475569', fontSize: '13px', borderRight: '1px solid #f1f5f9' }}>{formatRiel(batch.price)}</td>;
-                                }
-                                
-                                if (col === 'cost_price') {
-                                  if (isEditBatch) return <td key={col} style={{ padding: '4px', borderRight: '1px solid #f1f5f9' }}><CurrencyInput value={editData.cost_price} onChange={(v:any) => setHistoryEdits({...historyEdits, [batch.id]: {...editData, cost_price: v}})} style={{ width: '100%', padding: '6px', fontSize: '13px', borderRadius: '4px', border: '1px solid #b58a3d', boxSizing: 'border-box' }} /></td>;
-                                  return <td key={col} style={{ padding: '16px 12px', color: '#475569', fontSize: '13px', borderRight: '1px solid #f1f5f9' }}>{formatRiel(batch.cost_price || 0)}</td>;
-                                }
-                                
-                                if (col === 'stock') {
-                                  if (isEditBatch) return <td key={col} style={{ padding: '4px', borderRight: '1px solid #f1f5f9' }}><input type="number" className="no-spinners" value={editData.imported_qty} onChange={e => setHistoryEdits({...historyEdits, [batch.id]: {...editData, imported_qty: Number(e.target.value)}})} style={{ width: '100%', padding: '6px', fontSize: '13px', borderRadius: '4px', border: '1px solid #b58a3d', boxSizing: 'border-box' }} /></td>;
-                                  return <td key={col} style={{ padding: '16px 12px', color: '#475569', fontSize: '13px', borderRight: '1px solid #f1f5f9', fontWeight: 'bold' }}>{remaining}</td>;
-                                }
-                                
-                                return <td key={col} style={{ borderRight: '1px solid #f1f5f9' }}></td>;
-                              })}
-                            </tr>
-                          );
-                        })
-                      )}
+                      {/* Expandable Child Row Batch List (View Only) */}
+                      {isExpanded && activeView === 'wholesale' && pBatches.length > 1 && pBatches.slice(1).map((batch, index) => {
+                         let batchLabel = index === 0 ? '2nd Batch' : index === 1 ? '3rd Batch' : `${index + 2}th Batch`;
+                         
+                         return (
+                           <tr key={`batch-${batch.id}`} style={{ background: '#f8fafc', borderBottom: index === pBatches.length - 2 ? '2px solid #cbd5e1' : '1px dashed #e2e8f0' }}>
+                             {columnOrder.map(col => {
+                               if (col === 'expand') return <td key={col} style={{ borderRight: '1px solid #f1f5f9' }}></td>;
+                               if ((col === 'linked_wholesale' || col === 'mtd_kg_used' || col === 'mtd_bags_used') && activeView !== 'retail') return null;
+                               if (col === 'id') return <td key={col} style={{ borderRight: '1px solid #f1f5f9' }}></td>;
+                               
+                               if (col === 'name') return (
+                                 <td key={col} style={{ padding: '12px 12px 12px 48px', borderRight: '1px solid #f1f5f9', color: '#475569', fontSize: '13px' }}>
+                                   ↳ {batchLabel}
+                                 </td>
+                               );
+                               
+                               if (col === 'price') return <td key={col} style={{ padding: '12px', borderRight: '1px solid #f1f5f9', color: '#475569', fontSize: '13px' }}>-</td>;
+                               
+                               if (col === 'cost_price') return <td key={col} style={{ padding: '12px', borderRight: '1px solid #f1f5f9', color: '#475569', fontSize: '13px' }}>{formatRiel(batch.cost_price)}</td>;
+                               
+                               if (col === 'stock') return <td key={col} style={{ padding: '12px', borderRight: '1px solid #f1f5f9', color: '#b58a3d', fontWeight: 'bold', fontSize: '13px' }}>{batch.remaining_qty}</td>;
+                               
+                               if (col === 'actions') {
+                                 if (activeView !== 'wholesale') return null;
+                                 return <td key={col} style={{ borderRight: '1px solid #f1f5f9' }}></td>;
+                               }
+                               
+                               return <td key={col} style={{ padding: '12px', borderRight: '1px solid #f1f5f9', color: '#94a3b8', fontSize: '13px', textAlign: 'center' }}>-</td>;
+                             })}
+                           </tr>
+                         )
+                      })}
                     </React.Fragment>
                   )
                 })
@@ -1406,7 +1310,6 @@ export default function RiceControl() {
               ))}
             </div>
 
-            {/* Live Calculation Footer */}
             {pendingPaymentRows.some(r => Number(r.amount) > 0) && (
               <div style={{ marginBottom: '24px', paddingTop: '16px', borderTop: '1px dashed #cbd5e1', fontSize: '14px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
@@ -1437,6 +1340,104 @@ export default function RiceControl() {
               <button onClick={handlePayPendingSubmit} disabled={isProcessing} style={{ padding: '12px 16px', background: '#10b981', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', fontSize: '14px' }}>
                 {isProcessing ? 'Processing...' : 'Confirm Payment'}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* DUAL-VIEW HISTORY MODAL WITH CORRECTED EDIT HANDLERS */}
+      {historyModal.isOpen && historyModal.product && (
+        <div className="modal-overlay" onMouseDown={() => setHistoryModal({ isOpen: false, product: null, data: [], activeBatches: [] })}>
+          <div className="modal-content" style={{ maxWidth: '600px' }} onMouseDown={e => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #e2e8f0', paddingBottom: '16px', marginBottom: '16px' }}>
+              <div>
+                <h2 style={{ margin: 0, color: '#1e293b', fontSize: '20px' }}>📦 Batch & Import History</h2>
+                <p style={{ margin: '4px 0 0 0', color: '#64748b', fontSize: '14px' }}>Tracking: <b style={{ color: '#0f172a' }}>{historyModal.product.name}</b></p>
+              </div>
+              <button onClick={() => setHistoryModal({ isOpen: false, product: null, data: [], activeBatches: [] })} style={{ background: 'none', border: 'none', fontSize: '24px', cursor: 'pointer', color: '#94a3b8' }}>✕</button>
+            </div>
+            
+            <div style={{ overflowY: 'auto', flex: 1, paddingRight: '8px', maxHeight: '50vh' }}>
+              
+              {/* SECTION 1: Active Shelved Batches (These decrease) */}
+              <h3 style={{ fontSize: '13px', color: '#475569', textTransform: 'uppercase', marginBottom: '12px' }}>🟢 Active Batches on Shelf</h3>
+              {historyModal.activeBatches.length === 0 ? (
+                <p style={{ color: '#ef4444', fontSize: '14px', marginBottom: '24px' }}>No active batches remaining. Stock is empty.</p>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '24px' }}>
+                  {historyModal.activeBatches.map((b, index) => {
+                    const isEditing = editingHistoryId === b.id;
+                    const editData = historyEdits[b.id] || { remaining_qty: b.remaining_qty, cost_price: b.cost_price };
+                    let batchLabel = index === 0 ? '1st Batch (Current)' : index === 1 ? '2nd Batch' : `${index + 1}th Batch`;
+
+                    return (
+                      <div key={b.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '12px', background: index === 0 ? '#f0fdf4' : '#f8fafc', border: isEditing ? '1px solid #b58a3d' : (index === 0 ? '1px solid #bbf7d0' : '1px solid #e2e8f0'), borderRadius: '8px', transition: 'all 0.2s' }}>
+                        {isEditing ? (
+                          <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', flex: 1 }}>
+                            <div style={{ flex: '1 1 80px' }}>
+                              <label style={{ fontSize: '11px', fontWeight: 'bold', color: '#64748b' }}>Remaining Qty</label>
+                              <input autoFocus type="number" className="no-spinners" value={editData.remaining_qty} onChange={e => setHistoryEdits({...historyEdits, [b.id]: {...editData, remaining_qty: Number(e.target.value)}})} onKeyDown={e => e.key === 'Enter' && handleSaveHistory(b.id)} style={{ width: '100%', padding: '6px', border: '1px solid #b58a3d', borderRadius: '4px', fontSize: '14px', color: '#0f172a', backgroundColor: '#fff' }} />
+                            </div>
+                            <div style={{ flex: '1 1 100px' }}>
+                              <label style={{ fontSize: '11px', fontWeight: 'bold', color: '#64748b' }}>Cost (៛)</label>
+                              <input type="number" className="no-spinners" value={editData.cost_price} onChange={e => setHistoryEdits({...historyEdits, [b.id]: {...editData, cost_price: Number(e.target.value)}})} onKeyDown={e => e.key === 'Enter' && handleSaveHistory(b.id)} style={{ width: '100%', padding: '6px', border: '1px solid #b58a3d', borderRadius: '4px', fontSize: '14px', color: '#0f172a', backgroundColor: '#fff' }} />
+                            </div>
+                          </div>
+                        ) : (
+                          <div>
+                            <div style={{ fontWeight: 'bold', color: index === 0 ? '#15803d' : '#0f172a' }}>{batchLabel}</div>
+                            <div style={{ fontSize: '12px', color: '#64748b', marginTop: '4px' }}>Arrived: {new Date(b.created_at).toLocaleDateString()}</div>
+                          </div>
+                        )}
+
+                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', justifyContent: 'space-between' }}>
+                          {!isEditing && (
+                            <div style={{ textAlign: 'right' }}>
+                              <div style={{ fontWeight: 'bold', color: '#b58a3d', fontSize: '16px' }}>{b.remaining_qty} Bags Left</div>
+                              <div style={{ fontSize: '12px', color: '#64748b', marginTop: '2px' }}>Cost: {formatRiel(b.cost_price)}</div>
+                            </div>
+                          )}
+                          <div style={{ display: 'flex', gap: '8px', marginTop: isEditing ? '20px' : '8px' }}>
+                            {isEditing ? (
+                              <>
+                                <button onClick={() => handleSaveHistory(b.id)} style={{ padding: '6px 12px', background: '#10b981', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', fontSize: '12px' }}>Save</button>
+                                <button onClick={() => setEditingHistoryId(null)} style={{ padding: '6px 12px', background: '#f1f5f9', color: '#64748b', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', fontSize: '12px' }}>Cancel</button>
+                              </>
+                            ) : (
+                              <>
+                                <button onClick={() => { setEditingHistoryId(b.id); setHistoryEdits({ [b.id]: { remaining_qty: b.remaining_qty, cost_price: b.cost_price } }); }} style={{ padding: '4px 8px', background: '#e0f2fe', color: '#0284c7', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', fontSize: '12px' }}>✏️ Edit</button>
+                                <button onClick={() => handleDeleteHistory(b.id)} style={{ padding: '4px 8px', background: '#fee2e2', color: '#dc2626', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', fontSize: '12px' }}>🗑️ Del</button>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* SECTION 2: Permanent Import Log (These never decrease) */}
+              <h3 style={{ fontSize: '13px', color: '#475569', textTransform: 'uppercase', marginBottom: '12px', paddingTop: '16px', borderTop: '2px dashed #e2e8f0' }}>📦 Permanent Invoice Log</h3>
+              {historyModal.data.length === 0 ? (
+                <p style={{ color: '#64748b', fontSize: '14px' }}>No import records found.</p>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  {historyModal.data.map((h) => (
+                    <div key={h.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px', border: '1px solid #e2e8f0', borderRadius: '8px', background: '#fff' }}>
+                       <div>
+                         <div style={{ fontWeight: 'bold', color: '#0f172a', marginBottom: '4px', fontSize: '13px' }}>{new Date(h.created_at).toLocaleDateString()} at {new Date(h.created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</div>
+                         <div style={{ color: '#64748b', fontSize: '12px' }}>Supplier: <span style={{ color: '#334155', fontWeight: 'bold' }}>{h.suppliers?.name || 'Unknown'}</span></div>
+                       </div>
+                       <div style={{ textAlign: 'right' }}>
+                         <div style={{ fontWeight: 'bold', color: '#10b981', fontSize: '14px' }}>+{h.qty} Bags Imported</div>
+                         <div style={{ color: '#64748b', fontSize: '12px', marginTop: '2px' }}>Paid: {formatRiel(h.unit_cost)} / bag</div>
+                       </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
             </div>
           </div>
         </div>
@@ -1479,7 +1480,7 @@ export default function RiceControl() {
               <div key={rule.id} style={{ display: 'flex', gap: '8px', marginBottom: '12px', alignItems: 'center', flexWrap: 'wrap', background: '#f8fafc', padding: '12px', borderRadius: '8px' }}>
                 <span style={{ fontSize: '13px', color: '#475569', width: '40px', fontWeight: 'bold' }}>{index === 0 ? 'Where' : 'And'}</span>
                 <select value={rule.column} onChange={e => setFilterRules(prev => prev.map(r => r.id === rule.id ? { ...r, column: e.target.value as keyof Product } : r))} style={{ flex: '1 1 100px', padding: '8px', border: '1px solid #cbd5e1', borderRadius: '6px', fontSize: '14px', backgroundColor: '#fff', color: '#0f172a' }}>
-                  {DEFAULT_ORDER.filter(o => o !== 'linked_wholesale' && o !== 'actions').map(c => <option key={c} value={c as string}>{String(c).toUpperCase()}</option>)}
+                  {DEFAULT_ORDER.filter(o => o !== 'linked_wholesale' && o !== 'actions' && o !== 'expand').map(c => <option key={c} value={c as string}>{String(c).toUpperCase()}</option>)}
                 </select>
                 <select value={rule.operator} onChange={e => setFilterRules(prev => prev.map(r => r.id === rule.id ? { ...r, operator: e.target.value as FilterOperator } : r))} style={{ flex: '1 1 100px', padding: '8px', border: '1px solid #cbd5e1', borderRadius: '6px', fontSize: '14px', backgroundColor: '#fff', color: '#0f172a' }}>
                   <option value="contains">Contains</option>
@@ -1497,105 +1498,6 @@ export default function RiceControl() {
             <div style={{ marginTop: '24px', display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
               <button onClick={() => setFilterRules([])} style={{ padding: '10px 16px', background: '#f1f5f9', color: '#475569', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', fontSize: '14px' }}>Clear All</button>
               <button onClick={() => setIsFilterOpen(false)} style={{ padding: '10px 16px', background: '#10b981', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', fontSize: '14px' }}>Apply Filters</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* GLOBAL HISTORY MODAL */}
-      {historyModal.isOpen && historyModal.product && (
-        <div className="modal-overlay" onMouseDown={() => setHistoryModal({ isOpen: false, product: null, data: [] })}>
-          <div className="modal-content" style={{ maxWidth: '650px' }} onMouseDown={e => e.stopPropagation()}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #e2e8f0', paddingBottom: '16px', marginBottom: '16px' }}>
-              <div>
-                <h2 style={{ margin: 0, color: '#1e293b', fontSize: '20px' }}>📦 Live Batches & History</h2>
-                <p style={{ margin: '4px 0 0 0', color: '#64748b', fontSize: '14px' }}>Tracking: <b style={{ color: '#0f172a' }}>{historyModal.product.name}</b></p>
-              </div>
-              <button onClick={() => setHistoryModal({ isOpen: false, product: null, data: [] })} style={{ background: 'none', border: 'none', fontSize: '24px', cursor: 'pointer', color: '#94a3b8' }}>✕</button>
-            </div>
-            
-            <div style={{ overflowY: 'auto', flex: 1, paddingRight: '8px', maxHeight: '60vh' }}>
-              {historyModal.data.length === 0 ? (
-                <p style={{ textAlign: 'center', color: '#64748b', padding: '40px' }}>No batches recorded yet.</p>
-              ) : (
-                <>
-                  <h3 style={{ fontSize: '13px', color: '#475569', textTransform: 'uppercase', marginBottom: '12px' }}>🟢 Active Batches</h3>
-                  {historyModal.data.filter(h => (h.imported_qty || 0) - (h.sold_qty || 0) > 0).map((h, index) => {
-                    const isEditing = editingHistoryId === h.id;
-                    const editData = historyEdits[h.id] || { imported_qty: h.imported_qty, price: h.price, cost_price: h.cost_price };
-                    const remaining = (h.imported_qty || 0) - (h.sold_qty || 0);
-                    
-                    let batchLabel = "Current Batch";
-                    if (index === 1) batchLabel = "1st Next Batch";
-                    else if (index === 2) batchLabel = "2nd Next Batch";
-                    else if (index === 3) batchLabel = "3rd Next Batch";
-                    else if (index > 3) batchLabel = `${index}th Next Batch`;
-
-                    return (
-                      <div key={h.id} style={{ background: isEditing ? '#fefcf3' : '#f0fdf4', padding: '16px', borderRadius: '12px', border: isEditing ? '1px solid #b58a3d' : '1px solid #bbf7d0', marginBottom: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px', transition: 'all 0.2s' }}>
-                        {isEditing ? (
-                          <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', flex: 1 }}>
-                            <div style={{ flex: '1 1 80px' }}>
-                              <label style={{ fontSize: '11px', fontWeight: 'bold', color: '#64748b' }}>Import Qty</label>
-                              <input autoFocus type="number" className="no-spinners" value={editData.imported_qty} onChange={e => setHistoryEdits({...historyEdits, [h.id]: {...editData, imported_qty: Number(e.target.value)}})} onKeyDown={e => e.key === 'Enter' && handleSaveHistory(h.id)} style={{ width: '100%', padding: '6px', border: '1px solid #b58a3d', borderRadius: '4px', fontSize: '14px', color: '#0f172a', backgroundColor: '#fff' }} />
-                            </div>
-                            <div style={{ flex: '1 1 100px' }}>
-                              <label style={{ fontSize: '11px', fontWeight: 'bold', color: '#64748b' }}>Selling (៛)</label>
-                              <input type="number" className="no-spinners" value={editData.price} onChange={e => setHistoryEdits({...historyEdits, [h.id]: {...editData, price: Number(e.target.value)}})} onKeyDown={e => e.key === 'Enter' && handleSaveHistory(h.id)} style={{ width: '100%', padding: '6px', border: '1px solid #b58a3d', borderRadius: '4px', fontSize: '14px', color: '#0f172a', backgroundColor: '#fff' }} />
-                            </div>
-                            <div style={{ flex: '1 1 100px' }}>
-                              <label style={{ fontSize: '11px', fontWeight: 'bold', color: '#64748b' }}>Cost (៛)</label>
-                              <input type="number" className="no-spinners" value={editData.cost_price} onChange={e => setHistoryEdits({...historyEdits, [h.id]: {...editData, cost_price: Number(e.target.value)}})} onKeyDown={e => e.key === 'Enter' && handleSaveHistory(h.id)} style={{ width: '100%', padding: '6px', border: '1px solid #b58a3d', borderRadius: '4px', fontSize: '14px', color: '#0f172a', backgroundColor: '#fff' }} />
-                            </div>
-                          </div>
-                        ) : (
-                          <div>
-                            <div style={{ fontSize: '12px', fontWeight: 'bold', color: '#15803d', marginBottom: '6px', display: 'inline-block', background: '#dcfce7', padding: '4px 8px', borderRadius: '12px' }}>
-                              {batchLabel} • {remaining} left
-                            </div>
-                            <div style={{ fontSize: '14px', fontWeight: 'bold', color: '#0f172a' }}>Selling: <span style={{ color: '#b58a3d' }}>{formatRiel(h.price)}</span></div>
-                            <div style={{ fontSize: '13px', color: '#64748b', marginTop: '4px', fontWeight: 'bold' }}>Cost: {formatRiel(h.cost_price || 0)}</div>
-                          </div>
-                        )}
-
-                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '8px' }}>
-                          <div style={{ fontSize: '12px', color: '#94a3b8', fontWeight: 'bold' }}>{new Date(h.created_at).toLocaleDateString()}</div>
-                          <div style={{ display: 'flex', gap: '8px' }}>
-                            {isEditing ? (
-                              <>
-                                <button onClick={() => handleSaveHistory(h.id)} style={{ padding: '6px 12px', background: '#10b981', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', fontSize: '12px' }}>Save</button>
-                                <button onClick={() => setEditingHistoryId(null)} style={{ padding: '6px 12px', background: '#f1f5f9', color: '#64748b', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', fontSize: '12px' }}>Cancel</button>
-                              </>
-                            ) : (
-                              <>
-                                <button onClick={() => { setEditingHistoryId(h.id); setHistoryEdits({ [h.id]: { imported_qty: h.imported_qty, price: h.price, cost_price: h.cost_price } }); }} style={{ padding: '4px 8px', background: '#e0f2fe', color: '#0284c7', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', fontSize: '12px' }}>✏️ Edit</button>
-                                <button onClick={() => handleDeleteHistory(h.id)} style={{ padding: '4px 8px', background: '#fee2e2', color: '#dc2626', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', fontSize: '12px' }}>🗑️ Del</button>
-                              </>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-
-                  {/* DEPLETED HISTORY ACCORDION */}
-                  {historyModal.data.filter(h => (h.imported_qty || 0) - (h.sold_qty || 0) <= 0).length > 0 && (
-                    <details style={{ marginTop: '24px', background: '#f8fafc', borderRadius: '12px', border: '1px solid #e2e8f0', padding: '12px' }}>
-                      <summary style={{ fontSize: '13px', fontWeight: 'bold', color: '#64748b', cursor: 'pointer', outline: 'none' }}>
-                        🕰️ Show Depleted History ({historyModal.data.filter(h => (h.imported_qty || 0) - (h.sold_qty || 0) <= 0).length})
-                      </summary>
-                      <div style={{ marginTop: '12px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                        {historyModal.data.filter(h => (h.imported_qty || 0) - (h.sold_qty || 0) <= 0).map((h) => (
-                          <div key={h.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px', borderBottom: '1px dashed #cbd5e1', fontSize: '13px' }}>
-                            <span style={{ color: '#64748b' }}>{new Date(h.created_at).toLocaleDateString()}</span>
-                            <span style={{ color: '#0f172a', fontWeight: 'bold' }}>{h.imported_qty} Bags Sold Out</span>
-                          </div>
-                        ))}
-                      </div>
-                    </details>
-                  )}
-                </>
-              )}
             </div>
           </div>
         </div>
