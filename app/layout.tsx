@@ -1,10 +1,20 @@
+import type { Metadata, Viewport } from 'next'
 import './globals.css'
 import Sidebar from '@/components/Sidebar'
 import SplashScreen from '@/components/SplashScreen'
 
-export const metadata = {
+export const metadata: Metadata = {
   title: 'Angkor Radiant Rice POS',
   description: 'Inventory and POS Management System',
+}
+
+// 🔥 CRITICAL FOR MOBILE: Prevents Safari auto-zoom and maps the status bar color
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  maximumScale: 1,
+  userScalable: false,
+  themeColor: '#f8fafc',
 }
 
 export default function RootLayout({
@@ -20,6 +30,7 @@ export default function RootLayout({
             
             <Sidebar />
 
+            {/* This tag isolates the scroll, keeping the Sidebar perfectly fixed */}
             <main className="app-scroller">
               {children}
             </main>
