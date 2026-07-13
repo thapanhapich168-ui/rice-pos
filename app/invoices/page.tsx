@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabaseClient'
+import { useFocusRefresh } from '@/lib/useFocusRefresh'
 
 // --- TYPESCRIPT INTERFACES ---
 interface Invoice {
@@ -41,6 +42,9 @@ export default function InvoiceGallery() {
     setIsDeviceMobile(isMobile);
     fetchInvoices();
   }, [filterTab])
+
+  // 🚀 NEW: Window Focus Auto-Refresh
+  useFocusRefresh(fetchInvoices);
 
   async function fetchInvoices() {
     setIsLoading(true)

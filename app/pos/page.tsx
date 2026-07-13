@@ -344,7 +344,20 @@ export default function POSPage() {
     
     stabilizeConnection()
 
-    return () => window.removeEventListener('resize', checkDeviceType);
+    // 🚀 NEW: True Realtime Live View for POS Inventory Sync!
+    const posProductsChannel = supabase.channel('pos-products-update')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'products' }, () => loadProductsAndSettings())
+      .subscribe();
+
+    const posBatchesChannel = supabase.channel('pos-batches-update')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'inventory_batches' }, () => loadBatches())
+      .subscribe();
+
+    return () => {
+      window.removeEventListener('resize', checkDeviceType);
+      supabase.removeChannel(posProductsChannel);
+      supabase.removeChannel(posBatchesChannel);
+    };
   }, [])
 
   useEffect(() => {
@@ -682,6 +695,9 @@ export default function POSPage() {
     window.history.replaceState({}, document.title, window.location.pathname);
   }
 
+  // ==============================================================================================
+  // 🚀 REFACTORED CONFIRM CHECKOUT (TRAFFIC COP + OPTION B ASSET LOGGING)
+  // ==============================================================================================
   async function confirmCheckout() {
     if (!isCartValid) return alert("Please ensure all items have a valid quantity and price.");
     if (activeTab === 'wholesale' && !selectedCustomerId) return alert(lang === 'kh' ? 'សូមជ្រើសរើសអតិថិជនសម្រាប់ដុំ!' : 'Please select a customer for wholesale');
@@ -692,13 +708,17 @@ export default function POSPage() {
     try {
       const currentCart = [...cart];
       const currentTotalRiel = totalRiel;
+      
       const finalCustomerName = cartCustomerNameOverride.trim() || 'Walk-in';
+      const finalOwner = selectedCustomer?.owner || null; 
+      const finalLocation = selectedCustomer?.location || '';
+      const finalPhone = selectedCustomer?.phone || '';
 
       const activePayments = showPaymentSelector ? paymentRows.filter(r => (Number(r.amount) || 0) > 0) : [];
       const actualTotalReceived = showPaymentSelector ? liveTotalReceivedInRiel : 0;
       const actualRemaining = currentTotalRiel - actualTotalReceived;
 
-      // --- 🚀 NEW MATH ENGINE FOR DUAL CURRENCY CHANGE RETURN ---
+      // --- NEW MATH ENGINE FOR DUAL CURRENCY CHANGE RETURN ---
       let effectiveSplits: { method: string, amount_usd: number, amount_riel: number, face_amount: number }[] = [];
 
       if (activePayments.length === 0) {
@@ -708,7 +728,6 @@ export default function POSPage() {
           effectiveSplits.push({ method: 'Cash ៛', amount_usd: 0, amount_riel: currentTotalRiel, face_amount: currentTotalRiel });
         }
       } else {
-        // Log all income exactly as handed to us
         activePayments.forEach(p => {
             let amtFace = Number(p.amount);
             if (p.method.includes('$')) {
@@ -722,7 +741,6 @@ export default function POSPage() {
             effectiveSplits.push({ method: 'Unpaid / Debt', amount_usd: 0, amount_riel: actualRemaining, face_amount: actualRemaining });
         }
 
-        // If they paid too much, we log the negative change OUT of the Riel drawer natively into the Payment String
         if (actualRemaining < 0) {
            const changeAmountRiel = Math.abs(actualRemaining);
            effectiveSplits.push({ method: 'Cash ៛', amount_usd: 0, amount_riel: -changeAmountRiel, face_amount: -changeAmountRiel });
@@ -730,25 +748,28 @@ export default function POSPage() {
       }
 
       // --- DATABASE INSERTIONS ---
-      if (activeTab === 'retail') {
-        const retailTxId = `RET-${Date.now().toString().slice(-6)}`;
-        const retailRows = [];
+      const activeTxId = activeTab === 'retail' 
+          ? `RET-${Date.now().toString().slice(-6)}` 
+          : (editingInvoiceId ? editingInvoiceId : `INV-${Date.now().toString().slice(-6)}`);
 
-        // Build native multi-currency string (e.g. "Cash $: 1, Cash ៛: -1300")
-        let primaryMethodStr = effectiveSplits.map(s => {
-          if (s.method === 'Unpaid / Debt') return s.method;
-          return `${s.method}: ${s.face_amount}`;
-        }).join(', ');
+      let primaryMethodStr = effectiveSplits.map(s => {
+        if (s.method === 'Unpaid / Debt') return s.method;
+        return `${s.method}: ${s.face_amount}`;
+      }).join(', ');
+
+      if (activeTab === 'retail') {
+        const retailRows = [];
 
         for (const item of currentCart) {
            retailRows.push({
-              transaction_id: retailTxId,
-              rice_type: item.name,
-              custom_rice_type: item.custom_name !== item.name ? item.custom_name : null,
-              qty: item.quantity,
-              price_per_bag: item.custom_price_riel,
-              cogs_price: item.cost_price || 0,
-              payment_method: primaryMethodStr
+             transaction_id: activeTxId,
+             rice_type: item.name,
+             custom_rice_type: item.custom_name !== item.name ? item.custom_name : null,
+             qty: item.quantity,
+             price_per_bag: item.custom_price_riel,
+             cogs_price: item.cost_price || 0,
+             payment_method: primaryMethodStr
+             // Removed manual total calculations. Supabase automatically generates them.
            });
         }
 
@@ -763,14 +784,7 @@ export default function POSPage() {
             await supabase.from('products').update({ stock: newStock }).eq('id', prodId);
         }
 
-        // NO FAKE EXPENSE ENTRIES HERE ANYMORE. Handled 100% via the sales string native parsing!
-
       } else {
-        const displayInvoiceNo = editingInvoiceId ? editingInvoiceId : `INV-${Date.now().toString().slice(-6)}`;
-        const finalOwner = selectedCustomer?.owner || null; 
-        const finalLocation = selectedCustomer?.location || '';
-        const finalPhone = selectedCustomer?.phone || '';
-        
         const combinedRiceTypes = currentCart.map(item => `${item.custom_name} (x${item.quantity})`).join(', ');
         const baseSaleRows = [];
         const stockUpdates: Record<number, number> = {}; 
@@ -822,34 +836,31 @@ export default function POSPage() {
           await supabase.from('invoice_summaries').delete().like('invoice_id', `${editingInvoiceId}%`);
         }
 
-        // Generate combined method string for Wholesale table logs
-        const finalCombinedMethodString = effectiveSplits.map(s => {
-           if (s.method === 'Unpaid / Debt') return s.method;
-           return `${s.method}: ${s.face_amount}`;
-        }).join(', ');
-
-        const finalSaleRows = baseSaleRows.map(r => ({ ...r, invoice_id: displayInvoiceNo, payment_method: finalCombinedMethodString }));
+        const finalSaleRows = baseSaleRows.map(r => ({ ...r, invoice_id: activeTxId, payment_method: primaryMethodStr }));
         let splitCogsSum = baseSaleRows.reduce((sum, r) => sum + (r.cogs_price * r.qty), 0);
-
-        const summaryRow = {
-           invoice_id: displayInvoiceNo,
-           customer_name: finalCustomerName,
-           owner: finalOwner,
-           rice_types: combinedRiceTypes,
-           total_sales: currentTotalRiel,
-           total_cogs: splitCogsSum,
-           total_profit: currentTotalRiel - splitCogsSum,
-           delivery_status: (!isSimpleCustomer && actualRemaining > 0) ? 'Pending' : 'Delivered',
-           payment_method: finalCombinedMethodString,
-           balance_due: actualRemaining > 0 && !isSimpleCustomer ? actualRemaining : 0,
-           customer_location: finalLocation
-        };
-
-        const { error: summaryErr } = await supabase.from('invoice_summaries').insert([summaryRow]);
-        if (summaryErr) throw new Error(`Failed to save to Summaries table: ${summaryErr.message}`);
 
         const { error: salesErr } = await supabase.from('sales').insert(finalSaleRows);
         if (salesErr) throw new Error(`Failed to save to Sales table: ${salesErr.message}`);
+
+        // 🚀 TRAFFIC COP: ONLY CREATE SUMMARY ROW IF NOT A WALK-IN!
+        if (!isSimpleCustomer) {
+           const summaryRow = {
+              invoice_id: activeTxId,
+              customer_name: finalCustomerName,
+              owner: finalOwner,
+              rice_types: combinedRiceTypes,
+              total_sales: currentTotalRiel,
+              total_cogs: splitCogsSum,
+              total_profit: currentTotalRiel - splitCogsSum,
+              delivery_status: actualRemaining > 0 ? 'Pending' : 'Delivered',
+              payment_method: primaryMethodStr,
+              balance_due: actualRemaining > 0 ? actualRemaining : 0,
+              customer_location: finalLocation
+           };
+
+           const { error: summaryErr } = await supabase.from('invoice_summaries').insert([summaryRow]);
+           if (summaryErr) throw new Error(`Failed to save to Summaries table: ${summaryErr.message}`);
+        }
 
         for (const [prodId, newStock] of Object.entries(stockUpdates)) {
            await supabase.from('products').update({ stock: newStock }).eq('id', prodId);
@@ -857,30 +868,31 @@ export default function POSPage() {
         for (const [batchId, newSold] of Object.entries(fifoUpdates)) {
            await supabase.from('price_history').update({ sold_qty: newSold }).eq('id', batchId);
         }
-
-        if (showPaymentSelector) {
-           for (const split of effectiveSplits) {
-              if (split.method === 'Unpaid / Debt') continue;
-              await supabase.from('invoice_payments').insert([{
-                invoice_id: displayInvoiceNo,
-                amount_paid_usd: split.amount_usd, 
-                amount_paid_riel: split.amount_riel, 
-                payment_method: split.method,
-                recorded_by: 'System'
-              }]);
-           }
-        }
-
-        const currentDate = new Date();
-        setCompletedSale({
-          invoiceNo: displayInvoiceNo, 
-          cartSnapshot: currentCart, 
-          customer: { name: finalCustomerName, phone: finalPhone, location: finalLocation },
-          dateObj: { day: String(currentDate.getDate()).padStart(2, '0'), month: String(currentDate.getMonth() + 1).padStart(2, '0'), year: currentDate.getFullYear() },
-          changeDue: actualRemaining < 0 ? Math.abs(actualRemaining) : 0,
-          amountReceived: actualTotalReceived
-        });
       }
+
+      // 🚀 UNIVERSAL OPTION B PAYMENT LOGGING (RUNS FOR EVERYTHING)
+      if (showPaymentSelector || !isSimpleCustomer) {
+         for (const split of effectiveSplits) {
+            if (split.method === 'Unpaid / Debt') continue;
+            await supabase.from('invoice_payments').insert([{
+              invoice_id: activeTxId,
+              amount_paid_usd: split.amount_usd, 
+              amount_paid_riel: split.amount_riel, 
+              payment_method: split.method,
+              recorded_by: finalOwner || 'System'
+            }]);
+         }
+      }
+
+      const currentDate = new Date();
+      setCompletedSale({
+        invoiceNo: activeTxId, 
+        cartSnapshot: currentCart, 
+        customer: { name: finalCustomerName, phone: finalPhone, location: finalLocation },
+        dateObj: { day: String(currentDate.getDate()).padStart(2, '0'), month: String(currentDate.getMonth() + 1).padStart(2, '0'), year: currentDate.getFullYear() },
+        changeDue: actualRemaining < 0 ? Math.abs(actualRemaining) : 0,
+        amountReceived: actualTotalReceived
+      });
 
       if (activeTab === 'wholesale' && !isSimpleCustomer) {
         setIsGeneratingPreview(true);

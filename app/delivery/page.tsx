@@ -80,6 +80,17 @@ export default function DeliveryPage() {
 
   useEffect(() => {
     fetchDeliveries();
+
+    // 🚀 NEW: True Realtime Live View for Delivery Queue!
+    const deliveryChannel = supabase.channel('delivery-updates')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'invoice_summaries' }, () => {
+        fetchDeliveries();
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(deliveryChannel);
+    };
   }, [])
 
   async function fetchDeliveries() {
@@ -146,15 +157,16 @@ export default function DeliveryPage() {
       const amt = Number(r.amount) || 0;
       if (amt <= 0) continue;
       
-      let convertedAmt = amt;
-      if (r.method.includes('$')) convertedAmt = amt * EXCHANGE_RATE;
+      const isUsd = r.method.includes('$');
+      let convertedAmt = isUsd ? amt * EXCHANGE_RATE : amt;
       
       totalRielEq += convertedAmt;
       methodStrings.push(`${r.method}: ${amt}`);
 
       paymentRecordsToInsert.push({
         invoice_id: d.invoice_id,
-        amount_paid: convertedAmt,
+        amount_paid_riel: isUsd ? 0 : amt,
+        amount_paid_usd: isUsd ? amt : 0,
         payment_method: r.method,
         recorded_by: validSpender,
         remarks: `Inline Delivery Settlement`
@@ -264,16 +276,24 @@ export default function DeliveryPage() {
 
     let totalRielEq = 0;
     let methodStrings: string[] = [];
+    let availableFunds: { method: string, isUsd: boolean, faceRemaining: number, eqRemaining: number }[] = [];
 
     for (const r of rows) {
       const amt = Number(r.amount) || 0;
       if (amt <= 0) continue;
       
-      let convertedAmt = amt;
-      if (r.method.includes('$')) convertedAmt = amt * EXCHANGE_RATE;
+      const isUsd = r.method.includes('$');
+      let convertedAmt = isUsd ? amt * EXCHANGE_RATE : amt;
       
       totalRielEq += convertedAmt;
       methodStrings.push(`${r.method}: ${amt}`);
+      
+      availableFunds.push({
+          method: r.method,
+          isUsd: isUsd,
+          faceRemaining: amt,
+          eqRemaining: convertedAmt
+      });
     }
 
     if (totalRielEq <= 0) return;
@@ -282,45 +302,58 @@ export default function DeliveryPage() {
 
     try {
       const validSpender = ['Pich', 'Jing'].includes(debtor.owner) ? debtor.owner : 'Both';
-      let remainingToDistribute = totalRielEq;
       
       const updatedInvoices: any[] = [];
       const paymentRecordsToInsert: any[] = [];
       const combinedMethodStr = methodStrings.join(', ');
       
       for (const inv of debtor.invoices) {
-        if (remainingToDistribute <= 0) break;
-        
         let invBalance = Number(inv.balance_due) || 0;
-        let amountToApply = Math.min(invBalance, remainingToDistribute);
-        let newBalance = invBalance - amountToApply;
+        if (invBalance <= 0) continue;
+        
+        let amountAppliedToThisInvoiceRielEq = 0;
 
-        paymentRecordsToInsert.push({
-          invoice_id: inv.invoice_id,
-          amount_paid: amountToApply,
-          payment_method: combinedMethodStr,
-          recorded_by: validSpender,
-          remarks: `Bulk Credit Settlement`
-        });
+        for (let fund of availableFunds) {
+            if (fund.eqRemaining <= 0) continue;
+            if (invBalance <= 0) break;
 
-        let newPaymentMethodStr = inv.payment_method;
-        const appliedStr = `Paid: ${formatRiel(amountToApply)} via [${combinedMethodStr}]`;
+            let applyEq = Math.min(invBalance, fund.eqRemaining);
+            let applyFace = fund.isUsd ? applyEq / EXCHANGE_RATE : applyEq;
 
-        if (inv.payment_method && inv.payment_method !== '-' && inv.payment_method !== 'Unpaid / Debt') {
-           newPaymentMethodStr = `${inv.payment_method}, ${appliedStr}`;
-        } else {
-           newPaymentMethodStr = appliedStr;
+            paymentRecordsToInsert.push({
+                invoice_id: inv.invoice_id,
+                amount_paid_riel: fund.isUsd ? 0 : applyFace,
+                amount_paid_usd: fund.isUsd ? applyFace : 0,
+                payment_method: fund.method,
+                recorded_by: validSpender,
+                remarks: `Bulk Credit Settlement`
+            });
+
+            fund.eqRemaining -= applyEq;
+            fund.faceRemaining -= applyFace;
+            invBalance -= applyEq;
+            amountAppliedToThisInvoiceRielEq += applyEq;
         }
+        
+        if (amountAppliedToThisInvoiceRielEq > 0) {
+            let newBalance = (Number(inv.balance_due) || 0) - amountAppliedToThisInvoiceRielEq;
+            let newPaymentMethodStr = inv.payment_method;
+            const appliedStr = `Paid: ${formatRiel(amountAppliedToThisInvoiceRielEq)} via [${combinedMethodStr}]`;
 
-        updatedInvoices.push({
-          invoice_id: inv.invoice_id,
-          balance_due: newBalance,
-          payment_method: newPaymentMethodStr,
-          is_done: newBalance <= 0,
-          delivery_status: newBalance <= 0 ? 'Delivered' : inv.delivery_status
-        });
+            if (inv.payment_method && inv.payment_method !== '-' && inv.payment_method !== 'Unpaid / Debt') {
+               newPaymentMethodStr = `${inv.payment_method}, ${appliedStr}`;
+            } else {
+               newPaymentMethodStr = appliedStr;
+            }
 
-        remainingToDistribute -= amountToApply;
+            updatedInvoices.push({
+              invoice_id: inv.invoice_id,
+              balance_due: newBalance,
+              payment_method: newPaymentMethodStr,
+              is_done: newBalance <= 0,
+              delivery_status: newBalance <= 0 ? 'Delivered' : inv.delivery_status
+            });
+        }
       }
 
       if (paymentRecordsToInsert.length > 0) {

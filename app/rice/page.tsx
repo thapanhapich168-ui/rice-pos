@@ -1003,9 +1003,6 @@ export default function RiceControl() {
                             return null;
                           }
 
-                          // 🚀 FIXED: Added check so TS compiler won't complain inside the child loop later
-                          if (col === 'linked_wholesale' || col === 'mtd_kg_used' || col === 'mtd_bags_used') return null;
-
                           return (
                             <td key={col} className={isEditing ? 'cell-editing' : ''} style={{ borderRight: '1px solid #f1f5f9', overflow: 'hidden', position: 'relative', padding: 0 }}>
                               {isIdCol && (hoveredId === p.id || selectedToDelete.has(p.id)) && (
@@ -1047,7 +1044,7 @@ export default function RiceControl() {
                            <tr key={`batch-${batch.id}`} style={{ background: '#f8fafc', borderBottom: index === pBatches.length - 2 ? '2px solid #cbd5e1' : '1px dashed #e2e8f0' }}>
                              {columnOrder.map(col => {
                                if (col === 'expand') return <td key={col} style={{ borderRight: '1px solid #f1f5f9' }}></td>;
-                               if (col === 'linked_wholesale' || col === 'mtd_kg_used' || col === 'mtd_bags_used') return null; // 🚀 FIXED TS ERROR HERE
+                               if (col === 'linked_wholesale' || col === 'mtd_kg_used' || col === 'mtd_bags_used') return null;
                                if (col === 'id') return <td key={col} style={{ borderRight: '1px solid #f1f5f9' }}></td>;
                                
                                if (col === 'name') return (
@@ -1063,7 +1060,7 @@ export default function RiceControl() {
                                if (col === 'stock') return <td key={col} style={{ padding: '12px', borderRight: '1px solid #f1f5f9', color: '#b58a3d', fontWeight: 'bold', fontSize: '13px' }}>{batch.remaining_qty}</td>;
                                
                                if (col === 'actions') {
-                                 return <td key={col} style={{ borderRight: '1px solid #f1f5f9' }}></td>; // 🚀 FIXED TS ERROR HERE
+                                 return <td key={col} style={{ borderRight: '1px solid #f1f5f9' }}></td>;
                                }
                                
                                return <td key={col} style={{ padding: '12px', borderRight: '1px solid #f1f5f9', color: '#94a3b8', fontSize: '13px', textAlign: 'center' }}>-</td>;

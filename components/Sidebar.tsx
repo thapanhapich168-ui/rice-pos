@@ -4,33 +4,45 @@ import React, { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabaseClient'
+import { useUserRole } from '@/lib/useUserRole'
 
-const defaultMenuItems = [
+// --- TYPESCRIPT INTERFACE ---
+// This tells VS Code exactly what properties belong to a menu item, clearing all errors.
+interface MenuItem {
+  label: string;
+  href: string;
+  adminOnly: boolean;
+}
+
+const defaultMenuItems: MenuItem[] = [
   // 1. Daily Operations
-  { label: '📊 Dashboard', href: '/dashboard' },
-  { label: '🛒 POS System', href: '/pos' },
-  { label: '🚚 Delivery & Credit', href: '/delivery' },
+  { label: '📊 Dashboard', href: '/dashboard', adminOnly: true },
+  { label: '🛒 POS System', href: '/pos', adminOnly: false },
+  { label: '🚚 Delivery & Credit', href: '/delivery', adminOnly: false },
   
   // 2. Money & Inventory
-  { label: '💵 Expense & Payroll', href: '/expense' },
-  { label: '🌾 Rice Control', href: '/rice' },
-  { label: '🧮 Mix Calculator', href: '/calculator' },
+  { label: '💵 Expense & Payroll', href: '/expense', adminOnly: false },
+  { label: '🌾 Rice Control', href: '/rice', adminOnly: false },
+  { label: '🧮 Mix Calculator', href: '/calculator', adminOnly: false },
   
   // 3. Records & Accounting
-  { label: '🖼️ Invoice Gallery', href: '/invoices' },
-  { label: '🧾 COGS Accounting', href: '/cogs-report' },
+  { label: '🖼️ Invoice Gallery', href: '/invoices', adminOnly: false },
+  { label: '🧾 COGS Accounting', href: '/cogs-report', adminOnly: true },
   
   // 4. Databases & Config
-  { label: '👥 Customer Database', href: '/customerdatabase' },
-  { label: '💼 Master Biz Database', href: '/bizdatabase' },
-  { label: '⚙️ Settings', href: '/settings' }
+  { label: '👥 Customer Database', href: '/customerdatabase', adminOnly: false },
+  { label: '💼 Master Biz Database', href: '/bizdatabase', adminOnly: false },
+  { label: '⚙️ Settings', href: '/settings', adminOnly: true }
 ]
 
 export default function Sidebar() {
   const [isOpen, setIsOpen] = useState(false)
-  const [menuItems, setMenuItems] = useState(defaultMenuItems)
+  const [menuItems, setMenuItems] = useState<MenuItem[]>(defaultMenuItems)
   const pathname = usePathname()
   const router = useRouter()
+
+  // 🚀 Auth Role Integration
+  const { role, loadingRole } = useUserRole();
 
   // Load user's custom drag-and-drop order on mount
   useEffect(() => {
@@ -140,7 +152,12 @@ export default function Sidebar() {
           
           <nav style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
             {menuItems.map((item, index) => {
+              // 🚀 Security Check: If it's an admin tab, and the user isn't an admin, do not render it!
+              const isAllowed = !item.adminOnly || (!loadingRole && role === 'admin');
+              if (!isAllowed) return null;
+
               const isActive = pathname === item.href
+              
               return (
                 <div
                   key={item.href}

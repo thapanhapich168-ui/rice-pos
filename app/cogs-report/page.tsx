@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { supabase } from '@/lib/supabaseClient'
 import * as htmlToImage from 'html-to-image'
+import { useFocusRefresh } from '@/lib/useFocusRefresh'
 
 const EXCHANGE_RATE = 4000;
 const formatRiel = (amount: number) => `${new Intl.NumberFormat('en-US').format(Math.round(amount))} ៛`;
@@ -114,9 +115,10 @@ export default function CogsReportPage() {
 
   useEffect(() => {
     fetchReportData();
-    const channel = supabase.channel('cogs-channel').on('postgres_changes', { event: '*', schema: 'public' }, () => fetchReportData()).subscribe();
-    return () => { supabase.removeChannel(channel); };
   }, [])
+
+  // 🚀 NEW: Window Focus Auto-Refresh
+  useFocusRefresh(fetchReportData);
 
   async function fetchReportData() {
     setLoading(true)
@@ -165,7 +167,6 @@ export default function CogsReportPage() {
 
     // 2. Wholesale Invoices paid to Business
     (payData || []).forEach((p: any) => {
-       // 🚀 UPDATED SCHEMA to calculate correctly regardless if USD or Riel payment
        const amtUsd = Number(p.amount_paid_usd || 0);
        const amtRiel = Number(p.amount_paid_riel || 0);
        const amtRielEq = amtRiel + (amtUsd * EXCHANGE_RATE);
@@ -208,7 +209,6 @@ export default function CogsReportPage() {
                  if (!mName.toLowerCase().includes('mom qr')) momCogsSettledRiel += bAmt;
               });
           } else {
-              // 🚀 UPDATED SCHEMA reading safely
               const rielPaid = Number(c.paid_amount_riel || 0);
               const usdPaid = Number(c.paid_amount_usd || 0) * EXCHANGE_RATE;
               if (!method.includes('mom qr')) momCogsSettledRiel += (rielPaid + usdPaid);
@@ -405,7 +405,6 @@ export default function CogsReportPage() {
     const displayOwner = owner.charAt(0).toUpperCase() + owner.slice(1);
     const key = `${c.settlement_date}_${displayOwner}`;
     if (dailyMap[key]) {
-      // 🚀 UPDATED SCHEMA to catch both currencies back to Riel math for the UI tracker
       const rielPaid = Number(c.paid_amount_riel || 0);
       const usdPaid = Number(c.paid_amount_usd || 0) * EXCHANGE_RATE;
       dailyMap[key].totalPaid += (rielPaid + usdPaid);
@@ -440,7 +439,6 @@ export default function CogsReportPage() {
     let liabilityUsedUsd = 0;
     let methodStrings: string[] = [];
 
-    // Storage buckets for the new schema
     let totalUsdFace = 0;
     let totalRielFace = 0;
 
@@ -491,7 +489,6 @@ export default function CogsReportPage() {
          const owed = day.totalCogs - day.totalPaid;
          const apply = Math.min(owed, remainingToDistribute);
 
-         // We distribute the USD and Riel proportionally into the database so it mirrors correctly
          const pctOfTotal = apply / totalAppliedRielEq;
          const allocatedUsd = totalUsdFace * pctOfTotal;
          const allocatedRiel = totalRielFace * pctOfTotal;
@@ -500,8 +497,8 @@ export default function CogsReportPage() {
            settlement_date: day.date,
            owner_name: day.owner,
            source_type: 'Batch',
-           paid_amount_usd: allocatedUsd, // 🚀 UPDATED SCHEMA 
-           paid_amount_riel: allocatedRiel, // 🚀 UPDATED SCHEMA 
+           paid_amount_usd: allocatedUsd,
+           paid_amount_riel: allocatedRiel,
            payment_method: methodStrings.join(', '),
            status: apply >= owed ? 'Settled' : 'Partial',
            remarks: isBulk ? `Bulk via COGS Dashboard` : `Inline via COGS Dashboard`
@@ -510,7 +507,6 @@ export default function CogsReportPage() {
          remainingToDistribute -= apply;
       }
 
-      // 🔥 STRICT ISOLATION: WE NEVER TOUCH THE 'expenses' TABLE HERE EVER AGAIN.
       const { error } = await supabase.from('cogs_settlements').insert(settlesToInsert);
       if (error) throw error;
       
@@ -1018,12 +1014,12 @@ export default function CogsReportPage() {
 
       <style jsx global>{`
         .main-wrapper { 
-          padding: 24px 24px 24px 75px; 
+          padding: 24px 24px 24px 85px; 
           background: #f8fafc; 
           min-height: 100vh; 
           font-family: Arial, sans-serif; 
           box-sizing: border-box; 
-          color: #333;
+          color: #0f172a;
         }
         .header-container { 
           margin-bottom: 24px; 

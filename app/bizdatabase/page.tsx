@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { supabase } from '@/lib/supabaseClient'
+import { useFocusRefresh } from '@/lib/useFocusRefresh'
 
 // --- CONSTANTS & FORMATTERS ---
 const EXCHANGE_RATE = 4000;
@@ -13,15 +14,6 @@ const formatRiel = (v: number) => {
 const formatNumber = (v: number) => {
   return new Intl.NumberFormat('en-US').format(v);
 };
-
-// Smart Converter for database values
-const parseToRiel = (amount: any, currency?: string) => {
-  const val = Number(amount || 0);
-  if (val === 0) return 0;
-  if (currency?.toLowerCase() === 'usd') return val * EXCHANGE_RATE;
-  if (currency?.toLowerCase() === 'khr' || currency?.toLowerCase() === 'riel') return val;
-  return (Math.abs(val) < 10000) ? val * EXCHANGE_RATE : val;
-}
 
 // Formats 'total_sales' into 'Total Sales', 'qty' to 'Quantity'
 const formatHeader = (key: string) => {
@@ -105,6 +97,9 @@ export default function BizDatabase() {
     fetchData()
     fetchSettings()
   }, [])
+
+  // 🚀 NEW: Window Focus Auto-Refresh
+  useFocusRefresh(fetchData);
 
   // --- DATABASE OPERATIONS ---
   async function fetchSettings() {
@@ -213,15 +208,20 @@ export default function BizDatabase() {
 
     if (expensesData && expensesData.length > 0) {
       expensesData.forEach(e => {
+        // 🚀 FIXED: Robust reading of Dual Currency schema to prevent crash
+        const amtRiel = Number(e.amount_riel || 0);
+        const amtUsd = Number(e.amount_usd || 0);
+        const totalRielValue = amtRiel !== 0 ? Math.abs(amtRiel) : Math.abs(amtUsd) * EXCHANGE_RATE;
+
         unified.push({
           id: `exp_${e.id}`,
           source: 'Expense log',
           created_at: e.created_at,
-          description: e.description || `Expense #${e.id}`,
-          amount: parseToRiel(e.amount, e.currency),
-          category: e.category || 'Uncategorized',
-          status: e.status || 'cleared',
-          owner: e.owner || '-'
+          description: e.remarks || e.description || `Expense #${e.id}`,
+          amount: totalRielValue,
+          category: e.description || e.category || 'Uncategorized',
+          status: e.payment_method || e.status || 'cleared',
+          owner: e.spender || e.owner || '-'
         })
       })
     }

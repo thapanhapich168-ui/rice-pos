@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useRef } from 'react'
 import { supabase } from '@/lib/supabaseClient'
+import { useFocusRefresh } from '@/lib/useFocusRefresh'
 
 // --- TYPES ---
 interface Customer {
@@ -71,6 +72,9 @@ export default function CustomerDatabasePage() {
     loadCustomers()
     fetchSettings()
   }, [])
+
+  // 🚀 NEW: Window Focus Auto-Refresh
+  useFocusRefresh(loadCustomers);
 
   // --- DATABASE OPERATIONS ---
   async function fetchSettings() {
