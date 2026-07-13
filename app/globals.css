@@ -4,7 +4,6 @@
   --background: #f8fafc;
   --foreground: #171717;
   
-  /* Map iOS Safe Areas for easy use anywhere in your app */
   --sat: env(safe-area-inset-top, 0px);
   --sab: env(safe-area-inset-bottom, 0px);
   --sal: env(safe-area-inset-left, 0px);
@@ -21,19 +20,20 @@
    ========================================= */
 html, body {
   width: 100%;
-  height: 100dvh; /* dvh calculates exact height accounting for Safari address bars */
+  height: 100dvh !important; 
   margin: 0;
   padding: 0;
   
-  /* Freeze the native browser canvas to kill the dark-grey rubber-band bounce */
-  overflow: hidden !important; 
-  overscroll-behavior-y: none; 
+  /* SHIELD: Blocks the Sidebar from breaking Safari's layout when opened */
+  position: static !important; 
   
-  background-color: var(--background);
+  overflow: hidden !important; 
+  overscroll-behavior-y: none !important; 
+  
+  background-color: var(--background) !important; /* Forces the void to be white/grey */
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
   
-  /* Prevent double-tap to zoom on UI elements */
   touch-action: manipulation;
   -webkit-text-size-adjust: 100%;
 }
@@ -47,13 +47,10 @@ html, body {
   overflow-x: hidden;
   height: 100dvh;
   
-  /* Enables buttery-smooth momentum scrolling on iOS */
   -webkit-overflow-scrolling: touch; 
   
-  /* Ensures no content gets trapped under the iPhone bottom swipe bar */
   padding-bottom: var(--sab); 
   background-color: var(--background);
   
-  /* Provides a safe relative context for any absolute elements inside pages */
   position: relative; 
 }

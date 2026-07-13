@@ -8,13 +8,14 @@ export const metadata: Metadata = {
   description: 'Inventory and POS Management System',
 }
 
-// 🔥 CRITICAL FOR MOBILE: Prevents Safari auto-zoom and maps the status bar color
+// 🔥 ADDED viewportFit: 'cover'
 export const viewport: Viewport = {
   width: 'device-width',
   initialScale: 1,
   maximumScale: 1,
   userScalable: false,
   themeColor: '#f8fafc',
+  viewportFit: 'cover', 
 }
 
 export default function RootLayout({
@@ -27,14 +28,10 @@ export default function RootLayout({
       <body>
         <SplashScreen>
           <div style={{ display: 'flex', width: '100%', height: '100dvh', overflow: 'hidden' }}>
-            
             <Sidebar />
-
-            {/* This tag isolates the scroll, keeping the Sidebar perfectly fixed */}
             <main className="app-scroller">
               {children}
             </main>
-            
           </div>
         </SplashScreen>
       </body>
