@@ -170,7 +170,7 @@ export default function SettingsPage() {
 
   if (role !== 'admin') {
     return (
-      <div className="main-wrapper" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '100vh', background: '#f8fafc' }}>
+      <div className="main-wrapper" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '100dvh', background: '#f8fafc' }}>
         <div style={{ textAlign: 'center', background: '#fff', padding: '40px', borderRadius: '12px', boxShadow: '0 10px 25px rgba(0,0,0,0.1)', borderTop: '4px solid #ef4444', maxWidth: '400px' }}>
           <div style={{ fontSize: '48px', marginBottom: '16px' }}>🛑</div>
           <h1 style={{ margin: '0 0 8px 0', color: '#1e293b', fontSize: '24px' }}>Access Denied</h1>
@@ -244,7 +244,7 @@ export default function SettingsPage() {
             <strong style={{ color: '#b45309' }}>To Add Users:</strong> Create them securely in your <i>Supabase Auth Dashboard</i>. They will instantly appear below so you can assign their role.
           </div>
 
-          <div style={{ overflowX: 'auto', border: '1px solid #e2e8f0', borderRadius: '8px' }}>
+          <div className="table-responsive-wrapper">
             <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '14px', minWidth: '500px' }}>
               <thead>
                 <tr style={{ background: '#f8fafc', borderBottom: '1px solid #cbd5e1' }}>
@@ -271,12 +271,13 @@ export default function SettingsPage() {
                      </td>
                      <td style={{ padding: '14px 16px' }}>
                        <select
+                         className="mobile-select"
                          value={p.role || ''}
                          onChange={(e) => handleRoleUpdate(p.id, e.target.value)}
                          disabled={p.id === currentUser?.id}
                          style={{ 
-                           padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', outline: 'none', background: '#fff', 
-                           color: '#334155', width: '100%', cursor: p.id === currentUser?.id ? 'not-allowed' : 'pointer', fontSize: '13px'
+                           padding: '10px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', outline: 'none', background: '#fff', 
+                           color: '#334155', width: '100%', cursor: p.id === currentUser?.id ? 'not-allowed' : 'pointer', fontSize: '16px' 
                          }}
                        >
                          <option value="">🚫 No Access</option>
@@ -362,7 +363,7 @@ export default function SettingsPage() {
         .main-wrapper { 
           padding: 24px 24px 24px 75px; 
           background: #f8fafc; 
-          min-height: 100vh; 
+          min-height: 100dvh; /* Swapped to 100dvh for accurate mobile browser height */
           font-family: Arial, sans-serif; 
           box-sizing: border-box; 
           color: #333;
@@ -457,20 +458,29 @@ export default function SettingsPage() {
           font-weight: bold;
           text-transform: uppercase;
         }
-        .settings-input {
+        .settings-input, .mobile-select {
           width: 100%; 
           padding: 10px 12px; 
           border-radius: 6px; 
           border: 1px solid #cbd5e1; 
           outline: none; 
-          font-size: 15px;
+          font-size: 16px; /* Exactly 16px prevents Safari Auto-Zoom */
           box-sizing: border-box;
           background: #ffffff;
+          -webkit-appearance: none; /* Strips harsh default iOS styling */
           transition: border-color 0.2s, box-shadow 0.2s;
         }
-        .settings-input:focus {
+        .settings-input:focus, .mobile-select:focus {
           border-color: #b58a3d;
           box-shadow: 0 0 0 2px rgba(181, 138, 61, 0.2);
+        }
+
+        /* Wrapper for momentum scrolling on iOS */
+        .table-responsive-wrapper {
+          overflow-x: auto;
+          border: 1px solid #e2e8f0;
+          border-radius: 8px;
+          -webkit-overflow-scrolling: touch; 
         }
         
         .signout-btn {
@@ -484,6 +494,7 @@ export default function SettingsPage() {
           font-size: 14px; 
           transition: background 0.2s;
           margin-top: auto;
+          -webkit-tap-highlight-color: transparent;
         }
         .signout-btn:hover {
           background: #334155;
@@ -500,6 +511,7 @@ export default function SettingsPage() {
           font-size: 14px; 
           transition: background 0.2s;
           white-space: nowrap;
+          -webkit-tap-highlight-color: transparent;
         }
         .danger-btn:hover:not(:disabled) {
           background: #dc2626;
@@ -511,7 +523,11 @@ export default function SettingsPage() {
         
         @media (max-width: 768px) { 
           .main-wrapper { 
-            padding: max(80px, env(safe-area-inset-top, 80px)) 16px 16px 16px !important; 
+            /* Safely pads bottom accounting for iOS home bar, and ignores the sidebar padding on mobile */
+            padding: max(80px, env(safe-area-inset-top, 80px)) 
+                     max(16px, env(safe-area-inset-right, 16px)) 
+                     max(24px, env(safe-area-inset-bottom, 24px)) 
+                     max(16px, env(safe-area-inset-left, 16px)) !important; 
           }
           .settings-grid {
             grid-template-columns: 1fr;
@@ -521,6 +537,7 @@ export default function SettingsPage() {
           }
           .signout-btn, .danger-btn {
             width: 100%;
+            padding: 14px; /* Slightly larger touch target on mobile */
           }
         }
       `}</style>
