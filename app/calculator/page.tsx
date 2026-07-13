@@ -613,7 +613,7 @@ export default function RiceMixCalculator() {
         .page-title {
           font-size: 24px !important;
           font-weight: bold;
-          color: #1e293b !important;
+          color: #4a3b1b !important;
           margin: 0;
           letter-spacing: -0.5px;
         }

@@ -997,29 +997,29 @@ export default function DashboardPage() {
         .main-wrapper { padding: 24px 24px 24px 75px; background: #f8fafc; min-height: 100vh; font-family: Arial, sans-serif; box-sizing: border-box; color: #333; }
         
         .header-container { 
-          margin-bottom: 24px; 
           display: flex;
           justify-content: space-between;
-          align-items: center;
-          flex-wrap: wrap; 
+          align-items: center; /* Vertically centers everything */
+          margin-bottom: 24px; 
           gap: 12px;
+          min-height: 48px; /* Locks container height to match hamburger icon */
         }
+        
         .header-left {
           display: flex;
-          flex-direction: row;
-          align-items: center;
-          gap: 16px;
+          align-items: center; /* Vertically centers contents */
+          gap: 12px;
         }
+
         .page-title { 
           font-size: 24px !important; 
-          color: #4a3b1b !important; 
-          margin: 0; 
+          color: #4a3b1b !important; /* Standardized Business Dashboard Color */
+          margin: 0 !important; 
           font-weight: bold;
           letter-spacing: -0.5px;
-          min-width: 0;
-          white-space: normal;
-          word-break: break-word;
-          line-height: 1.2;
+          line-height: 1 !important; /* Removes invisible padding causing misalignment */
+          display: flex;
+          align-items: center;
         }
 
         .section-divider { font-size: 15px; color: #475569; margin-bottom: 16px; border-bottom: 1px solid #e2e8f0; padding-bottom: 6px; }
@@ -1028,9 +1028,30 @@ export default function DashboardPage() {
         input[type="text"].no-spinners::-webkit-inner-spin-button, input[type="text"].no-spinners::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
         
         @media (max-width: 1023px) { 
-          .main-wrapper { padding: 90px 16px 140px 16px !important; min-height: auto; }
-          .header-container { flex-direction: column !important; align-items: flex-start !important; gap: 16px !important; margin-top: 0 !important; margin-bottom: 24px !important; }
-          .header-left { flex-direction: column !important; align-items: flex-start !important; text-align: left !important; gap: 6px !important; }
+          .main-wrapper { 
+            padding: max(20px, env(safe-area-inset-top, 20px)) 16px 24px 16px !important; 
+            min-height: auto; 
+          }
+          .header-container { 
+            margin-left: 54px !important; /* Clears the hamburger icon */
+            margin-bottom: 24px !important; 
+            margin-top: 0 !important;
+            display: flex !important;
+            flex-direction: row !important;
+            justify-content: space-between !important;
+            align-items: center !important; /* Vertically centers on mobile */
+            min-height: 44px !important;
+          }
+          .header-left {
+            display: flex !important;
+            flex-direction: row !important;
+            align-items: center !important;
+            gap: 12px !important;
+          }
+          .page-title {
+            font-size: 22px !important;
+            line-height: 1 !important;
+          }
         }
       `}</style>
     </div>

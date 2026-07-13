@@ -570,7 +570,9 @@ export default function CogsReportPage() {
     <div className="main-wrapper">
       
       <div className="header-container" style={{ paddingRight: '20px' }}>
-        <h1 className="page-title">🌾 COGS Accounting</h1>
+        <div className="header-left">
+          <h1 className="page-title">🌾 COGS Accounting</h1>
+        </div>
         
         <div style={{ display: 'flex', gap: '10px' }}>
           {activeMainTab === 'report' && (
@@ -1021,17 +1023,31 @@ export default function CogsReportPage() {
           box-sizing: border-box; 
           color: #0f172a;
         }
+
         .header-container { 
-          margin-bottom: 24px; 
           display: flex;
           justify-content: space-between;
-          align-items: center;
+          align-items: center; /* Vertically centers everything */
+          margin-bottom: 24px; 
+          gap: 12px;
+          min-height: 48px; /* Locks container height to match hamburger icon */
         }
+        
+        .header-left {
+          display: flex;
+          align-items: center; /* Vertically centers contents */
+          gap: 12px;
+        }
+
         .page-title { 
-          font-size: 24px; 
-          font-weight: bold; 
-          color: #4a3b1b; 
-          margin: 0; 
+          font-size: 24px !important; 
+          color: #4a3b1b !important; /* Standardized Business Dashboard Color */
+          margin: 0 !important; 
+          font-weight: bold;
+          letter-spacing: -0.5px;
+          line-height: 1 !important; /* Removes invisible padding causing misalignment */
+          display: flex;
+          align-items: center;
         }
 
         input[type="text"].no-spinners::-webkit-inner-spin-button,
@@ -1115,15 +1131,28 @@ export default function CogsReportPage() {
 
         @media (max-width: 1023px) { 
           .main-wrapper { 
-            padding: 90px 16px 140px 16px !important; 
+            padding: max(20px, env(safe-area-inset-top, 20px)) 16px 24px 16px !important; 
             min-height: auto;
           }
           .header-container {
-            flex-direction: column !important;
-            align-items: flex-start !important;
-            gap: 16px !important;
+            margin-left: 54px !important; /* Clears the hamburger icon */
+            margin-bottom: 24px !important; 
             margin-top: 0 !important;
-            margin-bottom: 24px !important;
+            display: flex !important;
+            flex-direction: row !important;
+            justify-content: space-between !important;
+            align-items: center !important; /* Vertically centers on mobile */
+            min-height: 44px !important;
+          }
+          .header-left {
+            display: flex !important;
+            flex-direction: row !important;
+            align-items: center !important;
+            gap: 12px !important;
+          }
+          .page-title {
+            font-size: 22px !important;
+            line-height: 1 !important;
           }
           .a4-paper-container {
             padding: 16px;
