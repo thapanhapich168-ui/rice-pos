@@ -1,10 +1,21 @@
+import type { Metadata, Viewport } from 'next'
 import './globals.css'
 import Sidebar from '@/components/Sidebar'
 import SplashScreen from '@/components/SplashScreen'
 
-export const metadata = {
+export const metadata: Metadata = {
   title: 'Angkor Radiant Rice POS',
   description: 'Inventory and POS Management System',
+}
+
+// 🔥 CRITICAL: Fixes the Theme Color and stretches the app under the iOS Notch
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  maximumScale: 1,
+  userScalable: false,
+  themeColor: '#f8fafc',
+  viewportFit: 'cover', 
 }
 
 export default function RootLayout({
