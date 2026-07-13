@@ -4,6 +4,7 @@
   --background: #f8fafc;
   --foreground: #171717;
   
+  /* Map iOS Safe Areas for easy use anywhere in your app */
   --sat: env(safe-area-inset-top, 0px);
   --sab: env(safe-area-inset-bottom, 0px);
   --sal: env(safe-area-inset-left, 0px);
@@ -16,41 +17,34 @@
 }
 
 /* =========================================
-   THE SAFARI LOCKDOWN (Core Body)
+   THE SAFARI LOCKDOWN
    ========================================= */
 html, body {
   width: 100%;
-  height: 100dvh !important; 
+  height: 100dvh; /* dvh calculates exact height accounting for Safari bars */
   margin: 0;
   padding: 0;
   
-  /* SHIELD: Blocks the Sidebar from breaking Safari's layout when opened */
-  position: static !important; 
+  /* Freeze the native browser canvas */
+  overflow: hidden; 
+  overscroll-behavior-y: none; /* Kills the rubber-band bounce */
   
-  overflow: hidden !important; 
-  overscroll-behavior-y: none !important; 
-  
-  background-color: var(--background) !important; /* Forces the void to be white/grey */
+  background: var(--background);
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
   
-  touch-action: manipulation;
+  /* Prevent double-tap to zoom on inputs */
+  touch-action: pan-x pan-y;
   -webkit-text-size-adjust: 100%;
 }
 
-/* =========================================
-   APP SCROLLER (The internal scroll engine)
-   ========================================= */
+/* The secure scrolling container for your pages */
 .app-scroller {
   flex: 1;
   overflow-y: auto;
   overflow-x: hidden;
   height: 100dvh;
-  
-  -webkit-overflow-scrolling: touch; 
-  
+  -webkit-overflow-scrolling: touch; /* Smooth momentum scrolling on iOS */
+  /* Ensures nothing hides under the bottom notch */
   padding-bottom: var(--sab); 
-  background-color: var(--background);
-  
-  position: relative; 
 }

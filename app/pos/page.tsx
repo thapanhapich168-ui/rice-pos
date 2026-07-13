@@ -1802,26 +1802,31 @@ export default function POSPage() {
           box-sizing: border-box; 
           color: #333;
         }
+
         .header-container { 
-          margin-bottom: 24px; 
           display: flex;
           justify-content: space-between;
-          align-items: center;
-          flex-wrap: wrap; 
+          align-items: center; /* Vertically centers everything */
+          margin-bottom: 24px; 
           gap: 12px;
+          min-height: 48px; /* Locks container height to match hamburger icon */
         }
+        
         .header-left {
           display: flex;
-          flex-direction: row;
-          align-items: center;
-          gap: 16px;
+          align-items: center; /* Vertically centers contents */
+          gap: 12px;
         }
+
         .page-title { 
-          font-size: 24px; 
-          color: #4a3b1b; 
-          margin: 0; 
+          font-size: 24px !important; 
+          color: #4a3b1b !important; /* Standardized Business Dashboard Color */
+          margin: 0 !important; 
           font-weight: bold;
           letter-spacing: -0.5px;
+          line-height: 1 !important; /* Removes invisible padding causing misalignment */
+          display: flex;
+          align-items: center;
           min-width: 0;
           white-space: normal;
           word-break: break-word;
@@ -1864,22 +1869,33 @@ export default function POSPage() {
           .desktop-cart-panel { display: none !important; }
           
           .main-wrapper { 
-            padding: max(80px, env(safe-area-inset-top, 80px)) 16px 140px 16px !important; 
-            min-height: auto;
+            padding: max(20px, env(safe-area-inset-top, 20px)) 16px 140px 16px !important; 
+            min-height: 100% !important;
           }
-          .header-container {
-            flex-direction: column !important;
-            align-items: flex-start !important;
-            gap: 16px !important;
-            margin-top: 0 !important; 
-            margin-bottom: 24px !important;
+          
+          .header-container { 
+            margin-left: 54px !important; /* Clears the hamburger icon */
+            margin-bottom: 24px !important; 
+            margin-top: 0 !important;
+            display: flex !important;
+            flex-direction: row !important;
+            justify-content: space-between !important;
+            align-items: center !important; /* Vertically centers on mobile */
+            min-height: 44px !important;
           }
+
           .header-left {
-            flex-direction: column !important;
-            align-items: flex-start !important;
-            text-align: left !important;
-            gap: 6px !important;
+            display: flex !important;
+            flex-direction: row !important;
+            align-items: center !important;
+            gap: 12px !important;
           }
+
+          .page-title {
+            font-size: 22px !important;
+            line-height: 1 !important;
+          }
+
           .mobile-fab {
             display: flex !important; 
             justify-content: space-between; 
@@ -1896,6 +1912,7 @@ export default function POSPage() {
             z-index: 998; 
             cursor: pointer;
           }
+
           .mobile-input-field, .mobile-select-menu {
             font-size: 16px !important; 
           }
