@@ -75,6 +75,9 @@ export default function ExpenseDashboard() {
   const [remarks, setRemarks] = useState('')
   const [loading, setLoading] = useState(false)
 
+  // Top Notification Popup State
+  const [notification, setNotification] = useState<{show: boolean, message: string, type: 'success'|'error'}>({ show: false, message: '', type: 'success' })
+
   // Split Payment Tracking
   const [paymentRows, setPaymentRows] = useState<{id: number, method: string, amount: number | ''}[]>([
     { id: Date.now(), method: 'Cash ៛', amount: '' }
@@ -110,6 +113,12 @@ export default function ExpenseDashboard() {
     fetchStaff()
   }, [])
 
+  // Notification Helper
+  const showNotification = (message: string, type: 'success' | 'error' = 'success') => {
+    setNotification({ show: true, message, type });
+    setTimeout(() => setNotification({ show: false, message: '', type: 'success' }), 3000);
+  }
+
   // --- API: Fetch Staff ---
   async function fetchStaff() {
     const { data, error } = await supabase.from('staff').select('*').order('id', { ascending: true })
@@ -128,36 +137,42 @@ export default function ExpenseDashboard() {
     setLoading(true)
 
     try {
-      for (const row of activePayments) {
-        let rawAmount = Number(row.amount);
-        let saveRiel = 0;
-        let saveUsd = 0;
-
-        if (row.method.includes('$')) {
-          saveUsd = rawAmount;
-        } else {
-          saveRiel = rawAmount;
-        }
-
-        const { error } = await supabase.from('expenses').insert([{
-          expense_date: expenseDate,
-          spender: spender,
-          payment_method: row.method,
-          remarks: activePayments.length > 1 ? `${remarks} (Split Payment)` : remarks,                     
-          amount_usd: saveUsd, // 🚀 UPDATED SCHEMA              
-          amount_riel: saveRiel,         
-          description: activeTab.toUpperCase(), 
-        }]);
-
-        if (error) throw error;
+      // 🚀 FIXED: Combine multiple split payments into ONE single record for the dashboard to parse properly
+      let combinedMethod = activePayments[0].method;
+      if (activePayments.length > 1) {
+        combinedMethod = activePayments.map(r => `${r.method}:${r.amount}`).join(',');
       }
 
-      alert('Expense recorded successfully!')
+      let totalUsd = 0;
+      let totalRiel = 0;
+
+      for (const row of activePayments) {
+        let rawAmount = Number(row.amount);
+        if (row.method.includes('$')) {
+          totalUsd += rawAmount;
+        } else {
+          totalRiel += rawAmount;
+        }
+      }
+
+      const { error } = await supabase.from('expenses').insert([{
+        expense_date: expenseDate,
+        spender: spender,
+        payment_method: combinedMethod,
+        remarks: remarks,                     
+        amount_usd: totalUsd,              
+        amount_riel: totalRiel,         
+        description: activeTab.toUpperCase(), 
+      }]);
+
+      if (error) throw error;
+
+      showNotification('Expense recorded successfully!', 'success');
       setRemarks('')
       setPaymentRows([{ id: Date.now(), method: 'Cash ៛', amount: '' }]);
 
     } catch (err: any) {
-      alert(`Error saving entry: ${err.message}`)
+      showNotification(`Error saving entry: ${err.message}`, 'error');
     } finally {
       setLoading(false)
     }
@@ -176,8 +191,8 @@ export default function ExpenseDashboard() {
       { 
         name: newStaffName, 
         salary: Number(newStaffSalary) || 0,
-        total_debt_riel: 0, // 🚀 UPDATED SCHEMA 
-        total_debt_usd: 0,  // 🚀 UPDATED SCHEMA 
+        total_debt_riel: 0, 
+        total_debt_usd: 0,  
         start_date: firstOfMonth
       }
     ])
@@ -203,7 +218,6 @@ export default function ExpenseDashboard() {
     let newTotalRiel = Number(staff.total_debt_riel || 0);
     let newTotalUsd = Number(staff.total_debt_usd || 0);
 
-    // 🚀 DUAL CURRENCY ROUTING
     if (method.includes('$')) {
       saveUsd = rawAmount;
       newTotalUsd += rawAmount;
@@ -212,11 +226,9 @@ export default function ExpenseDashboard() {
       newTotalRiel += rawAmount;
     }
 
-    // Optimistic UI update
     setStaffList(prev => prev.map(s => s.id === staff.id ? { ...s, total_debt_riel: newTotalRiel, total_debt_usd: newTotalUsd } : s));
     setDebtAdditions(prev => ({ ...prev, [staff.id]: '' }))
 
-    // 1. Update total debt natively
     const { error: staffErr } = await supabase.from('staff').update({ total_debt_riel: newTotalRiel, total_debt_usd: newTotalUsd }).eq('id', staff.id)
     if (staffErr) {
       alert(`Error updating debt: ${staffErr.message}`)
@@ -224,20 +236,19 @@ export default function ExpenseDashboard() {
       return;
     }
 
-    // 2. Log History
     const { error: histErr } = await supabase.from('staff_debt_history').insert([{ staff_id: staff.id, amount: rawAmount, payment_method: method }])
     if (histErr) alert(`Debt updated, but history log failed: ${histErr.message}`);
 
-    // 3. Log as STAFF_ADVANCE to deduct cash, using updated schema
     await supabase.from('expenses').insert([{
       expense_date: new Date().toISOString().split('T')[0],
       spender: 'Both', 
       payment_method: method,
       remarks: `Staff Advance: ${staff.name}`,
-      amount_usd: saveUsd, // 🚀 UPDATED SCHEMA 
+      amount_usd: saveUsd, 
       amount_riel: saveRiel,
       description: 'STAFF_ADVANCE' 
     }])
+    showNotification(`Advance added for ${staff.name}`, 'success');
   }
 
   // --- Action: Settle/Pay Back Debt ---
@@ -250,7 +261,6 @@ export default function ExpenseDashboard() {
     let newTotalRiel = Number(staff.total_debt_riel || 0);
     let newTotalUsd = Number(staff.total_debt_usd || 0);
 
-    // 🚀 DUAL CURRENCY ROUTING
     if (settleModal.method.includes('$')) {
       if (rawAmount > newTotalUsd) return alert("Cannot settle more USD than they owe.");
       saveUsd = -Math.abs(rawAmount);
@@ -261,7 +271,6 @@ export default function ExpenseDashboard() {
       newTotalRiel -= rawAmount;
     }
 
-    // Optimistic Update
     setStaffList(prev => prev.map(s => s.id === staff.id ? { ...s, total_debt_riel: newTotalRiel, total_debt_usd: newTotalUsd } : s));
     setSettleModal({ isOpen: false, staff: null, amount: '', method: 'Cash ៛' });
 
@@ -273,10 +282,12 @@ export default function ExpenseDashboard() {
       spender: 'Both', 
       payment_method: settleModal.method,
       remarks: `Staff Debt Settlement: ${staff.name}`,
-      amount_usd: saveUsd, // 🚀 UPDATED SCHEMA 
+      amount_usd: saveUsd, 
       amount_riel: saveRiel,
       description: 'STAFF_SETTLEMENT' 
     }]);
+    
+    showNotification(`Settlement recorded for ${staff.name}`, 'success');
   }
 
   // --- Action: View Staff History ---
@@ -301,13 +312,11 @@ export default function ExpenseDashboard() {
 
     const staff = staffList.find(s => s.id === id);
 
-    // Optimistic UI Update
     setStaffList(prev => prev.map(s => s.id === id ? { ...s, [field]: finalValue } : s));
     setEditingCell(null);
 
     const { error } = await supabase.from('staff').update({ [field]: finalValue }).eq('id', id);
     
-    // Auto-log manual debt adjustments natively
     if (!error && (field === 'total_debt_riel' || field === 'total_debt_usd') && staff) {
         const difference = finalValue - (Number(staff[field]) || 0);
         if (difference !== 0) {
@@ -323,7 +332,7 @@ export default function ExpenseDashboard() {
 
     if (error) {
       alert(`Failed to update ${field}: ${error.message}`);
-      fetchStaff(); // Revert on failure
+      fetchStaff();
     }
   }
 
@@ -340,7 +349,6 @@ export default function ExpenseDashboard() {
     }
   }
 
-  // --- Helper: Calculate Month-to-Date Days Worked ---
   function calculateDaysWorked(startDateStr: string) {
     if (!startDateStr) return 0;
     
@@ -365,11 +373,25 @@ export default function ExpenseDashboard() {
     return diffDays > 0 ? diffDays : 0;
   }
 
-  // Active payments check for button
   const hasPayments = paymentRows.some(r => Number(r.amount) > 0);
 
   return (
     <div className="main-wrapper">
+
+      {/* 🚀 TOP NOTIFICATION POPUP */}
+      {notification.show && (
+        <div style={{
+          position: 'fixed', top: '24px', left: '50%', transform: 'translateX(-50%)',
+          backgroundColor: notification.type === 'success' ? '#10b981' : '#ef4444',
+          color: '#ffffff', padding: '14px 24px', borderRadius: '8px',
+          boxShadow: '0 10px 25px rgba(0,0,0,0.15)', zIndex: 999999,
+          fontWeight: 'bold', fontSize: '15px', display: 'flex', alignItems: 'center', gap: '8px',
+          animation: 'slideDown 0.3s ease-out'
+        }}>
+          {notification.type === 'success' ? '✅' : '❌'} {notification.message}
+        </div>
+      )}
+
       <div style={{
         backgroundColor: '#ffffff',
         width: '100%',
@@ -384,7 +406,7 @@ export default function ExpenseDashboard() {
         boxSizing: 'border-box'
       }} className="content-card">
         
-        {/* HEADER BRANDING - CENTERED */}
+        {/* HEADER BRANDING */}
         <div className="header-container">
           <h1 className="page-title">💸 Daily Expense & Payroll</h1>
         </div>
@@ -784,6 +806,11 @@ export default function ExpenseDashboard() {
           -moz-appearance: textfield;
         }
 
+        @keyframes slideDown {
+          from { transform: translate(-50%, -20px); opacity: 0; }
+          to { transform: translate(-50%, 0); opacity: 1; }
+        }
+
         .main-wrapper { 
           padding: 24px 24px 24px 75px; 
           background: #f8fafc; 
@@ -797,24 +824,22 @@ export default function ExpenseDashboard() {
         }
 
         .header-container { 
-          margin-bottom: 30px; 
+          margin-bottom: 24px; 
           display: flex;
-          justify-content: center;
+          justify-content: center; /* This centers your title */
           align-items: center;
           flex-wrap: wrap; 
           gap: 12px;
-          text-align: center;
         }
 
         .page-title { 
-          font-size: 26px; 
-          color: #1e293b; 
+          font-size: 24px !important; 
+          color: #4a3b1b !important; 
           margin: 0; 
-          min-width: 0;
-          white-space: normal;
-          word-break: break-word;
           font-weight: bold;
-          letter-spacing: -0.3px;
+          letter-spacing: -0.5px;
+          line-height: 1.2;
+          text-align: center; /* Optional: ensures text wraps centered */
         }
 
         .tabs-container {
@@ -853,9 +878,9 @@ export default function ExpenseDashboard() {
           }
           .header-container {
             flex-direction: column !important;
-            align-items: center !important;
-            gap: 10px !important;
-            margin-bottom: 20px !important;
+            align-items: flex-start !important;
+            gap: 16px !important;
+            margin-bottom: 24px !important;
           }
           .content-card {
             padding: 20px !important;
