@@ -6,7 +6,6 @@ import { usePathname, useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabaseClient'
 import { useUserRole } from '@/lib/useUserRole'
 
-// --- TYPESCRIPT INTERFACE ---
 interface MenuItem {
   label: string;
   href: string;
@@ -14,21 +13,14 @@ interface MenuItem {
 }
 
 const defaultMenuItems: MenuItem[] = [
-  // 1. Daily Operations
   { label: '📊 Dashboard', href: '/dashboard', adminOnly: true },
   { label: '🛒 POS System', href: '/pos', adminOnly: false },
   { label: '🚚 Delivery & Credit', href: '/delivery', adminOnly: false },
-  
-  // 2. Money & Inventory
   { label: '💵 Expense & Payroll', href: '/expense', adminOnly: false },
   { label: '🌾 Rice Control', href: '/rice', adminOnly: false },
   { label: '🧮 Mix Calculator', href: '/calculator', adminOnly: false },
-  
-  // 3. Records & Accounting
   { label: '🖼️ Invoice Gallery', href: '/invoices', adminOnly: false },
   { label: '🧾 COGS Accounting', href: '/cogs-report', adminOnly: true },
-  
-  // 4. Databases & Config
   { label: '👥 Customer Database', href: '/customerdatabase', adminOnly: false },
   { label: '💼 Master Biz Database', href: '/bizdatabase', adminOnly: false },
   { label: '⚙️ Settings', href: '/settings', adminOnly: true }
@@ -40,10 +32,8 @@ export default function Sidebar() {
   const pathname = usePathname()
   const router = useRouter()
 
-  // 🚀 Auth Role Integration
   const { role, loadingRole } = useUserRole();
 
-  // Load user's custom drag-and-drop order on mount
   useEffect(() => {
     const saved = localStorage.getItem('sidebar_menu_order')
     if (saved) {
@@ -59,12 +49,10 @@ export default function Sidebar() {
         })
         setMenuItems(sorted)
       } catch (e) {
-        // Fallback to default if parsing fails
       }
     }
   }, [])
 
-  // Automatically secure screens: if user logs out, boot them back to root login page
   useEffect(() => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       if (!session) {
@@ -79,7 +67,6 @@ export default function Sidebar() {
     router.push('/')
   }
 
-  // --- DRAG AND DROP ENGINE ---
   const handleDragStart = (e: React.DragEvent, index: number) => {
     e.dataTransfer.setData('text/plain', index.toString())
     e.dataTransfer.effectAllowed = 'move'
@@ -100,29 +87,25 @@ export default function Sidebar() {
     newItems.splice(targetIndex, 0, draggedItem)
 
     setMenuItems(newItems)
-    // Instantly persist the new layout
     localStorage.setItem('sidebar_menu_order', JSON.stringify(newItems.map(i => i.label)))
   }
 
-  // Prevents the hamburger from showing up on the login screen
   if (pathname === '/') return null;
 
   return (
     <>
-      {/* MOBILE BACKDROP: Appears only on phones to let you click outside to close */}
       <div 
         className={`sidebar-backdrop ${isOpen ? 'open' : ''}`} 
         onClick={() => setIsOpen(false)} 
       />
 
-      {/* FIXED BURGER BUTTON (Safe-area protected so it dodges the iOS notch) */}
       <button
         onClick={() => setIsOpen(!isOpen)}
         style={{
           position: 'fixed',
           top: 'max(15px, env(safe-area-inset-top, 15px))',
           left: 'max(15px, env(safe-area-inset-left, 15px))',
-          zIndex: 1001, // Guaranteed to stay on top of everything
+          zIndex: 1001,
           background: '#111827',
           color: 'white',
           border: 'none',
@@ -140,10 +123,7 @@ export default function Sidebar() {
         ☰
       </button>
 
-      {/* SIDEBAR CONTAINER */}
       <div className={`sidebar-wrapper ${isOpen ? 'open' : 'closed'}`}>
-        
-        {/* TOP SECTION: BRAND & LINKS */}
         <div>
           <div style={{ display: 'flex', alignItems: 'center', minHeight: '42px', marginBottom: '30px', paddingLeft: '45px' }}>
             <h2 style={{ margin: 0, whiteSpace: 'nowrap', fontSize: '20px' }}>🌾 Rice POS</h2>
@@ -151,7 +131,6 @@ export default function Sidebar() {
           
           <nav style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
             {menuItems.map((item, index) => {
-              // 🚀 Security Check: If it's an admin tab, and the user isn't an admin, do not render it!
               const isAllowed = !item.adminOnly || (!loadingRole && role === 'admin');
               if (!isAllowed) return null;
 
@@ -170,7 +149,7 @@ export default function Sidebar() {
                   <Link 
                     href={item.href}
                     onClick={() => setIsOpen(false)} 
-                    draggable={false} // Crucial: Stops the browser from accidentally dragging the URL
+                    draggable={false}
                     style={{
                       color: 'white',
                       textDecoration: 'none',
@@ -193,7 +172,6 @@ export default function Sidebar() {
           </nav>
         </div>
 
-        {/* BOTTOM SECTION: LOGOUT */}
         <button 
           onClick={handleLogout} 
           style={{
@@ -213,28 +191,24 @@ export default function Sidebar() {
         </button>
       </div>
 
-      {/* SIDEBAR RESPONSIVE & MOBILE PHYSICS */}
       <style jsx>{`
-        /* MOBILE BACKDROP */
         .sidebar-backdrop {
           position: fixed;
-          /* 🔥 THE MAGIC FIX: We push the backdrop down exactly below the camera notch.
-             Because it no longer touches the absolute top edge, Safari CANNOT color-sample it! */
-          top: max(1px, env(safe-area-inset-top));
-          bottom: max(1px, env(safe-area-inset-bottom));
-          left: 0; right: 0;
+          /* 🔥 Removed 1px hack. Flawless coverage. */
+          top: 0; left: 0; right: 0; bottom: 0;
           background: rgba(0,0,0,0.5);
           z-index: 999;
           opacity: 0;
           pointer-events: none;
           transition: opacity 0.3s ease;
+          touch-action: none;
         }
 
-        /* BASE SIDEBAR STYLES */
         .sidebar-wrapper {
           background: #111827;
           color: white;
-          height: 100dvh; /* Flawless full height bypassing Safari/Chrome URL bars */
+          /* 🔥 Changed from 100dvh to 100%. Perfectly maps to the pinned body. */
+          height: 100%; 
           display: flex;
           flex-direction: column;
           justify-content: space-between;
@@ -245,7 +219,6 @@ export default function Sidebar() {
           z-index: 1000;
         }
 
-        /* CLOSED STATE */
         .sidebar-wrapper.closed {
           width: 0px;
           min-width: 0px;
@@ -254,18 +227,15 @@ export default function Sidebar() {
           padding: 0px;
         }
 
-        /* OPEN STATE */
         .sidebar-wrapper.open {
           width: 240px;
           min-width: 240px;
           opacity: 1;
           pointer-events: auto;
-          /* Safely pads the top & bottom so nothing touches the absolute edges on phones */
           padding: max(15px, env(safe-area-inset-top, 15px)) 20px max(20px, env(safe-area-inset-bottom, 20px)) 20px;
           box-shadow: 4px 0 10px rgba(0, 0, 0, 0.1);
         }
 
-        /* DESKTOP SPECIFIC RULES */
         @media (min-width: 1024px) {
           .sidebar-wrapper {
             position: sticky;
@@ -273,14 +243,13 @@ export default function Sidebar() {
             left: 0;
           }
           .sidebar-backdrop {
-            display: none; /* We don't want a backdrop on laptops */
+            display: none;
           }
         }
 
-        /* MOBILE SPECIFIC RULES */
         @media (max-width: 1023px) {
           .sidebar-wrapper {
-            position: fixed; /* Pops out of the layout flow as a drawer */
+            position: fixed;
             top: 0;
             left: 0;
           }

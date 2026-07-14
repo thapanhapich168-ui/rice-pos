@@ -12,14 +12,14 @@ export const metadata: Metadata = {
   },
 }
 
-// 🔥 CRITICAL: This bans Safari from "tinting" the top/bottom bars dark grey.
+// 🔥 CRITICAL: Forces Safari to paint the notch and bottom bar white/light-grey
 export const viewport: Viewport = {
   width: 'device-width',
   initialScale: 1,
   maximumScale: 1,
   userScalable: false,
   viewportFit: 'cover',
-  themeColor: '#f8fafc', 
+  themeColor: '#f8fafc',
 }
 
 export default function RootLayout({
@@ -31,7 +31,7 @@ export default function RootLayout({
     <html lang="en">
       <body>
         <SplashScreen>
-          {/* Changed 100dvh to 100% so it perfectly fits without stretching out of bounds */}
+          {/* Changed 100dvh to 100% so it perfectly fits inside the pinned body */}
           <div style={{ display: 'flex', width: '100%', height: '100%', overflow: 'hidden' }}>
             
             <Sidebar />
