@@ -64,10 +64,8 @@ export default function SplashScreen({ children }: { children: React.ReactNode }
         </div>
       )}
       
-      {/* We keep the children mounted in the background so the layout 
-        calculates its dimensions invisibly while the splash screen plays 
-      */}
-      <div style={{ display: fadeState && !isLoading ? 'block' : isLoading ? 'none' : 'block', height: '100dvh', width: '100%' }}>
+      {/* Changed 100dvh to 100% here to stop layout pushing */}
+      <div style={{ display: fadeState && !isLoading ? 'block' : isLoading ? 'none' : 'block', height: '100%', width: '100%' }}>
         {children}
       </div>
     </>

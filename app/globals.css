@@ -4,7 +4,7 @@
   --background: #f8fafc;
   --foreground: #171717;
   
-  /* Map iOS Safe Areas for exact notch measurements */
+  /* Map iOS Safe Areas for easy use anywhere in your app */
   --sat: env(safe-area-inset-top, 0px);
   --sab: env(safe-area-inset-bottom, 0px);
   --sal: env(safe-area-inset-left, 0px);
@@ -17,43 +17,35 @@
 }
 
 /* =========================================
-   THE SAFARI LOCKDOWN (Core Body)
+   THE SAFARI LOCKDOWN
    ========================================= */
 html, body {
   width: 100%;
-  height: 100dvh !important; 
+  height: 100dvh; /* The ONLY place 100dvh is allowed */
   margin: 0;
   padding: 0;
   
-  /* SHIELD: Blocks the Sidebar from breaking Safari's layout */
-  position: static !important; 
+  /* Freeze the native browser canvas */
+  overflow: hidden; 
+  overscroll-behavior-y: none; /* Kills the rubber-band bounce */
   
-  /* Kills the rubber-band memory bug */
-  overflow: hidden !important; 
-  overscroll-behavior-y: none !important; 
-  
-  /* Forces the void to perfectly match your theme */
-  background-color: var(--background) !important; 
+  background-color: var(--background);
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
   
-  touch-action: manipulation;
+  /* Prevent double-tap to zoom on inputs */
+  touch-action: pan-x pan-y;
   -webkit-text-size-adjust: 100%;
 }
 
-/* =========================================
-   APP SCROLLER (The internal scroll engine)
-   ========================================= */
+/* The secure scrolling container for your pages */
 .app-scroller {
   flex: 1;
   overflow-y: auto;
   overflow-x: hidden;
-  height: 100dvh;
-  
-  /* Native momentum scrolling on iOS */
-  -webkit-overflow-scrolling: touch; 
-  
+  height: 100%; /* Stays perfectly in bounds */
+  -webkit-overflow-scrolling: touch; /* Smooth momentum scrolling on iOS */
+  /* Ensures nothing hides under the bottom notch */
   padding-bottom: var(--sab); 
-  background-color: var(--background);
-  position: relative; 
+  overscroll-behavior-y: contain; /* Stops internal scroll from glitching the body */
 }

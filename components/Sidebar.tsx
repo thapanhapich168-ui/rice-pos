@@ -7,7 +7,6 @@ import { supabase } from '@/lib/supabaseClient'
 import { useUserRole } from '@/lib/useUserRole'
 
 // --- TYPESCRIPT INTERFACE ---
-// This tells VS Code exactly what properties belong to a menu item, clearing all errors.
 interface MenuItem {
   label: string;
   href: string;
@@ -225,13 +224,14 @@ export default function Sidebar() {
           opacity: 0;
           pointer-events: none;
           transition: opacity 0.3s ease;
+          touch-action: none; /* 🔥 KILLS THE SWIPE GLITCH ON IOS */
         }
 
         /* BASE SIDEBAR STYLES */
         .sidebar-wrapper {
           background: #111827;
           color: white;
-          height: 100dvh; /* Flawless full height bypassing Safari/Chrome URL bars */
+          height: 100%; /* Changed from 100dvh to prevent pushing out of bounds */
           display: flex;
           flex-direction: column;
           justify-content: space-between;

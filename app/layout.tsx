@@ -8,7 +8,7 @@ export const metadata: Metadata = {
   description: 'Inventory and POS Management System',
 }
 
-// 🔥 CRITICAL: Fixes the Theme Color and stretches the app under the iOS Notch
+// 🔥 THIS KILLS THE GREY SCREEN: Paints notch/bottom area & locks zoom
 export const viewport: Viewport = {
   width: 'device-width',
   initialScale: 1,
@@ -27,7 +27,8 @@ export default function RootLayout({
     <html lang="en">
       <body>
         <SplashScreen>
-          <div style={{ display: 'flex', width: '100%', height: '100dvh', overflow: 'hidden' }}>
+          {/* Changed 100dvh to 100% to stop it from pushing out of bounds */}
+          <div style={{ display: 'flex', width: '100%', height: '100%', overflow: 'hidden' }}>
             
             <Sidebar />
 
