@@ -6,9 +6,15 @@ import SplashScreen from '@/components/SplashScreen'
 export const metadata: Metadata = {
   title: 'Angkor Radiant Rice POS',
   description: 'Inventory and POS Management System',
+  // 🔥 THIS IS THE MAGIC FIX FOR THE IPHONE 16 PRO MAX
+  // It forces newer iOS versions to bridge the gap and act like the iPhone 11
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: 'default', 
+  },
 }
 
-// 🔥 THIS KILLS THE GREY SCREEN: Paints notch/bottom area & locks zoom
+// Ensures Safari stretches the background correctly and prevents zooming
 export const viewport: Viewport = {
   width: 'device-width',
   initialScale: 1,
@@ -27,7 +33,6 @@ export default function RootLayout({
     <html lang="en">
       <body>
         <SplashScreen>
-          {/* Changed 100dvh to 100% to stop it from pushing out of bounds */}
           <div style={{ display: 'flex', width: '100%', height: '100%', overflow: 'hidden' }}>
             
             <Sidebar />
