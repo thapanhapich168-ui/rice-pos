@@ -218,20 +218,23 @@ export default function Sidebar() {
         /* MOBILE BACKDROP */
         .sidebar-backdrop {
           position: fixed;
-          top: 0; left: 0; right: 0; bottom: 0;
+          /* 🔥 THE MAGIC FIX: We push the backdrop down exactly below the camera notch.
+             Because it no longer touches the absolute top edge, Safari CANNOT color-sample it! */
+          top: max(1px, env(safe-area-inset-top));
+          bottom: max(1px, env(safe-area-inset-bottom));
+          left: 0; right: 0;
           background: rgba(0,0,0,0.5);
           z-index: 999;
           opacity: 0;
           pointer-events: none;
           transition: opacity 0.3s ease;
-          touch-action: none; /* 🔥 KILLS THE SWIPE GLITCH ON IOS */
         }
 
         /* BASE SIDEBAR STYLES */
         .sidebar-wrapper {
           background: #111827;
           color: white;
-          height: 100%; /* Changed from 100dvh to prevent pushing out of bounds */
+          height: 100dvh; /* Flawless full height bypassing Safari/Chrome URL bars */
           display: flex;
           flex-direction: column;
           justify-content: space-between;
