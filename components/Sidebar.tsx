@@ -23,6 +23,7 @@ const defaultMenuItems: MenuItem[] = [
   { label: '🧾 COGS Accounting', href: '/cogs-report', adminOnly: true },
   { label: '🧑‍🌾 Customer Database', href: '/customerdatabase', adminOnly: false },
   { label: '🔐 Master Biz Database', href: '/bizdatabase', adminOnly: false },
+  { label: '🛠️ Dev Test', href: '/dev-test', adminOnly: true },
   { label: '⚙️ Settings', href: '/settings', adminOnly: true }
 ]
 

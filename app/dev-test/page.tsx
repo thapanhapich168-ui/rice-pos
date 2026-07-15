@@ -355,33 +355,36 @@ export default function MasterTestEngine() {
 
   return (
     <div className="main-wrapper">
-      <div style={{ backgroundColor: '#ffffff', padding: '24px', borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: '0 4px 15px rgba(0,0,0,0.05)', maxWidth: '1400px', margin: '0 auto', width: '100%' }}>
-        
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', borderBottom: '2px solid #f1f5f9', paddingBottom: '16px' }}>
-          <div>
-            <h1 style={{ margin: 0, color: '#1e293b', fontSize: '20px' }}>🛠️ Master QA Test Engine</h1>
-            <p style={{ margin: '4px 0 0 0', color: '#64748b', fontSize: '13px' }}>Automated mathematical mapping and database insertion verifier.</p>
-          </div>
-          <button 
-            onClick={runAllTests} 
-            disabled={isRunning}
-            style={{ 
-              padding: '10px 20px', background: isRunning ? '#cbd5e1' : '#0f172a', color: '#fff', 
-              border: 'none', borderRadius: '8px', cursor: isRunning ? 'not-allowed' : 'pointer', 
-              fontWeight: 'bold', fontSize: '14px', boxShadow: '0 4px 6px rgba(0,0,0,0.1)' 
-            }}
-          >
-            {isRunning ? '⏳ Running...' : '🚀 Execute Master Suite'}
-          </button>
+      
+      {/* 🔥 STANDARDIZED HEADER */}
+      <div className="header-container">
+        <div className="header-left" style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: '4px' }}>
+          <h1 style={{ margin: 0, color: '#1e293b', fontSize: '20px' }}>🛠️ Master QA Test Engine</h1>
+          <p className="mobile-subtitle" style={{ margin: 0, color: '#64748b', fontSize: '13px' }}>Automated mathematical mapping and database insertion verifier.</p>
         </div>
+        <button 
+          onClick={runAllTests} 
+          disabled={isRunning}
+          className="execute-btn"
+          style={{ 
+            background: isRunning ? '#cbd5e1' : '#0f172a', color: '#fff', 
+            border: 'none', borderRadius: '8px', cursor: isRunning ? 'not-allowed' : 'pointer', 
+            fontWeight: 'bold', boxShadow: '0 4px 6px rgba(0,0,0,0.1)'
+          }}
+        >
+          {isRunning ? '⏳ Run' : '🚀 Run'}
+        </button>
+      </div>
 
+      <div style={{ backgroundColor: '#ffffff', padding: '24px', borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: '0 4px 15px rgba(0,0,0,0.05)', maxWidth: '1600px', margin: '0 auto', width: '100%', boxSizing: 'border-box' }}>
+        
         {results.length === 0 ? (
           <div style={{ textAlign: 'center', padding: '40px', color: '#94a3b8', border: '2px dashed #cbd5e1', borderRadius: '8px', background: '#f8fafc' }}>
             <h2>Ready for Diagnostics</h2>
-            <p style={{ fontSize: '14px' }}>Click "Execute Master Suite" to insert test data, verify database formulas, and validate table relationships.</p>
+            <p style={{ fontSize: '14px' }}>Click "Run" to insert test data, verify database formulas, and validate table relationships.</p>
           </div>
         ) : (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(450px, 1fr))', gap: '12px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 450px), 1fr))', gap: '12px' }}>
             {results.map((r, i) => (
               <div key={i} style={{ 
                 padding: '12px', borderRadius: '6px', 
@@ -401,7 +404,9 @@ export default function MasterTestEngine() {
                       borderLeft: `3px solid ${logItem.type === 'assert' ? (logItem.msg.includes('✅') ? '#22c55e' : '#ef4444') : logItem.type === 'ui' ? '#eab308' : '#cbd5e1'}`,
                       color: logItem.type === 'ui' ? '#854d0e' : logItem.type === 'assert' ? '#1e293b' : '#64748b',
                       fontWeight: logItem.type === 'assert' ? 'bold' : 'normal',
-                      backgroundColor: logItem.type === 'ui' ? '#fefce8' : 'transparent'
+                      backgroundColor: logItem.type === 'ui' ? '#fefce8' : 'transparent',
+                      wordBreak: 'break-word',
+                      whiteSpace: 'pre-wrap'
                     }}>
                       {logItem.msg}
                     </div>
@@ -412,8 +417,17 @@ export default function MasterTestEngine() {
           </div>
         )}
       </div>
+
       <style jsx global>{`
         body { font-family: Arial, sans-serif; margin: 0; padding: 0; background-color: #f1f5f9; }
+        
+        .execute-btn {
+          padding: 10px 20px;
+          font-size: 14px;
+          white-space: nowrap;
+        }
+
+        /* 🔥 DESKTOP LAYOUT FIXES (Aligned with other pages) */
         .main-wrapper { 
           padding: max(20px, env(safe-area-inset-top, 20px)) 24px 40px 24px; 
           background: #f1f5f9; 
@@ -423,6 +437,47 @@ export default function MasterTestEngine() {
           overflow-y: auto;
           -webkit-overflow-scrolling: touch;
           width: 100%;
+        }
+
+        .header-container { 
+          display: flex;
+          justify-content: space-between;
+          align-items: center; 
+          margin-bottom: 24px; 
+          margin-top: 0;
+          margin-left: 60px; /* 🔥 Clears the burger menu icon for horizontal alignment */
+          gap: 12px;
+          min-height: 42px; 
+          width: calc(100% - 60px);
+          max-width: 1600px;
+          margin-right: auto;
+        }
+
+        /* 🔥 MOBILE OVERRIDES */
+        @media (max-width: 1023px) { 
+          .execute-btn {
+            padding: 8px 12px !important;
+            font-size: 12px !important;
+          }
+          .mobile-subtitle {
+            display: none; /* Hide subtitle on mobile to save space so the button fits */
+          }
+
+          .main-wrapper { 
+            padding: max(20px, env(safe-area-inset-top, 20px)) 16px 16px 16px !important; 
+          }
+          .header-container { 
+            margin-left: 54px !important; /* Clears mobile hamburger button safely */
+            margin-right: 0 !important;
+            margin-bottom: 24px !important; 
+            margin-top: 0 !important;
+            display: flex !important;
+            flex-direction: row !important;
+            justify-content: space-between !important;
+            align-items: center !important; 
+            min-height: 44px !important;
+            width: calc(100% - 54px) !important;
+          }
         }
       `}</style>
     </div>
