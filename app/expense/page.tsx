@@ -820,11 +820,15 @@ export default function ExpenseDashboard() {
           font-family: Arial, sans-serif; 
           box-sizing: border-box; 
           color: #333;
-          min-height: 100dvh;
           display: flex;
           flex-direction: column;
           align-items: center; /* Safely centers the white form card */
           width: 100%;
+
+          /* 👇 SCROLL FIX 👇 */
+          height: 100dvh;
+          overflow-y: auto;
+          -webkit-overflow-scrolling: touch;
         }
 
         /* 🔥 Extracted header now perfectly aligns horizontally with the Hamburger icon */
@@ -894,6 +898,11 @@ export default function ExpenseDashboard() {
         @media (max-width: 1023px) { 
           .main-wrapper { 
             padding: max(20px, env(safe-area-inset-top, 20px)) 16px 16px 16px !important; 
+            
+            /* 👇 MOBILE SCROLL FIX 👇 */
+            height: 100dvh !important;
+            overflow-y: auto !important;
+            -webkit-overflow-scrolling: touch !important;
           }
           .header-container { 
             margin-left: 54px !important; /* Clears mobile hamburger button safely */

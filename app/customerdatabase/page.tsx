@@ -556,8 +556,12 @@ export default function CustomerDatabasePage() {
           font-family: Arial, sans-serif; 
           box-sizing: border-box; 
           color: #333;
-          min-height: 100vh;
           width: 100%;
+          
+          /* 👇 SCROLL FIX 👇 */
+          height: 100dvh; 
+          overflow-y: auto; 
+          -webkit-overflow-scrolling: touch;
         }
 
         .header-container { 
@@ -720,6 +724,11 @@ export default function CustomerDatabasePage() {
         @media (max-width: 1023px) {
           .main-wrapper {
             padding: max(20px, env(safe-area-inset-top, 20px)) 16px 16px 16px !important; 
+            
+            /* 👇 MOBILE SCROLL FIX 👇 */
+            height: 100dvh !important;
+            overflow-y: auto !important;
+            -webkit-overflow-scrolling: touch !important;
           }
 
           .header-container { 

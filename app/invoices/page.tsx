@@ -413,11 +413,15 @@ export default function InvoiceGallery() {
         .main-wrapper { 
           padding: max(20px, env(safe-area-inset-top, 20px)) 24px 24px 24px; 
           background: #f8fafc; 
-          min-height: 100vh; 
           font-family: Arial, sans-serif; 
           box-sizing: border-box; 
           color: #0f172a;
           width: 100%;
+          
+          /* 👇 DESKTOP SCROLL FIX 👇 */
+          height: 100dvh;
+          overflow-y: auto;
+          -webkit-overflow-scrolling: touch;
         }
         .header-container { 
           display: flex;
@@ -775,6 +779,11 @@ export default function InvoiceGallery() {
         @media (max-width: 1023px) { 
           .main-wrapper { 
             padding: max(20px, env(safe-area-inset-top, 20px)) 16px 16px 16px !important; 
+            
+            /* 👇 MOBILE SCROLL FIX 👇 */
+            height: 100dvh !important;
+            overflow-y: auto !important;
+            -webkit-overflow-scrolling: touch !important;
           }
           .header-container { 
             margin-left: 54px !important; /* Clears mobile hamburger button safely */

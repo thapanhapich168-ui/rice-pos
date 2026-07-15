@@ -369,11 +369,15 @@ export default function SettingsPage() {
           /* 🔥 RESTORED to normal top padding so it sits level with the burger icon */
           padding: max(20px, env(safe-area-inset-top, 20px)) 24px 24px 24px; 
           background: #f8fafc; 
-          min-height: 100vh; 
           font-family: Arial, sans-serif; 
           box-sizing: border-box; 
           color: #333;
           width: 100%;
+          
+          /* 👇 SCROLL FIX 👇 */
+          height: 100dvh; 
+          overflow-y: auto; 
+          -webkit-overflow-scrolling: touch;
         }
 
         .header-container { 
@@ -565,6 +569,11 @@ export default function SettingsPage() {
         @media (max-width: 1023px) { 
           .main-wrapper { 
             padding: max(20px, env(safe-area-inset-top, 20px)) 16px 16px 16px !important; 
+            
+            /* 👇 MOBILE SCROLL FIX 👇 */
+            height: 100dvh !important;
+            overflow-y: auto !important;
+            -webkit-overflow-scrolling: touch !important;
           }
           .header-container { 
             /* 🔥 RESTORED margin-left so it clears the burger on mobile for horizontal alignment */

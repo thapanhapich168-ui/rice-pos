@@ -1012,27 +1012,27 @@ export default function CogsReportPage() {
       )}
 
       <style jsx global>{`
+        /* 🔥 DESKTOP LAYOUT FIXES (Perfect Alignment + Scrolling) */
         .main-wrapper { 
-          padding: max(20px, env(safe-area-inset-top, 20px)) 24px 24px 24px; 
+          padding: 15px 24px 24px 75px; 
           background: #f8fafc; 
-          height: 100dvh; 
-  overflow-y: auto; 
-  -webkit-overflow-scrolling: touch;; 
           font-family: Arial, sans-serif; 
           box-sizing: border-box; 
           color: #0f172a;
           width: 100%;
+          
+          /* 👇 SCROLL FIX 👇 */
+          height: 100dvh; 
+          overflow-y: auto; 
+          -webkit-overflow-scrolling: touch;
         }
 
         .header-container { 
           display: flex;
           justify-content: space-between;
           align-items: center; 
+          height: 42px; 
           margin-bottom: 24px; 
-          margin-top: 0;
-          margin-left: 60px; /* 🔥 Clears the burger menu icon for horizontal alignment */
-          gap: 12px;
-          min-height: 42px; 
           width: 100%;
           max-width: 1600px;
         }
@@ -1134,10 +1134,15 @@ export default function CogsReportPage() {
           @page { size: A4 portrait; margin: 10mm; }
         }
 
+        /* 🔥 MOBILE LAYOUT FIXES */
         @media (max-width: 1023px) { 
           .main-wrapper { 
             padding: max(20px, env(safe-area-inset-top, 20px)) 16px 24px 16px !important; 
-            min-height: auto;
+            
+            /* 👇 MOBILE SCROLL FIX 👇 */
+            height: 100dvh !important;
+            overflow-y: auto !important;
+            -webkit-overflow-scrolling: touch !important;
           }
           .header-container {
             margin-left: 54px !important; /* Clears the hamburger icon */

@@ -761,15 +761,36 @@ export default function POSPage() {
         const retailRows = [];
 
         for (const item of currentCart) {
+           // 1. Find the actual product from our loaded products list
+           const dbProduct = products.find(p => p.id === item.product_id);
+           
+           // 2. Default COGS (fallback)
+           let retailCogsPerKg = Number(item.cost_price || 0);
+
+           // 3. 🔥 THE FIX: Look up the Linked Wholesale Bag's cost and divide by 50
+           if (dbProduct && dbProduct.linked_wholesale_id) {
+              const wholesaleProd = products.find(wp => wp.id === dbProduct.linked_wholesale_id);
+              if (wholesaleProd) {
+                 // Check if it has an active batch to get the exact FIFO cost, otherwise use base cost
+                 const wBatches = activeBatches[wholesaleProd.id] || [];
+                 const currentBatch = wBatches.length > 0 ? [...wBatches].sort((a,b) => a.id - b.id)[0] : null;
+                 const wholesaleBagCogs = currentBatch ? Number(currentBatch.cost_price) : Number(wholesaleProd.cost_price || 0);
+                 const wholesaleWeight = Number(wholesaleProd.weight) || 50;
+                 
+                 // e.g. 100,000 / 50 = 2,000
+                 retailCogsPerKg = wholesaleBagCogs / wholesaleWeight;
+              }
+           }
+
            retailRows.push({
              transaction_id: activeTxId,
              rice_type: item.name,
              custom_rice_type: item.custom_name !== item.name ? item.custom_name : null,
              qty: item.quantity,
              price_per_bag: item.custom_price_riel,
-             cogs_price: item.cost_price || 0,
+             cogs_price: retailCogsPerKg, // ⬅️ This is now correctly 2000!
              payment_method: primaryMethodStr
-             // Removed manual total calculations. Supabase automatically generates them.
+             // NOTE: Supabase will automatically multiply and calculate total_cogs and total_profit!
            });
         }
 
@@ -1803,6 +1824,9 @@ export default function POSPage() {
           box-sizing: border-box; 
           color: #333;
           width: 100%;
+          height: 100dvh;
+          overflow-y: auto;
+          -webkit-overflow-scrolling: touch;
         }
 
         .header-container { 
@@ -1876,7 +1900,9 @@ export default function POSPage() {
           .main-wrapper { 
             /* 🔥 Preserved: keeping 140px bottom padding for the shopping cart FAB */
             padding: max(20px, env(safe-area-inset-top, 20px)) 16px 140px 16px !important; 
-            min-height: 100% !important;
+            height: 100dvh !important;
+            overflow-y: auto !important;
+            -webkit-overflow-scrolling: touch !important;
           }
           
           .header-container { 

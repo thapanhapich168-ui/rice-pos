@@ -746,28 +746,27 @@ export default function DeliveryPage() {
           font-variant-numeric: tabular-nums lining-nums;
         }
 
-        /* 🔥 DESKTOP LAYOUT FIXES */
+        /* 🔥 DESKTOP LAYOUT FIXES (Perfect Alignment + Scrolling) */
         .main-wrapper { 
-          padding: max(20px, env(safe-area-inset-top, 20px)) 24px 24px 24px; 
+          padding: 15px 24px 24px 75px; 
           background: #f8fafc; 
           font-family: Arial, sans-serif; 
           box-sizing: border-box; 
           color: #333;
-          min-height: 100vh;
           width: 100%;
+          
+          /* 👇 SCROLL FIX 👇 */
+          height: 100dvh; 
+          overflow-y: auto; 
+          -webkit-overflow-scrolling: touch;
         }
 
         .header-container { 
           display: flex;
           justify-content: flex-start;
           align-items: center; 
+          height: 42px; 
           margin-bottom: 24px; 
-          margin-top: 0;
-          margin-left: 60px; /* 🔥 Clears the burger menu icon for horizontal alignment */
-          gap: 12px;
-          min-height: 42px; 
-          width: 100%;
-          max-width: 1600px;
         }
 
         .header-left {
@@ -837,6 +836,11 @@ export default function DeliveryPage() {
         @media (max-width: 1023px) { 
           .main-wrapper { 
             padding: max(20px, env(safe-area-inset-top, 20px)) 16px 16px 16px !important; 
+            
+            /* 👇 MOBILE SCROLL FIX 👇 */
+            height: 100dvh !important;
+            overflow-y: auto !important;
+            -webkit-overflow-scrolling: touch !important;
           }
           .header-container { 
             margin-left: 54px !important; /* Clears mobile hamburger button safely */

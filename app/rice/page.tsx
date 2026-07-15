@@ -1597,11 +1597,15 @@ export default function RiceControl() {
         .main-wrapper { 
           padding: max(20px, env(safe-area-inset-top, 20px)) 24px 24px 24px; 
           background: #f8fafc; 
-          min-height: 100vh;
           font-family: Arial, sans-serif; 
           box-sizing: border-box; 
           color: #333;
           width: 100%;
+          
+          /* 👇 SCROLL FIX 👇 */
+          height: 100dvh; 
+          overflow-y: auto; 
+          -webkit-overflow-scrolling: touch;
         }
 
         .header-container { 
@@ -1869,7 +1873,11 @@ export default function RiceControl() {
           .main-wrapper { 
             /* 🔥 Preserved: keeping 140px bottom padding for the shopping cart FAB */
             padding: max(20px, env(safe-area-inset-top, 20px)) 16px 140px 16px !important; 
-            min-height: auto;
+            
+            /* 👇 MOBILE SCROLL FIX 👇 */
+            height: 100dvh !important;
+            overflow-y: auto !important;
+            -webkit-overflow-scrolling: touch !important;
           }
           
           .header-container { 
