@@ -210,7 +210,8 @@ export default function DashboardPage() {
       if (parseOwner(exp.spender) === 'mom') return; 
       
       const desc = (exp.description || '').toUpperCase();
-      if (desc === 'RETAIL' || desc === 'WHOLESALE') return; 
+      // 🔥 FIX: Ignore Staff Advances & Settlements so they don't bloat the Expense UI cards
+      if (desc === 'RETAIL' || desc === 'WHOLESALE' || desc.includes('STAFF_ADVANCE') || desc.includes('STAFF_SETTLEMENT')) return; 
 
       let amtRiel = Number(exp.amount_riel || 0); let amtUsd = Number(exp.amount_usd || 0);
       if (amtRiel < 0 && amtUsd <= 0) return;
@@ -517,7 +518,8 @@ export default function DashboardPage() {
         if (owner === 'mom') return;
 
         const desc = (e.description || '').toUpperCase();
-        if (desc === 'RETAIL' || desc === 'WHOLESALE') return;
+        // 🔥 FIX: Ignore Staff Advances & Settlements so they don't bloat the Expense UI cards
+        if (desc === 'RETAIL' || desc === 'WHOLESALE' || desc.includes('STAFF_ADVANCE') || desc.includes('STAFF_SETTLEMENT')) return;
 
         let amtRiel = Number(e.amount_riel || 0); let amtUsd = Number(e.amount_usd || 0);
         if (amtRiel < 0 && amtUsd <= 0) return;
