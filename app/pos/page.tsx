@@ -790,10 +790,6 @@ export default function POSPage() {
                  retailCogsPerKg = wholesaleBagCogs / wholesaleWeight;
               }
            }
-           
-           const totalSales = item.quantity * item.custom_price_riel;
-           const totalCogs = item.quantity * retailCogsPerKg;
-           const finalProfit = totalSales - totalCogs;
 
            retailRows.push({
              transaction_id: activeTxId,
@@ -802,9 +798,6 @@ export default function POSPage() {
              qty: item.quantity,
              price_per_bag: item.custom_price_riel,
              cogs_price: retailCogsPerKg,
-             total_sales: totalSales,
-             total_cogs: totalCogs,
-             total_profit: finalProfit,
              payment_method: primaryMethodStr
            });
         }
