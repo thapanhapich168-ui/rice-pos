@@ -313,13 +313,14 @@ export default function POSPage() {
               if ((row.custom_rice_type || row.rice_type).includes('បានប្រើ')) sortOrder = 2;
 
               return {
-                id: Math.random(), 
+                id: row.id, // Explicitly match database ID to avoid grouping
+                db_row_id: row.id, // Keep reference to exact DB row for upserting
                 product_id: row.product_id, 
                 name: row.rice_type, 
                 custom_name: row.custom_rice_type || row.rice_type, 
-                custom_price_riel: row.price_per_bag,
-                quantity: row.qty,
-                cost_price: row.cogs_price,
+                custom_price_riel: Number(row.price_per_bag || 0),
+                quantity: Number(row.qty),
+                cost_price: Number(row.cogs_price || 0),
                 stock: 0, 
                 isSpecial: isSpecialRow,
                 bypass_stock: (row.custom_rice_type || row.rice_type).includes('បានប្រើ'),
@@ -327,6 +328,7 @@ export default function POSPage() {
                 selected_batch_id: null
               };
             });
+            
             setCart(rebuiltCart);
 
             const cName = saleRows[0].customer_name;
@@ -533,7 +535,6 @@ export default function POSPage() {
     const consumedKg = Number(exchangeModal.consumedKg) || 0;
     const perKgCogs = Math.round(Number(prod.cost_price || 0) / 50);
 
-    // Default the prices to 0 so they can be securely linked and edited.
     const newItems = [{
       ...prod, id: Math.random(), product_id: prod.id, custom_name: `ដូរ ${prod.name}`, custom_price_riel: 0,
       cost_price: Number(prod.cost_price || 0), quantity: 1, isSpecial: true, bypass_stock: false, sortOrder: 1
@@ -553,7 +554,6 @@ export default function POSPage() {
   function updateCartItem(id: number, field: string, value: any) {
     let updatedCart = cart.map((item) => item.id === id ? { ...item, [field]: value } : item);
 
-    // 🔥 THE FIX: Auto-link "បានប្រើ" price to "ដូរ" price / 50
     if (field === 'custom_price_riel') {
       const editedItem = updatedCart.find(i => i.id === id);
       if (editedItem && editedItem.custom_name.includes('ដូរ')) {
@@ -715,9 +715,6 @@ export default function POSPage() {
     window.history.replaceState({}, document.title, window.location.pathname);
   }
 
-  // ==============================================================================================
-  // 🚀 REFACTORED CONFIRM CHECKOUT (TRAFFIC COP + OPTION B ASSET LOGGING)
-  // ==============================================================================================
   async function confirmCheckout() {
     if (!isCartValid) return alert("Please ensure all items have a valid quantity and price.");
     if (activeTab === 'wholesale' && !selectedCustomerId) return alert(lang === 'kh' ? 'សូមជ្រើសរើសអតិថិជនសម្រាប់ដុំ!' : 'Please select a customer for wholesale');
@@ -738,7 +735,6 @@ export default function POSPage() {
       const actualTotalReceived = showPaymentSelector ? liveTotalReceivedInRiel : 0;
       const actualRemaining = currentTotalRiel - actualTotalReceived;
 
-      // --- NEW MATH ENGINE FOR DUAL CURRENCY CHANGE RETURN ---
       let effectiveSplits: { method: string, amount_usd: number, amount_riel: number, face_amount: number }[] = [];
 
       if (activePayments.length === 0) {
@@ -767,7 +763,6 @@ export default function POSPage() {
         }
       }
 
-      // --- DATABASE INSERTIONS ---
       const activeTxId = activeTab === 'retail' 
           ? `RET-${Date.now().toString().slice(-6)}` 
           : (editingInvoiceId ? editingInvoiceId : `INV-${Date.now().toString().slice(-6)}`);
@@ -838,11 +833,13 @@ export default function POSPage() {
           const finalQty = isReturn ? -Math.abs(item.quantity) : item.quantity;
           
           if (isReturn || isBypass || editingInvoiceId) {
-            baseSaleRows.push({
+            const newRow: any = {
               product_id: item.product_id, customer_name: finalCustomerName, rice_type: item.name,
               custom_rice_type: item.custom_name !== item.name ? item.custom_name : null, qty: finalQty, price_per_bag: item.custom_price_riel,
               cogs_price: item.cost_price || 0, owner: finalOwner
-            });
+            };
+            if (item.db_row_id) newRow.id = item.db_row_id;
+            baseSaleRows.push(newRow);
           } else if (item.selected_batch_id) {
             const specificBatch = activeBatches[item.product_id]?.find(b => b.id === item.selected_batch_id);
             baseSaleRows.push({
@@ -873,17 +870,23 @@ export default function POSPage() {
         }
 
         if (editingInvoiceId) {
-          await supabase.from('sales').delete().like('invoice_id', `${editingInvoiceId}%`);
-          await supabase.from('invoice_summaries').delete().like('invoice_id', `${editingInvoiceId}%`);
+          const { data: existingSales } = await supabase.from('sales').select('id').eq('invoice_id', editingInvoiceId);
+          if (existingSales) {
+            const cartIds = currentCart.map(c => c.db_row_id).filter(Boolean);
+            const idsToDelete = existingSales.map(s => s.id).filter(id => !cartIds.includes(id));
+            if (idsToDelete.length > 0) {
+              await supabase.from('sales').delete().in('id', idsToDelete);
+            }
+          }
+          await supabase.from('invoice_payments').delete().eq('invoice_id', editingInvoiceId);
         }
 
         const finalSaleRows = baseSaleRows.map(r => ({ ...r, invoice_id: activeTxId, payment_method: primaryMethodStr }));
         let splitCogsSum = baseSaleRows.reduce((sum, r) => sum + (r.cogs_price * r.qty), 0);
 
-        const { error: salesErr } = await supabase.from('sales').insert(finalSaleRows);
+        const { error: salesErr } = await supabase.from('sales').upsert(finalSaleRows, { onConflict: 'id' });
         if (salesErr) throw new Error(`Failed to save to Sales table: ${salesErr.message}`);
 
-        // 🚀 TRAFFIC COP: ONLY CREATE SUMMARY ROW IF NOT A WALK-IN!
         if (!isSimpleCustomer) {
            const summaryRow = {
               invoice_id: activeTxId,
@@ -899,7 +902,7 @@ export default function POSPage() {
               customer_location: finalLocation
            };
 
-           const { error: summaryErr } = await supabase.from('invoice_summaries').insert([summaryRow]);
+           const { error: summaryErr } = await supabase.from('invoice_summaries').upsert([summaryRow], { onConflict: 'invoice_id' });
            if (summaryErr) throw new Error(`Failed to save to Summaries table: ${summaryErr.message}`);
         }
 
@@ -911,7 +914,6 @@ export default function POSPage() {
         }
       }
 
-      // 🚀 UNIVERSAL OPTION B PAYMENT LOGGING (RUNS FOR EVERYTHING)
       if (showPaymentSelector || !isSimpleCustomer) {
          for (const split of effectiveSplits) {
             if (split.method === 'Unpaid / Debt') continue;
@@ -1093,6 +1095,14 @@ export default function POSPage() {
           <div className="header-container">
             <div className="header-left">
               <h1 className="page-title">{editingInvoiceId ? `✏️ Editing: ${editingInvoiceId}` : `🛒 ${currentT.title}`}</h1>
+              {editingInvoiceId && (
+                <button 
+                  onClick={cancelEditMode} 
+                  style={{ marginLeft: '16px', padding: '6px 12px', backgroundColor: '#fef2f2', color: '#dc2626', border: '1px solid #fecaca', borderRadius: '6px', fontSize: '13px', cursor: 'pointer', fontWeight: 'bold' }}
+                >
+                  ❌ Cancel
+                </button>
+              )}
             </div>
           </div>
 

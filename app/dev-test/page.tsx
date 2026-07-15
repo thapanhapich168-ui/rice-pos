@@ -49,15 +49,21 @@ export default function MasterTestEngine() {
   const cleanupTestData = async () => {
     logInfo('System Data Sweep', 'Sweeping previous DEV-TEST data from all tables...');
     
-    await supabase.from('retail_sales').delete().like('transaction_id', '%[DEV-TEST]%');
-    await supabase.from('invoice_payments').delete().like('invoice_id', '%[DEV-TEST]%');
-    await supabase.from('sales').delete().like('invoice_id', '%[DEV-TEST]%');
-    await supabase.from('invoice_summaries').delete().like('invoice_id', '%[DEV-TEST]%');
-    await supabase.from('accounts_payable').delete().like('supplier_name', '%[DEV-TEST]%');
-    await supabase.from('expenses').delete().like('remarks', '%[DEV-TEST]%');
-    await supabase.from('cogs_settlements').delete().like('remarks', '%[DEV-TEST]%');
+    // 🔥 THE FIX: Removed the [] from the .like() query. Brackets act as regex matchers in SQL and were failing silently.
+    const del = async (table: string, column: string) => {
+       const { error } = await supabase.from(table).delete().like(column, '%DEV-TEST%');
+       if (error) logMsg('System Data Sweep', 'assert', `❌ FAIL | Cleanup error on ${table}: ${error.message}`);
+    }
+
+    await del('retail_sales', 'transaction_id');
+    await del('invoice_payments', 'invoice_id');
+    await del('sales', 'invoice_id');
+    await del('invoice_summaries', 'invoice_id');
+    await del('accounts_payable', 'supplier_name');
+    await del('expenses', 'remarks');
+    await del('cogs_settlements', 'remarks');
     
-    const { data: impProducts } = await supabase.from('products').select('id').like('name', '%[DEV-TEST]%');
+    const { data: impProducts } = await supabase.from('products').select('id').like('name', '%DEV-TEST%');
     if (impProducts && impProducts.length > 0) {
         const pIds = impProducts.map(p => p.id);
         await supabase.from('imports').delete().in('product_id', pIds);
@@ -65,11 +71,11 @@ export default function MasterTestEngine() {
         await supabase.from('price_history').delete().in('product_id', pIds);
     }
     
-    await supabase.from('products').delete().like('name', '%[DEV-TEST]%');
-    await supabase.from('customers').delete().like('name', '%[DEV-TEST]%');
-    await supabase.from('suppliers').delete().like('name', '%[DEV-TEST]%');
+    await del('products', 'name');
+    await del('customers', 'name');
+    await del('suppliers', 'name');
     
-    const { data: stf } = await supabase.from('staff').select('id').like('name', '%[DEV-TEST]%');
+    const { data: stf } = await supabase.from('staff').select('id').like('name', '%DEV-TEST%');
     if (stf && stf.length > 0) {
         await supabase.from('staff_debt_history').delete().in('staff_id', stf.map(s => s.id));
         await supabase.from('staff').delete().in('id', stf.map(s => s.id));
@@ -90,7 +96,7 @@ export default function MasterTestEngine() {
     try {
       await cleanupTestData();
 
-      let supData, custData, wProd, rProd, staffData;
+      let supData, custData, wProd, rProd;
 
       // =========================================================================
       // MODULE 1: SETUP & CUSTOMER DB (Test 9, a.1, a.4)
@@ -224,8 +230,6 @@ export default function MasterTestEngine() {
         const { data: cr } = await supabase.from('products').select('stock').eq('id', rProd.id).single();
         
         assertEq(9, cw?.stock, testName, '[Table: products] D: products.stock (Wholesale) decreased by exactly 1');
-        
-        // THE FIX: We had 10 to start, sold 5 in Test A, then pulled 50. Expected is exactly 55.
         assertEq(55, cr?.stock, testName, '[Table: products] D: products.stock (Retail) increased by exactly 50 (5 remaining + 50)');
         
         uiCheck(testName, 'D.1: Verify Retail stock increase dynamically updates Rice Asset Evaluation in Dashboard.');
