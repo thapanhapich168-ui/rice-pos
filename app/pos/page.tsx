@@ -129,7 +129,7 @@ function CurrencyInput({ value, onChange, placeholder, style, autoFocus, classNa
   )
 }
 
-function CartInput({ value, onChange, isQty, fontSize = '14px' }: { value: number | '', onChange: (val: number | '') => void, isQty: boolean, fontSize?: string }) {
+function CartInput({ value, onChange, isQty, fontSize = '14px', onFocus }: { value: number | '', onChange: (val: number | '') => void, isQty: boolean, fontSize?: string, onFocus?: () => void }) {
   const [inputValue, setInputValue] = useState('');
 
   useEffect(() => {
@@ -163,6 +163,7 @@ function CartInput({ value, onChange, isQty, fontSize = '14px' }: { value: numbe
       inputMode="decimal"
       value={inputValue}
       onChange={handleChange}
+      onFocus={onFocus}
       style={{ 
         width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', 
         fontSize: fontSize, fontWeight: 'normal', color: '#334155', backgroundColor: '#ffffff', outline: 'none', textAlign: 'center'
@@ -481,20 +482,20 @@ export default function POSPage() {
 
   function handleProductClick(product: any) {
     const isMobile = typeof window !== 'undefined' && window.innerWidth < 1024;
-    const defaultQty = activeTab === 'wholesale' ? '' : 1;
+    const defaultQty = 1; 
     if (isMobile) {
       setSelectedMobileProduct(product);
       setMobileName(product.name);
-      setMobilePrice(Number(product.price));
+      setMobilePrice(activeTab === 'wholesale' ? 0 : Number(product.price));
       setMobileQty(defaultQty);
     } else {
-      addToCartDirect(product, defaultQty === '' ? '' : defaultQty);
+      addToCartDirect(product, defaultQty);
     }
   }
 
   function addToCartDirect(product: any, qtyToAdd: number | '' = 1) {
     const existing = cart.find((item) => item.product_id === product.id && !item.isSpecial)
-    const priceInRiel = Number(product.price); 
+    const priceInRiel = activeTab === 'wholesale' ? 0 : Number(product.price); 
     if (existing) {
       setCart(cart.map((item) => item.product_id === product.id && !item.isSpecial ? { ...item, quantity: (Number(item.quantity) || 0) + (Number(qtyToAdd) || 0) } : item))
     } else {
@@ -530,17 +531,17 @@ export default function POSPage() {
     if (!exchangeModal.product) return;
     const prod = exchangeModal.product;
     const consumedKg = Number(exchangeModal.consumedKg) || 0;
-    const perKgPrice = Math.round(Number(prod.price) / 50);
     const perKgCogs = Math.round(Number(prod.cost_price || 0) / 50);
 
+    // Default the prices to 0 so they can be securely linked and edited.
     const newItems = [{
-      ...prod, id: Math.random(), product_id: prod.id, custom_name: `ដូរ ${prod.name}`, custom_price_riel: Number(prod.price),
+      ...prod, id: Math.random(), product_id: prod.id, custom_name: `ដូរ ${prod.name}`, custom_price_riel: 0,
       cost_price: Number(prod.cost_price || 0), quantity: 1, isSpecial: true, bypass_stock: false, sortOrder: 1
     }];
 
     if (consumedKg > 0) {
       newItems.push({
-        ...prod, id: Math.random(), product_id: prod.id, custom_name: `បានប្រើ ${prod.name}`, custom_price_riel: perKgPrice,
+        ...prod, id: Math.random(), product_id: prod.id, custom_name: `បានប្រើ ${prod.name}`, custom_price_riel: 0,
         cost_price: perKgCogs, quantity: consumedKg, isSpecial: true, bypass_stock: true, sortOrder: 2
       });
     }
@@ -550,7 +551,26 @@ export default function POSPage() {
   }
 
   function updateCartItem(id: number, field: string, value: any) {
-    setCart(cart.map((item) => item.id === id ? { ...item, [field]: value } : item))
+    let updatedCart = cart.map((item) => item.id === id ? { ...item, [field]: value } : item);
+
+    // 🔥 THE FIX: Auto-link "បានប្រើ" price to "ដូរ" price / 50
+    if (field === 'custom_price_riel') {
+      const editedItem = updatedCart.find(i => i.id === id);
+      if (editedItem && editedItem.custom_name.includes('ដូរ')) {
+        const baseName = editedItem.custom_name.replace('ដូរ ', '');
+        const consumedName = `បានប្រើ ${baseName}`;
+        const newPerKgPrice = Math.round(Number(value) / 50) || 0;
+
+        updatedCart = updatedCart.map(item => {
+          if (item.product_id === editedItem.product_id && item.custom_name === consumedName) {
+            return { ...item, custom_price_riel: newPerKgPrice };
+          }
+          return item;
+        });
+      }
+    }
+
+    setCart(updatedCart);
   }
 
   function removeFromCart(id: number) {
@@ -761,26 +781,24 @@ export default function POSPage() {
         const retailRows = [];
 
         for (const item of currentCart) {
-           // 1. Find the actual product from our loaded products list
            const dbProduct = products.find(p => p.id === item.product_id);
-           
-           // 2. Default COGS (fallback)
            let retailCogsPerKg = Number(item.cost_price || 0);
 
-           // 3. 🔥 THE FIX: Look up the Linked Wholesale Bag's cost and divide by 50
            if (dbProduct && dbProduct.linked_wholesale_id) {
               const wholesaleProd = products.find(wp => wp.id === dbProduct.linked_wholesale_id);
               if (wholesaleProd) {
-                 // Check if it has an active batch to get the exact FIFO cost, otherwise use base cost
                  const wBatches = activeBatches[wholesaleProd.id] || [];
                  const currentBatch = wBatches.length > 0 ? [...wBatches].sort((a,b) => a.id - b.id)[0] : null;
                  const wholesaleBagCogs = currentBatch ? Number(currentBatch.cost_price) : Number(wholesaleProd.cost_price || 0);
                  const wholesaleWeight = Number(wholesaleProd.weight) || 50;
                  
-                 // e.g. 100,000 / 50 = 2,000
                  retailCogsPerKg = wholesaleBagCogs / wholesaleWeight;
               }
            }
+           
+           const totalSales = item.quantity * item.custom_price_riel;
+           const totalCogs = item.quantity * retailCogsPerKg;
+           const finalProfit = totalSales - totalCogs;
 
            retailRows.push({
              transaction_id: activeTxId,
@@ -788,9 +806,11 @@ export default function POSPage() {
              custom_rice_type: item.custom_name !== item.name ? item.custom_name : null,
              qty: item.quantity,
              price_per_bag: item.custom_price_riel,
-             cogs_price: retailCogsPerKg, // ⬅️ This is now correctly 2000!
+             cogs_price: retailCogsPerKg,
+             total_sales: totalSales,
+             total_cogs: totalCogs,
+             total_profit: finalProfit,
              payment_method: primaryMethodStr
-             // NOTE: Supabase will automatically multiply and calculate total_cogs and total_profit!
            });
         }
 
@@ -1259,11 +1279,11 @@ export default function POSPage() {
                   <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-end' }}>
                     <div style={{ flex: 1 }}>
                       <span style={{ display: 'block', fontSize: '10px', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '4px' }}>{currentT.quantity}</span>
-                      <CartInput value={item.quantity} onChange={(v) => updateCartItem(item.id, 'quantity', v)} isQty={true} fontSize="13px" />
+                      <CartInput value={item.quantity} onChange={(v) => updateCartItem(item.id, 'quantity', v)} onFocus={() => updateCartItem(item.id, 'quantity', '')} isQty={true} fontSize="13px" />
                     </div>
                     <div style={{ flex: 1 }}>
                       <span style={{ display: 'block', fontSize: '10px', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '4px' }}>{currentT.unitPrice} (៛)</span>
-                      <CartInput value={item.custom_price_riel} onChange={(v) => updateCartItem(item.id, 'custom_price_riel', v)} isQty={false} fontSize="13px" />
+                      <CartInput value={item.custom_price_riel} onChange={(v) => updateCartItem(item.id, 'custom_price_riel', v)} onFocus={() => updateCartItem(item.id, 'custom_price_riel', '')} isQty={false} fontSize="13px" />
                     </div>
                   </div>
                 </div>
@@ -1371,11 +1391,11 @@ export default function POSPage() {
                     <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-end' }}>
                       <div style={{ flex: 1 }}>
                         <span style={{ display: 'block', fontSize: '10px', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '4px' }}>{currentT.quantity}</span>
-                        <CartInput fontSize="16px" value={item.quantity} onChange={(v) => updateCartItem(item.id, 'quantity', v)} isQty={true} />
+                        <CartInput fontSize="16px" value={item.quantity} onChange={(v) => updateCartItem(item.id, 'quantity', v)} onFocus={() => updateCartItem(item.id, 'quantity', '')} isQty={true} />
                       </div>
                       <div style={{ flex: 1 }}>
                         <span style={{ display: 'block', fontSize: '10px', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '4px' }}>{currentT.unitPrice}</span>
-                        <CartInput fontSize="16px" value={item.custom_price_riel} onChange={(v) => updateCartItem(item.id, 'custom_price_riel', v)} isQty={false} />
+                        <CartInput fontSize="16px" value={item.custom_price_riel} onChange={(v) => updateCartItem(item.id, 'custom_price_riel', v)} onFocus={() => updateCartItem(item.id, 'custom_price_riel', '')} isQty={false} />
                       </div>
                     </div>
                   </div>
@@ -1577,8 +1597,8 @@ export default function POSPage() {
 
       {/* 💰 SALE SUMMARY MODAL */}
       {saleSummary && (
-        <div className="modal-overlay" style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.85)', zIndex: 10005, display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '20px', boxSizing: 'border-box' }}>
-          <div className="modal-content" style={{ backgroundColor: '#ffffff', width: '100%', maxWidth: '400px', borderRadius: '16px', padding: '30px', boxShadow: '0 10px 25px rgba(0,0,0,0.2)' }}>
+        <div className="modal-overlay" style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.85)', zIndex: 10005, display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '20px', boxSizing: 'border-box' }} onMouseDown={() => setSaleSummary(null)}>
+          <div className="modal-content" style={{ backgroundColor: '#ffffff', width: '100%', maxWidth: '400px', borderRadius: '16px', padding: '30px', boxShadow: '0 10px 25px rgba(0,0,0,0.2)' }} onMouseDown={e => e.stopPropagation()}>
             <h2 style={{ marginTop: 0, color: saleSummary.isDebt ? '#d97706' : '#10b981', fontSize: '20px', marginBottom: '16px', textAlign: 'center' }}>
               {saleSummary.isCashless ? 'Sale Recorded! ✅' : saleSummary.isDebt ? 'Partial Payment Logged ⏳' : 'Sale Complete! ✅'}
             </h2>
@@ -1824,6 +1844,8 @@ export default function POSPage() {
           box-sizing: border-box; 
           color: #333;
           width: 100%;
+          
+          /* 👇 SCROLL FIX 👇 */
           height: 100dvh;
           overflow-y: auto;
           -webkit-overflow-scrolling: touch;
@@ -1900,6 +1922,8 @@ export default function POSPage() {
           .main-wrapper { 
             /* 🔥 Preserved: keeping 140px bottom padding for the shopping cart FAB */
             padding: max(20px, env(safe-area-inset-top, 20px)) 16px 140px 16px !important; 
+            
+            /* 👇 MOBILE SCROLL FIX 👇 */
             height: 100dvh !important;
             overflow-y: auto !important;
             -webkit-overflow-scrolling: touch !important;
