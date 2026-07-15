@@ -1086,12 +1086,12 @@ export default function POSPage() {
   }
 
   return (
-    <div className="pos-layout-wrapper" style={{ display: 'flex', width: '100%', backgroundColor: '#ffffff', boxSizing: 'border-box' }}>
+    <div className="pos-layout-wrapper" style={{ display: 'flex', width: '100%', height: '100dvh', overflow: 'hidden', backgroundColor: '#ffffff', boxSizing: 'border-box' }}>
       
-      {/* SELECTION ENGINE VIEW GRID PANEL */}
-      <div className="pos-main-engine hide-scrollbar" style={{ flex: 1, display: 'flex', flexDirection: 'column', backgroundColor: '#f8fafc', minWidth: 0 }}>
+      {/* SELECTION ENGINE VIEW GRID PANEL (Now correctly handles its own scrolling) */}
+      <div className="pos-main-engine hide-scrollbar" style={{ flex: 1, height: '100%', overflowY: 'auto', backgroundColor: '#f8fafc', minWidth: 0, WebkitOverflowScrolling: 'touch' }}>
         
-        <div className="main-wrapper" style={{ flex: 1 }}>
+        <div className="main-wrapper">
           <div className="header-container">
             <div className="header-left">
               <h1 className="page-title">{editingInvoiceId ? `✏️ Editing: ${editingInvoiceId}` : `🛒 ${currentT.title}`}</h1>
@@ -1232,7 +1232,7 @@ export default function POSPage() {
       {/* ==============================================================================================
           DESKTOP SIDEBAR CART
           ============================================================================================== */}
-      <div className="desktop-cart-panel" style={{ width: '400px', backgroundColor: '#ffffff', borderLeft: '1px solid #e5e7eb', display: 'flex', flexDirection: 'column', position: 'sticky', top: '0px', height: '100vh' }}>
+      <div className="desktop-cart-panel" style={{ width: '400px', backgroundColor: '#ffffff', borderLeft: '1px solid #e5e7eb', display: 'flex', flexDirection: 'column', height: '100%' }}>
         <div style={{ paddingTop: '16px', paddingRight: '20px', paddingBottom: '16px', paddingLeft: '20px', borderBottom: '1px solid #f1f5f9', backgroundColor: '#f8fafc', flexShrink: 0 }}>
           <h2 style={{ fontSize: '16px', margin: 0, fontWeight: 'bold', color: '#334155' }}>{currentT.cartTitle} ({cart.length})</h2>
         </div>
@@ -1849,16 +1849,11 @@ export default function POSPage() {
         /* 🔥 DESKTOP LAYOUT FIXES (Aligned with other pages) */
         .main-wrapper { 
           padding: max(20px, env(safe-area-inset-top, 20px)) 24px 24px 24px; 
-          background: #f8fafc; 
           font-family: Arial, sans-serif; 
           box-sizing: border-box; 
           color: #333;
           width: 100%;
-          
-          /* 👇 SCROLL FIX 👇 */
-          height: 100dvh;
-          overflow-y: auto;
-          -webkit-overflow-scrolling: touch;
+          min-height: 100%;
         }
 
         .header-container { 
@@ -1932,11 +1927,6 @@ export default function POSPage() {
           .main-wrapper { 
             /* 🔥 Preserved: keeping 140px bottom padding for the shopping cart FAB */
             padding: max(20px, env(safe-area-inset-top, 20px)) 16px 140px 16px !important; 
-            
-            /* 👇 MOBILE SCROLL FIX 👇 */
-            height: 100dvh !important;
-            overflow-y: auto !important;
-            -webkit-overflow-scrolling: touch !important;
           }
           
           .header-container { 
