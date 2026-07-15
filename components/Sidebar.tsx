@@ -21,8 +21,8 @@ const defaultMenuItems: MenuItem[] = [
   { label: '🧮 Mix Calculator', href: '/calculator', adminOnly: false },
   { label: '🖼️ Invoice Gallery', href: '/invoices', adminOnly: false },
   { label: '🧾 COGS Accounting', href: '/cogs-report', adminOnly: true },
-  { label: '👥 Customer Database', href: '/customerdatabase', adminOnly: false },
-  { label: '💼 Master Biz Database', href: '/bizdatabase', adminOnly: false },
+  { label: '🧑‍🌾 Customer Database', href: '/customerdatabase', adminOnly: false },
+  { label: '🔐 Master Biz Database', href: '/bizdatabase', adminOnly: false },
   { label: '⚙️ Settings', href: '/settings', adminOnly: true }
 ]
 
@@ -194,7 +194,6 @@ export default function Sidebar() {
       <style jsx>{`
         .sidebar-backdrop {
           position: fixed;
-          /* 🔥 Removed 1px hack. Flawless coverage. */
           top: 0; left: 0; right: 0; bottom: 0;
           background: rgba(0,0,0,0.5);
           z-index: 999;
@@ -207,7 +206,6 @@ export default function Sidebar() {
         .sidebar-wrapper {
           background: #111827;
           color: white;
-          /* 🔥 Changed from 100dvh to 100%. Perfectly maps to the pinned body. */
           height: 100%; 
           display: flex;
           flex-direction: column;
@@ -241,6 +239,8 @@ export default function Sidebar() {
             position: sticky;
             top: 0;
             left: 0;
+            /* 🔥 FIX: Forces the sidebar to map exactly to the bottom of the screen on laptops! */
+            height: 100vh; 
           }
           .sidebar-backdrop {
             display: none;

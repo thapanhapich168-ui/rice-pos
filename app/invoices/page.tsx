@@ -236,7 +236,9 @@ export default function InvoiceGallery() {
       
       {/* HEADER */}
       <div className="header-container">
-        <h1 className="page-title">🖼️ Invoice Image Gallery</h1>
+        <div className="header-left">
+          <h1 className="page-title">🖼️ Invoice Image Gallery</h1>
+        </div>
       </div>
 
       {/* FILTER TABS & SEARCH CONTAINER */}
@@ -407,25 +409,44 @@ export default function InvoiceGallery() {
 
       {/* --- REINFORCED STYLING FOR RESPONSIVENESS --- */}
       <style jsx global>{`
+        /* 🔥 DESKTOP LAYOUT */
         .main-wrapper { 
-          padding: 24px 24px 24px 85px; 
+          padding: max(20px, env(safe-area-inset-top, 20px)) 24px 24px 24px; 
           background: #f8fafc; 
           min-height: 100vh; 
           font-family: Arial, sans-serif; 
           box-sizing: border-box; 
           color: #0f172a;
+          width: 100%;
         }
         .header-container { 
-          margin-bottom: 24px; 
           display: flex;
-          justify-content: space-between;
+          justify-content: flex-start;
+          align-items: center; 
+          margin-bottom: 24px; 
+          margin-top: 0;
+          margin-left: 60px; /* 🔥 Clears the burger menu icon for horizontal alignment */
+          gap: 12px;
+          min-height: 42px; 
+          width: 100%;
+          max-width: 1600px;
+        }
+        .header-left {
+          display: flex;
           align-items: center;
+          gap: 12px;
         }
         .page-title { 
-          font-size: 24px; 
-          font-weight: bold; 
-          color: #4a3b1b; 
-          margin: 0; 
+          font-size: 24px !important; 
+          color: #4a3b1b !important; 
+          margin: 0 !important; 
+          font-weight: bold;
+          letter-spacing: -0.5px;
+          line-height: normal !important; 
+          display: flex;
+          align-items: center;
+          min-width: 0;
+          white-space: nowrap !important; 
         }
 
         /* TOOLBAR CONFIGURATION */
@@ -750,18 +771,35 @@ export default function InvoiceGallery() {
           font-weight: bold;
         }
 
-        /* RESPONSIVE LAYOUT ADJUSTMENTS */
+        /* MATCHED MOBILE OVERRIDES */
         @media (max-width: 1023px) { 
           .main-wrapper { 
-            /* Extra top margin protection ensures burger menus/global app shell headers never clash */
-            padding: max(100px, env(safe-area-inset-top, 100px)) 16px 16px 16px !important; 
+            padding: max(20px, env(safe-area-inset-top, 20px)) 16px 16px 16px !important; 
           }
-          .header-container {
-            flex-direction: column;
-            align-items: flex-start;
-            gap: 12px;
-            margin-bottom: 16px;
+          .header-container { 
+            margin-left: 54px !important; /* Clears mobile hamburger button safely */
+            margin-right: 0 !important;
+            margin-bottom: 24px !important; 
+            margin-top: 0 !important;
+            display: flex !important;
+            flex-direction: row !important;
+            justify-content: flex-start !important;
+            align-items: center !important; 
+            min-height: 44px !important;
+            width: calc(100% - 54px) !important;
           }
+          .header-left {
+            display: flex !important;
+            flex-direction: row !important;
+            align-items: center !important;
+            gap: 12px !important;
+          }
+          .page-title {
+            font-size: 21px !important; 
+            line-height: normal !important; 
+            white-space: nowrap !important; 
+          }
+          
           .toolbar-container {
             flex-direction: column;
             align-items: stretch;

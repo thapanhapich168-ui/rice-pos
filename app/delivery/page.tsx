@@ -723,7 +723,9 @@ export default function DeliveryPage() {
     <>
       <div className="main-wrapper">
         <div className="header-container">
-          <h1 className="page-title">🚚 Delivery & Credit Hub</h1>
+          <div className="header-left">
+            <h1 className="page-title">🚚 Delivery & Credit Hub</h1>
+          </div>
         </div>
 
         <div className="tabs-container">
@@ -744,29 +746,47 @@ export default function DeliveryPage() {
           font-variant-numeric: tabular-nums lining-nums;
         }
 
+        /* 🔥 DESKTOP LAYOUT FIXES */
         .main-wrapper { 
-          padding: 24px 24px 24px 75px; 
+          padding: max(20px, env(safe-area-inset-top, 20px)) 24px 24px 24px; 
           background: #f8fafc; 
           font-family: Arial, sans-serif; 
           box-sizing: border-box; 
           color: #333;
-          min-height: 100dvh;
+          min-height: 100vh;
+          width: 100%;
         }
 
         .header-container { 
-          margin-bottom: 24px; 
           display: flex;
-          justify-content: space-between;
+          justify-content: flex-start;
+          align-items: center; 
+          margin-bottom: 24px; 
+          margin-top: 0;
+          margin-left: 60px; /* 🔥 Clears the burger menu icon for horizontal alignment */
+          gap: 12px;
+          min-height: 42px; 
+          width: 100%;
+          max-width: 1600px;
+        }
+
+        .header-left {
+          display: flex;
           align-items: center;
-          flex-wrap: wrap;
           gap: 12px;
         }
 
         .page-title { 
-          font-size: 26px; 
-          color: #334155; 
-          margin: 0; 
+          font-size: 24px !important; 
+          color: #4a3b1b !important; 
+          margin: 0 !important; 
+          font-weight: bold;
           letter-spacing: -0.5px;
+          line-height: normal !important; 
+          display: flex;
+          align-items: center;
+          min-width: 0;
+          white-space: nowrap !important; 
         }
 
         .tabs-container {
@@ -813,16 +833,37 @@ export default function DeliveryPage() {
           box-shadow: 0 0 0 2px rgba(181, 138, 61, 0.2) !important;
         }
 
+        /* 🔥 MOBILE LAYOUT FIXES */
         @media (max-width: 1023px) { 
           .main-wrapper { 
-            padding: max(80px, env(safe-area-inset-top, 80px)) 16px 24px 16px !important; 
+            padding: max(20px, env(safe-area-inset-top, 20px)) 16px 16px 16px !important; 
           }
-          .header-container {
-            flex-direction: column !important;
-            align-items: flex-start !important;
-            gap: 10px !important;
-            margin-bottom: 20px !important;
+          .header-container { 
+            margin-left: 54px !important; /* Clears mobile hamburger button safely */
+            margin-right: 0 !important;
+            margin-bottom: 24px !important; 
+            margin-top: 0 !important;
+            display: flex !important;
+            flex-direction: row !important;
+            justify-content: flex-start !important;
+            align-items: center !important; 
+            min-height: 44px !important;
+            width: calc(100% - 54px) !important;
           }
+
+          .header-left {
+            display: flex !important;
+            flex-direction: row !important;
+            align-items: center !important;
+            gap: 12px !important;
+          }
+
+          .page-title {
+            font-size: 21px !important; 
+            line-height: normal !important; 
+            white-space: nowrap !important; 
+          }
+
           .tabs-container {
             padding: 4px !important;
             margin-bottom: 20px !important;

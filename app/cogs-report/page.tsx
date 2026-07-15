@@ -579,16 +579,13 @@ export default function CogsReportPage() {
             <>
               {isDeviceMobile ? (
                 <button onClick={handleMobileShare} disabled={isCapturing} className="action-btn share-btn">
-                  {isCapturing ? '⏳...' : '📤 Share Report'}
+                  {isCapturing ? '⏳...' : '📤 Share'}
                 </button>
               ) : (
                 <button onClick={handleDownload} disabled={isCapturing} className="action-btn download-btn">
                   {isCapturing ? '⏳ Saving...' : '⬇️ Download A4'}
                 </button>
               )}
-              <button onClick={handleNativePrint} className="action-btn print-btn">
-                🖨️ Print
-              </button>
             </>
           )}
         </div>
@@ -1016,38 +1013,47 @@ export default function CogsReportPage() {
 
       <style jsx global>{`
         .main-wrapper { 
-          padding: 24px 24px 24px 85px; 
+          padding: max(20px, env(safe-area-inset-top, 20px)) 24px 24px 24px; 
           background: #f8fafc; 
-          min-height: 100vh; 
+          height: 100dvh; 
+  overflow-y: auto; 
+  -webkit-overflow-scrolling: touch;; 
           font-family: Arial, sans-serif; 
           box-sizing: border-box; 
           color: #0f172a;
+          width: 100%;
         }
 
         .header-container { 
           display: flex;
           justify-content: space-between;
-          align-items: center; /* Vertically centers everything */
+          align-items: center; 
           margin-bottom: 24px; 
+          margin-top: 0;
+          margin-left: 60px; /* 🔥 Clears the burger menu icon for horizontal alignment */
           gap: 12px;
-          min-height: 48px; /* Locks container height to match hamburger icon */
+          min-height: 42px; 
+          width: 100%;
+          max-width: 1600px;
         }
         
         .header-left {
           display: flex;
-          align-items: center; /* Vertically centers contents */
+          align-items: center; 
           gap: 12px;
         }
 
         .page-title { 
           font-size: 24px !important; 
-          color: #4a3b1b !important; /* Standardized Business Dashboard Color */
+          color: #4a3b1b !important; 
           margin: 0 !important; 
           font-weight: bold;
           letter-spacing: -0.5px;
-          line-height: 1 !important; /* Removes invisible padding causing misalignment */
+          line-height: normal !important; 
           display: flex;
           align-items: center;
+          min-width: 0;
+          white-space: nowrap !important; 
         }
 
         input[type="text"].no-spinners::-webkit-inner-spin-button,
@@ -1067,7 +1073,6 @@ export default function CogsReportPage() {
         }
         .download-btn { background: #b58a3d; }
         .share-btn { background: #3b82f6; }
-        .print-btn { background: #10b981; }
 
         .a4-paper-container {
           width: 100%;
@@ -1141,8 +1146,9 @@ export default function CogsReportPage() {
             display: flex !important;
             flex-direction: row !important;
             justify-content: space-between !important;
-            align-items: center !important; /* Vertically centers on mobile */
+            align-items: center !important; 
             min-height: 44px !important;
+            width: calc(100% - 54px) !important;
           }
           .header-left {
             display: flex !important;
@@ -1152,7 +1158,8 @@ export default function CogsReportPage() {
           }
           .page-title {
             font-size: 22px !important;
-            line-height: 1 !important;
+            line-height: normal !important;
+            white-space: nowrap !important; 
           }
           .a4-paper-container {
             padding: 16px;

@@ -994,32 +994,50 @@ export default function DashboardPage() {
           font-variant-numeric: tabular-nums lining-nums;
         }
         body { font-variant-numeric: tabular-nums lining-nums; }
-        .main-wrapper { padding: 24px 24px 24px 75px; background: #f8fafc; min-height: 100vh; font-family: Arial, sans-serif; box-sizing: border-box; color: #333; }
+        
+        /* 🔥 DESKTOP LAYOUT FIXES */
+        .main-wrapper { 
+          padding: max(20px, env(safe-area-inset-top, 20px)) 24px 24px 24px; 
+          background: #f8fafc; 
+          font-family: Arial, sans-serif; 
+          box-sizing: border-box; 
+          color: #333;
+          height: 100dvh;
+          overflow-y: auto;
+          -webkit-overflow-scrolling: touch;
+          width: 100%;
+        }
         
         .header-container { 
           display: flex;
-          justify-content: space-between;
-          align-items: center; /* Vertically centers everything */
+          justify-content: flex-start;
+          align-items: center; 
           margin-bottom: 24px; 
+          margin-top: 0;
+          margin-left: 60px; /* 🔥 Clears the burger menu icon for horizontal alignment */
           gap: 12px;
-          min-height: 48px; /* Locks container height to match hamburger icon */
+          min-height: 42px; 
+          width: 100%;
+          max-width: 1600px;
         }
         
         .header-left {
           display: flex;
-          align-items: center; /* Vertically centers contents */
+          align-items: center; 
           gap: 12px;
         }
 
         .page-title { 
           font-size: 24px !important; 
-          color: #4a3b1b !important; /* Standardized Business Dashboard Color */
+          color: #4a3b1b !important; 
           margin: 0 !important; 
           font-weight: bold;
           letter-spacing: -0.5px;
-          line-height: 1 !important; /* Removes invisible padding causing misalignment */
+          line-height: normal !important; 
           display: flex;
           align-items: center;
+          min-width: 0;
+          white-space: nowrap !important; 
         }
 
         .section-divider { font-size: 15px; color: #475569; margin-bottom: 16px; border-bottom: 1px solid #e2e8f0; padding-bottom: 6px; }
@@ -1027,20 +1045,25 @@ export default function DashboardPage() {
         @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
         input[type="text"].no-spinners::-webkit-inner-spin-button, input[type="text"].no-spinners::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
         
+        /* 🔥 MOBILE LAYOUT FIXES */
         @media (max-width: 1023px) { 
           .main-wrapper { 
-            padding: max(20px, env(safe-area-inset-top, 20px)) 16px 24px 16px !important; 
-            min-height: auto; 
+            padding: max(20px, env(safe-area-inset-top, 20px)) 16px 16px 16px !important; 
+            height: 100dvh !important;
+            overflow-y: auto !important;
+            -webkit-overflow-scrolling: touch !important;
           }
           .header-container { 
-            margin-left: 54px !important; /* Clears the hamburger icon */
+            margin-left: 54px !important; /* Clears mobile hamburger button safely */
+            margin-right: 0 !important;
             margin-bottom: 24px !important; 
             margin-top: 0 !important;
             display: flex !important;
             flex-direction: row !important;
-            justify-content: space-between !important;
-            align-items: center !important; /* Vertically centers on mobile */
+            justify-content: flex-start !important;
+            align-items: center !important; 
             min-height: 44px !important;
+            width: calc(100% - 54px) !important;
           }
           .header-left {
             display: flex !important;
@@ -1049,8 +1072,9 @@ export default function DashboardPage() {
             gap: 12px !important;
           }
           .page-title {
-            font-size: 22px !important;
-            line-height: 1 !important;
+            font-size: 21px !important; 
+            line-height: normal !important; 
+            white-space: nowrap !important; 
           }
         }
       `}</style>

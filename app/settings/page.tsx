@@ -171,7 +171,7 @@ export default function SettingsPage() {
   if (role !== 'admin') {
     return (
       <div className="main-wrapper" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '100dvh', background: '#f8fafc' }}>
-        <div style={{ textAlign: 'center', background: '#fff', padding: '40px', borderRadius: '12px', boxShadow: '0 10px 25px rgba(0,0,0,0.1)', borderTop: '4px solid #ef4444', maxWidth: '400px' }}>
+        <div style={{ textAlign: 'center', background: '#fff', padding: '40px', borderRadius: '12px', boxShadow: '0 10px 25px rgba(0,0,0,0.1)', borderTop: '4px solid #ef4444', maxWidth: '400px', margin: '0 auto' }}>
           <div style={{ fontSize: '48px', marginBottom: '16px' }}>🛑</div>
           <h1 style={{ margin: '0 0 8px 0', color: '#1e293b', fontSize: '24px' }}>Access Denied</h1>
           <p style={{ color: '#64748b', marginBottom: '24px', fontSize: '14px', lineHeight: 1.5 }}>
@@ -187,8 +187,12 @@ export default function SettingsPage() {
 
   return (
     <div className="main-wrapper">
+      
+      {/* 🔥 REPLACED HEADER TO PERFECTLY MATCH ALL OTHER PAGES */}
       <div className="header-container">
-        <h1 className="page-title">⚙️ Access & Settings</h1>
+        <div className="header-left">
+          <h1 className="page-title">⚙️ Access & Settings</h1>
+        </div>
       </div>
 
       <div className="settings-grid">
@@ -360,29 +364,60 @@ export default function SettingsPage() {
       </div>
       
       <style jsx global>{`
+        /* 🔥 DESKTOP LAYOUT */
         .main-wrapper { 
-          padding: 24px 24px 24px 75px; 
+          /* 🔥 RESTORED to normal top padding so it sits level with the burger icon */
+          padding: max(20px, env(safe-area-inset-top, 20px)) 24px 24px 24px; 
           background: #f8fafc; 
-          min-height: 100dvh; /* Swapped to 100dvh for accurate mobile browser height */
+          min-height: 100vh; 
           font-family: Arial, sans-serif; 
           box-sizing: border-box; 
           color: #333;
+          width: 100%;
         }
+
         .header-container { 
+          display: flex;
+          justify-content: flex-start;
+          align-items: center; 
           margin-bottom: 24px; 
+          margin-top: 0;
+          /* 🔥 This gap perfectly clears the burger button to the left, horizontally aligning them */
+          margin-left: 60px; 
+          gap: 12px;
+          min-height: 42px;
+          width: 100%;
+          max-width: 1600px;
         }
+
+        .header-left {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+        }
+
         .page-title { 
-          font-size: 24px; 
-          font-weight: bold; 
-          color: #4a3b1b; 
-          margin: 0; 
+          font-size: 24px !important; 
+          color: #4a3b1b !important; 
+          margin: 0 !important; 
+          font-weight: bold;
+          letter-spacing: -0.5px;
+          line-height: normal !important; 
+          display: flex;
+          align-items: center; /* Guarantees vertical centering */
+          min-width: 0;
+          white-space: nowrap !important; 
         }
 
         .settings-grid {
           display: grid;
-          grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+          grid-template-columns: repeat(auto-fit, minmax(min(100%, 400px), 1fr));
           gap: 24px;
-          max-width: 1200px;
+          /* Screen Fill Bounds */
+          width: 100%;
+          max-width: 1600px;
+          margin-left: auto;
+          margin-right: auto;
         }
 
         .settings-card {
@@ -393,7 +428,11 @@ export default function SettingsPage() {
           box-shadow: 0 4px 6px rgba(0,0,0,0.02);
           display: flex;
           flex-direction: column;
+          /* 🔥 FIXED: min-width 0 prevents child elements (like tables) from pushing grid wider than screen */
+          min-width: 0; 
+          box-sizing: border-box;
         }
+        
         .card-subtitle {
           margin: 0 0 16px 0; 
           font-size: 18px; 
@@ -431,6 +470,7 @@ export default function SettingsPage() {
           font-size: 16px; 
           font-weight: bold; 
           color: #10b981;
+          word-break: break-all;
         }
         .info-subtext {
           font-size: 11px; 
@@ -464,10 +504,10 @@ export default function SettingsPage() {
           border-radius: 6px; 
           border: 1px solid #cbd5e1; 
           outline: none; 
-          font-size: 16px; /* Exactly 16px prevents Safari Auto-Zoom */
+          font-size: 16px; 
           box-sizing: border-box;
           background: #ffffff;
-          -webkit-appearance: none; /* Strips harsh default iOS styling */
+          -webkit-appearance: none; 
           transition: border-color 0.2s, box-shadow 0.2s;
         }
         .settings-input:focus, .mobile-select:focus {
@@ -475,12 +515,12 @@ export default function SettingsPage() {
           box-shadow: 0 0 0 2px rgba(181, 138, 61, 0.2);
         }
 
-        /* Wrapper for momentum scrolling on iOS */
         .table-responsive-wrapper {
           overflow-x: auto;
           border: 1px solid #e2e8f0;
           border-radius: 8px;
-          -webkit-overflow-scrolling: touch; 
+          -webkit-overflow-scrolling: touch;
+          width: 100%; 
         }
         
         .signout-btn {
@@ -521,14 +561,36 @@ export default function SettingsPage() {
           cursor: not-allowed;
         }
         
-        @media (max-width: 768px) { 
+        /* 🔥 MATCHED MOBILE OVERRIDES */
+        @media (max-width: 1023px) { 
           .main-wrapper { 
-            /* Safely pads bottom accounting for iOS home bar, and ignores the sidebar padding on mobile */
-            padding: max(80px, env(safe-area-inset-top, 80px)) 
-                     max(16px, env(safe-area-inset-right, 16px)) 
-                     max(24px, env(safe-area-inset-bottom, 24px)) 
-                     max(16px, env(safe-area-inset-left, 16px)) !important; 
+            padding: max(20px, env(safe-area-inset-top, 20px)) 16px 16px 16px !important; 
           }
+          .header-container { 
+            /* 🔥 RESTORED margin-left so it clears the burger on mobile for horizontal alignment */
+            margin-left: 54px !important; 
+            margin-right: 0 !important; 
+            margin-bottom: 24px !important; 
+            margin-top: 0 !important;
+            display: flex !important;
+            flex-direction: row !important;
+            justify-content: flex-start !important;
+            align-items: center !important; 
+            min-height: 44px !important;
+            width: calc(100% - 54px) !important;
+          }
+          .header-left {
+            display: flex !important;
+            flex-direction: row !important;
+            align-items: center !important;
+            gap: 12px !important;
+          }
+          .page-title {
+            font-size: 21px !important; 
+            line-height: normal !important; 
+            white-space: nowrap !important; 
+          }
+
           .settings-grid {
             grid-template-columns: 1fr;
           }
@@ -537,7 +599,7 @@ export default function SettingsPage() {
           }
           .signout-btn, .danger-btn {
             width: 100%;
-            padding: 14px; /* Slightly larger touch target on mobile */
+            padding: 14px; 
           }
         }
       `}</style>

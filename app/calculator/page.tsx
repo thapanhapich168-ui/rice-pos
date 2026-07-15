@@ -283,7 +283,9 @@ export default function RiceMixCalculator() {
     <div className="main-wrapper">
       {/* HEADER */}
       <div className="header-container">
-        <h1 className="page-title">🧮 Rice Mix Calculator</h1>
+        <div className="header-left">
+          <h1 className="page-title">🧮 Rice Mix Calculator</h1>
+        </div>
         <button className="action-btn" onClick={handleReset} style={{ background: '#f1f5f9', color: '#475569', border: '1px solid #cbd5e1' }}>↺ Reset</button>
       </div>
 
@@ -594,13 +596,15 @@ export default function RiceMixCalculator() {
           margin: 0;
         }
         
+        /* 🔥 DESKTOP LAYOUT FIXES (Aligned with other pages) */
         .main-wrapper {
-          padding: 24px 24px 24px 75px;
+          padding: max(20px, env(safe-area-inset-top, 20px)) 24px 24px 24px;
           background: #f8fafc;
           min-height: 100vh;
           font-family: Arial, sans-serif;
           color: #333;
           box-sizing: border-box;
+          width: 100%;
         }
 
         .header-container {
@@ -608,14 +612,31 @@ export default function RiceMixCalculator() {
           justify-content: space-between;
           align-items: center;
           margin-bottom: 24px;
+          margin-top: 0;
+          margin-left: 60px; /* 🔥 Clears the burger menu icon for horizontal alignment */
+          gap: 12px;
+          min-height: 42px; 
+          width: 100%;
+          max-width: 1600px;
+        }
+        
+        .header-left {
+          display: flex;
+          align-items: center; 
+          gap: 12px;
         }
 
         .page-title {
           font-size: 24px !important;
           font-weight: bold;
           color: #4a3b1b !important;
-          margin: 0;
+          margin: 0 !important;
           letter-spacing: -0.5px;
+          line-height: normal !important; 
+          display: flex;
+          align-items: center;
+          min-width: 0;
+          white-space: nowrap !important;
         }
 
         .action-btn {
@@ -774,6 +795,7 @@ export default function RiceMixCalculator() {
           margin-top: 40px;
         }
 
+        /* 🔥 MOBILE OVERRIDES */
         @media (max-width: 1023px) {
           .main-wrapper {
             /* Pulls the page up */
@@ -786,9 +808,21 @@ export default function RiceMixCalculator() {
             display: flex !important;
             justify-content: space-between !important;
             align-items: center !important;
+            margin-right: 0 !important;
+            margin-top: 0 !important;
+            min-height: 44px !important;
+            width: calc(100% - 54px) !important;
+          }
+          .header-left {
+            display: flex !important;
+            flex-direction: row !important;
+            align-items: center !important;
+            gap: 12px !important;
           }
           .page-title {
             font-size: 22px !important;
+            line-height: normal !important; 
+            white-space: nowrap !important;
             margin: 0 !important;
           }
           .calculator-grid {

@@ -780,7 +780,9 @@ export default function RiceControl() {
       
       {/* HEADER */}
       <div className="header-container">
-        <h1 className="page-title">🌾 Rice Inventory & Suppliers</h1>
+        <div className="header-left">
+          <h1 className="page-title">🌾 Rice Inventory & Suppliers</h1>
+        </div>
         <div className="header-actions">
           {selectedToDelete.size > 0 && activeView !== 'import' && activeView !== 'pending' && activeView !== 'suppliers' && (
             <button className="delete-btn" onClick={handleDelete}>
@@ -788,12 +790,12 @@ export default function RiceControl() {
             </button>
           )}
           {(activeView === 'retail' || activeView === 'wholesale') && (
-            <button className="add-btn" onClick={() => setIsAddModalOpen(true)}>
+            <button className="add-btn desktop-only-btn" onClick={() => setIsAddModalOpen(true)}>
               + Add Product
             </button>
           )}
           {activeView === 'suppliers' && (
-            <button className="add-btn" onClick={() => setIsAddSupplierOpen(true)}>
+            <button className="add-btn desktop-only-btn" onClick={() => setIsAddSupplierOpen(true)}>
               + Add Supplier
             </button>
           )}
@@ -811,7 +813,7 @@ export default function RiceControl() {
         </div>
         
         {(activeView === 'retail' || activeView === 'wholesale') && (
-          <>
+          <div className="mobile-action-row">
             <input 
               className="toolbar-search" 
               placeholder="🔍 Quick search..." 
@@ -821,11 +823,22 @@ export default function RiceControl() {
             />
             
             <div className="toolbar-filters">
+              <button className="add-btn-inline mobile-only-btn" onClick={() => setIsAddModalOpen(true)}>
+                + Add Product
+              </button>
               <button className="filter-btn" onClick={() => setIsFilterOpen(true)} style={{ color: filterRules.length > 0 ? '#3b82f6' : '#0f172a' }}>
                 Y Filter {filterRules.length > 0 && `(${filterRules.length})`}
               </button>
             </div>
-          </>
+          </div>
+        )}
+
+        {activeView === 'suppliers' && (
+          <div className="mobile-action-row mobile-only-flex" style={{ justifyContent: 'flex-end' }}>
+             <button className="add-btn-inline" onClick={() => setIsAddSupplierOpen(true)}>
+               + Add Supplier
+             </button>
+          </div>
         )}
       </div>
 
@@ -1568,26 +1581,59 @@ export default function RiceControl() {
           to { opacity: 1; transform: translateY(0); }
         }
 
-        .main-wrapper {
-          padding: 24px 24px 24px 75px;
-          background: #f8fafc;
-          min-height: 100vh;
-          font-family: Arial, sans-serif;
-          color: #333;
-          box-sizing: border-box;
-        }
-        .header-container {
+        /* 📱 RESPONSIVE CLASSES */
+        .desktop-only-btn { display: block; }
+        .mobile-only-btn { display: none !important; }
+
+        .mobile-action-row {
           display: flex;
-          justify-content: space-between;
+          flex: 1;
+          gap: 12px;
           align-items: center;
-          margin-bottom: 24px;
+          min-width: 300px;
         }
-        .page-title {
-          font-size: 24px;
+
+        /* 🔥 DESKTOP LAYOUT FIXES (Aligned with other pages) */
+        .main-wrapper { 
+          padding: max(20px, env(safe-area-inset-top, 20px)) 24px 24px 24px; 
+          background: #f8fafc; 
+          min-height: 100vh;
+          font-family: Arial, sans-serif; 
+          box-sizing: border-box; 
+          color: #333;
+          width: 100%;
+        }
+
+        .header-container { 
+          display: flex;
+          justify-content: space-between; /* Preserved to keep header-actions on the right */
+          align-items: center; 
+          margin-bottom: 24px; 
+          margin-top: 0;
+          margin-left: 60px; /* 🔥 Clears the burger menu icon for horizontal alignment */
+          gap: 12px;
+          min-height: 48px; 
+        }
+        
+        .header-left {
+          display: flex;
+          align-items: center; 
+          gap: 12px;
+        }
+
+        .page-title { 
+          font-size: 24px !important; 
+          color: #4a3b1b !important; 
+          margin: 0 !important; 
           font-weight: bold;
-          color: #4a3b1b;
-          margin: 0;
+          letter-spacing: -0.5px;
+          line-height: normal !important; 
+          display: flex;
+          align-items: center;
+          min-width: 0;
+          white-space: nowrap !important; 
         }
+
         .header-actions {
           display: flex;
           gap: 10px;
@@ -1659,6 +1705,7 @@ export default function RiceControl() {
         .toolbar-filters {
           display: flex;
           gap: 10px;
+          flex-shrink: 0;
         }
         .filter-btn {
           padding: 10px 16px;
@@ -1668,6 +1715,21 @@ export default function RiceControl() {
           cursor: pointer;
           font-weight: bold;
           font-size: 14px;
+        }
+
+        .add-btn-inline {
+          display: flex;
+          align-items: center;
+          padding: 8px 14px;
+          background: #f0fdf4;
+          color: #166534;
+          border: 1px solid #bbf7d0;
+          border-radius: 6px;
+          font-weight: bold;
+          cursor: pointer;
+          font-size: 13px; 
+          white-space: nowrap;
+          transition: background 0.2s;
         }
 
         .hide-scrollbar::-webkit-scrollbar { display: none; }
@@ -1798,10 +1860,75 @@ export default function RiceControl() {
           box-shadow: 0 10px 25px rgba(0,0,0,0.2);
         }
 
+        /* 🔥 MOBILE OVERRIDES */
         @media (max-width: 1023px) { 
+          .desktop-only-btn { display: none !important; }
+          .mobile-only-btn { display: flex !important; }
+          .mobile-only-flex { display: flex !important; }
+
           .main-wrapper { 
-            padding: max(80px, env(safe-area-inset-top, 80px)) 16px 140px 16px !important; 
+            /* 🔥 Preserved: keeping 140px bottom padding for the shopping cart FAB */
+            padding: max(20px, env(safe-area-inset-top, 20px)) 16px 140px 16px !important; 
             min-height: auto;
+          }
+          
+          .header-container { 
+            margin-left: 54px !important; 
+            margin-right: 0 !important;
+            margin-bottom: 24px !important; 
+            margin-top: 0 !important;
+            display: flex !important;
+            flex-direction: row !important;
+            justify-content: space-between !important;
+            align-items: center !important; 
+            min-height: 44px !important;
+            width: calc(100% - 54px) !important;
+          }
+
+          .header-left {
+            display: flex !important;
+            flex-direction: row !important;
+            align-items: center !important;
+            gap: 12px !important;
+          }
+
+          .page-title {
+            font-size: 21px !important; 
+            line-height: normal !important; 
+            white-space: nowrap !important; 
+          }
+
+          /* 🔥 Forces tabs and action row to stack cleanly */
+          .toolbar-container {
+            flex-direction: column !important;
+            align-items: stretch !important;
+            padding: 12px !important;
+            gap: 10px !important;
+          }
+          .toolbar-tabs {
+            width: 100%;
+          }
+          
+          /* 🔥 Squeezes Search, Add, and Filter into one row exactly */
+          .mobile-action-row {
+            width: 100%;
+            gap: 8px !important;
+            min-width: 0 !important; /* overrides desktop min-width */
+            justify-content: space-between;
+          }
+          .toolbar-search {
+            min-width: 0 !important; /* allows the search bar to shrink as needed */
+            width: 100%;
+            padding: 8px 10px !important;
+            font-size: 14px !important;
+          }
+          .toolbar-filters {
+            gap: 6px !important;
+          }
+          .filter-btn, .add-btn-inline {
+            padding: 8px 10px !important;
+            font-size: 12px !important; /* Reduced slightly to ensure it fits next to search */
+            white-space: nowrap !important;
           }
         }
       `}</style>

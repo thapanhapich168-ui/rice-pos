@@ -408,10 +408,14 @@ export default function BizDatabase() {
       
       {/* HEADER */}
       <div className="header-container">
-        <h1 className="page-title">💼 Business Database</h1>
-        <button className="refresh-btn" onClick={fetchData}>
-          {isLoading ? '🔄 Loading...' : '🔄 Refresh Data'}
-        </button>
+        <div className="header-left">
+          <h1 className="page-title">🔐 Business Database</h1>
+        </div>
+        <div className="header-actions">
+          <button className="refresh-btn" onClick={fetchData}>
+            {isLoading ? '🔄 Loading...' : '🔄 Refresh Data'}
+          </button>
+        </div>
       </div>
 
       {/* TOOLBAR */}
@@ -561,26 +565,54 @@ export default function BizDatabase() {
 
       {/* --- GLOBAL CSS --- */}
       <style jsx global>{`
+        /* 🔥 DESKTOP/LAPTOP BASE STYLES */
         .main-wrapper {
-          padding: 24px 24px 24px 75px;
+          padding: max(20px, env(safe-area-inset-top, 20px)) 24px 24px 24px; 
           background: #f8fafc;
           min-height: 100vh;
           font-family: Arial, sans-serif;
           color: #333;
           box-sizing: border-box;
+          width: 100%;
         }
-        .header-container {
+
+        .header-container { 
           display: flex;
           justify-content: space-between;
-          align-items: center;
-          margin-bottom: 20px;
+          align-items: center; 
+          margin-bottom: 24px; 
+          margin-top: 0;
+          margin-left: 60px; /* 🔥 Clears the burger menu icon for horizontal alignment */
+          gap: 12px;
+          height: 42px; /* 🔥 Strictly locked to match the hamburger perfectly */
+          width: calc(100% - 60px); /* 🔥 Ensures right elements don't push off-screen */
+          max-width: 1600px;
         }
-        .page-title {
-          font-size: 24px;
+
+        .header-left {
+          display: flex;
+          align-items: center; 
+          gap: 12px;
+        }
+
+        .page-title { 
+          font-size: 24px !important; 
+          color: #4a3b1b !important; 
+          margin: 0 !important; 
           font-weight: bold;
-          color: #0f172a;
-          margin: 0;
+          letter-spacing: -0.5px;
+          line-height: normal !important; 
+          display: flex;
+          align-items: center;
+          min-width: 0;
+          white-space: nowrap !important; 
         }
+
+        .header-actions {
+          display: flex;
+          align-items: center;
+        }
+        
         .refresh-btn {
           padding: 10px 16px;
           background: #e2e8f0;
@@ -590,6 +622,8 @@ export default function BizDatabase() {
           font-weight: bold;
           cursor: pointer;
           transition: background 0.2s;
+          white-space: nowrap;
+          margin: 0; /* Ensures no extra spacing shifts the header */
         }
         .refresh-btn:hover { background: #cbd5e1; }
         
@@ -662,19 +696,46 @@ export default function BizDatabase() {
           box-shadow: 0 4px 6px rgba(0,0,0,0.02);
         }
         
+        /* 📱 MOBILE OVERRIDES */
         @media (max-width: 1023px) {
           .main-wrapper {
-            padding: max(80px, env(safe-area-inset-top, 80px)) 16px 16px 16px !important; 
+            padding: max(20px, env(safe-area-inset-top, 20px)) 16px 16px 16px !important; 
           }
-          .header-container {
-            flex-direction: column;
-            align-items: stretch;
-            gap: 16px;
+
+          .header-container { 
+            margin-left: 54px !important; /* Clears the mobile hamburger button safely */
+            margin-right: 0 !important;
+            margin-bottom: 24px !important; 
+            margin-top: 0 !important;
+            display: flex !important;
+            flex-direction: row !important;
+            justify-content: space-between !important;
+            align-items: center !important; 
+            height: 44px !important;
+            width: calc(100% - 54px) !important;
+          }
+
+          .header-left {
+            display: flex !important;
+            flex-direction: row !important;
+            align-items: center !important;
+            gap: 12px !important;
+          }
+
+          .page-title {
+            font-size: 21px !important; 
+            line-height: normal !important; 
+            white-space: nowrap !important; 
+          }
+
+          .header-actions {
+            display: flex;
           }
           .refresh-btn {
-            width: 100%;
-            padding: 14px;
+            padding: 8px 12px !important;
+            font-size: 13px !important;
           }
+          
           .toolbar-container {
             padding: 12px;
           }

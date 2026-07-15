@@ -1795,41 +1795,45 @@ export default function POSPage() {
           font-variant-numeric: tabular-nums lining-nums;
         }
 
+        /* 🔥 DESKTOP LAYOUT FIXES (Aligned with other pages) */
         .main-wrapper { 
-          padding: 24px 24px 24px 75px; 
+          padding: max(20px, env(safe-area-inset-top, 20px)) 24px 24px 24px; 
           background: #f8fafc; 
           font-family: Arial, sans-serif; 
           box-sizing: border-box; 
           color: #333;
+          width: 100%;
         }
 
         .header-container { 
           display: flex;
-          justify-content: space-between;
-          align-items: center; /* Vertically centers everything */
+          justify-content: flex-start;
+          align-items: center; 
           margin-bottom: 24px; 
+          margin-top: 0;
+          margin-left: 60px; /* 🔥 Clears the burger menu icon for horizontal alignment */
           gap: 12px;
-          min-height: 48px; /* Locks container height to match hamburger icon */
+          min-height: 48px; 
+          width: 100%;
         }
         
         .header-left {
           display: flex;
-          align-items: center; /* Vertically centers contents */
+          align-items: center; 
           gap: 12px;
         }
 
         .page-title { 
           font-size: 24px !important; 
-          color: #4a3b1b !important; /* Standardized Business Dashboard Color */
+          color: #4a3b1b !important; 
           margin: 0 !important; 
           font-weight: bold;
           letter-spacing: -0.5px;
-          line-height: 1 !important; /* Removes invisible padding causing misalignment */
+          line-height: normal !important; 
           display: flex;
           align-items: center;
           min-width: 0;
-          white-space: normal;
-          word-break: break-word;
+          white-space: nowrap !important; 
         }
 
         input[type="text"].no-spinners::-webkit-inner-spin-button,
@@ -1864,24 +1868,28 @@ export default function POSPage() {
           .desktop-controls { display: flex !important; }
         }
         
+        /* 🔥 MOBILE OVERRIDES */
         @media (max-width: 1023px) { 
           .desktop-controls { display: none !important; }
           .desktop-cart-panel { display: none !important; }
           
           .main-wrapper { 
+            /* 🔥 Preserved: keeping 140px bottom padding for the shopping cart FAB */
             padding: max(20px, env(safe-area-inset-top, 20px)) 16px 140px 16px !important; 
             min-height: 100% !important;
           }
           
           .header-container { 
-            margin-left: 54px !important; /* Clears the hamburger icon */
+            margin-left: 54px !important; /* Clears mobile hamburger button safely */
+            margin-right: 0 !important;
             margin-bottom: 24px !important; 
             margin-top: 0 !important;
             display: flex !important;
             flex-direction: row !important;
-            justify-content: space-between !important;
-            align-items: center !important; /* Vertically centers on mobile */
+            justify-content: flex-start !important;
+            align-items: center !important; 
             min-height: 44px !important;
+            width: calc(100% - 54px) !important;
           }
 
           .header-left {
@@ -1893,7 +1901,8 @@ export default function POSPage() {
 
           .page-title {
             font-size: 22px !important;
-            line-height: 1 !important;
+            line-height: normal !important; 
+            white-space: nowrap !important; 
           }
 
           .mobile-fab {

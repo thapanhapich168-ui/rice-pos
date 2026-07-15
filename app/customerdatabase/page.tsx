@@ -189,6 +189,7 @@ export default function CustomerDatabasePage() {
     document.addEventListener('mousemove', handleMove)
     document.addEventListener('mouseup', handleUp)
     document.addEventListener('touchmove', handleMove, { passive: false })
+    document.addEventListener('touchmove', handleMove)
     document.addEventListener('touchend', handleUp)
   }
 
@@ -301,16 +302,16 @@ export default function CustomerDatabasePage() {
       
       {/* HEADER */}
       <div className="header-container">
-        <h1 className="page-title">👥 Customer Database</h1>
+        <div className="header-left">
+          <h1 className="page-title">🧑‍🌾 Customer Database</h1>
+        </div>
+
         <div className="header-actions">
           {selectedToDelete.size > 0 && (
             <button className="delete-btn" onClick={handleDelete}>
               Delete ({selectedToDelete.size})
             </button>
           )}
-          <button className="add-btn" onClick={() => setShowAddModal(true)}>
-            ➕ Add Customer
-          </button>
         </div>
       </div>
 
@@ -318,11 +319,15 @@ export default function CustomerDatabasePage() {
       <div className="toolbar-container">
         <input 
           className="toolbar-search" 
-          placeholder="🔍 Search customers by name, phone, or location..." 
+          placeholder="🔍 Search by name, phone, or location..." 
           value={searchQuery} 
           onChange={(e) => setSearchQuery(e.target.value)} 
           onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
         />
+        <button className="add-btn-inline" onClick={() => setShowAddModal(true)}>
+          <span style={{ color: '#10b981', fontSize: '16px', marginRight: '4px', fontWeight: 'bold' }}>+</span>
+          Add Customer
+        </button>
       </div>
 
       {/* FILTER SEGMENTS */}
@@ -544,26 +549,49 @@ export default function CustomerDatabasePage() {
 
       {/* --- GLOBAL CSS --- */}
       <style jsx global>{`
+        /* 🔥 DESKTOP LAYOUT FIXES */
         .main-wrapper {
-          padding: 24px 24px 24px 75px;
-          background: #f8fafc;
-          min-height: 100vh;
-          font-family: Arial, sans-serif;
+          padding: max(20px, env(safe-area-inset-top, 20px)) 24px 24px 24px; 
+          background: #f8fafc; 
+          font-family: Arial, sans-serif; 
+          box-sizing: border-box; 
           color: #333;
-          box-sizing: border-box;
+          min-height: 100vh;
+          width: 100%;
         }
-        .header-container {
+
+        .header-container { 
           display: flex;
           justify-content: space-between;
-          align-items: center;
-          margin-bottom: 24px;
+          align-items: center; 
+          margin-bottom: 24px; 
+          margin-top: 0;
+          margin-left: 60px; /* 🔥 Clears the burger menu icon for horizontal alignment */
+          gap: 12px;
+          min-height: 42px; 
+          width: 100%;
+          max-width: 1600px;
         }
-        .page-title {
-          font-size: 24px;
+        
+        .header-left {
+          display: flex;
+          align-items: center; /* Vertically centers contents */
+          gap: 12px;
+        }
+
+        .page-title { 
+          font-size: 24px !important; 
+          color: #4a3b1b !important; 
+          margin: 0 !important; 
           font-weight: bold;
-          color: #1e293b;
-          margin: 0;
+          letter-spacing: -0.5px;
+          line-height: normal !important; 
+          display: flex;
+          align-items: center;
+          min-width: 0;
+          white-space: nowrap !important; 
         }
+
         .header-actions {
           display: flex;
           gap: 10px;
@@ -577,15 +605,7 @@ export default function CustomerDatabasePage() {
           font-weight: bold;
           cursor: pointer;
         }
-        .add-btn {
-          padding: 10px 20px;
-          background: #10b981;
-          color: #fff;
-          border: none;
-          border-radius: 6px;
-          font-weight: bold;
-          cursor: pointer;
-        }
+        
         .toolbar-container {
           display: flex;
           gap: 12px;
@@ -595,20 +615,40 @@ export default function CustomerDatabasePage() {
           border-radius: 12px;
           border: 1px solid #e2e8f0;
           align-items: center;
-          flex-wrap: wrap;
+          flex-wrap: nowrap; 
           box-shadow: 0 4px 6px rgba(0,0,0,0.02);
         }
+        
         .toolbar-search {
           padding: 10px 14px;
           border: 1px solid #cbd5e1;
           border-radius: 6px;
           flex: 1;
+          min-width: 0; 
           outline: none;
-          min-width: 150px;
           font-size: 16px;
           color: #0f172a;
           background-color: #ffffff;
         }
+        
+        .add-btn-inline {
+          display: flex;
+          align-items: center;
+          padding: 8px 14px;
+          background: #f0fdf4;
+          color: #166534;
+          border: 1px solid #bbf7d0;
+          border-radius: 6px;
+          font-weight: bold;
+          cursor: pointer;
+          font-size: 13px; 
+          white-space: nowrap;
+          transition: background 0.2s;
+        }
+        .add-btn-inline:hover {
+          background: #dcfce7;
+        }
+
         .hide-scrollbar::-webkit-scrollbar { display: none; }
         .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
 
@@ -676,31 +716,59 @@ export default function CustomerDatabasePage() {
           box-shadow: 0 10px 25px rgba(0,0,0,0.2);
         }
 
+        /* 🔥 MOBILE LAYOUT FIXES */
         @media (max-width: 1023px) {
           .main-wrapper {
-            padding: max(80px, env(safe-area-inset-top, 80px)) 16px 16px 16px !important; 
+            padding: max(20px, env(safe-area-inset-top, 20px)) 16px 16px 16px !important; 
           }
-          .header-container {
-            flex-direction: column;
-            align-items: stretch;
-            gap: 16px;
+
+          .header-container { 
+            margin-left: 54px !important; 
+            margin-right: 0 !important;
+            margin-bottom: 24px !important; 
+            margin-top: 0 !important;
+            display: flex !important;
+            flex-direction: row !important;
+            justify-content: space-between !important;
+            align-items: center !important; 
+            min-height: 44px !important;
+            width: calc(100% - 54px) !important;
           }
+
+          .header-left {
+            display: flex !important;
+            flex-direction: row !important;
+            align-items: center !important;
+            gap: 12px !important;
+          }
+
+          .page-title {
+            font-size: 21px !important; 
+            line-height: normal !important; 
+            white-space: nowrap !important; 
+          }
+
           .header-actions {
-            flex-direction: column;
+            display: flex;
             width: 100%;
           }
-          .delete-btn, .add-btn {
+          .delete-btn {
             width: 100%;
             padding: 14px;
             font-size: 15px;
           }
           .toolbar-container {
-            flex-direction: column;
-            align-items: stretch;
+            flex-direction: row; 
+            align-items: center;
+            padding: 12px 16px;
           }
           .toolbar-search {
             width: 100%;
             box-sizing: border-box;
+          }
+          .add-btn-inline {
+            padding: 10px 12px;
+            font-size: 13px;
           }
         }
       `}</style>
