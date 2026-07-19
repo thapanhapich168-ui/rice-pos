@@ -569,7 +569,8 @@ export default function CogsReportPage() {
   return (
     <div className="main-wrapper">
       
-      <div className="header-container" style={{ paddingRight: '20px' }}>
+      {/* 🔥 STANDARDIZED HEADER CONTAINER */}
+      <div className="header-container">
         <div className="header-left">
           <h1 className="page-title">🌾 COGS Accounting</h1>
         </div>
@@ -1004,16 +1005,14 @@ export default function CogsReportPage() {
       )}
 
       <style jsx global>{`
-        /* 🔥 DESKTOP LAYOUT FIXES (Perfect Alignment + Scrolling) */
+        /* 🔥 DESKTOP LAYOUT FIXES (EXACT DASHBOARD CSS) */
         .main-wrapper { 
-          padding: 15px 24px 24px 75px; 
+          padding: max(20px, env(safe-area-inset-top, 20px)) 24px 24px 24px; 
           background: #f8fafc; 
           font-family: Arial, sans-serif; 
           box-sizing: border-box; 
-          color: #0f172a;
+          color: #333;
           width: 100%;
-          
-          /* 👇 SCROLL FIX 👇 */
           height: 100dvh; 
           overflow-y: auto; 
           -webkit-overflow-scrolling: touch;
@@ -1021,11 +1020,14 @@ export default function CogsReportPage() {
 
         .header-container { 
           display: flex;
-          justify-content: space-between;
+          justify-content: space-between; 
           align-items: center; 
-          height: 42px; 
           margin-bottom: 24px; 
-          width: 100%;
+          margin-top: 0;
+          margin-left: 60px; /* 🔥 Clears the burger menu icon */
+          gap: 12px;
+          min-height: 42px; 
+          width: calc(100% - 60px); 
           max-width: 1600px;
         }
         
@@ -1126,18 +1128,17 @@ export default function CogsReportPage() {
           @page { size: A4 portrait; margin: 10mm; }
         }
 
-        /* 🔥 MOBILE LAYOUT FIXES */
+        /* 🔥 MOBILE LAYOUT FIXES (EXACT DASHBOARD CSS) */
         @media (max-width: 1023px) { 
           .main-wrapper { 
-            padding: max(20px, env(safe-area-inset-top, 20px)) 16px 24px 16px !important; 
-            
-            /* 👇 MOBILE SCROLL FIX 👇 */
+            padding: max(20px, env(safe-area-inset-top, 20px)) 16px 16px 16px !important; 
             height: 100dvh !important;
             overflow-y: auto !important;
             -webkit-overflow-scrolling: touch !important;
           }
           .header-container {
-            margin-left: 54px !important; /* Clears the hamburger icon */
+            margin-left: 54px !important; 
+            margin-right: 0 !important;
             margin-bottom: 24px !important; 
             margin-top: 0 !important;
             display: flex !important;
@@ -1154,7 +1155,7 @@ export default function CogsReportPage() {
             gap: 12px !important;
           }
           .page-title {
-            font-size: 22px !important;
+            font-size: 21px !important;
             line-height: normal !important;
             white-space: nowrap !important; 
           }

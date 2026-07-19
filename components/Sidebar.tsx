@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabaseClient'
@@ -32,8 +32,10 @@ export default function Sidebar() {
   const [menuItems, setMenuItems] = useState<MenuItem[]>(defaultMenuItems)
   const pathname = usePathname()
   const router = useRouter()
-
   const { role, loadingRole } = useUserRole();
+
+  const sidebarRef = useRef<HTMLDivElement>(null)
+  const buttonRef = useRef<HTMLButtonElement>(null)
 
   useEffect(() => {
     const saved = localStorage.getItem('sidebar_menu_order')
@@ -62,6 +64,25 @@ export default function Sidebar() {
     })
     return () => subscription.unsubscribe()
   }, [router])
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (
+        isOpen && 
+        sidebarRef.current && 
+        !sidebarRef.current.contains(event.target as Node) &&
+        buttonRef.current && 
+        !buttonRef.current.contains(event.target as Node)
+      ) {
+        setIsOpen(false);
+      }
+    }
+
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, [isOpen]);
 
   const handleLogout = async () => {
     await supabase.auth.signOut()
@@ -101,33 +122,23 @@ export default function Sidebar() {
       />
 
       <button
+        ref={buttonRef} 
+        className="burger-btn"
         onClick={() => setIsOpen(!isOpen)}
-        style={{
-          position: 'fixed',
-          top: 'max(15px, env(safe-area-inset-top, 15px))',
-          left: 'max(15px, env(safe-area-inset-left, 15px))',
-          zIndex: 1001,
-          background: '#111827',
-          color: 'white',
-          border: 'none',
-          borderRadius: '6px',
-          padding: '10px 12px',
-          cursor: 'pointer',
-          fontSize: '18px',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          boxShadow: isOpen ? 'none' : '0 2px 8px rgba(0,0,0,0.2)'
-        }}
+        style={{ boxShadow: isOpen ? 'none' : '0 2px 8px rgba(0,0,0,0.2)' }}
         aria-label="Toggle Navigation Sidebar"
       >
         ☰
       </button>
 
-      <div className={`sidebar-wrapper ${isOpen ? 'open' : 'closed'}`}>
+      <div 
+        ref={sidebarRef} 
+        className={`sidebar-wrapper ${isOpen ? 'open' : 'closed'}`}
+      >
         <div>
-          <div style={{ display: 'flex', alignItems: 'center', minHeight: '42px', marginBottom: '30px', paddingLeft: '45px' }}>
-            <h2 style={{ margin: 0, whiteSpace: 'nowrap', fontSize: '20px' }}>🌾 Rice POS</h2>
+          {/* 🔥 FIX: Extracted to responsive CSS class for perfect math alignment */}
+          <div className="sidebar-header">
+            <h2 style={{ margin: 0, whiteSpace: 'nowrap', fontSize: '20px', lineHeight: 1 }}>🌾 Rice POS</h2>
           </div>
           
           <nav style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
@@ -193,6 +204,36 @@ export default function Sidebar() {
       </div>
 
       <style jsx>{`
+        /* 🔥 NEW: Exact alignment matching the Dashboard/Customer page headers */
+        .burger-btn {
+          position: fixed;
+          top: max(20px, env(safe-area-inset-top, 20px));
+          left: max(24px, env(safe-area-inset-left, 24px));
+          z-index: 1001;
+          background: #111827;
+          color: white;
+          border: none;
+          border-radius: 6px;
+          width: 42px;
+          height: 42px;
+          cursor: pointer;
+          font-size: 18px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          padding: 0; /* Ensures perfect square without stretching */
+          box-sizing: border-box;
+          outline: none;
+        }
+
+        .sidebar-header {
+          display: flex;
+          align-items: center;
+          height: 42px; /* Matches exact desktop burger height */
+          margin-bottom: 32px;
+          margin-left: 54px; /* 42px button + 12px exact gap */
+        }
+
         .sidebar-backdrop {
           position: fixed;
           top: 0; left: 0; right: 0; bottom: 0;
@@ -227,11 +268,12 @@ export default function Sidebar() {
         }
 
         .sidebar-wrapper.open {
-          width: 240px;
-          min-width: 240px;
+          width: 250px;
+          min-width: 250px;
           opacity: 1;
           pointer-events: auto;
-          padding: max(15px, env(safe-area-inset-top, 15px)) 20px max(20px, env(safe-area-inset-bottom, 20px)) 20px;
+          /* Matches exact Desktop layout padding */
+          padding: max(20px, env(safe-area-inset-top, 20px)) 24px 24px 24px;
           box-shadow: 4px 0 10px rgba(0, 0, 0, 0.1);
         }
 
@@ -240,7 +282,6 @@ export default function Sidebar() {
             position: sticky;
             top: 0;
             left: 0;
-            /* 🔥 FIX: Forces the sidebar to map exactly to the bottom of the screen on laptops! */
             height: 100vh; 
           }
           .sidebar-backdrop {
@@ -249,10 +290,23 @@ export default function Sidebar() {
         }
 
         @media (max-width: 1023px) {
+          .burger-btn {
+            left: max(16px, env(safe-area-inset-left, 16px));
+            width: 44px;
+            height: 44px;
+          }
+          .sidebar-header {
+            height: 44px; /* Matches exact mobile burger height */
+            margin-left: 56px; /* 44px button + 12px exact gap */
+          }
           .sidebar-wrapper {
             position: fixed;
             top: 0;
             left: 0;
+          }
+          .sidebar-wrapper.open {
+             /* Matches exact Mobile layout padding */
+             padding: max(20px, env(safe-area-inset-top, 20px)) 16px 16px 16px;
           }
           .sidebar-backdrop.open {
             opacity: 1;

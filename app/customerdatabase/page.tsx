@@ -15,7 +15,7 @@ interface Customer {
   google_map: string;
   created_at: string;
   last_purchase_date: string;
-  days_since_last_purchase?: number | null; // Stored as integer for perfect sorting
+  days_since_last_purchase?: number | null; 
 }
 
 type SortConfig = {
@@ -26,14 +26,14 @@ type SortConfig = {
 const DEFAULT_WIDTHS: Record<string, number> = {
   created_at: 120,
   id: 280,
-  name: 200,
+  name: 240, 
   owner: 120,
   type: 120,
   phone: 150,
   location: 200,
   google_map: 120,
   last_purchase_date: 150,
-  days_since_last_purchase: 160 // Reduced width since text is now short
+  days_since_last_purchase: 160 
 }
 
 const DEFAULT_ORDER: Array<keyof Customer> = [
@@ -73,7 +73,6 @@ export default function CustomerDatabasePage() {
     fetchSettings()
   }, [])
 
-  // 🚀 NEW: Window Focus Auto-Refresh
   useFocusRefresh(loadCustomers);
 
   // --- DATABASE OPERATIONS ---
@@ -107,6 +106,12 @@ export default function CustomerDatabasePage() {
   // --- RECORD OPERATIONS ---
   const handleSaveRecord = async (id: string) => {
     if (!edits[id]) return;
+    
+    if (edits[id].name !== undefined && edits[id].name?.trim() === '') {
+      alert("❌ Customer Name cannot be empty.");
+      return;
+    }
+
     const { error } = await supabase.from('customers').update(edits[id]).eq('id', id)
     if (!error) {
       setEdits(prev => { const n = { ...prev }; delete n[id]; return n })
@@ -120,7 +125,22 @@ export default function CustomerDatabasePage() {
   const handleDelete = async () => {
     if (!confirm(`Are you sure you want to delete ${selectedToDelete.size} customer(s)?`)) return
     const { error } = await supabase.from('customers').delete().in('id', Array.from(selectedToDelete))
-    if (!error) { setSelectedToDelete(new Set()); loadCustomers() }
+    if (!error) { 
+      setSelectedToDelete(new Set()); 
+      loadCustomers() 
+    } else {
+      alert(`❌ Cannot delete customer: ${error.message}\n\nMake sure you ran the SQL script if they have past orders!`)
+    }
+  }
+
+  const handleDeleteSingle = async (id: string, name: string) => {
+    if (!confirm(`Are you sure you want to permanently delete: ${name}?`)) return
+    const { error } = await supabase.from('customers').delete().eq('id', id)
+    if (!error) { 
+      loadCustomers() 
+    } else {
+      alert(`❌ Cannot delete ${name}: ${error.message}\n\nMake sure you ran the SQL script if they have past orders!`)
+    }
   }
 
   async function handleAddCustomer(e: React.FormEvent) {
@@ -181,6 +201,7 @@ export default function CustomerDatabasePage() {
       document.removeEventListener('mousemove', handleMove)
       document.removeEventListener('mouseup', handleUp)
       document.removeEventListener('touchmove', handleMove)
+      document.removeEventListener('touchmove', handleMove)
       document.removeEventListener('touchend', handleUp)
       
       await supabase.from('app_settings').upsert({ setting_key: 'cust_col_widths', setting_value: widthsRef.current }, { onConflict: 'setting_key' })
@@ -208,7 +229,6 @@ export default function CustomerDatabasePage() {
     .map(c => {
       const merged = { ...c, ...edits[c.id] };
       
-      // Calculate Days Since Last Purchase as a raw integer
       let daysSince = null;
       if (merged.last_purchase_date) {
         const diffTime = now - new Date(merged.last_purchase_date).getTime();
@@ -238,7 +258,6 @@ export default function CustomerDatabasePage() {
       let valA = a[key];
       let valB = b[key];
 
-      // Push nulls/empty values to the bottom gracefully
       if (valA === null || valA === undefined || valA === '') return 1;
       if (valB === null || valB === undefined || valB === '') return -1;
 
@@ -265,7 +284,6 @@ export default function CustomerDatabasePage() {
       return new Date(val).toLocaleDateString('en-GB');
     }
     
-    // Dynamic Time String Formatter (Short Version)
     if (col === 'days_since_last_purchase') {
       if (val === 0) return 'Today';
       
@@ -281,7 +299,7 @@ export default function CustomerDatabasePage() {
       if (days > 0) parts.push(`${days}D`);
 
       if (parts.length === 0) return 'Today';
-      return parts.join(' '); // Returns format like: "1Y 2M 3D"
+      return parts.join(' '); 
     }
 
     return String(val);
@@ -357,6 +375,20 @@ export default function CustomerDatabasePage() {
         <table style={{ borderCollapse: 'collapse', tableLayout: 'fixed', width: 'max-content', minWidth: '100%' }}>
           <thead>
             <tr style={{ background: '#f8fafc', borderBottom: '2px solid #e2e8f0' }}>
+              
+              {/* 🔥 NEW: Dedicated Checkbox Header Column */}
+              <th style={{ width: '46px', minWidth: '46px', maxWidth: '46px', padding: '16px 8px', textAlign: 'center', borderRight: '1px solid #f1f5f9' }}>
+                 <input 
+                   type="checkbox" 
+                   checked={selectedToDelete.size === processedCustomers.length && processedCustomers.length > 0}
+                   onChange={(e) => {
+                     if (e.target.checked) setSelectedToDelete(new Set(processedCustomers.map(c => c.id)));
+                     else setSelectedToDelete(new Set());
+                   }}
+                   style={{ cursor: 'pointer', accentColor: '#b58a3d', width: '16px', height: '16px' }}
+                 />
+              </th>
+
               {columnOrder.map(key => (
                 <th 
                   key={key} 
@@ -391,11 +423,25 @@ export default function CustomerDatabasePage() {
           </thead>
           <tbody>
             {processedCustomers.length === 0 ? (
-              <tr><td colSpan={columnOrder.length} style={{ padding: '40px', textAlign: 'center', color: '#94a3b8' }}>No customers found.</td></tr>
+              <tr><td colSpan={columnOrder.length + 1} style={{ padding: '40px', textAlign: 'center', color: '#94a3b8' }}>No customers found.</td></tr>
             ) : (
               processedCustomers.map(c => (
                 <tr key={c.id} onMouseEnter={() => setHoveredId(c.id)} onMouseLeave={() => setHoveredId(null)} style={{ borderBottom: '1px solid #f1f5f9', background: edits[c.id] ? '#fefcf3' : 'transparent', transition: 'background 0.2s' }}>
                   
+                  {/* 🔥 NEW: Dedicated Checkbox Row Column */}
+                  <td style={{ width: '46px', padding: '8px', textAlign: 'center', borderRight: '1px solid #f1f5f9', background: edits[c.id] ? '#fefcf3' : 'transparent' }}>
+                    <input 
+                      type="checkbox" 
+                      checked={selectedToDelete.has(c.id)}
+                      onChange={() => {
+                        const next = new Set(selectedToDelete)
+                        next.has(c.id) ? next.delete(c.id) : next.add(c.id)
+                        setSelectedToDelete(next)
+                      }} 
+                      style={{ cursor: 'pointer', width: '16px', height: '16px', margin: 0, accentColor: '#b58a3d' }} 
+                    />
+                  </td>
+
                   {columnOrder.map(col => {
                     const isNameCol = col === 'name';
                     const editing = editingCell?.id === c.id && editingCell?.col === col;
@@ -404,17 +450,6 @@ export default function CustomerDatabasePage() {
 
                     return (
                       <td key={col} className={editing ? 'cell-editing' : ''} style={{ borderRight: '1px solid #f1f5f9', overflow: 'hidden', position: 'relative', padding: 0 }}>
-                        
-                        {/* Hover Checkbox */}
-                        {isNameCol && (hoveredId === c.id || selectedToDelete.has(c.id)) && (
-                          <div style={{ position: 'absolute', left: '8px', top: '50%', transform: 'translateY(-50%)', zIndex: 25, background: edits[c.id] ? '#fefcf3' : '#fff', paddingRight: '4px' }}>
-                            <input type="checkbox" checked={selectedToDelete.has(c.id)} onChange={() => {
-                              const next = new Set(selectedToDelete)
-                              next.has(c.id) ? next.delete(c.id) : next.add(c.id)
-                              setSelectedToDelete(next)
-                            }} style={{ cursor: 'pointer', width: '18px', height: '18px', margin: 0, accentColor: '#b58a3d' }} />
-                          </div>
-                        )}
                         
                         {/* Input Transform */}
                         {editing && !readOnly ? (
@@ -452,7 +487,7 @@ export default function CustomerDatabasePage() {
                               autoFocus
                               type="text"
                               className="cell-input"
-                              style={{ paddingLeft: isNameCol ? '36px' : '12px' }}
+                              style={{ paddingLeft: '12px' }}
                               value={val}
                               onChange={(e) => setEdits(prev => ({ ...prev, [c.id]: { ...(prev[c.id] || {}), [col]: e.target.value } }))}
                               onBlur={() => handleSaveRecord(c.id)}
@@ -463,18 +498,40 @@ export default function CustomerDatabasePage() {
                           <div 
                             className="cell-display"
                             style={{ 
-                              paddingLeft: isNameCol ? '36px' : '12px', 
+                              paddingLeft: '12px', 
                               fontWeight: isNameCol || col === 'days_since_last_purchase' ? 'bold' : 'normal', 
                               color: isNameCol ? '#1e293b' : col === 'days_since_last_purchase' ? '#b58a3d' : readOnly ? '#94a3b8' : '#334155',
                               cursor: readOnly ? 'default' : 'text',
-                              fontFamily: col === 'id' ? 'monospace' : 'inherit'
+                              fontFamily: col === 'id' ? 'monospace' : 'inherit',
+                              display: 'flex',
+                              justifyContent: 'space-between',
+                              alignItems: 'center',
+                              width: '100%',
+                              boxSizing: 'border-box'
                             }}
                             onClick={() => !readOnly && setEditingCell({ id: c.id, col: col as string })}
                           >
-                            {col === 'google_map' && val ? (
-                              <a href={val} target="_blank" rel="noreferrer" style={{ color: '#2563eb', textDecoration: 'none', fontWeight: 'bold' }} onClick={e => e.stopPropagation()}>🗺️ Open Map</a>
-                            ) : (
-                              formatDisplayValue(col as string, val)
+                            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {col === 'google_map' && val ? (
+                                <a href={val} target="_blank" rel="noreferrer" style={{ color: '#2563eb', textDecoration: 'none', fontWeight: 'bold' }} onClick={e => e.stopPropagation()}>🗺️ Open Map</a>
+                              ) : (
+                                formatDisplayValue(col as string, val)
+                              )}
+                            </span>
+
+                            {/* 🔥 NEW: Inline Single Delete Button visible on Hover */}
+                            {isNameCol && hoveredId === c.id && (
+                              <button
+                                onClick={(e) => { e.stopPropagation(); setEditingCell(null); handleDeleteSingle(c.id, c.name); }}
+                                style={{ 
+                                  background: '#fee2e2', border: 'none', borderRadius: '4px', 
+                                  cursor: 'pointer', padding: '4px 8px', fontSize: '11px', color: '#ef4444', 
+                                  fontWeight: 'bold', marginLeft: '8px', zIndex: 30
+                                }}
+                                title="Delete Customer"
+                              >
+                                🗑️ Delete
+                              </button>
                             )}
                           </div>
                         )}
@@ -549,7 +606,7 @@ export default function CustomerDatabasePage() {
 
       {/* --- GLOBAL CSS --- */}
       <style jsx global>{`
-        /* 🔥 DESKTOP LAYOUT FIXES */
+        /* 🔥 DESKTOP LAYOUT FIXES (EXACT DASHBOARD CSS) */
         .main-wrapper {
           padding: max(20px, env(safe-area-inset-top, 20px)) 24px 24px 24px; 
           background: #f8fafc; 
@@ -557,8 +614,6 @@ export default function CustomerDatabasePage() {
           box-sizing: border-box; 
           color: #333;
           width: 100%;
-          
-          /* 👇 SCROLL FIX 👇 */
           height: 100dvh; 
           overflow-y: auto; 
           -webkit-overflow-scrolling: touch;
@@ -566,7 +621,7 @@ export default function CustomerDatabasePage() {
 
         .header-container { 
           display: flex;
-          justify-content: space-between;
+          justify-content: flex-start;
           align-items: center; 
           margin-bottom: 24px; 
           margin-top: 0;
@@ -579,7 +634,7 @@ export default function CustomerDatabasePage() {
         
         .header-left {
           display: flex;
-          align-items: center; /* Vertically centers contents */
+          align-items: center;
           gap: 12px;
         }
 
@@ -596,10 +651,14 @@ export default function CustomerDatabasePage() {
           white-space: nowrap !important; 
         }
 
+        /* 🔥 FIX: Wraps the button securely inside the screen width WITHOUT touching .header-container */
         .header-actions {
           display: flex;
           gap: 10px;
+          margin-left: auto;
+          padding-right: 60px; 
         }
+
         .delete-btn {
           padding: 10px 20px;
           background: #ef4444;
@@ -720,25 +779,23 @@ export default function CustomerDatabasePage() {
           box-shadow: 0 10px 25px rgba(0,0,0,0.2);
         }
 
-        /* 🔥 MOBILE LAYOUT FIXES */
+        /* 🔥 MOBILE LAYOUT FIXES (EXACT DASHBOARD CSS) */
         @media (max-width: 1023px) {
           .main-wrapper {
             padding: max(20px, env(safe-area-inset-top, 20px)) 16px 16px 16px !important; 
-            
-            /* 👇 MOBILE SCROLL FIX 👇 */
             height: 100dvh !important;
             overflow-y: auto !important;
             -webkit-overflow-scrolling: touch !important;
           }
 
           .header-container { 
-            margin-left: 54px !important; 
+            margin-left: 54px !important; /* Clears mobile hamburger button safely */
             margin-right: 0 !important;
             margin-bottom: 24px !important; 
             margin-top: 0 !important;
             display: flex !important;
             flex-direction: row !important;
-            justify-content: space-between !important;
+            justify-content: flex-start !important;
             align-items: center !important; 
             min-height: 44px !important;
             width: calc(100% - 54px) !important;
@@ -758,14 +815,15 @@ export default function CustomerDatabasePage() {
           }
 
           .header-actions {
-            display: flex;
-            width: 100%;
+            margin-left: auto;
+            padding-right: 0px; /* Reset on mobile because calc() handles the width perfectly */
           }
+          
           .delete-btn {
-            width: 100%;
-            padding: 14px;
-            font-size: 15px;
+            padding: 8px 12px;
+            font-size: 13px;
           }
+
           .toolbar-container {
             flex-direction: row; 
             align-items: center;
