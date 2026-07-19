@@ -105,7 +105,6 @@ export default function DashboardPage() {
 
     loadData();
     
-    // 🚀 NEW: Window Focus Listener (Zero-cost, instant refresh)
     const onFocus = () => loadData();
     window.addEventListener('focus', onFocus);
     
@@ -210,7 +209,6 @@ export default function DashboardPage() {
       if (parseOwner(exp.spender) === 'mom') return; 
       
       const desc = (exp.description || '').toUpperCase();
-      // 🔥 FIX: Ignore Staff Advances & Settlements so they don't bloat the Expense UI cards
       if (desc === 'RETAIL' || desc === 'WHOLESALE' || desc.includes('STAFF_ADVANCE') || desc.includes('STAFF_SETTLEMENT')) return; 
 
       let amtRiel = Number(exp.amount_riel || 0); let amtUsd = Number(exp.amount_usd || 0);
@@ -278,6 +276,7 @@ export default function DashboardPage() {
     
     let momTotalCogsRiel = 0;
     let momTotalPaidRiel = 0;
+    let momCustomerArRiel = 0; 
     
     let momCollectedRiel = 0, momCollectedUsd = 0;
     let momPaidOutRiel = 0, momPaidOutUsd = 0;
@@ -388,7 +387,6 @@ export default function DashboardPage() {
            
            let owner = parseOwner(p.recorded_by);
            
-           // Lookup true owner from invoice/sales to bypass the "Both" fallback from Delivery page
            const relatedInv = invoiceSummaries.find((inv: any) => inv.invoice_id === p.invoice_id);
            if (relatedInv) {
                owner = parseOwner(relatedInv.owner);
@@ -400,6 +398,25 @@ export default function DashboardPage() {
            if (owner === 'mom' || methodStr.includes('mom qr')) {
                if (isUsd) momCollectedUsd += amtUsd;
                else momCollectedRiel += amtRiel;
+           }
+       }
+    });
+
+    // 🔥 FIX: Added Retail Sales specifically into the Cash on Hand buckets
+    retailSales.forEach((rs: any) => {
+       const methodStr = (rs.payment_method || 'Cash ៛').toLowerCase();
+       if (methodStr.includes('unpaid') || methodStr.includes('debt') || methodStr.includes('liability')) return;
+
+       const totalRiel = Number(rs.total_sales || 0);
+
+       if (isBusinessMethod(methodStr)) {
+           addFunds(totalRiel, methodStr);
+           
+           let owner = parseOwner(rs.owner);
+           if (owner === 'mom' || methodStr.includes('mom qr')) {
+               const isUsd = methodStr.includes('$');
+               if (isUsd) momCollectedUsd += (totalRiel / EXCHANGE_RATE);
+               else momCollectedRiel += totalRiel;
            }
        }
     });
@@ -472,12 +489,12 @@ export default function DashboardPage() {
          if (remarks.includes('account settled') && !remarks.includes('cogs')) return;
 
          if (paymentMethod.includes(':')) {
-            paymentMethod.split(',').forEach((p: string) => {
-              const [m, amtStr] = p.split(':');
-              let bucketAmt = Number(amtStr) || 0;
-              if (m.includes('$')) bucketAmt *= EXCHANGE_RATE;
-              addFunds(Math.abs(bucketAmt), m.trim());
-            });
+             paymentMethod.split(',').forEach((p: string) => {
+               const [m, amtStr] = p.split(':');
+               let bucketAmt = Number(amtStr) || 0;
+               if (m.includes('$')) bucketAmt *= EXCHANGE_RATE;
+               addFunds(Math.abs(bucketAmt), m.trim());
+             });
          } else addFunds(totalRielValue, paymentMethod);
       } else {
          const remarks = (e.remarks || '').toLowerCase();
@@ -499,12 +516,12 @@ export default function DashboardPage() {
          }
 
          if (paymentMethod.includes(':')) {
-            paymentMethod.split(',').forEach((p: string) => {
-              const [m, amtStr] = p.split(':');
-              let bucketAmt = Number(amtStr) || 0;
-              if (m.includes('$')) bucketAmt *= EXCHANGE_RATE;
-              subFunds(Math.abs(bucketAmt), m.trim());
-            });
+             paymentMethod.split(',').forEach((p: string) => {
+               const [m, amtStr] = p.split(':');
+               let bucketAmt = Number(amtStr) || 0;
+               if (m.includes('$')) bucketAmt *= EXCHANGE_RATE;
+               subFunds(Math.abs(bucketAmt), m.trim());
+             });
          } else subFunds(totalRielValue, paymentMethod);
       }
     });
@@ -518,7 +535,6 @@ export default function DashboardPage() {
         if (owner === 'mom') return;
 
         const desc = (e.description || '').toUpperCase();
-        // 🔥 FIX: Ignore Staff Advances & Settlements so they don't bloat the Expense UI cards
         if (desc === 'RETAIL' || desc === 'WHOLESALE' || desc.includes('STAFF_ADVANCE') || desc.includes('STAFF_SETTLEMENT')) return;
 
         let amtRiel = Number(e.amount_riel || 0); let amtUsd = Number(e.amount_usd || 0);
@@ -531,7 +547,7 @@ export default function DashboardPage() {
         if (remarks.includes('stock import') || remarks.includes('rice') || desc.includes('RICE') || desc.includes('COGS')) isRice = true;
         else if (desc === 'BUSINESS' || desc === 'BIZ' || desc === 'STAFF') isBiz = true;
 
-        const distributeToBuckets = (m: string, pRiel: number, pUsd: number) => {
+        const distributeToBuckets = (pRiel: number, pUsd: number) => {
            if (isRice) { riceExpRiel += pRiel; riceExpUsd += pUsd; } 
            else if (isBiz) { bizExpRiel += pRiel; bizExpUsd += pUsd; } 
            else { persExpRiel += pRiel; persExpUsd += pUsd; }
@@ -543,15 +559,17 @@ export default function DashboardPage() {
               let pAmt = Number(amtStr) || 0;
               let pRiel = 0, pUsd = 0;
               if (m.includes('$')) pUsd = pAmt; else pRiel = pAmt;
-              distributeToBuckets(m.trim(), Math.abs(pRiel), Math.abs(pUsd));
+              distributeToBuckets(Math.abs(pRiel), Math.abs(pUsd));
            });
-        } else distributeToBuckets(methodStr, Math.abs(amtRiel), Math.abs(amtUsd));
+        } else distributeToBuckets(Math.abs(amtRiel), Math.abs(amtUsd));
     });
 
     invoiceSummaries.forEach((inv: any) => {
        const owner = parseOwner(inv.owner);
        if (owner !== 'mom') {
            bizCreditRiel += Number(inv.balance_due || 0);
+       } else {
+           momCustomerArRiel += Number(inv.balance_due || 0);
        }
     });
 
@@ -574,12 +592,12 @@ export default function DashboardPage() {
     const netWorthRiel = baseCapital + liveCashRiel + liveQrRiel + bizCreditRiel + familyOweRiel + momCogsArRiel + staffDebtRiel - totalSupplierAPRiel - liveMomLiabilityRiel;
     const netWorthUsd = liveCashUsd + liveQrUsd + familyOweUsd + staffDebtUsd - totalSupplierAPUsd - liveMomLiabilityUsd;
 
-    const totalArRiel = bizCreditRiel + familyOweRiel + momCogsArRiel + staffDebtRiel;
+    const totalArRiel = bizCreditRiel + familyOweRiel + staffDebtRiel; 
     const totalArUsd = familyOweUsd + staffDebtUsd;
 
     return {
       liveCashRiel, liveCashUsd, liveQrRiel, liveQrUsd,
-      bizCreditRiel, bizCreditUsd, momCogsArRiel, liveMomLiabilityRiel, liveMomLiabilityUsd, totalSupplierAPRiel, totalSupplierAPUsd, staffDebtRiel, staffDebtUsd,
+      bizCreditRiel, bizCreditUsd, momCogsArRiel, momCustomerArRiel, liveMomLiabilityRiel, liveMomLiabilityUsd, totalSupplierAPRiel, totalSupplierAPUsd, staffDebtRiel, staffDebtUsd,
       familyOweRiel, familyOweUsd,
       netWorthRiel, netWorthUsd, totalArRiel, totalArUsd, riceStockValue, productValuations,
       bizExpRiel, bizExpUsd, persExpRiel, persExpUsd, riceExpRiel, riceExpUsd
@@ -774,13 +792,25 @@ export default function DashboardPage() {
                     <div style={{ fontSize: '14px', color: '#334155', fontWeight: 'bold' }}>{formatUSD(assetData.familyOweUsd)}</div>
                   </div>
                   <div>
-                    <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 'bold', textTransform: 'uppercase' }}>Mom AR (COGS)</span>
-                    <div style={{ fontSize: '14px', color: '#334155', fontWeight: 'bold' }}>{formatRiel(assetData.momCogsArRiel)}</div>
-                  </div>
-                  <div>
                     <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 'bold', textTransform: 'uppercase' }}>Staff Debt</span>
                     <div style={{ fontSize: '14px', color: '#334155', fontWeight: 'bold' }}>{formatRiel(assetData.staffDebtRiel)}</div>
                     <div style={{ fontSize: '14px', color: '#334155', fontWeight: 'bold' }}>{formatUSD(assetData.staffDebtUsd)}</div>
+                  </div>
+                </div>
+              </div>
+
+              {/* 🔥 DEDICATED MOM BOX */}
+              <div style={{ background: '#fff', padding: '24px', borderRadius: '16px', border: '1px solid #bbf7d0', boxShadow: '0 4px 6px rgba(0,0,0,0.02)' }}>
+                <div style={{ fontSize: '13px', color: '#047857', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 'bold' }}>👩 Mom Receivables</div>
+                
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginTop: '16px' }}>
+                  <div>
+                    <span style={{ fontSize: '11px', color: '#059669', fontWeight: 'bold', textTransform: 'uppercase' }}>Owed by Customers</span>
+                    <div style={{ fontSize: '20px', color: '#10b981', fontWeight: 'bold', marginTop: '4px' }}>{formatRiel(assetData.momCustomerArRiel)}</div>
+                  </div>
+                  <div>
+                    <span style={{ fontSize: '11px', color: '#059669', fontWeight: 'bold', textTransform: 'uppercase' }}>COGS Owed to Biz</span>
+                    <div style={{ fontSize: '20px', color: '#10b981', fontWeight: 'bold', marginTop: '4px' }}>{formatRiel(assetData.momCogsArRiel)}</div>
                   </div>
                 </div>
               </div>

@@ -97,7 +97,7 @@ export default function CogsReportPage() {
   // Bulk Settlement States
   const [selectedDays, setSelectedDays] = useState<string[]>([])
   const [bulkModalOpen, setBulkModalOpen] = useState(false)
-  const [bulkPaymentRows, setBulkPaymentRows] = useState<PaymentRow[]>([{ id: Date.now(), method: 'Cash ៛', amount: '' }]);
+  const [bulkPaymentRows, setBulkPaymentRows] = useState<PaymentRow[]>([{ id: Date.now(), method: 'Mom Liability ៛', amount: '' }]);
   const [isProcessing, setIsProcessing] = useState(false)
 
   // Inline History States
@@ -513,7 +513,7 @@ export default function CogsReportPage() {
       if (isBulk) {
         setBulkModalOpen(false);
         setSelectedDays([]);
-        setBulkPaymentRows([{ id: Date.now(), method: 'Cash ៛', amount: '' }]);
+        setBulkPaymentRows([{ id: Date.now(), method: 'Mom Liability ៛', amount: '' }]);
       } else {
         setInlinePayments(prev => { const n = {...prev}; delete n[targetDays[0].key]; return n; });
       }
@@ -542,24 +542,24 @@ export default function CogsReportPage() {
   const liveBulkRemaining = bulkTotalDue - liveBulkReceived;
 
   const getInlinePaymentState = (key: string, owed: number) => {
-    return inlinePayments[key] || [{ id: 1, method: 'Cash ៛', amount: owed }];
+    return inlinePayments[key] || [{ id: 1, method: 'Mom Liability ៛', amount: owed }];
   }
   const updateInlineRow = (key: string, rowId: number, field: string, value: any, owed: number) => {
     setInlinePayments(prev => {
-      const rows = prev[key] ? [...prev[key]] : [{ id: 1, method: 'Cash ៛', amount: owed }];
+      const rows = prev[key] ? [...prev[key]] : [{ id: 1, method: 'Mom Liability ៛', amount: owed }];
       const newRows = rows.map(r => r.id === rowId ? { ...r, [field]: value } : r);
       return { ...prev, [key]: newRows };
     });
   }
   const addInlineSplit = (key: string, owed: number) => {
     setInlinePayments(prev => {
-      const rows = prev[key] ? [...prev[key]] : [{ id: 1, method: 'Cash ៛', amount: owed }];
-      return { ...prev, [key]: [...rows, { id: Date.now(), method: 'Cash ៛', amount: '' }] };
+      const rows = prev[key] ? [...prev[key]] : [{ id: 1, method: 'Mom Liability ៛', amount: owed }];
+      return { ...prev, [key]: [...rows, { id: Date.now(), method: 'Mom Liability ៛', amount: '' }] };
     });
   }
   const removeInlineSplit = (key: string, rowId: number, owed: number) => {
     setInlinePayments(prev => {
-      const rows = prev[key] ? [...prev[key]] : [{ id: 1, method: 'Cash ៛', amount: owed }];
+      const rows = prev[key] ? [...prev[key]] : [{ id: 1, method: 'Mom Liability ៛', amount: owed }];
       return { ...prev, [key]: rows.filter(r => r.id !== rowId) };
     });
   }
@@ -859,12 +859,8 @@ export default function CogsReportPage() {
                                       onChange={(e) => updateInlineRow(d.key, row.id, 'method', e.target.value, remaining)}
                                       style={{ padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px', outline: 'none', background: '#fff', color: '#475569', cursor: 'pointer', flex: 1 }}
                                     >
-                                      <option value="Cash ៛">💵 Cash ៛</option>
-                                      <option value="Cash $">💵 Cash $</option>
-                                      <option value="QR ៛">📱 QR ៛</option>
-                                      <option value="QR $">📱 QR $</option>
-                                      {activeOwnerTab === 'mom' && <option value="Mom Liability ៛">📉 Mom Liability ៛</option>}
-                                      {activeOwnerTab === 'mom' && <option value="Mom Liability $">📉 Mom Liability $</option>}
+                                      <option value="Mom Liability ៛">📉 Mom Liability ៛</option>
+                                      <option value="Mom Liability $">📉 Mom Liability $</option>
                                     </select>
                                     {paymentState.length > 1 && (
                                       <button onClick={() => removeInlineSplit(d.key, row.id, remaining)} style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', fontSize: '16px' }}>✕</button>
@@ -926,7 +922,7 @@ export default function CogsReportPage() {
             <div style={{ marginBottom: '24px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
                 <label style={{ fontSize: '13px', color: '#475569', fontWeight: 'bold' }}>Payment Method(s)</label>
-                <button onClick={() => setBulkPaymentRows([...bulkPaymentRows, { id: Date.now(), method: 'Cash ៛', amount: '' }])} style={{ background: '#e0f2fe', color: '#0284c7', border: 'none', borderRadius: '4px', fontSize: '12px', padding: '6px 10px', cursor: 'pointer', fontWeight: 'bold' }}>+ Split</button>
+                <button onClick={() => setBulkPaymentRows([...bulkPaymentRows, { id: Date.now(), method: 'Mom Liability ៛', amount: '' }])} style={{ background: '#e0f2fe', color: '#0284c7', border: 'none', borderRadius: '4px', fontSize: '12px', padding: '6px 10px', cursor: 'pointer', fontWeight: 'bold' }}>+ Split</button>
               </div>
 
               {bulkPaymentRows.map((row, index) => (
@@ -940,12 +936,8 @@ export default function CogsReportPage() {
                     }}
                     style={{ width: '50%', padding: '12px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '14px', outline: 'none', backgroundColor: '#fff', cursor: 'pointer', color: '#334155' }}
                   >
-                    <option value="Cash ៛">💵 Cash ៛</option>
-                    <option value="Cash $">💵 Cash $</option>
-                    <option value="QR ៛">📱 QR ៛</option>
-                    <option value="QR $">📱 QR $</option>
-                    {activeOwnerTab === 'mom' && <option value="Mom Liability ៛">📉 Mom Liability ៛</option>}
-                    {activeOwnerTab === 'mom' && <option value="Mom Liability $">📉 Mom Liability $</option>}
+                    <option value="Mom Liability ៛">📉 Mom Liability ៛</option>
+                    <option value="Mom Liability $">📉 Mom Liability $</option>
                   </select>
                   
                   <div style={{ flex: 1 }}>

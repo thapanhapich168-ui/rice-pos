@@ -877,27 +877,29 @@ export default function POSPage() {
         const finalSaleRows = baseSaleRows.map(r => ({ ...r, invoice_id: activeTxId, payment_method: primaryMethodStr }));
         let splitCogsSum = baseSaleRows.reduce((sum, r) => sum + (r.cogs_price * r.qty), 0);
 
+        // 1. Create the Master Invoice FIRST so the database doesn't block the line items
+        // We now do this for ALL wholesale customers (even Walk-ins) to satisfy the strict database rules.
+        const summaryRow = {
+          invoice_id: activeTxId,
+          customer_name: finalCustomerName,
+          owner: finalOwner,
+          rice_types: combinedRiceTypes,
+          total_sales: currentTotalRiel,
+          total_cogs: splitCogsSum,
+          total_profit: currentTotalRiel - splitCogsSum,
+          delivery_status: actualRemaining > 0 ? 'Pending' : 'Delivered',
+          payment_method: primaryMethodStr,
+          balance_due: actualRemaining > 0 ? actualRemaining : 0,
+          customer_location: finalLocation,
+          is_done: actualRemaining <= 0 // Automatically mark as done if paid in full
+        };
+
+        const { error: summaryErr } = await supabase.from('invoice_summaries').upsert([summaryRow], { onConflict: 'invoice_id' });
+        if (summaryErr) throw new Error(`Failed to save to Summaries table: ${summaryErr.message}`);
+
+        // 2. NOW it is safe to insert the child line items
         const { error: salesErr } = await supabase.from('sales').upsert(finalSaleRows, { onConflict: 'id' });
         if (salesErr) throw new Error(`Failed to save to Sales table: ${salesErr.message}`);
-
-        if (!isSimpleCustomer) {
-           const summaryRow = {
-              invoice_id: activeTxId,
-              customer_name: finalCustomerName,
-              owner: finalOwner,
-              rice_types: combinedRiceTypes,
-              total_sales: currentTotalRiel,
-              total_cogs: splitCogsSum,
-              total_profit: currentTotalRiel - splitCogsSum,
-              delivery_status: actualRemaining > 0 ? 'Pending' : 'Delivered',
-              payment_method: primaryMethodStr,
-              balance_due: actualRemaining > 0 ? actualRemaining : 0,
-              customer_location: finalLocation
-           };
-
-           const { error: summaryErr } = await supabase.from('invoice_summaries').upsert([summaryRow], { onConflict: 'invoice_id' });
-           if (summaryErr) throw new Error(`Failed to save to Summaries table: ${summaryErr.message}`);
-        }
 
         for (const [prodId, newStock] of Object.entries(stockUpdates)) {
            await supabase.from('products').update({ stock: newStock }).eq('id', prodId);

@@ -202,6 +202,12 @@ export default function RiceControl() {
 
   // --- UNBREAKABLE RPC MANUAL PULL ---
   const handleManualPull = async (retailId: number, wholesaleId: number) => {
+    const wholesaleProduct = products.find(p => p.id === wholesaleId);
+    if (!wholesaleProduct || Number(wholesaleProduct.stock) < 1) {
+      alert("❌ Cannot pull: Wholesale bag is out of stock!");
+      return;
+    }
+
     setIsProcessing(true);
     try {
       const { error } = await supabase.rpc('pull_wholesale_bags', {
@@ -562,14 +568,14 @@ export default function RiceControl() {
         }
 
         if (payload.stock !== undefined) {
-           const newBatchQty = Number(payload.stock);
-           const oldBatchQty = Number(currentBatch.remaining_qty);
-           const diff = newBatchQty - oldBatchQty;
+           const newMasterStock = Number(payload.stock);
+           const oldMasterStock = Number(mainProd.stock);
+           const diff = newMasterStock - oldMasterStock;
            
-           batchPayload.remaining_qty = newBatchQty;
+           batchPayload.remaining_qty = Math.max(0, Number(currentBatch.remaining_qty) + diff);
            updateBatch = true;
            
-           payload.stock = Number(mainProd.stock) + diff;
+           payload.stock = newMasterStock;
         }
 
         if (updateBatch) {
@@ -930,15 +936,19 @@ export default function RiceControl() {
                             if (activeView === 'retail') {
                                return (
                                  <td key={col} style={{ borderRight: '1px solid #f1f5f9', padding: '8px', overflow: 'hidden', textAlign: 'center' }}>
-                                   {p.linked_wholesale_id ? (
-                                     <button 
-                                       onClick={() => handleManualPull(p.id, p.linked_wholesale_id!)}
-                                       disabled={isProcessing}
-                                       style={{ background: '#10b981', color: '#fff', border: 'none', padding: '6px 12px', borderRadius: '6px', fontSize: '12px', fontWeight: 'bold', cursor: isProcessing ? 'not-allowed' : 'pointer' }}
-                                     >
-                                       ♻️ Pull 1 Bag
-                                     </button>
-                                   ) : (
+                                   {p.linked_wholesale_id ? (() => {
+                                     const wholesaleProd = products.find(wp => wp.id === p.linked_wholesale_id);
+                                     const isOutOfStock = wholesaleProd ? Number(wholesaleProd.stock) < 1 : true;
+                                     return (
+                                       <button 
+                                         onClick={() => handleManualPull(p.id, p.linked_wholesale_id!)}
+                                         disabled={isProcessing || isOutOfStock}
+                                         style={{ background: isOutOfStock ? '#cbd5e1' : '#10b981', color: '#fff', border: 'none', padding: '6px 12px', borderRadius: '6px', fontSize: '12px', fontWeight: 'bold', cursor: (isProcessing || isOutOfStock) ? 'not-allowed' : 'pointer' }}
+                                       >
+                                         {isOutOfStock ? '❌ No Stock' : '♻️ Pull 1 Bag'}
+                                       </button>
+                                     )
+                                   })() : (
                                       <span style={{ fontSize: '12px', color: '#94a3b8' }}>No Link</span>
                                    )}
                                  </td>
@@ -970,7 +980,7 @@ export default function RiceControl() {
                           let val = edits[p.id]?.[col as keyof Product] ?? p[col as keyof Product] ?? '';
                           if (activeView === 'wholesale' && currentBatch) {
                              if (col === 'cost_price') val = edits[p.id]?.cost_price ?? currentBatch.cost_price;
-                             if (col === 'stock') val = edits[p.id]?.stock ?? currentBatch.remaining_qty;
+                             // 🔥 FIXED: We completely removed the stock override here so the TRUE MASTER STOCK is displayed.
                           }
 
                           if (!isEditing && !edits[p.id] && activeView === 'retail' && col === 'cost_price' && p.linked_wholesale_id) {
