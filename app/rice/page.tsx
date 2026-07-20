@@ -97,12 +97,14 @@ function CurrencyInput({ value, onChange, placeholder, style, autoFocus, onEnter
     <input 
       type="text"
       inputMode="decimal"
+      enterKeyHint="done"
       placeholder={placeholder}
       value={inputValue}
       onChange={handleChange}
       autoFocus={autoFocus}
       onKeyDown={(e) => {
-        if (e.key === 'Enter') {
+        if (e.key === 'Enter' || e.keyCode === 13) {
+          e.preventDefault();
           e.currentTarget.blur();
           if (onEnter) onEnter();
         }
@@ -127,14 +129,22 @@ export default function RiceControl() {
   const [searchQuery, setSearchQuery] = useState('')
   const [edits, setEdits] = useState<Record<number, Partial<Product>>>({})
   const [selectedToDelete, setSelectedToDelete] = useState<Set<number>>(new Set())
+  const [selectedSuppliersToDelete, setSelectedSuppliersToDelete] = useState<Set<number>>(new Set())
   const [hoveredId, setHoveredId] = useState<number | null>(null)
   
   const [isProcessing, setIsProcessing] = useState(false) 
+  const isImportingRef = useRef(false);
 
   // --- CELL EDITING STATE ---
   const [editingCell, setEditingCell] = useState<{id: number, col: string} | null>(null)
   const [activeDropdownId, setActiveDropdownId] = useState<number | null>(null)
   const [dropdownSearch, setDropdownSearch] = useState('')
+
+  // --- IMPORT DROPDOWN STATE ---
+  const [isSupplierDropdownOpen, setIsSupplierDropdownOpen] = useState(false)
+  const [isProductDropdownOpen, setIsProductDropdownOpen] = useState(false)
+  const [supplierSearch, setSupplierSearch] = useState('')
+  const [productSearch, setProductSearch] = useState('')
 
   // --- VIEWS & TABS STATE ---
   const [activeView, setActiveView] = useState<'retail' | 'wholesale' | 'import' | 'pending' | 'suppliers'>('retail')
@@ -203,10 +213,10 @@ export default function RiceControl() {
   const handleOpenAddProduct = () => {
     setNewItem({
       name: '',
-      price: activeView === 'retail' ? ('' as any) : 0,
-      cost_price: activeView === 'wholesale' ? ('' as any) : 0,
+      price: 0,
+      cost_price: 0,
       weight: activeView === 'retail' ? 1 : 50,
-      stock: '',
+      stock: 0,
       min_stock_level: 10
     });
     setIsAddModalOpen(true);
@@ -289,13 +299,11 @@ export default function RiceControl() {
   }
 
   async function fetchProducts() {
-    // 🔥 NEW: Only fetch active products
     const { data } = await supabase.from('products').select('*').eq('is_archived', false).order('id', { ascending: true })
     if (data) setProducts(data)
   }
 
   async function fetchSuppliers() {
-    // 🔥 NEW: Only fetch active suppliers
     const { data } = await supabase.from('suppliers').select('*').eq('is_archived', false).order('name', { ascending: true })
     if (data) setSuppliers(data)
   }
@@ -415,10 +423,18 @@ export default function RiceControl() {
     if (!newSupplier.name) return alert('Supplier name is required');
     setIsProcessing(true);
     try {
-      const { error } = await supabase.from('suppliers').insert([{ name: newSupplier.name, phone: newSupplier.phone, location: newSupplier.location }]);
+      const { data, error } = await supabase.from('suppliers').insert([{ name: newSupplier.name, phone: newSupplier.phone, location: newSupplier.location }]).select();
       if (error) throw error;
+      
       setIsAddSupplierOpen(false);
       setNewSupplier({ name: '', phone: '', location: '' });
+
+      if (data && data.length > 0) {
+        setSuppliers(prev => [...prev, data[0]]);
+        setImportForm(prev => ({ ...prev, supplier_id: String(data[0].id) }));
+        setActiveView('import');
+      }
+
     } catch (err: any) {
       alert(`Error: ${err.message}`);
     } finally {
@@ -427,21 +443,28 @@ export default function RiceControl() {
   }
 
   async function handleProcessImport(isPayLater: boolean) {
+    if (isImportingRef.current) return;
+
     if (!importForm.supplier_id || !importForm.product_id || !importForm.qty || !importForm.unit_cost) {
       return alert('Please fill in all required fields (Supplier, Product, Qty, Cost).');
     }
+
+    isImportingRef.current = true;
+    setIsProcessing(true);
 
     const qty = Number(importForm.qty);
     const unitCost = Number(importForm.unit_cost);
     const totalCost = qty * unitCost;
     const paidAmount = isPayLater ? (Number(importForm.paid_amount) || 0) : totalCost;
     
-    if (paidAmount > totalCost) return alert('Cannot pay more than the total cost.');
+    if (paidAmount > totalCost) {
+      isImportingRef.current = false;
+      setIsProcessing(false);
+      return alert('Cannot pay more than the total cost.');
+    }
 
     const status = paidAmount >= totalCost ? 'Paid' : 'Pending';
     const remainingDebt = totalCost - paidAmount;
-
-    setIsProcessing(true);
 
     try {
       const supplierName = suppliers.find(s => String(s.id) === String(importForm.supplier_id))?.name || 'Unknown Supplier';
@@ -511,6 +534,7 @@ export default function RiceControl() {
     } catch (err: any) {
       alert(`Error processing import: ${err.message}`);
     } finally {
+      isImportingRef.current = false;
       setIsProcessing(false);
     }
   }
@@ -650,10 +674,14 @@ export default function RiceControl() {
 
   const handleDelete = async () => {
     if (!confirm(`Are you sure you want to delete ${selectedToDelete.size} item(s)?`)) return
-    
-    // 🔥 NEW: Soft Delete (Archive) instead of hard delete
     const { error } = await supabase.from('products').update({ is_archived: true }).in('id', Array.from(selectedToDelete))
-    if (!error) { setSelectedToDelete(new Set()); }
+    if (!error) { setSelectedToDelete(new Set()); fetchProducts(); }
+  }
+
+  const handleDeleteSuppliers = async () => {
+    if (!confirm(`Are you sure you want to delete ${selectedSuppliersToDelete.size} supplier(s)?`)) return
+    const { error } = await supabase.from('suppliers').update({ is_archived: true }).in('id', Array.from(selectedSuppliersToDelete))
+    if (!error) { setSelectedSuppliersToDelete(new Set()); fetchSuppliers(); }
   }
 
   const addProduct = async () => {
@@ -662,16 +690,24 @@ export default function RiceControl() {
       name: newItem.name,
       price: Number(newItem.price) || 0,
       cost_price: Number(newItem.cost_price) || 0,
-      weight: Number(newItem.weight) || 0,
+      weight: Number(newItem.weight) || 50,
       stock: Number(newItem.stock) || 0,
       min_stock_level: Number(newItem.min_stock_level) || 10,
       mtd_kg_used: 0,
       mtd_bags_used: 0
     }
-    const { error } = await supabase.from('products').insert([payload])
-    if (!error) {
+    const { data, error } = await supabase.from('products').insert([payload]).select()
+    
+    if (!error && data && data.length > 0) {
       setIsAddModalOpen(false)
       setNewItem({ name: '', price: 0, cost_price: 0, weight: 50, stock: '', min_stock_level: 10 })
+      
+      setProducts(prev => [...prev, data[0]]);
+      setImportForm(prev => ({ ...prev, product_id: String(data[0].id) }));
+      setActiveView('import');
+
+    } else if (error) {
+      alert(`Error: ${error.message}`)
     }
   }
 
@@ -847,9 +883,14 @@ export default function RiceControl() {
           <h1 className="page-title">🌾 Rice Inventory & Suppliers</h1>
         </div>
         <div className="header-actions">
-          {selectedToDelete.size > 0 && activeView !== 'import' && activeView !== 'pending' && activeView !== 'suppliers' && (
+          {selectedToDelete.size > 0 && (activeView === 'retail' || activeView === 'wholesale') && (
             <button className="delete-btn" onClick={handleDelete}>
               Delete ({selectedToDelete.size})
+            </button>
+          )}
+          {selectedSuppliersToDelete.size > 0 && activeView === 'suppliers' && (
+            <button className="delete-btn" onClick={handleDeleteSuppliers}>
+              Delete ({selectedSuppliersToDelete.size})
             </button>
           )}
           {(activeView === 'retail' || activeView === 'wholesale') && (
@@ -1098,7 +1139,26 @@ export default function RiceControl() {
                               )}
                               
                               {isEditing ? (
-                                <input autoFocus type={['name'].includes(col as string) ? 'text' : 'number'} className="cell-input no-spinners" style={{ paddingLeft: isIdCol ? '36px' : '12px' }} value={val as any} onChange={(e) => { const newVal = e.target.type === 'number' ? (e.target.value === '' ? '' : Number(e.target.value)) : e.target.value; setEdits(prev => ({ ...prev, [p.id]: { ...(prev[p.id] || {}), [col]: newVal } })) }} onBlur={() => handleSaveRecord(p.id)} onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); if (e.key === 'Escape') { setEdits(prev => { const n = { ...prev }; delete n[p.id]; return n }); setEditingCell(null); } }} />
+                                <input 
+                                  autoFocus 
+                                  enterKeyHint="done"
+                                  type={['name'].includes(col as string) ? 'text' : 'number'} 
+                                  className="cell-input no-spinners" 
+                                  style={{ paddingLeft: isIdCol ? '36px' : '12px' }} 
+                                  value={val as any} 
+                                  onChange={(e) => { const newVal = e.target.type === 'number' ? (e.target.value === '' ? '' : Number(e.target.value)) : e.target.value; setEdits(prev => ({ ...prev, [p.id]: { ...(prev[p.id] || {}), [col]: newVal } })) }} 
+                                  onBlur={() => handleSaveRecord(p.id)} 
+                                  onKeyDown={(e) => { 
+                                    if (e.key === 'Enter' || e.keyCode === 13) { 
+                                      e.preventDefault();
+                                      e.currentTarget.blur(); 
+                                    } 
+                                    if (e.key === 'Escape') { 
+                                      setEdits(prev => { const n = { ...prev }; delete n[p.id]; return n }); 
+                                      setEditingCell(null); 
+                                    } 
+                                  }} 
+                                />
                               ) : (
                                 <div className="cell-display" style={{ paddingLeft: isIdCol ? '36px' : '12px', fontWeight: col === 'name' ? 'bold' : 'normal', color: col === 'name' ? '#1e293b' : (['mtd_kg_used', 'mtd_bags_used'].includes(col) ? '#b58a3d' : '#334155'), cursor: 'text' }} onClick={() => { setEditingCell({ id: p.id, col: col as string }) }}>
                                   
@@ -1170,36 +1230,81 @@ export default function RiceControl() {
             <h2 style={{ marginTop: 0, color: '#1e293b', marginBottom: '24px', borderBottom: '2px solid #f1f5f9', paddingBottom: '12px' }}>🚚 Receive New Stock</h2>
             
             <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-              <div>
+              
+              {/* SUPPLIER SEARCHABLE DROPDOWN */}
+              <div style={{ position: 'relative', zIndex: isSupplierDropdownOpen ? 100 : 2 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: '6px' }}>
                   <label style={{ fontSize: '13px', color: '#0f172a', fontWeight: 'bold' }}>Select Supplier</label>
                   <button onClick={() => setIsAddSupplierOpen(true)} style={{ background: 'none', border: 'none', color: '#3b82f6', fontWeight: 'bold', fontSize: '12px', cursor: 'pointer' }}>+ Add New Supplier</button>
                 </div>
-                <select value={importForm.supplier_id} onChange={e => setImportForm({...importForm, supplier_id: e.target.value})} style={{ width: '100%', padding: '12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '15px', outline: 'none', backgroundColor: '#fff', color: '#0f172a', cursor: 'pointer' }}>
-                  <option value="">-- Choose a Supplier --</option>
-                  {suppliers.map((s: any) => <option key={s.id} value={s.id}>{s.name} {s.location ? `(${s.location})` : ''}</option>)}
-                </select>
+                {isSupplierDropdownOpen ? (
+                  <div style={{ position: 'relative' }}>
+                    <input 
+                      autoFocus 
+                      className="dropdown-search-input" 
+                      placeholder="Search..." 
+                      value={supplierSearch} 
+                      onChange={e => setSupplierSearch(e.target.value)} 
+                      onBlur={() => setTimeout(() => setIsSupplierDropdownOpen(false), 200)} 
+                      onKeyDown={e => e.key === 'Escape' && setIsSupplierDropdownOpen(false)} 
+                    />
+                    <div className="dropdown-results-tray">
+                      {suppliers.filter(s => s.name.toLowerCase().includes(supplierSearch.toLowerCase())).map(s => (
+                        <div key={s.id} className="dropdown-row" onMouseDown={(e) => { e.stopPropagation(); setImportForm({...importForm, supplier_id: String(s.id)}); setIsSupplierDropdownOpen(false); }}>
+                          <span style={{ fontWeight: 'bold' }}>{s.name}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="interactive-select-trigger" onClick={() => { setIsSupplierDropdownOpen(true); setSupplierSearch(''); }} style={{ width: '100%', padding: '12px', fontSize: '15px' }}>
+                    {importForm.supplier_id ? suppliers.find(s => String(s.id) === String(importForm.supplier_id))?.name || 'Unknown' : '-- Choose a Supplier --'}
+                  </div>
+                )}
               </div>
 
-              <div>
+              {/* PRODUCT SEARCHABLE DROPDOWN */}
+              <div style={{ position: 'relative', zIndex: isProductDropdownOpen ? 90 : 1 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: '6px' }}>
                   <label style={{ fontSize: '13px', color: '#0f172a', fontWeight: 'bold' }}>Select Product (Rice)</label>
                   <button onClick={handleOpenAddProduct} style={{ background: 'none', border: 'none', color: '#3b82f6', fontWeight: 'bold', fontSize: '12px', cursor: 'pointer' }}>+ Create New Product</button>
                 </div>
-                <select value={importForm.product_id} onChange={e => setImportForm({...importForm, product_id: e.target.value})} style={{ width: '100%', padding: '12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '15px', outline: 'none', backgroundColor: '#fff', color: '#0f172a', cursor: 'pointer' }}>
-                  <option value="">-- Choose Rice Type --</option>
-                  {products.map((p) => <option key={p.id} value={p.id}>{p.name} ({p.weight}kg)</option>)}
-                </select>
+                {isProductDropdownOpen ? (
+                  <div style={{ position: 'relative' }}>
+                    <input 
+                      autoFocus 
+                      className="dropdown-search-input" 
+                      placeholder="Search..." 
+                      value={productSearch} 
+                      onChange={e => setProductSearch(e.target.value)} 
+                      onBlur={() => setTimeout(() => setIsProductDropdownOpen(false), 200)} 
+                      onKeyDown={e => e.key === 'Escape' && setIsProductDropdownOpen(false)} 
+                    />
+                    <div className="dropdown-results-tray">
+                      {/* 🔥 Filter forces only >= 50kg bags to be shown */}
+                      {products.filter(p => p.weight >= 50 && p.name.toLowerCase().includes(productSearch.toLowerCase())).map(p => (
+                        <div key={p.id} className="dropdown-row" onMouseDown={(e) => { e.stopPropagation(); setImportForm({...importForm, product_id: String(p.id)}); setIsProductDropdownOpen(false); }}>
+                          <span style={{ fontWeight: 'bold' }}>{p.name}</span>
+                          <span style={{ fontSize: '11px', color: '#64748b', marginLeft: '8px' }}>({p.weight}kg)</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="interactive-select-trigger" onClick={() => { setIsProductDropdownOpen(true); setProductSearch(''); }} style={{ width: '100%', padding: '12px', fontSize: '15px' }}>
+                    {importForm.product_id ? products.find(p => String(p.id) === String(importForm.product_id))?.name || 'Unknown' : '-- Choose Rice Type --'}
+                  </div>
+                )}
               </div>
 
               <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap' }}>
                 <div style={{ flex: 1, minWidth: '150px' }}>
                   <label style={{ display: 'block', fontSize: '13px', color: '#0f172a', fontWeight: 'bold', marginBottom: '6px' }}>Quantity Imported</label>
-                  <input type="number" className="no-spinners" placeholder="0" value={importForm.qty} onChange={e => setImportForm({...importForm, qty: e.target.value})} style={{ width: '100%', padding: '12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '15px', boxSizing: 'border-box' }} />
+                  <input type="number" className="no-spinners" placeholder="" value={importForm.qty} onChange={e => setImportForm({...importForm, qty: e.target.value})} style={{ width: '100%', padding: '12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '15px', boxSizing: 'border-box' }} />
                 </div>
                 <div style={{ flex: 1, minWidth: '150px' }}>
                   <label style={{ display: 'block', fontSize: '13px', color: '#0f172a', fontWeight: 'bold', marginBottom: '6px' }}>Unit Cost (៛)</label>
-                  <input type="number" className="no-spinners" placeholder="0" value={importForm.unit_cost} onChange={e => setImportForm({...importForm, unit_cost: e.target.value})} style={{ width: '100%', padding: '12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '15px', boxSizing: 'border-box' }} />
+                  <input type="number" className="no-spinners" placeholder="" value={importForm.unit_cost} onChange={e => setImportForm({...importForm, unit_cost: e.target.value})} style={{ width: '100%', padding: '12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '15px', boxSizing: 'border-box' }} />
                 </div>
               </div>
 
@@ -1213,7 +1318,7 @@ export default function RiceControl() {
                 <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap' }}>
                   <div style={{ flex: 2, minWidth: '150px' }}>
                     <label style={{ display: 'block', fontSize: '12px', color: '#64748b', fontWeight: 'bold', marginBottom: '6px' }}>Amount Paying Now (៛)</label>
-                    <input type="number" className="no-spinners" placeholder="0 (Leave empty to pay later)" value={importForm.paid_amount} onChange={e => setImportForm({...importForm, paid_amount: e.target.value})} style={{ width: '100%', padding: '12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '15px', boxSizing: 'border-box' }} />
+                    <input type="number" className="no-spinners" placeholder="" value={importForm.paid_amount} onChange={e => setImportForm({...importForm, paid_amount: e.target.value})} style={{ width: '100%', padding: '12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '15px', boxSizing: 'border-box' }} />
                   </div>
                   <div style={{ flex: 1, minWidth: '120px' }}>
                     <label style={{ display: 'block', fontSize: '12px', color: '#64748b', fontWeight: 'bold', marginBottom: '6px' }}>Payment Method</label>
@@ -1306,6 +1411,17 @@ export default function RiceControl() {
           <table style={{ borderCollapse: 'collapse', width: '100%', minWidth: '700px' }}>
             <thead>
               <tr style={{ background: '#f8fafc', borderBottom: '2px solid #e2e8f0' }}>
+                <th style={{ width: '46px', minWidth: '46px', maxWidth: '46px', padding: '16px 8px', textAlign: 'center', borderRight: '1px solid #f1f5f9' }}>
+                   <input 
+                     type="checkbox" 
+                     checked={selectedSuppliersToDelete.size === suppliers.length && suppliers.length > 0}
+                     onChange={(e) => {
+                       if (e.target.checked) setSelectedSuppliersToDelete(new Set(suppliers.map(s => s.id)));
+                       else setSelectedSuppliersToDelete(new Set());
+                     }}
+                     style={{ cursor: 'pointer', accentColor: '#b58a3d', width: '16px', height: '16px' }}
+                   />
+                </th>
                 <th style={{ padding: '16px', textAlign: 'left', color: '#475569', fontSize: '13px', textTransform: 'uppercase' }}>Supplier Name</th>
                 <th style={{ padding: '16px', textAlign: 'left', color: '#475569', fontSize: '13px', textTransform: 'uppercase' }}>Phone</th>
                 <th style={{ padding: '16px', textAlign: 'left', color: '#475569', fontSize: '13px', textTransform: 'uppercase' }}>Location</th>
@@ -1314,11 +1430,23 @@ export default function RiceControl() {
             </thead>
             <tbody>
               {suppliers.length === 0 ? (
-                <tr><td colSpan={4} style={{ padding: '40px', textAlign: 'center', color: '#94a3b8' }}>No suppliers recorded.</td></tr>
+                <tr><td colSpan={5} style={{ padding: '40px', textAlign: 'center', color: '#94a3b8' }}>No suppliers recorded.</td></tr>
               ) : (
                 suppliers.map((s: any) => (
                   <tr key={s.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                    <td style={{ padding: '16px', fontWeight: 'bold', color: '#0f172a' }}>{s.name}</td>
+                    <td style={{ padding: '16px', textAlign: 'center', borderRight: '1px solid #f1f5f9' }}>
+                      <input 
+                        type="checkbox" 
+                        checked={selectedSuppliersToDelete.has(s.id)}
+                        onChange={() => {
+                          const next = new Set(selectedSuppliersToDelete)
+                          next.has(s.id) ? next.delete(s.id) : next.add(s.id)
+                          setSelectedSuppliersToDelete(next)
+                        }} 
+                        style={{ cursor: 'pointer', accentColor: '#b58a3d', width: '16px', height: '16px' }} 
+                      />
+                    </td>
+                    <td className="supplier-name-cell" style={{ padding: '16px', fontWeight: 'bold', color: '#0f172a' }}>{s.name}</td>
                     <td style={{ padding: '16px', color: '#475569' }}>{s.phone || '-'}</td>
                     <td style={{ padding: '16px', color: '#475569' }}>{s.location || '-'}</td>
                     <td style={{ padding: '16px', textAlign: 'right', fontWeight: 'bold', color: Number(s.total_owed_riel) > 0 ? '#ef4444' : '#10b981', fontSize: '16px' }}>
@@ -1376,7 +1504,7 @@ export default function RiceControl() {
                   
                   <div style={{ flex: 1 }}>
                     <CurrencyInput 
-                      placeholder="Amount..." 
+                      placeholder="" 
                       value={row.amount} 
                       onChange={(val: any) => {
                         const newRows = [...pendingPaymentRows];
@@ -1573,7 +1701,7 @@ export default function RiceControl() {
                   <option value="gt">Greater Than (&gt;)</option>
                   <option value="lt">Less Than (&lt;)</option>
                 </select>
-                <input placeholder="Value..." value={rule.value} onChange={e => setFilterRules(prev => prev.map(r => r.id === rule.id ? { ...r, value: e.target.value } : r))} style={{ flex: '1 1 120px', padding: '8px 12px', border: '1px solid #cbd5e1', borderRadius: '6px', fontSize: '16px', backgroundColor: '#fff', color: '#0f172a' }} className="no-spinners" type={['price', 'cost_price', 'stock', 'weight'].includes(rule.column as string) ? 'number' : 'text'} />
+                <input placeholder="" value={rule.value} onChange={e => setFilterRules(prev => prev.map(r => r.id === rule.id ? { ...r, value: e.target.value } : r))} style={{ flex: '1 1 120px', padding: '8px 12px', border: '1px solid #cbd5e1', borderRadius: '6px', fontSize: '16px', backgroundColor: '#fff', color: '#0f172a' }} className="no-spinners" type={['price', 'cost_price', 'stock', 'weight'].includes(rule.column as string) ? 'number' : 'text'} />
                 <button onClick={() => setFilterRules(prev => prev.filter(r => r.id !== rule.id))} style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', fontSize: '18px', fontWeight: 'bold' }}>✕</button>
               </div>
             ))}
@@ -2010,6 +2138,11 @@ export default function RiceControl() {
             padding: 8px 10px !important;
             font-size: 12px !important; /* Reduced slightly to ensure it fits next to search */
             white-space: nowrap !important;
+          }
+
+          /* SHRINK SUPPLIER NAME ON MOBILE */
+          .supplier-name-cell {
+            font-size: 14px !important;
           }
         }
       `}</style>
