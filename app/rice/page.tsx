@@ -175,7 +175,7 @@ export default function RiceControl() {
   const [filterRules, setFilterRules] = useState<FilterRule[]>([])
 
   const [isAddModalOpen, setIsAddModalOpen] = useState(false)
-  const [newItem, setNewItem] = useState({ name: '', price: 0 as any, cost_price: 0 as any, weight: 50 as any, stock: '' as any, min_stock_level: 10 as any })
+  const [newItem, setNewItem] = useState({ name: '', price: 0 as any, cost_price: 0 as any, weight: 50 as any, stock: 0 as any, min_stock_level: 10 as any })
 
   const [historyModal, setHistoryModal] = useState<{ isOpen: boolean; product: Product | null; data: any[]; activeBatches: InventoryBatch[] }>({
     isOpen: false, product: null, data: [], activeBatches: []
@@ -419,6 +419,79 @@ export default function RiceControl() {
     }
   }
 
+  // --- AUTOMATED IMPORT VOID SYSTEM ---
+  const handleVoidImport = async (importId: number) => {
+    if (!confirm(`🚨 Are you sure you want to VOID this import?\n\nThis will instantly:\n1. Remove the bags from stock\n2. Delete the linked batch\n3. Reverse supplier debt & expenses\n4. Permanently erase this import record`)) return;
+
+    setIsProcessing(true);
+    try {
+      // 1. Fetch import
+      const { data: impData } = await supabase.from('imports').select('*').eq('id', importId).single();
+      if (!impData) throw new Error("Import not found");
+
+      // 2. Reverse Stock
+      const targetProduct = products.find(p => p.id === impData.product_id);
+      if (targetProduct) {
+        const newStock = Math.max(0, Number(targetProduct.stock) - Number(impData.qty));
+        await supabase.from('products').update({ stock: newStock }).eq('id', targetProduct.id);
+      }
+
+      // 3. Delete linked Batch
+      const { data: batches } = await supabase.from('inventory_batches')
+        .select('*')
+        .eq('product_id', impData.product_id)
+        .eq('cost_price', impData.unit_cost)
+        .eq('remaining_qty', impData.qty)
+        .order('created_at', { ascending: false })
+        .limit(1);
+      
+      if (batches && batches.length > 0) {
+        await supabase.from('inventory_batches').delete().eq('id', batches[0].id);
+      }
+
+      // Fetch supplier for exact matching
+      const { data: supData } = await supabase.from('suppliers').select('name, total_owed_riel').eq('id', impData.supplier_id).single();
+      const supplierName = supData?.name || 'Unknown Supplier';
+
+      // 4. Reverse Debt & AP
+      const debtAdded = Number(impData.total_cost) - Number(impData.paid_amount);
+      if (debtAdded > 0) {
+        if (supData) {
+          await supabase.from('suppliers').update({ total_owed_riel: Math.max(0, Number(supData.total_owed_riel) - debtAdded) }).eq('id', impData.supplier_id);
+        }
+        await supabase.from('accounts_payable')
+          .delete()
+          .eq('supplier_name', supplierName)
+          .eq('notes', `Stock Import: ${impData.qty} bags`)
+          .eq('status', 'Unpaid');
+      }
+
+      // 5. Reverse Expenses
+      if (Number(impData.paid_amount) > 0) {
+        await supabase.from('expenses')
+          .delete()
+          .eq('remarks', `Stock Import: ${supplierName}`);
+      }
+
+      // 6. Delete Import
+      await supabase.from('imports').delete().eq('id', importId);
+
+      alert("✅ Import successfully voided!");
+      
+      // Close modal & Refresh
+      setHistoryModal({ isOpen: false, product: null, data: [], activeBatches: [] });
+      fetchProducts();
+      fetchSuppliers();
+      fetchBatches();
+      fetchImports();
+
+    } catch (err: any) {
+      alert(`Error voiding import: ${err.message}`);
+    } finally {
+      setIsProcessing(false);
+    }
+  }
+
   async function handleAddSupplier() {
     if (!newSupplier.name) return alert('Supplier name is required');
     setIsProcessing(true);
@@ -474,6 +547,7 @@ export default function RiceControl() {
       const { error: importErr } = await supabase.from('imports').insert([{
         supplier_id: Number(importForm.supplier_id),
         product_id: Number(importForm.product_id),
+        product_name: product.name,
         qty: qty,
         unit_cost: unitCost,
         total_cost: totalCost,
@@ -502,6 +576,7 @@ export default function RiceControl() {
 
       await supabase.from('inventory_batches').insert([{
         product_id: Number(importForm.product_id),
+        product_name: product.name,
         cost_price: unitCost,
         remaining_qty: qty
       }]);
@@ -700,7 +775,7 @@ export default function RiceControl() {
     
     if (!error && data && data.length > 0) {
       setIsAddModalOpen(false)
-      setNewItem({ name: '', price: 0, cost_price: 0, weight: 50, stock: '', min_stock_level: 10 })
+      setNewItem({ name: '', price: 0, cost_price: 0, weight: 50, stock: 0, min_stock_level: 10 })
       
       setProducts(prev => [...prev, data[0]]);
       setImportForm(prev => ({ ...prev, product_id: String(data[0].id) }));
@@ -810,13 +885,18 @@ export default function RiceControl() {
   const processedProducts = products
     .map(p => ({ ...p, ...edits[p.id] }))
     .filter(p => {
+      const isEditingThisRow = editingCell?.id === p.id;
+
       if (searchQuery && !p.name?.toLowerCase().includes(searchQuery.toLowerCase())) return false;
       if (activeView === 'retail' && p.weight >= 50) return false;
       if (activeView === 'wholesale' && p.weight < 50) return false;
       
       if (activeView === 'wholesale') {
-        if (activeCategory === '❌ Out of Stock') return Number(p.stock) <= 0;
-        if (Number(p.stock) <= 0) return false;
+        if (activeCategory === '❌ Out of Stock') {
+            if (!isEditingThisRow && Number(p.stock) > 0) return false;
+        } else {
+            if (!isEditingThisRow && Number(p.stock) <= 0) return false;
+        }
       }
 
       if (activeView === 'wholesale' && activeCategory !== 'All' && activeCategory !== '❌ Out of Stock') {
@@ -1386,15 +1466,24 @@ export default function RiceControl() {
                       <td style={{ padding: '16px', textAlign: 'right', color: '#10b981' }}>{formatRiel(imp.paid_amount)}</td>
                       <td style={{ padding: '16px', textAlign: 'right', fontWeight: 'bold', color: '#ef4444', fontSize: '16px' }}>{formatRiel(remaining)}</td>
                       <td style={{ padding: '16px', textAlign: 'center' }}>
-                        <button 
-                          onClick={() => {
-                            setPayPendingModal({ isOpen: true, record: imp, totalDue: remaining });
-                            setPendingPaymentRows([{ id: Date.now(), method: 'Cash ៛', amount: '' }]);
-                          }}
-                          style={{ padding: '8px 16px', background: '#3b82f6', color: '#fff', border: 'none', borderRadius: '6px', fontWeight: 'bold', cursor: 'pointer' }}
-                        >
-                          💸 Pay Now
-                        </button>
+                        <div style={{ display: 'flex', gap: '8px', justifyContent: 'center' }}>
+                          <button 
+                            onClick={() => {
+                              setPayPendingModal({ isOpen: true, record: imp, totalDue: remaining });
+                              setPendingPaymentRows([{ id: Date.now(), method: 'Cash ៛', amount: '' }]);
+                            }}
+                            style={{ padding: '8px 16px', background: '#3b82f6', color: '#fff', border: 'none', borderRadius: '6px', fontWeight: 'bold', cursor: 'pointer' }}
+                          >
+                            💸 Pay Now
+                          </button>
+                          <button 
+                            onClick={() => handleVoidImport(imp.id)}
+                            disabled={isProcessing}
+                            style={{ padding: '8px 16px', background: '#fee2e2', color: '#dc2626', border: 'none', borderRadius: '6px', fontWeight: 'bold', cursor: isProcessing ? 'not-allowed' : 'pointer' }}
+                          >
+                            ❌ Void
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   )
@@ -1558,7 +1647,7 @@ export default function RiceControl() {
         </div>
       )}
 
-      {/* DUAL-VIEW HISTORY MODAL WITH CORRECTED EDIT HANDLERS */}
+      {/* DUAL-VIEW HISTORY MODAL WITH AUTOMATED VOID FEATURE */}
       {historyModal.isOpen && historyModal.product && (
         <div className="modal-overlay" onMouseDown={() => setHistoryModal({ isOpen: false, product: null, data: [], activeBatches: [] })}>
           <div className="modal-content" style={{ maxWidth: '600px' }} onMouseDown={e => e.stopPropagation()}>
@@ -1642,9 +1731,18 @@ export default function RiceControl() {
                          <div style={{ fontWeight: 'bold', color: '#0f172a', marginBottom: '4px', fontSize: '13px' }}>{new Date(h.created_at).toLocaleDateString()} at {new Date(h.created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</div>
                          <div style={{ color: '#64748b', fontSize: '12px' }}>Supplier: <span style={{ color: '#334155', fontWeight: 'bold' }}>{h.suppliers?.name || 'Unknown'}</span></div>
                        </div>
-                       <div style={{ textAlign: 'right' }}>
-                         <div style={{ fontWeight: 'bold', color: '#10b981', fontSize: '14px' }}>+{h.qty} Bags Imported</div>
-                         <div style={{ color: '#64748b', fontSize: '12px', marginTop: '2px' }}>Paid: {formatRiel(h.unit_cost)} / bag</div>
+                       <div style={{ textAlign: 'right', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '6px' }}>
+                         <div>
+                           <div style={{ fontWeight: 'bold', color: '#10b981', fontSize: '14px' }}>+{h.qty} Bags Imported</div>
+                           <div style={{ color: '#64748b', fontSize: '12px', marginTop: '2px' }}>Paid: {formatRiel(h.unit_cost)} / bag</div>
+                         </div>
+                         <button 
+                           onClick={() => handleVoidImport(h.id)}
+                           disabled={isProcessing}
+                           style={{ padding: '4px 8px', background: '#fee2e2', color: '#dc2626', border: 'none', borderRadius: '4px', cursor: isProcessing ? 'not-allowed' : 'pointer', fontWeight: 'bold', fontSize: '11px' }}
+                         >
+                           ❌ Void
+                         </button>
                        </div>
                     </div>
                   ))}
