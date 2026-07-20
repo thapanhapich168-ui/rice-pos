@@ -24,6 +24,15 @@ const formatHeader = (key: string) => {
   return key.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
 }
 
+// Helper to convert ISO dates to the local format needed by <input type="datetime-local">
+const toLocalDatetimeString = (dateStr: string) => {
+  if (!dateStr) return '';
+  const d = new Date(dateStr);
+  if (isNaN(d.getTime())) return '';
+  const pad = (n: number) => n.toString().padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
 // ==========================================
 // ROBUST LIVE COMMA FORMATTER 
 // ==========================================
@@ -76,10 +85,15 @@ function CurrencyInput({ value, onChange, placeholder, style, autoFocus, onEnter
 }
 
 // --- UNIFIED TRANSACTION TYPE ---
+type TabType = 'Wholesale Invoice Summary' | 'Walk-in Wholesale' | 'Non-Walk-in Wholesale' | 'Retails only' | 'Expense log';
+
 interface UnifiedTransaction {
   [key: string]: any; 
   id: string;
-  source: 'Wholesale Invoice Summary' | 'Wholesale Day Invoice Item' | 'Retails only' | 'Expense log';
+  raw_db_id: string | number;
+  product_id?: number | string; 
+  invoice_id?: string;
+  source: TabType;
   created_at: string;
 }
 
@@ -94,7 +108,7 @@ type TimeFilter = 'Today' | 'This Week' | 'This Month' | 'All Time';
 const DEFAULT_WIDTHS: Record<string, number> = {
   invoice_id: 140,
   transaction_id: 140,
-  created_at: 160,
+  created_at: 180,
   customer_name: 160,
   owner: 100,
   rice_types: 250,
@@ -119,12 +133,13 @@ const DEFAULT_EXPENSE_COLS = ['created_at', 'description', 'amount', 'category',
 export default function BizDatabase() {
   // --- CORE STATE ---
   const [transactions, setTransactions] = useState<UnifiedTransaction[]>([])
-  const [activeTab, setActiveTab] = useState<'Wholesale Invoice Summary' | 'Wholesale Day Invoice Item' | 'Retails only' | 'Expense log'>('Wholesale Invoice Summary')
+  const [activeTab, setActiveTab] = useState<TabType>('Wholesale Invoice Summary')
   const [searchQuery, setSearchQuery] = useState('')
   const [timeFilter, setTimeFilter] = useState<TimeFilter>('Today')
   const [isLoading, setIsLoading] = useState(true)
 
-  // --- EDITING STATE ---
+  // --- SELECTION & EDITING STATE ---
+  const [selectedToDelete, setSelectedToDelete] = useState<Set<string>>(new Set())
   const [editingCell, setEditingCell] = useState<{id: string, col: string} | null>(null)
   const [edits, setEdits] = useState<Record<string, Partial<UnifiedTransaction>>>({})
   
@@ -143,18 +158,17 @@ export default function BizDatabase() {
 
   // Dynamic active columns based on tab
   const activeColumns = activeTab === 'Wholesale Invoice Summary' ? summaryCols 
-                      : activeTab === 'Wholesale Day Invoice Item' ? dailyCols 
+                      : (activeTab === 'Walk-in Wholesale' || activeTab === 'Non-Walk-in Wholesale') ? dailyCols 
                       : activeTab === 'Retails only' ? retailCols 
                       : expenseCols;
 
   // --- LIFECYCLE ---
   useEffect(() => { 
-    fetchData()
+    fetchData(false)
     fetchSettings()
   }, [])
 
-  // 🚀 NEW: Window Focus Auto-Refresh
-  useFocusRefresh(fetchData);
+  useFocusRefresh(() => fetchData(true));
 
   // --- DATABASE OPERATIONS ---
   async function fetchSettings() {
@@ -174,9 +188,11 @@ export default function BizDatabase() {
     }
   }
 
-  async function fetchData() {
-    setIsLoading(true)
+  // 🚀 Fetch with precise Walk-in Isolation (HARD FETCH)
+  async function fetchData(isSilent = false) {
+    if (!isSilent) setIsLoading(true)
     
+    // Removed is_archived logic, fetching purely raw records
     const { data: summaryData } = await supabase.from('invoice_summaries').select('*')
     const { data: dailyData } = await supabase.from('sales').select('*')
     
@@ -197,16 +213,27 @@ export default function BizDatabase() {
     }
 
     const unified: UnifiedTransaction[] = []
+    
+    // Dictionary to map parent invoice data to child line items
+    const invoiceDict: Record<string, any> = {};
 
     if (summaryData) {
       summaryData.forEach(s => {
+        if (s.invoice_id) invoiceDict[s.invoice_id] = s;
+
+        const custName = s.customer_name || 'Walk-in';
+        const isWalkIn = custName.trim().toLowerCase() === 'walk-in';
+
+        // Do NOT push Walk-in sales to the Invoice Summary tab!
+        if (isWalkIn) return;
+
         unified.push({
           id: `sum_${s.id}`,
-          raw_db_id: s.id, // Keep exact DB reference for saving
+          raw_db_id: s.id, 
           source: 'Wholesale Invoice Summary',
           created_at: s.created_at,
           invoice_id: s.invoice_id,
-          customer_name: s.customer_name || 'Walk-in',
+          customer_name: custName,
           owner: s.owner || '-',
           rice_types: s.rice_types,
           total_sales: Number(s.total_sales || 0),
@@ -222,14 +249,22 @@ export default function BizDatabase() {
         const price = Number(d.price_per_bag || 0);
         const cogs = Number(d.cogs_price || 0);
         
+        // Borrow customer_name and owner from the parent invoice dictionary safely
+        const parentInvoice = invoiceDict[d.invoice_id] || {};
+        const custName = d.customer_name || parentInvoice.customer_name || 'Walk-in';
+        const ownerName = d.owner || parentInvoice.owner || '-';
+
+        const isWalkIn = !custName || custName.trim().toLowerCase() === 'walk-in';
+
         unified.push({
           id: `daily_${d.id}`,
-          raw_db_id: d.id, // Keep exact DB reference for saving
-          source: 'Wholesale Day Invoice Item',
-          created_at: d.created_at,
+          raw_db_id: d.id,
+          product_id: d.product_id, // Attached for smart voiding
           invoice_id: d.invoice_id,
-          customer_name: d.customer_name || 'Walk-in',
-          owner: d.owner || '-',
+          source: isWalkIn ? 'Walk-in Wholesale' : 'Non-Walk-in Wholesale',
+          created_at: d.created_at,
+          customer_name: custName,
+          owner: ownerName,
           rice_type: d.custom_rice_type || d.rice_type,
           qty: qty,
           price_per_bag: price,
@@ -249,7 +284,8 @@ export default function BizDatabase() {
 
         unified.push({
           id: `ret_${r.id}`,
-          raw_db_id: r.id, // Keep exact DB reference for saving
+          raw_db_id: r.id, 
+          product_id: r.product_id, // Attached for smart voiding
           source: 'Retails only',
           created_at: r.created_at,
           transaction_id: r.transaction_id,
@@ -272,7 +308,7 @@ export default function BizDatabase() {
 
         unified.push({
           id: `exp_${e.id}`,
-          raw_db_id: e.id, // Keep exact DB reference for saving
+          raw_db_id: e.id, 
           source: 'Expense log',
           created_at: e.created_at,
           description: e.remarks || e.description || `Expense #${e.id}`,
@@ -284,11 +320,131 @@ export default function BizDatabase() {
       })
     }
 
-    // Default global sort (newest first) applied initially
     unified.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
-    
     setTransactions(unified)
     setIsLoading(false)
+  }
+
+  // --- RAW BULK DELETE WITH CASCADING FOREIGN KEY SAFETY ---
+  const handleDelete = async () => {
+    if (!confirm(`🚨 Are you sure you want to PERMANENTLY DELETE ${selectedToDelete.size} records?\n\nThis will completely erase the transaction and physically return the items to your inventory stock.`)) return;
+    
+    // Optimistic UI Removal
+    setTransactions(prev => prev.filter(t => !selectedToDelete.has(t.id)));
+
+    const sumIds: any[] = [];
+    const dailyIds: any[] = [];
+    const retIds: any[] = [];
+    const expIds: any[] = [];
+
+    const itemsToRestore: UnifiedTransaction[] = [];
+    const invoiceIdsToCascade = new Set<string>(); // If deleting summary, delete children
+    const summaryIdsToCascade = new Set<string>(); // If deleting walk-in, delete parent
+
+    transactions.forEach(t => {
+      if (selectedToDelete.has(t.id)) {
+        if (t.source === 'Wholesale Invoice Summary') {
+          sumIds.push(t.raw_db_id);
+          if (t.invoice_id) invoiceIdsToCascade.add(t.invoice_id);
+        }
+        else if (t.source === 'Walk-in Wholesale') {
+          dailyIds.push(t.raw_db_id);
+          itemsToRestore.push(t);
+          if (t.invoice_id) summaryIdsToCascade.add(t.invoice_id);
+        }
+        else if (t.source === 'Non-Walk-in Wholesale') {
+          dailyIds.push(t.raw_db_id);
+          itemsToRestore.push(t);
+        }
+        else if (t.source === 'Retails only') {
+          retIds.push(t.raw_db_id);
+          itemsToRestore.push(t);
+        }
+        else if (t.source === 'Expense log') {
+          expIds.push(t.raw_db_id);
+        }
+      }
+    });
+
+    // Gather children of deleted summaries to restore their stock too
+    if (invoiceIdsToCascade.size > 0) {
+      const children = transactions.filter(t => (t.source === 'Non-Walk-in Wholesale' || t.source === 'Walk-in Wholesale') && t.invoice_id && invoiceIdsToCascade.has(t.invoice_id) && !selectedToDelete.has(t.id));
+      children.forEach(c => {
+        dailyIds.push(c.raw_db_id);
+        itemsToRestore.push(c);
+      });
+    }
+
+    try {
+      // 1. SMART VOID: RESTORE STOCK & FIFO FOR SALES
+      for (const item of itemsToRestore) {
+        const qty = Number(item.qty) || 0;
+        const isSpecial = (item.rice_type || '').includes('បានប្រើ') || (item.rice_type || '').includes('សេវាដឹក');
+        
+        if (qty !== 0 && !isSpecial && item.product_id) {
+          const { data: prod } = await supabase.from('products').select('stock').eq('id', item.product_id).single();
+          if (prod) {
+            await supabase.from('products').update({ stock: Number(prod.stock) + qty }).eq('id', item.product_id);
+          }
+
+          let remainingToReverse = qty;
+          const { data: batches } = await supabase.from('price_history')
+            .select('*')
+            .eq('product_id', item.product_id)
+            .gt('sold_qty', 0)
+            .order('created_at', { ascending: false }); 
+          
+          if (batches) {
+            for (const b of batches) {
+              if (remainingToReverse <= 0) break;
+              const possibleToReverse = Math.min(b.sold_qty, remainingToReverse);
+              await supabase.from('price_history').update({ sold_qty: b.sold_qty - possibleToReverse }).eq('id', b.id);
+              remainingToReverse -= possibleToReverse;
+            }
+          }
+        }
+      }
+
+      // 2. HARD DELETE WITH FOREIGN KEY SAFETY
+      // Combine all invoice IDs that need to be scrubbed of payments to prevent blocking
+      const allInvoicesToDelete = new Set([...Array.from(invoiceIdsToCascade), ...Array.from(summaryIdsToCascade)]);
+      
+      // A. Delete dependent payments first
+      if (allInvoicesToDelete.size > 0) {
+        await supabase.from('invoice_payments').delete().in('invoice_id', Array.from(allInvoicesToDelete));
+      }
+
+      // B. Delete children sales
+      if (dailyIds.length > 0) await supabase.from('sales').delete().in('id', dailyIds);
+      if (retIds.length > 0) await supabase.from('retail_sales').delete().in('id', retIds);
+      if (expIds.length > 0) await supabase.from('expenses').delete().in('id', expIds);
+      
+      // C. Delete parent summaries safely
+      if (sumIds.length > 0) await supabase.from('invoice_summaries').delete().in('id', sumIds);
+      if (summaryIdsToCascade.size > 0) {
+        await supabase.from('invoice_summaries').delete().in('invoice_id', Array.from(summaryIdsToCascade));
+      }
+      
+      setSelectedToDelete(new Set());
+      fetchData(true);
+    } catch (e: any) {
+      alert(`Error deleting records: ${e.message}`);
+      fetchData(true);
+    }
+  }
+
+  const toggleSelect = (id: string) => {
+    const next = new Set(selectedToDelete);
+    next.has(id) ? next.delete(id) : next.add(id);
+    setSelectedToDelete(next);
+  }
+
+  const toggleSelectAll = () => {
+    if (selectedToDelete.size === processedTransactions.length && processedTransactions.length > 0) {
+      setSelectedToDelete(new Set());
+    } else {
+      setSelectedToDelete(new Set(processedTransactions.map(t => t.id)));
+    }
   }
 
   // --- SAVE EDIT LOGIC ---
@@ -305,7 +461,15 @@ export default function BizDatabase() {
     let targetTable = '';
     const dbPayload: any = {};
 
-    // 1. Identify Target Table & Map Fields Back to DB schema
+    if (payload.created_at !== undefined) dbPayload.created_at = payload.created_at;
+    if (payload.invoice_id !== undefined) dbPayload.invoice_id = payload.invoice_id;
+    if (payload.transaction_id !== undefined) dbPayload.transaction_id = payload.transaction_id;
+
+    // Automatically calculate Totals if Qty or Price was edited!
+    const newQty = payload.qty !== undefined ? Number(payload.qty) : Number(baseTx.qty || 0);
+    const newPrice = payload.price_per_bag !== undefined ? Number(payload.price_per_bag) : Number(baseTx.price_per_bag || 0);
+    const newCogs = payload.cogs_price !== undefined ? Number(payload.cogs_price) : Number(baseTx.cogs_price || 0);
+
     if (baseTx.source === 'Wholesale Invoice Summary') {
       targetTable = 'invoice_summaries';
       if (payload.customer_name !== undefined) dbPayload.customer_name = payload.customer_name;
@@ -315,32 +479,37 @@ export default function BizDatabase() {
       if (payload.total_cogs !== undefined) dbPayload.total_cogs = payload.total_cogs;
       if (payload.total_profit !== undefined) dbPayload.total_profit = payload.total_profit;
     } 
-    else if (baseTx.source === 'Wholesale Day Invoice Item') {
+    else if (baseTx.source === 'Walk-in Wholesale' || baseTx.source === 'Non-Walk-in Wholesale') {
       targetTable = 'sales';
-      if (payload.customer_name !== undefined) dbPayload.customer_name = payload.customer_name;
-      if (payload.owner !== undefined) dbPayload.owner = payload.owner;
-      if (payload.rice_type !== undefined) dbPayload.custom_rice_type = payload.rice_type; // Map back to custom_rice_type
-      if (payload.qty !== undefined) dbPayload.qty = payload.qty;
-      if (payload.price_per_bag !== undefined) dbPayload.price_per_bag = payload.price_per_bag;
-      if (payload.cogs_price !== undefined) dbPayload.cogs_price = payload.cogs_price;
+      if (payload.rice_type !== undefined) dbPayload.custom_rice_type = payload.rice_type; 
+      
+      dbPayload.qty = newQty;
+      dbPayload.price_per_bag = newPrice;
+      dbPayload.cogs_price = newCogs;
+      dbPayload.total_sales = newQty * newPrice;
+      dbPayload.total_cogs = newQty * newCogs;
+      dbPayload.total_profit = (newPrice - newCogs) * newQty;
     }
     else if (baseTx.source === 'Retails only') {
       targetTable = 'retail_sales';
-      if (payload.rice_type !== undefined) dbPayload.custom_rice_type = payload.rice_type; // Map back
-      if (payload.qty !== undefined) dbPayload.qty = payload.qty;
-      if (payload.price_per_bag !== undefined) dbPayload.price_per_bag = payload.price_per_bag;
-      if (payload.cogs_price !== undefined) dbPayload.cogs_price = payload.cogs_price;
+      if (payload.rice_type !== undefined) dbPayload.custom_rice_type = payload.rice_type; 
+      
+      dbPayload.qty = newQty;
+      dbPayload.price_per_bag = newPrice;
+      dbPayload.cogs_price = newCogs;
+      dbPayload.total_sales = newQty * newPrice;
+      dbPayload.total_cogs = newQty * newCogs;
+      dbPayload.total_profit = (newPrice - newCogs) * newQty;
     }
     else if (baseTx.source === 'Expense log') {
       targetTable = 'expenses';
-      if (payload.description !== undefined) dbPayload.remarks = payload.description; // Map back
-      if (payload.category !== undefined) dbPayload.description = payload.category; // Map back
-      if (payload.owner !== undefined) dbPayload.spender = payload.owner; // Map back
-      if (payload.status !== undefined) dbPayload.payment_method = payload.status; // Map back
+      if (payload.description !== undefined) dbPayload.remarks = payload.description; 
+      if (payload.category !== undefined) dbPayload.description = payload.category; 
+      if (payload.owner !== undefined) dbPayload.spender = payload.owner; 
+      if (payload.status !== undefined) dbPayload.payment_method = payload.status; 
       if (payload.amount !== undefined) {
-        // Safe assumption: If they edit amount on the riel side, we force update amount_riel
         dbPayload.amount_riel = payload.amount;
-        dbPayload.amount_usd = 0; // Wipe USD to prevent double-counting if they switch
+        dbPayload.amount_usd = 0; 
       }
     }
 
@@ -352,10 +521,9 @@ export default function BizDatabase() {
       }
     }
 
-    // Safely clear the edit state and trigger a hard refresh to re-calculate everything perfectly
     setEdits(prev => { const n = { ...prev }; delete n[id]; return n });
     setEditingCell(null);
-    fetchData(); 
+    fetchData(true); // Silent refresh
   }
 
   // --- TIME FILTER LOGIC ---
@@ -375,7 +543,7 @@ export default function BizDatabase() {
     
     if (timeFilter === 'This Week') {
       const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-      const dayOfWeek = today.getDay(); // 0 is Sunday
+      const dayOfWeek = today.getDay(); 
       const diff = today.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1);
       const startOfWeek = new Date(today.setDate(diff));
       return d >= startOfWeek;
@@ -420,7 +588,7 @@ export default function BizDatabase() {
       const updated = reorder(summaryCols)
       setSummaryCols(updated)
       supabase.from('app_settings').upsert({ setting_key: 'biz_sum_cols', setting_value: updated }, { onConflict: 'setting_key' }).then()
-    } else if (activeTab === 'Wholesale Day Invoice Item') {
+    } else if (activeTab === 'Walk-in Wholesale' || activeTab === 'Non-Walk-in Wholesale') {
       const updated = reorder(dailyCols)
       setDailyCols(updated)
       supabase.from('app_settings').upsert({ setting_key: 'biz_daily_cols', setting_value: updated }, { onConflict: 'setting_key' }).then()
@@ -460,19 +628,16 @@ export default function BizDatabase() {
     document.addEventListener('mousemove', handleMove)
     document.addEventListener('mouseup', handleUp)
     document.addEventListener('touchmove', handleMove, { passive: false })
+    document.addEventListener('touchmove', handleMove, { passive: false })
     document.addEventListener('touchend', handleUp)
   }
 
   // --- DATA PROCESSING & CALCULATIONS ---
   const processedTransactions = transactions
     .filter(t => {
-      // 1. Tab Filter
-      if (t.source !== activeTab) return false
-      
-      // 2. Time Filter
+      if (t.source !== activeTab) return false;
       if (!isWithinTimeFilter(t.created_at)) return false;
 
-      // 3. Quick Search
       if (searchQuery) {
         const query = searchQuery.toLowerCase()
         const searchableText = `${t.invoice_id || ''} ${t.transaction_id || ''} ${t.customer_name || ''} ${t.rice_types || ''} ${t.rice_type || ''} ${t.description || ''} ${t.category || ''}`.toLowerCase()
@@ -482,14 +647,12 @@ export default function BizDatabase() {
       return true
     })
     .sort((a, b) => {
-      // 4. Header Click Sorting
-      if (!sortConfig) return 0; // Fallback to the initial fetch sort
+      if (!sortConfig) return 0;
       const { key, direction } = sortConfig;
       
       let valA = a[key];
       let valB = b[key];
       
-      // Handle missing values
       if (valA === undefined || valA === null) valA = '';
       if (valB === undefined || valB === null) valB = '';
 
@@ -537,7 +700,12 @@ export default function BizDatabase() {
           <h1 className="page-title">🔐 Business Database</h1>
         </div>
         <div className="header-actions">
-          <button className="refresh-btn" onClick={fetchData}>
+          {selectedToDelete.size > 0 && (
+            <button onClick={handleDelete} style={{ background: '#ef4444', color: '#fff', padding: '10px 16px', borderRadius: '6px', border: 'none', fontWeight: 'bold', cursor: 'pointer', marginRight: '12px' }}>
+              🗑️ Delete ({selectedToDelete.size})
+            </button>
+          )}
+          <button className="refresh-btn" onClick={() => fetchData(false)}>
             {isLoading ? '🔄 Loading...' : '🔄 Refresh Data'}
           </button>
         </div>
@@ -548,16 +716,19 @@ export default function BizDatabase() {
         
         {/* TOP ROW: TABS */}
         <div className="toolbar-tabs" style={{ width: '100%', borderBottom: '1px solid #e2e8f0', paddingBottom: '12px', marginBottom: '4px' }}>
-          <button className={activeTab === 'Wholesale Invoice Summary' ? 'tab active' : 'tab'} onClick={() => {setActiveTab('Wholesale Invoice Summary'); setSortConfig(null); setEditingCell(null)}}>
+          <button className={activeTab === 'Wholesale Invoice Summary' ? 'tab active' : 'tab'} onClick={() => {setActiveTab('Wholesale Invoice Summary'); setSortConfig(null); setEditingCell(null); setSelectedToDelete(new Set());}}>
             🌾 Wholesale Invoice Summary
           </button>
-          <button className={activeTab === 'Wholesale Day Invoice Item' ? 'tab active' : 'tab'} onClick={() => {setActiveTab('Wholesale Day Invoice Item'); setSortConfig(null); setEditingCell(null)}}>
-            🌾 Wholesale Day Invoice Item
+          <button className={activeTab === 'Walk-in Wholesale' ? 'tab active' : 'tab'} onClick={() => {setActiveTab('Walk-in Wholesale'); setSortConfig(null); setEditingCell(null); setSelectedToDelete(new Set());}}>
+            🚶 Walk-in Wholesale
           </button>
-          <button className={activeTab === 'Retails only' ? 'tab active' : 'tab'} onClick={() => {setActiveTab('Retails only'); setSortConfig(null); setEditingCell(null)}}>
+          <button className={activeTab === 'Non-Walk-in Wholesale' ? 'tab active' : 'tab'} onClick={() => {setActiveTab('Non-Walk-in Wholesale'); setSortConfig(null); setEditingCell(null); setSelectedToDelete(new Set());}}>
+            🚚 Non-Walk-in Wholesale
+          </button>
+          <button className={activeTab === 'Retails only' ? 'tab active' : 'tab'} onClick={() => {setActiveTab('Retails only'); setSortConfig(null); setEditingCell(null); setSelectedToDelete(new Set());}}>
             🛍️ Retails only
           </button>
-          <button className={activeTab === 'Expense log' ? 'tab active' : 'tab'} onClick={() => {setActiveTab('Expense log'); setSortConfig(null); setEditingCell(null)}}>
+          <button className={activeTab === 'Expense log' ? 'tab active' : 'tab'} onClick={() => {setActiveTab('Expense log'); setSortConfig(null); setEditingCell(null); setSelectedToDelete(new Set());}}>
             📉 Expense log
           </button>
         </div>
@@ -593,6 +764,16 @@ export default function BizDatabase() {
         <table style={{ borderCollapse: 'collapse', tableLayout: 'fixed', width: 'max-content', minWidth: '100%' }}>
           <thead>
             <tr style={{ background: '#f8fafc', borderBottom: '2px solid #e2e8f0' }}>
+              
+              <th style={{ width: '50px', padding: '14px 12px', textAlign: 'center', borderRight: '1px solid #f1f5f9' }}>
+                <input 
+                  type="checkbox" 
+                  checked={selectedToDelete.size === processedTransactions.length && processedTransactions.length > 0} 
+                  onChange={toggleSelectAll} 
+                  style={{ width: '18px', height: '18px', cursor: 'pointer', accentColor: '#b58a3d' }} 
+                />
+              </th>
+
               {activeColumns.map(key => (
                 <th 
                   key={key} 
@@ -626,29 +807,39 @@ export default function BizDatabase() {
             </tr>
           </thead>
           <tbody>
-            {isLoading ? (
+            {isLoading && transactions.length === 0 ? (
               <tr>
-                <td colSpan={activeColumns.length} style={{ padding: '40px', textAlign: 'center', color: '#94a3b8' }}>
+                <td colSpan={activeColumns.length + 1} style={{ padding: '40px', textAlign: 'center', color: '#94a3b8' }}>
                   Loading database...
                 </td>
               </tr>
             ) : processedTransactions.length === 0 ? (
               <tr>
-                <td colSpan={activeColumns.length} style={{ padding: '40px', textAlign: 'center', color: '#94a3b8' }}>
+                <td colSpan={activeColumns.length + 1} style={{ padding: '40px', textAlign: 'center', color: '#94a3b8' }}>
                   No records match your view.
                 </td>
               </tr>
             ) : (
               processedTransactions.map(t => (
-                <tr key={t.id} style={{ borderBottom: '1px solid #f1f5f9', transition: 'background 0.2s', background: edits[t.id] ? '#fefcf3' : 'transparent' }} onMouseEnter={e => { if(!edits[t.id]) e.currentTarget.style.backgroundColor = '#f8fafc' }} onMouseLeave={e => { if(!edits[t.id]) e.currentTarget.style.backgroundColor = 'transparent' }}>
+                <tr key={t.id} style={{ borderBottom: '1px solid #f1f5f9', transition: 'background 0.2s', background: edits[t.id] ? '#fefcf3' : (selectedToDelete.has(t.id) ? '#eff6ff' : 'transparent') }} onMouseEnter={e => { if(!edits[t.id] && !selectedToDelete.has(t.id)) e.currentTarget.style.backgroundColor = '#f8fafc' }} onMouseLeave={e => { if(!edits[t.id] && !selectedToDelete.has(t.id)) e.currentTarget.style.backgroundColor = 'transparent' }}>
+                  
+                  <td style={{ textAlign: 'center', borderRight: '1px solid #f1f5f9', padding: '14px 12px' }}>
+                    <input 
+                      type="checkbox" 
+                      checked={selectedToDelete.has(t.id)} 
+                      onChange={() => toggleSelect(t.id)} 
+                      style={{ width: '18px', height: '18px', cursor: 'pointer', accentColor: '#b58a3d' }} 
+                    />
+                  </td>
+
                   {activeColumns.map(col => {
                     
-                    // Core Data Resolvers
                     const isEditing = editingCell?.id === t.id && editingCell?.col === col;
                     const val = edits[t.id]?.[col] ?? t[col] ?? '';
-                    
-                    // Un-editable columns safety check
-                    const isUneditable = ['created_at', 'invoice_id', 'transaction_id'].includes(col);
+
+                    // Customer Name & Owner are un-editable on child tabs (must edit on invoice summary)
+                    const isParentFieldOnChild = (t.source === 'Walk-in Wholesale' || t.source === 'Non-Walk-in Wholesale') && ['customer_name', 'owner'].includes(col);
+                    const isUneditable = ['created_at', 'invoice_id', 'transaction_id'].includes(col) || isParentFieldOnChild;
 
                     return (
                       <td 
@@ -674,6 +865,27 @@ export default function BizDatabase() {
                               value={val} 
                               onChange={(v: any) => setEdits(prev => ({ ...prev, [t.id]: { ...(prev[t.id] || {}), [col]: v } }))} 
                               onEnter={() => handleSaveRecord(t.id)}
+                            />
+                          ) : col === 'created_at' ? (
+                            <input 
+                              autoFocus
+                              type="datetime-local"
+                              className="cell-input"
+                              value={toLocalDatetimeString(val)}
+                              onChange={(e) => {
+                                const dateObj = new Date(e.target.value);
+                                if (!isNaN(dateObj.getTime())) {
+                                  setEdits(prev => ({ ...prev, [t.id]: { ...(prev[t.id] || {}), [col]: dateObj.toISOString() } }));
+                                }
+                              }}
+                              onBlur={() => handleSaveRecord(t.id)}
+                              onKeyDown={(e) => { 
+                                if (e.key === 'Enter') { e.currentTarget.blur(); handleSaveRecord(t.id); } 
+                                if (e.key === 'Escape') { 
+                                  setEdits(prev => { const n = { ...prev }; delete n[t.id]; return n }); 
+                                  setEditingCell(null); 
+                                } 
+                              }}
                             />
                           ) : (
                             <input 

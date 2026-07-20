@@ -352,11 +352,11 @@ export default function DashboardPage() {
       if (lowerM.includes('liability') || lowerM.includes('mom qr')) return; 
       
       if (lowerM.includes('qr')) {
-          if (lowerM.includes('$')) liveQrUsd += (amtRiel / EXCHANGE_RATE);
-          else liveQrRiel += amtRiel;
+         if (lowerM.includes('$')) liveQrUsd += (amtRiel / EXCHANGE_RATE);
+         else liveQrRiel += amtRiel;
       } else {
-          if (lowerM.includes('$')) liveCashUsd += (amtRiel / EXCHANGE_RATE);
-          else liveCashRiel += amtRiel;
+         if (lowerM.includes('$')) liveCashUsd += (amtRiel / EXCHANGE_RATE);
+         else liveCashRiel += amtRiel;
       }
     }
 
@@ -365,11 +365,11 @@ export default function DashboardPage() {
       if (lowerM.includes('liability') || lowerM.includes('mom qr')) return; 
 
       if (lowerM.includes('qr')) {
-          if (lowerM.includes('$')) liveQrUsd -= (amtRiel / EXCHANGE_RATE);
-          else liveQrRiel -= amtRiel;
+         if (lowerM.includes('$')) liveQrUsd -= (amtRiel / EXCHANGE_RATE);
+         else liveQrRiel -= amtRiel;
       } else {
-          if (lowerM.includes('$')) liveCashUsd -= (amtRiel / EXCHANGE_RATE);
-          else liveCashRiel -= amtRiel;
+         if (lowerM.includes('$')) liveCashUsd -= (amtRiel / EXCHANGE_RATE);
+         else liveCashRiel -= amtRiel;
       }
     }
 
@@ -383,26 +383,25 @@ export default function DashboardPage() {
        const eqRiel = isUsd ? amtUsd * EXCHANGE_RATE : amtRiel;
 
        if (isBusinessMethod(methodStr)) {
-           addFunds(eqRiel, methodStr);
-           
-           let owner = parseOwner(p.recorded_by);
-           
-           const relatedInv = invoiceSummaries.find((inv: any) => inv.invoice_id === p.invoice_id);
-           if (relatedInv) {
-               owner = parseOwner(relatedInv.owner);
-           } else {
-               const relatedSale = wholesaleSales.find((s: any) => s.invoice_id === p.invoice_id) || retailSales.find((rs: any) => rs.transaction_id === p.invoice_id);
-               if (relatedSale) owner = parseOwner(relatedSale.owner);
-           }
+            addFunds(eqRiel, methodStr);
+            
+            let owner = parseOwner(p.recorded_by);
+            
+            const relatedInv = invoiceSummaries.find((inv: any) => inv.invoice_id === p.invoice_id);
+            if (relatedInv) {
+                owner = parseOwner(relatedInv.owner);
+            } else {
+                const relatedSale = wholesaleSales.find((s: any) => s.invoice_id === p.invoice_id) || retailSales.find((rs: any) => rs.transaction_id === p.invoice_id);
+                if (relatedSale) owner = parseOwner(relatedSale.owner);
+            }
 
-           if (owner === 'mom' || methodStr.includes('mom qr')) {
-               if (isUsd) momCollectedUsd += amtUsd;
-               else momCollectedRiel += amtRiel;
-           }
+            if (owner === 'mom' || methodStr.includes('mom qr')) {
+                if (isUsd) momCollectedUsd += amtUsd;
+                else momCollectedRiel += amtRiel;
+            }
        }
     });
 
-    // 🔥 FIX: Added Retail Sales specifically into the Cash on Hand buckets
     retailSales.forEach((rs: any) => {
        const methodStr = (rs.payment_method || 'Cash ៛').toLowerCase();
        if (methodStr.includes('unpaid') || methodStr.includes('debt') || methodStr.includes('liability')) return;
@@ -410,14 +409,14 @@ export default function DashboardPage() {
        const totalRiel = Number(rs.total_sales || 0);
 
        if (isBusinessMethod(methodStr)) {
-           addFunds(totalRiel, methodStr);
-           
-           let owner = parseOwner(rs.owner);
-           if (owner === 'mom' || methodStr.includes('mom qr')) {
-               const isUsd = methodStr.includes('$');
-               if (isUsd) momCollectedUsd += (totalRiel / EXCHANGE_RATE);
-               else momCollectedRiel += totalRiel;
-           }
+            addFunds(totalRiel, methodStr);
+            
+            let owner = parseOwner(rs.owner);
+            if (owner === 'mom' || methodStr.includes('mom qr')) {
+                const isUsd = methodStr.includes('$');
+                if (isUsd) momCollectedUsd += (totalRiel / EXCHANGE_RATE);
+                else momCollectedRiel += totalRiel;
+            }
        }
     });
 
@@ -450,23 +449,23 @@ export default function DashboardPage() {
              }
           });
        } else {
-           let isUsd = methodStr.includes('$');
-           let faceValue = isUsd ? totalAmtEq / EXCHANGE_RATE : totalAmtEq;
+          let isUsd = methodStr.includes('$');
+          let faceValue = isUsd ? totalAmtEq / EXCHANGE_RATE : totalAmtEq;
 
-           if (methodStr.includes('liability')) {
-               if (owner === 'mom') {
-                   if (isUsd) liabilityOffsetUsedUsd += faceValue;
-                   else liabilityOffsetUsedRiel += faceValue;
-                   momTotalPaidRiel += totalAmtEq;
-               }
-           } else {
-               subFunds(totalAmtEq, c.payment_method);
-               if (owner === 'mom' && !methodStr.includes('mom qr')) {
-                   if (isUsd) momPaidOutUsd += faceValue;
-                   else momPaidOutRiel += faceValue;
-                   momTotalPaidRiel += totalAmtEq;
-               }
-           }
+          if (methodStr.includes('liability')) {
+              if (owner === 'mom') {
+                  if (isUsd) liabilityOffsetUsedUsd += faceValue;
+                  else liabilityOffsetUsedRiel += faceValue;
+                  momTotalPaidRiel += totalAmtEq;
+              }
+          } else {
+              subFunds(totalAmtEq, c.payment_method);
+              if (owner === 'mom' && !methodStr.includes('mom qr')) {
+                  if (isUsd) momPaidOutUsd += faceValue;
+                  else momPaidOutRiel += faceValue;
+                  momTotalPaidRiel += totalAmtEq;
+              }
+          }
        }
     });
 
@@ -799,7 +798,7 @@ export default function DashboardPage() {
                 </div>
               </div>
 
-              {/* 🔥 DEDICATED MOM BOX */}
+              {/* DEDICATED MOM BOX */}
               <div style={{ background: '#fff', padding: '24px', borderRadius: '16px', border: '1px solid #bbf7d0', boxShadow: '0 4px 6px rgba(0,0,0,0.02)' }}>
                 <div style={{ fontSize: '13px', color: '#047857', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 'bold' }}>👩 Mom Receivables</div>
                 
@@ -1025,9 +1024,14 @@ export default function DashboardPage() {
           font-family: inherit;
           font-variant-numeric: tabular-nums lining-nums;
         }
-        body { font-variant-numeric: tabular-nums lining-nums; }
+        body { 
+          font-variant-numeric: tabular-nums lining-nums; 
+          overflow-x: hidden !important;
+          width: 100vw;
+          margin: 0;
+        }
         
-        /* 🔥 DESKTOP LAYOUT FIXES */
+        /* 🔥 DESKTOP LAYOUT FIXES (ONE-SCREEN LOCK) */
         .main-wrapper { 
           padding: max(20px, env(safe-area-inset-top, 20px)) 24px 24px 24px; 
           background: #f8fafc; 
@@ -1036,8 +1040,10 @@ export default function DashboardPage() {
           color: #333;
           height: 100dvh;
           overflow-y: auto;
+          overflow-x: hidden !important;
           -webkit-overflow-scrolling: touch;
-          width: 100%;
+          width: 100vw;
+          max-width: 100%;
         }
         
         .header-container { 
@@ -1049,8 +1055,9 @@ export default function DashboardPage() {
           margin-left: 60px; /* 🔥 Clears the burger menu icon for horizontal alignment */
           gap: 12px;
           min-height: 42px; 
-          width: 100%;
-          max-width: 1600px;
+          width: calc(100vw - 84px);
+          max-width: 1550px;
+          box-sizing: border-box;
         }
         
         .header-left {
@@ -1083,7 +1090,9 @@ export default function DashboardPage() {
             padding: max(20px, env(safe-area-inset-top, 20px)) 16px 16px 16px !important; 
             height: 100dvh !important;
             overflow-y: auto !important;
+            overflow-x: hidden !important;
             -webkit-overflow-scrolling: touch !important;
+            width: 100vw !important;
           }
           .header-container { 
             margin-left: 54px !important; /* Clears mobile hamburger button safely */
@@ -1095,7 +1104,7 @@ export default function DashboardPage() {
             justify-content: flex-start !important;
             align-items: center !important; 
             min-height: 44px !important;
-            width: calc(100% - 54px) !important;
+            width: calc(100vw - 70px) !important;
           }
           .header-left {
             display: flex !important;
