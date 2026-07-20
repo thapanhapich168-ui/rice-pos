@@ -289,12 +289,14 @@ export default function RiceControl() {
   }
 
   async function fetchProducts() {
-    const { data } = await supabase.from('products').select('*').order('id', { ascending: true })
+    // 🔥 NEW: Only fetch active products
+    const { data } = await supabase.from('products').select('*').eq('is_archived', false).order('id', { ascending: true })
     if (data) setProducts(data)
   }
 
   async function fetchSuppliers() {
-    const { data } = await supabase.from('suppliers').select('*').order('name', { ascending: true })
+    // 🔥 NEW: Only fetch active suppliers
+    const { data } = await supabase.from('suppliers').select('*').eq('is_archived', false).order('name', { ascending: true })
     if (data) setSuppliers(data)
   }
 
@@ -648,7 +650,9 @@ export default function RiceControl() {
 
   const handleDelete = async () => {
     if (!confirm(`Are you sure you want to delete ${selectedToDelete.size} item(s)?`)) return
-    const { error } = await supabase.from('products').delete().in('id', Array.from(selectedToDelete))
+    
+    // 🔥 NEW: Soft Delete (Archive) instead of hard delete
+    const { error } = await supabase.from('products').update({ is_archived: true }).in('id', Array.from(selectedToDelete))
     if (!error) { setSelectedToDelete(new Set()); }
   }
 

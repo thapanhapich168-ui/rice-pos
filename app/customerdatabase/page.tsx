@@ -97,7 +97,13 @@ export default function CustomerDatabasePage() {
   }
 
   async function loadCustomers() {
-    const { data, error } = await supabase.from('customers').select('*').order('created_at', { ascending: false })
+    // 🔥 NEW: Only fetch customers that have NOT been archived
+    const { data, error } = await supabase
+      .from('customers')
+      .select('*')
+      .eq('is_archived', false)
+      .order('created_at', { ascending: false })
+      
     if (!error && data) {
       setCustomers(data)
       setEdits({})
@@ -125,22 +131,18 @@ export default function CustomerDatabasePage() {
 
   const handleDelete = async () => {
     if (!confirm(`Are you sure you want to delete ${selectedToDelete.size} customer(s)?`)) return
-    const { error } = await supabase.from('customers').delete().in('id', Array.from(selectedToDelete))
+    
+    // 🔥 NEW: Soft Delete (Archive) instead of hard delete
+    const { error } = await supabase
+      .from('customers')
+      .update({ is_archived: true })
+      .in('id', Array.from(selectedToDelete))
+      
     if (!error) { 
       setSelectedToDelete(new Set()); 
       loadCustomers() 
     } else {
-      alert(`❌ Cannot delete customer: ${error.message}\n\nMake sure you ran the SQL script if they have past orders!`)
-    }
-  }
-
-  const handleDeleteSingle = async (id: string, name: string) => {
-    if (!confirm(`Are you sure you want to permanently delete: ${name}?`)) return
-    const { error } = await supabase.from('customers').delete().eq('id', id)
-    if (!error) { 
-      loadCustomers() 
-    } else {
-      alert(`❌ Cannot delete ${name}: ${error.message}\n\nMake sure you ran the SQL script if they have past orders!`)
+      alert(`❌ Cannot delete customer: ${error.message}`)
     }
   }
 
