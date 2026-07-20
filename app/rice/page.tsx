@@ -14,7 +14,7 @@ const formatNumber = (v: number) => new Intl.NumberFormat('en-US').format(v);
 const EXCHANGE_RATE = 4000;
 
 // --- CATEGORIES ---
-const RICE_CATEGORIES = ['All', 'មិញ', 'ខុន', 'ខ្ញី', 'ម្លិះ', 'រំដួល', 'បីកំណាត់', 'ដំណើប', 'សម្រូប', 'ផ្សេងៗ'];
+const RICE_CATEGORIES = ['All', 'មិញ', 'ខុន', 'ខ្ញី', 'ម្លិះ', 'រំដួល', 'បីកំណាត់', 'ដំណើប', 'សម្រូប', 'ផ្សេងៗ', '❌ Out of Stock'];
 const MAIN_KEYWORDS = ['មិញ', 'ខុន', 'ខ្ញី', 'ម្លិះ', 'រំដួល', 'បីកំណាត់', 'ដំណើប', 'សម្រូប'];
 
 // --- TYPES ---
@@ -139,6 +139,7 @@ export default function RiceControl() {
   // --- VIEWS & TABS STATE ---
   const [activeView, setActiveView] = useState<'retail' | 'wholesale' | 'import' | 'pending' | 'suppliers'>('retail')
   const [activeCategory, setActiveCategory] = useState<string>('All')
+  const [categoryOrder, setCategoryOrder] = useState<string[]>(RICE_CATEGORIES)
 
   // --- BATCH ENGINE STATES ---
   const [activeBatchesMap, setActiveBatchesMap] = useState<Record<number, InventoryBatch[]>>({})
@@ -164,7 +165,7 @@ export default function RiceControl() {
   const [filterRules, setFilterRules] = useState<FilterRule[]>([])
 
   const [isAddModalOpen, setIsAddModalOpen] = useState(false)
-  const [newItem, setNewItem] = useState({ name: '', price: '' as any, cost_price: '' as any, weight: '' as any, stock: '' as any, min_stock_level: 10 as any })
+  const [newItem, setNewItem] = useState({ name: '', price: 0 as any, cost_price: 0 as any, weight: 50 as any, stock: '' as any, min_stock_level: 10 as any })
 
   const [historyModal, setHistoryModal] = useState<{ isOpen: boolean; product: Product | null; data: any[]; activeBatches: InventoryBatch[] }>({
     isOpen: false, product: null, data: [], activeBatches: []
@@ -172,6 +173,44 @@ export default function RiceControl() {
   
   const [editingHistoryId, setEditingHistoryId] = useState<number | null>(null)
   const [historyEdits, setHistoryEdits] = useState<Record<number, Partial<InventoryBatch>>>({})
+
+  // --- DRAG HANDLERS FOR CATEGORIES ---
+  const handleCategoryDragStart = (e: React.DragEvent, cat: string) => {
+    e.dataTransfer.setData('text/category', cat)
+    e.dataTransfer.effectAllowed = 'move'
+  }
+
+  const handleCategoryDrop = async (e: React.DragEvent, targetCat: string) => {
+    e.preventDefault()
+    const sourceCat = e.dataTransfer.getData('text/category');
+    if (!sourceCat || sourceCat === targetCat) return
+
+    setCategoryOrder(prev => {
+      const newOrder = prev.filter(c => c !== sourceCat);
+      const targetIdx = newOrder.indexOf(targetCat);
+      newOrder.splice(targetIdx, 0, sourceCat);
+      
+      supabase.from('app_settings').upsert({
+        setting_key: 'category_order',
+        setting_value: newOrder
+      }, { onConflict: 'setting_key' }).then()
+      
+      return newOrder;
+    })
+  }
+
+  // --- DYNAMIC DEFAULT VALUES ADD PRODUCT ---
+  const handleOpenAddProduct = () => {
+    setNewItem({
+      name: '',
+      price: activeView === 'retail' ? ('' as any) : 0,
+      cost_price: activeView === 'wholesale' ? ('' as any) : 0,
+      weight: activeView === 'retail' ? 1 : 50,
+      stock: '',
+      min_stock_level: 10
+    });
+    setIsAddModalOpen(true);
+  };
 
   // --- LIFECYCLE & REALTIME SYNC ---
   useEffect(() => { 
@@ -227,15 +266,24 @@ export default function RiceControl() {
 
   // --- DATABASE OPERATIONS ---
   async function fetchSettings() {
-    const { data } = await supabase.from('app_settings').select('*').in('setting_key', ['column_widths', 'column_order'])
+    const { data } = await supabase.from('app_settings').select('*').in('setting_key', ['column_widths', 'column_order', 'category_order'])
     if (data) {
       const widths = data.find((d: any) => d.setting_key === 'column_widths')
       const order = data.find((d: any) => d.setting_key === 'column_order')
+      const catOrder = data.find((d: any) => d.setting_key === 'category_order')
+
       if (widths && widths.setting_value) setColumnWidths(widths.setting_value)
+      
       if (order && order.setting_value) {
         const cleanOrder = order.setting_value.filter((o: string) => o !== 'actions' && o !== 'expand');
         cleanOrder.unshift('expand');
         setColumnOrder([...cleanOrder, 'actions'] as any);
+      }
+
+      if (catOrder && catOrder.setting_value) {
+        const saved = catOrder.setting_value;
+        const missing = RICE_CATEGORIES.filter(c => !saved.includes(c));
+        setCategoryOrder([...saved, ...missing]);
       }
     }
   }
@@ -619,7 +667,7 @@ export default function RiceControl() {
     const { error } = await supabase.from('products').insert([payload])
     if (!error) {
       setIsAddModalOpen(false)
-      setNewItem({ name: '', price: '', cost_price: '', weight: '', stock: '', min_stock_level: 10 })
+      setNewItem({ name: '', price: 0, cost_price: 0, weight: 50, stock: '', min_stock_level: 10 })
     }
   }
 
@@ -726,7 +774,12 @@ export default function RiceControl() {
       if (activeView === 'retail' && p.weight >= 50) return false;
       if (activeView === 'wholesale' && p.weight < 50) return false;
       
-      if (activeView === 'wholesale' && activeCategory !== 'All') {
+      if (activeView === 'wholesale') {
+        if (activeCategory === '❌ Out of Stock') return Number(p.stock) <= 0;
+        if (Number(p.stock) <= 0) return false;
+      }
+
+      if (activeView === 'wholesale' && activeCategory !== 'All' && activeCategory !== '❌ Out of Stock') {
         const name = p.name || '';
         if (activeCategory === 'ផ្សេងៗ') {
           if (MAIN_KEYWORDS.some(kw => name.includes(kw))) return false;
@@ -796,7 +849,7 @@ export default function RiceControl() {
             </button>
           )}
           {(activeView === 'retail' || activeView === 'wholesale') && (
-            <button className="add-btn desktop-only-btn" onClick={() => setIsAddModalOpen(true)}>
+            <button className="add-btn desktop-only-btn" onClick={handleOpenAddProduct}>
               + Add Product
             </button>
           )}
@@ -829,7 +882,7 @@ export default function RiceControl() {
             />
             
             <div className="toolbar-filters">
-              <button className="add-btn-inline mobile-only-btn" onClick={() => setIsAddModalOpen(true)}>
+              <button className="add-btn-inline mobile-only-btn" onClick={handleOpenAddProduct}>
                 + Add Product
               </button>
               <button className="filter-btn" onClick={() => setIsFilterOpen(true)} style={{ color: filterRules.length > 0 ? '#3b82f6' : '#0f172a' }}>
@@ -850,12 +903,19 @@ export default function RiceControl() {
 
       {/* RICE CATEGORIES (ONLY WHOLESALE) */}
       {activeView === 'wholesale' && (
-        <div className="hide-scrollbar" style={{ display: 'flex', overflowX: 'auto', gap: '8px', paddingBottom: '16px', marginBottom: '8px', WebkitOverflowScrolling: 'touch', scrollSnapType: 'x mandatory' }}>
-          {RICE_CATEGORIES.map(cat => (
+        <div 
+          className="hide-scrollbar" 
+          style={{ display: 'flex', overflowX: 'auto', gap: '8px', paddingBottom: '16px', marginBottom: '8px', WebkitOverflowScrolling: 'touch', userSelect: 'none' }}
+        >
+          {categoryOrder.map(cat => (
             <button 
               key={cat} 
+              draggable={true}
+              onDragStart={(e) => handleCategoryDragStart(e, cat)}
+              onDragOver={handleDragOver}
+              onDrop={(e) => handleCategoryDrop(e, cat)}
               onClick={() => setActiveCategory(cat)} 
-              style={{ scrollSnapAlign: 'start', padding: '8px 16px', borderRadius: '20px', border: activeCategory === cat ? 'none' : '1px solid #cbd5e1', backgroundColor: activeCategory === cat ? '#b58a3d' : '#ffffff', color: activeCategory === cat ? '#fff' : '#475569', fontWeight: 'bold', cursor: 'pointer', fontSize: '13px', whiteSpace: 'nowrap', boxShadow: activeCategory === cat ? '0 2px 4px rgba(181, 138, 61, 0.3)' : 'none' }}
+              style={{ flexShrink: 0, padding: '8px 16px', borderRadius: '20px', border: activeCategory === cat ? 'none' : '1px solid #cbd5e1', backgroundColor: activeCategory === cat ? '#b58a3d' : '#ffffff', color: activeCategory === cat ? '#fff' : '#475569', fontWeight: 'bold', cursor: 'grab', fontSize: '13px', whiteSpace: 'nowrap', boxShadow: activeCategory === cat ? '0 2px 4px rgba(181, 138, 61, 0.3)' : 'none' }}
             >
               {cat}
             </button>
@@ -980,7 +1040,6 @@ export default function RiceControl() {
                           let val = edits[p.id]?.[col as keyof Product] ?? p[col as keyof Product] ?? '';
                           if (activeView === 'wholesale' && currentBatch) {
                              if (col === 'cost_price') val = edits[p.id]?.cost_price ?? currentBatch.cost_price;
-                             // 🔥 FIXED: We completely removed the stock override here so the TRUE MASTER STOCK is displayed.
                           }
 
                           if (!isEditing && !edits[p.id] && activeView === 'retail' && col === 'cost_price' && p.linked_wholesale_id) {
@@ -1121,7 +1180,7 @@ export default function RiceControl() {
               <div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: '6px' }}>
                   <label style={{ fontSize: '13px', color: '#0f172a', fontWeight: 'bold' }}>Select Product (Rice)</label>
-                  <button onClick={() => setIsAddModalOpen(true)} style={{ background: 'none', border: 'none', color: '#3b82f6', fontWeight: 'bold', fontSize: '12px', cursor: 'pointer' }}>+ Create New Product</button>
+                  <button onClick={handleOpenAddProduct} style={{ background: 'none', border: 'none', color: '#3b82f6', fontWeight: 'bold', fontSize: '12px', cursor: 'pointer' }}>+ Create New Product</button>
                 </div>
                 <select value={importForm.product_id} onChange={e => setImportForm({...importForm, product_id: e.target.value})} style={{ width: '100%', padding: '12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '15px', outline: 'none', backgroundColor: '#fff', color: '#0f172a', cursor: 'pointer' }}>
                   <option value="">-- Choose Rice Type --</option>
@@ -1473,7 +1532,7 @@ export default function RiceControl() {
             <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
               <div>
                 <label style={{ display: 'block', fontSize: '13px', color: '#0f172a', fontWeight: 'bold', marginBottom: '6px' }}>Supplier Name</label>
-                <input autoFocus placeholder="e.g. Mega Rice Corp" value={newSupplier.name} onChange={e => setNewSupplier({...newSupplier, name: e.target.value})} style={{ width: '100%', padding: '10px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', fontSize: '16px' }} />
+                <input autoFocus placeholder="" value={newSupplier.name} onChange={e => setNewSupplier({...newSupplier, name: e.target.value})} style={{ width: '100%', padding: '10px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', fontSize: '16px' }} />
               </div>
               <div>
                 <label style={{ display: 'block', fontSize: '13px', color: '#0f172a', fontWeight: 'bold', marginBottom: '6px' }}>Phone Number (Optional)</label>
@@ -1533,7 +1592,7 @@ export default function RiceControl() {
             <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
               <div>
                 <label style={{ display: 'block', fontSize: '13px', color: '#0f172a', fontWeight: 'bold', marginBottom: '6px' }}>Product Name</label>
-                <input autoFocus placeholder="e.g. ម្លិះលេខ១" value={newItem.name} onChange={e => setNewItem({...newItem, name: e.target.value})} style={{ width: '100%', padding: '10px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', fontSize: '16px' }} />
+                <input autoFocus placeholder="" value={newItem.name} onChange={e => setNewItem({...newItem, name: e.target.value})} style={{ width: '100%', padding: '10px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', fontSize: '16px' }} />
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
                 <div>
@@ -1891,7 +1950,7 @@ export default function RiceControl() {
           }
           
           .header-container { 
-            margin-left: 54px !important; 
+            margin-left: 54px !important; /* Clears mobile hamburger button safely */
             margin-right: 0 !important;
             margin-bottom: 24px !important; 
             margin-top: 0 !important;

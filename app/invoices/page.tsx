@@ -13,14 +13,11 @@ interface Invoice {
   created_at: string;
   customer_name: string;
   total_sales: number;
+  delivery_status: string;
 }
 
-type SortConfig = {
-  key: keyof Invoice;
-  direction: 'asc' | 'desc';
-} | null;
-
 type FilterTab = 'All' | 'Today' | 'This Week' | 'This Month';
+type StatusTab = 'Active' | 'Voided';
 
 export default function InvoiceGallery() {
   const [invoices, setInvoices] = useState<Invoice[]>([])
@@ -30,11 +27,10 @@ export default function InvoiceGallery() {
   
   const [selectedInvoices, setSelectedInvoices] = useState<Set<string>>(new Set())
   const [filterTab, setFilterTab] = useState<FilterTab>('All')
+  const [statusFilter, setStatusFilter] = useState<StatusTab>('Active')
   const [searchQuery, setSearchQuery] = useState<string>('')
   
-  // View & Sort State (Defaults to newest invoices first)
   const [viewMode, setViewMode] = useState<'grid' | 'table'>('grid')
-  const [sortConfig, setSortConfig] = useState<SortConfig>({ key: 'created_at', direction: 'desc' })
 
   useEffect(() => {
     setMounted(true);
@@ -51,16 +47,15 @@ export default function InvoiceGallery() {
     let query = supabase
       .from('invoice_summaries')
       .select('*')
-      .not('invoice_url', 'is', null) // Only fetch records that still have an image attached
+      .not('invoice_url', 'is', null)
 
-    // Dynamic Filter Range Calculations
     const now = new Date()
     if (filterTab === 'Today') {
       const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString()
       query = query.gte('created_at', todayStart)
     } else if (filterTab === 'This Week') {
       const currentDay = now.getDay()
-      const dayDifference = now.getDate() - currentDay + (currentDay === 0 ? -6 : 1) // Sets week start to Monday
+      const dayDifference = now.getDate() - currentDay + (currentDay === 0 ? -6 : 1) 
       const weekStart = new Date(now.getFullYear(), now.getMonth(), dayDifference)
       weekStart.setHours(0, 0, 0, 0)
       query = query.gte('created_at', weekStart.toISOString())
@@ -75,6 +70,81 @@ export default function InvoiceGallery() {
     }
     setInvoices(data || [])
     setIsLoading(false)
+  }
+
+  // --- SAFE VOID AUTOMATION ---
+  const handleVoidInvoice = async (invoiceId: string) => {
+    if (!confirm(`🚨 Are you sure you want to VOID invoice ${invoiceId}?\n\nThis will instantly:\n1. Restore bags to your stock\n2. Reverse the profit/COGS math\n3. Delete all payment records\n4. Mark this invoice as voided permanently`)) return;
+
+    setIsLoading(true);
+    try {
+      const isRetail = invoiceId.startsWith('RET-');
+
+      // 1. Fetch Line Items
+      const { data: items } = await supabase
+        .from(isRetail ? 'retail_sales' : 'sales')
+        .select('*')
+        .eq(isRetail ? 'transaction_id' : 'invoice_id', invoiceId);
+
+      // 2. Restore Stock & Batches
+      if (items && items.length > 0) {
+        for (const item of items) {
+          const qty = Number(item.qty) || 0;
+          const isSpecial = (item.custom_rice_type || item.rice_type || '').includes('បានប្រើ') || 
+                            (item.custom_rice_type || item.rice_type || '').includes('សេវាដឹក');
+          
+          if (qty !== 0 && !isSpecial && item.product_id) {
+            // A. Restore Master Stock
+            const { data: prod } = await supabase.from('products').select('stock').eq('id', item.product_id).single();
+            if (prod) {
+              await supabase.from('products').update({ stock: Number(prod.stock) + qty }).eq('id', item.product_id);
+            }
+
+            // B. Reverse FIFO Batches (Subtract from sold_qty)
+            let remainingToReverse = qty;
+            const { data: batches } = await supabase.from('price_history')
+              .select('*')
+              .eq('product_id', item.product_id)
+              .gt('sold_qty', 0)
+              .order('created_at', { ascending: false }); 
+            
+            if (batches) {
+              for (const b of batches) {
+                if (remainingToReverse <= 0) break;
+                const possibleToReverse = Math.min(b.sold_qty, remainingToReverse);
+                await supabase.from('price_history')
+                  .update({ sold_qty: b.sold_qty - possibleToReverse })
+                  .eq('id', b.id);
+                remainingToReverse -= possibleToReverse;
+              }
+            }
+          }
+        }
+      }
+
+      // 3. Delete Line Items
+      await supabase.from(isRetail ? 'retail_sales' : 'sales').delete().eq(isRetail ? 'transaction_id' : 'invoice_id', invoiceId);
+
+      // 4. Delete Payments (Removes from Cash on Hand)
+      await supabase.from('invoice_payments').delete().eq('invoice_id', invoiceId);
+
+      // 5. Update Master Invoice to Voided Status (Instead of deleting)
+      await supabase.from('invoice_summaries').update({ 
+        delivery_status: 'Voided',
+        balance_due: 0
+      }).eq('invoice_id', invoiceId);
+
+      alert(`✅ Invoice ${invoiceId} was successfully voided!`);
+      
+      setSelectedInvoices(new Set());
+      await fetchInvoices();
+
+    } catch (error: any) {
+      console.error("Void failed:", error);
+      alert(`❌ Error voiding invoice: ${error.message}`);
+    } finally {
+      setIsLoading(false);
+    }
   }
 
   // --- SELECTION & BULK ACTIONS ---
@@ -93,7 +163,7 @@ export default function InvoiceGallery() {
   }
 
   const deleteSelected = async () => {
-    if (!confirm(`Are you sure you want to delete the image files for ${selectedInvoices.size} invoice(s)? Your financial data will remain safely in the database.`)) return;
+    if (!confirm(`Are you sure you want to permanently delete the image files for ${selectedInvoices.size} invoice(s)?`)) return;
     
     setIsLoading(true);
     const idsToUpdate = Array.from(selectedInvoices);
@@ -188,18 +258,13 @@ export default function InvoiceGallery() {
     }
   }
 
-  // --- SORTING TRIGGER ---
-  const handleSort = (key: keyof Invoice) => {
-    let direction: 'asc' | 'desc' = 'asc';
-    if (sortConfig && sortConfig.key === key && sortConfig.direction === 'asc') {
-      direction = 'desc';
-    }
-    setSortConfig({ key, direction });
-  }
-
-  // --- CLIENT-SIDE SEARCH & SORT DYNAMICS ---
+  // --- CLIENT-SIDE SEARCH & FILTER DYNAMICS ---
   const processedInvoices = invoices
     .filter(inv => {
+      const isVoided = inv.delivery_status === 'Voided';
+      if (statusFilter === 'Active' && isVoided) return false;
+      if (statusFilter === 'Voided' && !isVoided) return false;
+
       if (!searchQuery) return true;
       const term = searchQuery.toLowerCase().trim();
       return (
@@ -207,23 +272,7 @@ export default function InvoiceGallery() {
         inv.customer_name?.toLowerCase().includes(term)
       );
     })
-    .sort((a, b) => {
-      if (!sortConfig) return 0;
-      const { key, direction } = sortConfig;
-      
-      let valA = a[key];
-      let valB = b[key];
-
-      if (key === 'created_at') {
-        return direction === 'asc' 
-          ? new Date(valA).getTime() - new Date(valB).getTime()
-          : new Date(valB).getTime() - new Date(valA).getTime();
-      }
-
-      if (valA < valB) return direction === 'asc' ? -1 : 1;
-      if (valA > valB) return direction === 'asc' ? 1 : -1;
-      return 0;
-    });
+    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()); // Always newest first naturally
 
   const formatDate = (dateStr: string) => {
     return new Date(dateStr).toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
@@ -241,10 +290,26 @@ export default function InvoiceGallery() {
         </div>
       </div>
 
+      {/* NEW: STATUS FILTER TABS */}
+      <div className="status-tabs-container">
+        <button 
+          onClick={() => { setStatusFilter('Active'); setSelectedInvoices(new Set()); }} 
+          className={`status-tab ${statusFilter === 'Active' ? 'active' : ''}`}
+        >
+          ✅ Valid Invoices
+        </button>
+        <button 
+          onClick={() => { setStatusFilter('Voided'); setSelectedInvoices(new Set()); }} 
+          className={`status-tab void-tab ${statusFilter === 'Voided' ? 'active' : ''}`}
+        >
+          ❌ Voided Invoices
+        </button>
+      </div>
+
       {/* FILTER TABS & SEARCH CONTAINER */}
       <div className="toolbar-container">
         
-        {/* Pre-Filter Tabs */}
+        {/* Time Filter Tabs */}
         <div className="tab-group">
           {(['All', 'Today', 'This Week', 'This Month'] as FilterTab[]).map(tab => (
             <button
@@ -266,7 +331,7 @@ export default function InvoiceGallery() {
             onChange={(e) => setSearchQuery(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === 'Enter') {
-                e.currentTarget.blur(); // Hides keyboard & forces iOS zoom-out reset
+                e.currentTarget.blur(); 
               }
             }}
             className="search-input"
@@ -279,7 +344,7 @@ export default function InvoiceGallery() {
           <button onClick={() => setViewMode('table')} className={`toggle-btn ${viewMode === 'table' ? 'active' : ''}`}>Table</button>
         </div>
 
-        {/* Global Action Modifiers (Strict high-contrast borders & text definitions) */}
+        {/* Global Action Modifiers */}
         <div className="actions-wrapper">
           <button onClick={toggleSelectAll} disabled={processedInvoices.length === 0} className="secondary-action-btn">
             {selectedInvoices.size === processedInvoices.length && processedInvoices.length > 0 ? 'Deselect All' : 'Select All'}
@@ -298,25 +363,12 @@ export default function InvoiceGallery() {
         </div>
       </div>
 
-      {/* Dynamic Sorting Status Bar for Grid Mode */}
-      {viewMode === 'grid' && processedInvoices.length > 0 && (
-        <div className="sort-status-bar">
-          <span style={{ fontSize: '13px', color: '#64748b', fontWeight: 'bold' }}>Sorted By:</span>
-          <button className="sort-toggle-pill" onClick={() => handleSort('created_at')}>
-            📅 Date {sortConfig?.key === 'created_at' ? (sortConfig.direction === 'asc' ? '▲ Oldest First' : '▼ Newest First') : '↕'}
-          </button>
-          <button className="sort-toggle-pill" onClick={() => handleSort('invoice_id')}>
-            🆔 Invoice ID {sortConfig?.key === 'invoice_id' ? (sortConfig.direction === 'asc' ? '▲ A-Z' : '▼ Z-A') : '↕'}
-          </button>
-        </div>
-      )}
-
       {/* CONTENT AREA */}
       {isLoading ? (
         <p className="status-message">Loading records...</p>
       ) : processedInvoices.length === 0 ? (
         <div className="empty-message-box">
-          No records found matching the chosen timeframe or search filters.
+          No records found matching the chosen filters.
         </div>
       ) : viewMode === 'grid' ? (
         
@@ -324,17 +376,24 @@ export default function InvoiceGallery() {
         <div className="grid-layout">
           {processedInvoices.map((inv) => {
             const isSelected = selectedInvoices.has(inv.invoice_id);
+            const isVoided = inv.delivery_status === 'Voided';
+
             return (
-              <div key={inv.id} className={`grid-card ${isSelected ? 'selected' : ''}`}>
+              <div key={inv.id} className={`grid-card ${isSelected ? 'selected' : ''} ${isVoided ? 'voided-card' : ''}`}>
                 
                 <input type="checkbox" checked={isSelected} onChange={() => toggleSelect(inv.invoice_id)} className="card-checkbox" />
 
                 <div onClick={() => toggleSelect(inv.invoice_id)} className="card-image-box">
                   <img src={inv.invoice_url} alt="Invoice Document File" className="card-img" style={{ opacity: isSelected ? 0.7 : 1 }} />
+                  {isVoided && (
+                    <div className="void-overlay">
+                      <span className="void-stamp">VOID</span>
+                    </div>
+                  )}
                 </div>
 
                 <div className="card-body">
-                  <div className="card-id-title">{inv.invoice_id}</div>
+                  <div className="card-id-title" style={{ textDecoration: isVoided ? 'line-through' : 'none' }}>{inv.invoice_id}</div>
                   <div className="card-customer-row">Customer: {inv.customer_name}</div>
                   <div className="card-amount-row">💰 {new Intl.NumberFormat('en-US').format(inv.total_sales)} ៛</div>
                 </div>
@@ -342,8 +401,9 @@ export default function InvoiceGallery() {
                 <div className="card-footer">
                   <div className="card-date-label">{formatDate(inv.created_at)}</div>
                   
-                  <div style={{ display: 'flex', gap: '8px' }}>
-                    <button onClick={() => window.location.href = `/pos?edit=${inv.invoice_id}`} className="card-edit-btn">Edit</button>
+                  <div className="card-action-buttons">
+                    {!isVoided && <button onClick={() => window.location.href = `/pos?edit=${inv.invoice_id}`} className="card-edit-btn">Edit</button>}
+                    {!isVoided && <button onClick={() => handleVoidInvoice(inv.invoice_id)} className="card-void-btn">Void</button>}
                     <button onClick={() => handleAction(inv.invoice_url, inv.invoice_id)} className="card-download-btn">
                       {isDeviceMobile ? 'Share' : 'Download'}
                     </button>
@@ -364,36 +424,31 @@ export default function InvoiceGallery() {
                 <th style={{ width: '50px', textAlign: 'center', padding: '16px' }}>
                   <input type="checkbox" checked={selectedInvoices.size === processedInvoices.length && processedInvoices.length > 0} onChange={toggleSelectAll} style={{ width: '18px', height: '18px', accentColor: '#b58a3d', cursor: 'pointer' }} />
                 </th>
-                <th onClick={() => handleSort('invoice_id')} className="sortable-header">
-                  Invoice ID {sortConfig?.key === 'invoice_id' ? (sortConfig.direction === 'asc' ? '▲' : '▼') : '↕'}
-                </th>
-                <th onClick={() => handleSort('customer_name')} className="sortable-header">
-                  Customer {sortConfig?.key === 'customer_name' ? (sortConfig.direction === 'asc' ? '▲' : '▼') : '↕'}
-                </th>
-                <th onClick={() => handleSort('total_sales')} className="sortable-header">
-                  Total Amount {sortConfig?.key === 'total_sales' ? (sortConfig.direction === 'asc' ? '▲' : '▼') : '↕'}
-                </th>
-                <th onClick={() => handleSort('created_at')} className="sortable-header">
-                  Date {sortConfig?.key === 'created_at' ? (sortConfig.direction === 'asc' ? '▲' : '▼') : '↕'}
-                </th>
-                <th style={{ padding: '16px', color: '#0f172a', textAlign: 'center', fontWeight: 'bold' }}>Actions</th>
+                <th style={{ padding: '16px', color: '#0f172a' }}>Invoice ID</th>
+                <th style={{ padding: '16px', color: '#0f172a' }}>Customer</th>
+                <th style={{ padding: '16px', color: '#0f172a' }}>Total Amount</th>
+                <th style={{ padding: '16px', color: '#0f172a' }}>Date</th>
+                <th style={{ padding: '16px', color: '#0f172a', textAlign: 'center' }}>Actions</th>
               </tr>
             </thead>
             <tbody>
               {processedInvoices.map((inv) => {
                 const isSelected = selectedInvoices.has(inv.invoice_id);
+                const isVoided = inv.delivery_status === 'Voided';
+
                 return (
-                  <tr key={inv.id} className={isSelected ? 'row-selected' : ''}>
+                  <tr key={inv.id} className={`${isSelected ? 'row-selected' : ''} ${isVoided ? 'row-voided' : ''}`}>
                     <td style={{ textAlign: 'center', padding: '16px' }}>
                       <input type="checkbox" checked={isSelected} onChange={() => toggleSelect(inv.invoice_id)} style={{ width: '18px', height: '18px', accentColor: '#b58a3d', cursor: 'pointer' }} />
                     </td>
-                    <td style={{ padding: '16px', fontWeight: 'bold', color: '#0f172a' }}>{inv.invoice_id}</td>
+                    <td style={{ padding: '16px', fontWeight: 'bold', color: '#0f172a', textDecoration: isVoided ? 'line-through' : 'none' }}>{inv.invoice_id}</td>
                     <td style={{ padding: '16px', color: '#334155', fontWeight: 'bold' }}>{inv.customer_name}</td>
                     <td style={{ padding: '16px', color: '#b58a3d', fontWeight: 'bold' }}>{new Intl.NumberFormat('en-US').format(inv.total_sales)} ៛</td>
                     <td style={{ padding: '16px', color: '#475569' }}>{formatDate(inv.created_at)}</td>
                     <td style={{ padding: '16px' }}>
                       <div style={{ display: 'flex', gap: '8px', justifyContent: 'center' }}>
-                        <button onClick={() => window.location.href = `/pos?edit=${inv.invoice_id}`} className="table-edit-btn">Edit</button>
+                        {!isVoided && <button onClick={() => window.location.href = `/pos?edit=${inv.invoice_id}`} className="table-edit-btn">Edit</button>}
+                        {!isVoided && <button onClick={() => handleVoidInvoice(inv.invoice_id)} className="table-void-btn">Void</button>}
                         <button onClick={() => handleAction(inv.invoice_url, inv.invoice_id)} className="table-download-btn">
                           {isDeviceMobile ? 'Share' : 'Download'}
                         </button>
@@ -429,7 +484,7 @@ export default function InvoiceGallery() {
           align-items: center; 
           margin-bottom: 24px; 
           margin-top: 0;
-          margin-left: 60px; /* 🔥 Clears the burger menu icon for horizontal alignment */
+          margin-left: 60px; 
           gap: 12px;
           min-height: 42px; 
           width: 100%;
@@ -451,6 +506,34 @@ export default function InvoiceGallery() {
           align-items: center;
           min-width: 0;
           white-space: nowrap !important; 
+        }
+
+        /* NEW STATUS TABS */
+        .status-tabs-container {
+          display: flex;
+          gap: 10px;
+          margin-bottom: 20px;
+        }
+        .status-tab {
+          padding: 10px 20px;
+          border-radius: 8px;
+          border: 1px solid #cbd5e1;
+          background: #ffffff;
+          color: #475569;
+          font-weight: bold;
+          font-size: 14px;
+          cursor: pointer;
+          transition: all 0.2s;
+          box-shadow: 0 2px 4px rgba(0,0,0,0.02);
+        }
+        .status-tab.active {
+          background: #10b981;
+          color: #ffffff;
+          border-color: #10b981;
+        }
+        .status-tab.void-tab.active {
+          background: #ef4444;
+          border-color: #ef4444;
         }
 
         /* TOOLBAR CONFIGURATION */
@@ -501,7 +584,7 @@ export default function InvoiceGallery() {
           padding: 10px 14px;
           border: 1px solid #cbd5e1;
           border-radius: 6px;
-          font-size: 16px; /* Enforces absolute 16px minimum to avoid mobile browser auto-zoom */
+          font-size: 16px; 
           outline: none;
           color: #0f172a;
           background-color: #ffffff;
@@ -578,33 +661,11 @@ export default function InvoiceGallery() {
           font-size: 14px;
         }
 
-        /* GRID SORT STATUS BAR */
-        .sort-status-bar {
-          display: flex;
-          gap: 8px;
-          align-items: center;
-          margin-bottom: 16px;
-          flex-wrap: wrap;
-        }
-        .sort-toggle-pill {
-          padding: 6px 12px;
-          background: #ffffff;
-          border: 1px solid #cbd5e1;
-          border-radius: 20px;
-          font-size: 12px;
-          font-weight: bold;
-          color: #475569;
-          cursor: pointer;
-        }
-        .sort-toggle-pill:hover {
-          border-color: #b58a3d;
-          color: #b58a3d;
-        }
-
         /* GRID VIEW ELEMENTS */
         .grid-layout {
           display: grid;
-          grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+          /* 🔥 FIX: Wider 340px minimum width so buttons fit perfectly */
+          grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
           gap: 20px;
         }
         .grid-card {
@@ -623,6 +684,35 @@ export default function InvoiceGallery() {
           background: #fefcf3;
           box-shadow: 0 4px 12px rgba(181, 138, 61, 0.15);
         }
+        
+        /* VOIDED CARD STYLES */
+        .voided-card {
+          border-color: #fca5a5 !important;
+          background: #fef2f2 !important;
+        }
+        .void-overlay {
+          position: absolute;
+          top: 0; left: 0; right: 0; bottom: 0;
+          background: rgba(239, 68, 68, 0.15);
+          backdrop-filter: blur(2px);
+          -webkit-backdrop-filter: blur(2px);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          z-index: 5;
+        }
+        .void-stamp {
+          color: #ef4444;
+          font-weight: 900;
+          font-size: 32px;
+          border: 4px solid #ef4444;
+          padding: 8px 16px;
+          border-radius: 8px;
+          transform: rotate(-30deg);
+          background: rgba(255,255,255,0.85);
+          box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+        }
+
         .card-checkbox {
           position: absolute;
           top: 12px;
@@ -640,6 +730,7 @@ export default function InvoiceGallery() {
           background: #f8fafc;
           border-bottom: 1px solid #e2e8f0;
           cursor: pointer;
+          position: relative;
         }
         .card-img {
           width: 100%;
@@ -667,35 +758,60 @@ export default function InvoiceGallery() {
           margin-top: 6px;
           font-weight: bold;
         }
+
+        /* 🔥 FIX: Vertically stacked footer for perfect button alignment */
         .card-footer {
-          padding: 12px 16px;
+          padding: 16px;
           display: flex;
-          justify-content: space-between;
-          align-items: center;
+          flex-direction: column;
+          align-items: stretch;
+          gap: 12px;
           background: #f8fafc;
           margin-top: auto;
         }
         .card-date-label {
-          font-size: 12px;
+          font-size: 13px;
           color: #64748b;
+          text-align: center;
+          font-weight: 500;
+        }
+        .card-action-buttons {
+          display: flex;
+          gap: 8px;
         }
         .card-edit-btn {
-          padding: 6px 12px;
+          flex: 1;
+          padding: 8px 4px;
+          text-align: center;
           background: #fef3c7;
           color: #b45309;
           border: 1px solid #fde047;
           border-radius: 6px;
-          fontSize: 12px;
+          font-size: 13px;
+          font-weight: bold;
+          cursor: pointer;
+        }
+        .card-void-btn {
+          flex: 1;
+          padding: 8px 4px;
+          text-align: center;
+          background: #fee2e2;
+          color: #dc2626;
+          border: 1px solid #fca5a5;
+          border-radius: 6px;
+          font-size: 13px;
           font-weight: bold;
           cursor: pointer;
         }
         .card-download-btn {
-          padding: 6px 12px;
+          flex: 1;
+          padding: 8px 4px;
+          text-align: center;
           background: #ffffff;
           color: #334155;
           border: 1px solid #cbd5e1;
           border-radius: 6px;
-          fontSize: 12px;
+          font-size: 13px;
           font-weight: bold;
           cursor: pointer;
         }
@@ -721,15 +837,6 @@ export default function InvoiceGallery() {
           font-weight: bold;
           color: #0f172a;
         }
-        .sortable-header {
-          cursor: pointer;
-          white-space: nowrap;
-          user-select: none;
-        }
-        .sortable-header:hover {
-          color: #b58a3d;
-          background: #f1f5f9;
-        }
         .data-table tr {
           border-bottom: 1px solid #e2e8f0;
           transition: background 0.2s;
@@ -737,10 +844,27 @@ export default function InvoiceGallery() {
         .data-table tr.row-selected {
           background: #fefcf3;
         }
+        .row-voided {
+          background: #fef2f2 !important;
+          opacity: 0.8;
+        }
+        .row-voided td {
+          color: #991b1b !important;
+        }
         .table-edit-btn {
           padding: 8px 14px;
           background: #fef3c7;
           color: #b45309;
+          border: none;
+          border-radius: 6px;
+          font-size: 13px;
+          font-weight: bold;
+          cursor: pointer;
+        }
+        .table-void-btn {
+          padding: 8px 14px;
+          background: #fee2e2;
+          color: #dc2626;
           border: none;
           border-radius: 6px;
           font-size: 13px;
@@ -779,14 +903,12 @@ export default function InvoiceGallery() {
         @media (max-width: 1023px) { 
           .main-wrapper { 
             padding: max(20px, env(safe-area-inset-top, 20px)) 16px 16px 16px !important; 
-            
-            /* 👇 MOBILE SCROLL FIX 👇 */
             height: 100dvh !important;
             overflow-y: auto !important;
             -webkit-overflow-scrolling: touch !important;
           }
           .header-container { 
-            margin-left: 54px !important; /* Clears mobile hamburger button safely */
+            margin-left: 54px !important; 
             margin-right: 0 !important;
             margin-bottom: 24px !important; 
             margin-top: 0 !important;

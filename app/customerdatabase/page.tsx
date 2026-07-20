@@ -53,6 +53,7 @@ export default function CustomerDatabasePage() {
 
   // --- FILTER & SORT STATE ---
   const [customerTypeFilter, setCustomerTypeFilter] = useState<string>('All')
+  const [ownerFilter, setOwnerFilter] = useState<string>('All')
   const [sortConfig, setSortConfig] = useState<SortConfig>(null)
 
   // --- COLUMN PREFERENCE STATE ---
@@ -240,6 +241,7 @@ export default function CustomerDatabasePage() {
     })
     .filter(c => {
       if (customerTypeFilter !== 'All' && c.type !== customerTypeFilter) return false;
+      if (ownerFilter !== 'All' && c.owner !== ownerFilter) return false;
 
       if (searchQuery) {
         const q = searchQuery.toLowerCase();
@@ -348,16 +350,43 @@ export default function CustomerDatabasePage() {
         </button>
       </div>
 
-      {/* FILTER SEGMENTS */}
+      {/* OWNER PRE-FILTERS */}
+      <div className="hide-scrollbar" style={{ display: 'flex', overflowX: 'auto', gap: '8px', paddingBottom: '12px', marginBottom: '8px' }}>
+        <button 
+          onClick={() => setOwnerFilter('All')} 
+          style={{ padding: '8px 16px', borderRadius: '20px', border: ownerFilter === 'All' ? 'none' : '1px solid #cbd5e1', backgroundColor: ownerFilter === 'All' ? '#3b82f6' : '#ffffff', color: ownerFilter === 'All' ? '#fff' : '#475569', fontWeight: 'bold', cursor: 'pointer', fontSize: '13px', whiteSpace: 'nowrap' }}
+        >
+          All Owners
+        </button>
+        {(['Pich', 'Jing', 'Both', 'Mom'] as const).map(ownerItem => {
+          // 🔥 NEW: Dynamic calculation based on the current Customer Type filter
+          const filteredByType = customerTypeFilter === 'All' ? customers : customers.filter(c => c.type === customerTypeFilter);
+          const count = filteredByType.filter(c => c.owner === ownerItem).length;
+          return (
+            <button 
+              key={ownerItem} 
+              onClick={() => setOwnerFilter(ownerItem)} 
+              style={{ padding: '8px 16px', borderRadius: '20px', border: ownerFilter === ownerItem ? 'none' : '1px solid #cbd5e1', backgroundColor: ownerFilter === ownerItem ? '#3b82f6' : '#ffffff', color: ownerFilter === ownerItem ? '#fff' : '#475569', fontWeight: 'bold', cursor: 'pointer', fontSize: '13px', whiteSpace: 'nowrap' }}
+            >
+              👤 {ownerItem} ({count})
+            </button>
+          )
+        })}
+      </div>
+
+      {/* CUSTOMER TYPE FILTERS */}
       <div className="hide-scrollbar" style={{ display: 'flex', overflowX: 'auto', gap: '8px', paddingBottom: '16px', marginBottom: '8px' }}>
         <button 
           onClick={() => setCustomerTypeFilter('All')} 
           style={{ padding: '8px 16px', borderRadius: '20px', border: customerTypeFilter === 'All' ? 'none' : '1px solid #cbd5e1', backgroundColor: customerTypeFilter === 'All' ? '#b58a3d' : '#ffffff', color: customerTypeFilter === 'All' ? '#fff' : '#475569', fontWeight: 'bold', cursor: 'pointer', fontSize: '13px', whiteSpace: 'nowrap' }}
         >
-          All Types ({customers.length})
+          {/* 🔥 NEW: Dynamic base calculation based on the current Owner filter */}
+          All Types ({ownerFilter === 'All' ? customers.length : customers.filter(c => c.owner === ownerFilter).length})
         </button>
         {(['ហូប', 'លក់បាយ', 'លក់ត', 'ធ្វើនំ', 'អំណោយ'] as const).map(typeItem => {
-          const count = customers.filter(c => c.type === typeItem).length;
+          // 🔥 NEW: Dynamic calculation based on the current Owner filter
+          const filteredByOwner = ownerFilter === 'All' ? customers : customers.filter(c => c.owner === ownerFilter);
+          const count = filteredByOwner.filter(c => c.type === typeItem).length;
           return (
             <button 
               key={typeItem} 
@@ -376,7 +405,7 @@ export default function CustomerDatabasePage() {
           <thead>
             <tr style={{ background: '#f8fafc', borderBottom: '2px solid #e2e8f0' }}>
               
-              {/* 🔥 NEW: Dedicated Checkbox Header Column */}
+              {/* Checkbox Header Column */}
               <th style={{ width: '46px', minWidth: '46px', maxWidth: '46px', padding: '16px 8px', textAlign: 'center', borderRight: '1px solid #f1f5f9' }}>
                  <input 
                    type="checkbox" 
@@ -387,6 +416,11 @@ export default function CustomerDatabasePage() {
                    }}
                    style={{ cursor: 'pointer', accentColor: '#b58a3d', width: '16px', height: '16px' }}
                  />
+              </th>
+
+              {/* 🔥 FIXED NUMBER COLUMN HEADER */}
+              <th style={{ width: '50px', minWidth: '50px', maxWidth: '50px', padding: '16px 8px', textAlign: 'center', borderRight: '1px solid #f1f5f9', color: '#475569', fontSize: '13px', fontWeight: 'bold' }}>
+                #
               </th>
 
               {columnOrder.map(key => (
@@ -423,12 +457,12 @@ export default function CustomerDatabasePage() {
           </thead>
           <tbody>
             {processedCustomers.length === 0 ? (
-              <tr><td colSpan={columnOrder.length + 1} style={{ padding: '40px', textAlign: 'center', color: '#94a3b8' }}>No customers found.</td></tr>
+              <tr><td colSpan={columnOrder.length + 2} style={{ padding: '40px', textAlign: 'center', color: '#94a3b8' }}>No customers found.</td></tr>
             ) : (
-              processedCustomers.map(c => (
+              processedCustomers.map((c, index) => (
                 <tr key={c.id} onMouseEnter={() => setHoveredId(c.id)} onMouseLeave={() => setHoveredId(null)} style={{ borderBottom: '1px solid #f1f5f9', background: edits[c.id] ? '#fefcf3' : 'transparent', transition: 'background 0.2s' }}>
                   
-                  {/* 🔥 NEW: Dedicated Checkbox Row Column */}
+                  {/* Checkbox Row Column */}
                   <td style={{ width: '46px', padding: '8px', textAlign: 'center', borderRight: '1px solid #f1f5f9', background: edits[c.id] ? '#fefcf3' : 'transparent' }}>
                     <input 
                       type="checkbox" 
@@ -440,6 +474,11 @@ export default function CustomerDatabasePage() {
                       }} 
                       style={{ cursor: 'pointer', width: '16px', height: '16px', margin: 0, accentColor: '#b58a3d' }} 
                     />
+                  </td>
+
+                  {/* 🔥 FIXED NUMBER COLUMN ROW */}
+                  <td style={{ width: '50px', padding: '8px', textAlign: 'center', borderRight: '1px solid #f1f5f9', color: '#64748b', fontSize: '13px', fontWeight: 'bold', background: edits[c.id] ? '#fefcf3' : 'transparent' }}>
+                    {index + 1}
                   </td>
 
                   {columnOrder.map(col => {
@@ -518,21 +557,6 @@ export default function CustomerDatabasePage() {
                                 formatDisplayValue(col as string, val)
                               )}
                             </span>
-
-                            {/* 🔥 NEW: Inline Single Delete Button visible on Hover */}
-                            {isNameCol && hoveredId === c.id && (
-                              <button
-                                onClick={(e) => { e.stopPropagation(); setEditingCell(null); handleDeleteSingle(c.id, c.name); }}
-                                style={{ 
-                                  background: '#fee2e2', border: 'none', borderRadius: '4px', 
-                                  cursor: 'pointer', padding: '4px 8px', fontSize: '11px', color: '#ef4444', 
-                                  fontWeight: 'bold', marginLeft: '8px', zIndex: 30
-                                }}
-                                title="Delete Customer"
-                              >
-                                🗑️ Delete
-                              </button>
-                            )}
                           </div>
                         )}
 

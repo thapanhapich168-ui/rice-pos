@@ -24,6 +24,57 @@ const formatHeader = (key: string) => {
   return key.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
 }
 
+// ==========================================
+// ROBUST LIVE COMMA FORMATTER 
+// ==========================================
+function CurrencyInput({ value, onChange, placeholder, style, autoFocus, onEnter }: any) {
+  const [inputValue, setInputValue] = useState('');
+
+  useEffect(() => {
+    if (value === '' || value === undefined || value === null) {
+      setInputValue('');
+    } else {
+      const parsed = parseFloat(inputValue.replace(/,/g, ''));
+      if (parsed !== value) {
+        setInputValue(new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 }).format(value));
+      }
+    }
+  }, [value]);
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    let raw = e.target.value.replace(/[^0-9.]/g, '');
+    const parts = raw.split('.');
+    if (parts.length > 2) raw = parts[0] + '.' + parts.slice(1).join('');
+
+    let formatted = parts[0] ? new Intl.NumberFormat('en-US').format(parseInt(parts[0], 10)) : '';
+    if (parts.length > 1) formatted += '.' + parts[1].substring(0, 2);
+    if (raw === '') formatted = '';
+
+    setInputValue(formatted);
+    const num = parseFloat(raw);
+    onChange(isNaN(num) ? '' : num);
+  };
+
+  return (
+    <input 
+      type="text"
+      inputMode="decimal"
+      placeholder={placeholder}
+      value={inputValue}
+      onChange={handleChange}
+      autoFocus={autoFocus}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') {
+          e.currentTarget.blur();
+          if (onEnter) onEnter();
+        }
+      }}
+      style={{ ...style, fontWeight: 'bold' }}
+      className="cell-input no-spinners"
+    />
+  )
+}
+
 // --- UNIFIED TRANSACTION TYPE ---
 interface UnifiedTransaction {
   [key: string]: any; 
@@ -72,6 +123,10 @@ export default function BizDatabase() {
   const [searchQuery, setSearchQuery] = useState('')
   const [timeFilter, setTimeFilter] = useState<TimeFilter>('Today')
   const [isLoading, setIsLoading] = useState(true)
+
+  // --- EDITING STATE ---
+  const [editingCell, setEditingCell] = useState<{id: string, col: string} | null>(null)
+  const [edits, setEdits] = useState<Record<string, Partial<UnifiedTransaction>>>({})
   
   // --- PREFERENCES ---
   const [columnWidths, setColumnWidths] = useState<Record<string, number>>(DEFAULT_WIDTHS)
@@ -147,6 +202,7 @@ export default function BizDatabase() {
       summaryData.forEach(s => {
         unified.push({
           id: `sum_${s.id}`,
+          raw_db_id: s.id, // Keep exact DB reference for saving
           source: 'Wholesale Invoice Summary',
           created_at: s.created_at,
           invoice_id: s.invoice_id,
@@ -168,6 +224,7 @@ export default function BizDatabase() {
         
         unified.push({
           id: `daily_${d.id}`,
+          raw_db_id: d.id, // Keep exact DB reference for saving
           source: 'Wholesale Day Invoice Item',
           created_at: d.created_at,
           invoice_id: d.invoice_id,
@@ -192,6 +249,7 @@ export default function BizDatabase() {
 
         unified.push({
           id: `ret_${r.id}`,
+          raw_db_id: r.id, // Keep exact DB reference for saving
           source: 'Retails only',
           created_at: r.created_at,
           transaction_id: r.transaction_id,
@@ -208,13 +266,13 @@ export default function BizDatabase() {
 
     if (expensesData && expensesData.length > 0) {
       expensesData.forEach(e => {
-        // 🚀 FIXED: Robust reading of Dual Currency schema to prevent crash
         const amtRiel = Number(e.amount_riel || 0);
         const amtUsd = Number(e.amount_usd || 0);
         const totalRielValue = amtRiel !== 0 ? Math.abs(amtRiel) : Math.abs(amtUsd) * EXCHANGE_RATE;
 
         unified.push({
           id: `exp_${e.id}`,
+          raw_db_id: e.id, // Keep exact DB reference for saving
           source: 'Expense log',
           created_at: e.created_at,
           description: e.remarks || e.description || `Expense #${e.id}`,
@@ -231,6 +289,73 @@ export default function BizDatabase() {
     
     setTransactions(unified)
     setIsLoading(false)
+  }
+
+  // --- SAVE EDIT LOGIC ---
+  const handleSaveRecord = async (id: string) => {
+    if (!edits[id]) {
+      setEditingCell(null);
+      return;
+    }
+
+    const payload = { ...edits[id] } as any;
+    const baseTx = transactions.find(t => t.id === id);
+    if (!baseTx) return;
+
+    let targetTable = '';
+    const dbPayload: any = {};
+
+    // 1. Identify Target Table & Map Fields Back to DB schema
+    if (baseTx.source === 'Wholesale Invoice Summary') {
+      targetTable = 'invoice_summaries';
+      if (payload.customer_name !== undefined) dbPayload.customer_name = payload.customer_name;
+      if (payload.owner !== undefined) dbPayload.owner = payload.owner;
+      if (payload.rice_types !== undefined) dbPayload.rice_types = payload.rice_types;
+      if (payload.total_sales !== undefined) dbPayload.total_sales = payload.total_sales;
+      if (payload.total_cogs !== undefined) dbPayload.total_cogs = payload.total_cogs;
+      if (payload.total_profit !== undefined) dbPayload.total_profit = payload.total_profit;
+    } 
+    else if (baseTx.source === 'Wholesale Day Invoice Item') {
+      targetTable = 'sales';
+      if (payload.customer_name !== undefined) dbPayload.customer_name = payload.customer_name;
+      if (payload.owner !== undefined) dbPayload.owner = payload.owner;
+      if (payload.rice_type !== undefined) dbPayload.custom_rice_type = payload.rice_type; // Map back to custom_rice_type
+      if (payload.qty !== undefined) dbPayload.qty = payload.qty;
+      if (payload.price_per_bag !== undefined) dbPayload.price_per_bag = payload.price_per_bag;
+      if (payload.cogs_price !== undefined) dbPayload.cogs_price = payload.cogs_price;
+    }
+    else if (baseTx.source === 'Retails only') {
+      targetTable = 'retail_sales';
+      if (payload.rice_type !== undefined) dbPayload.custom_rice_type = payload.rice_type; // Map back
+      if (payload.qty !== undefined) dbPayload.qty = payload.qty;
+      if (payload.price_per_bag !== undefined) dbPayload.price_per_bag = payload.price_per_bag;
+      if (payload.cogs_price !== undefined) dbPayload.cogs_price = payload.cogs_price;
+    }
+    else if (baseTx.source === 'Expense log') {
+      targetTable = 'expenses';
+      if (payload.description !== undefined) dbPayload.remarks = payload.description; // Map back
+      if (payload.category !== undefined) dbPayload.description = payload.category; // Map back
+      if (payload.owner !== undefined) dbPayload.spender = payload.owner; // Map back
+      if (payload.status !== undefined) dbPayload.payment_method = payload.status; // Map back
+      if (payload.amount !== undefined) {
+        // Safe assumption: If they edit amount on the riel side, we force update amount_riel
+        dbPayload.amount_riel = payload.amount;
+        dbPayload.amount_usd = 0; // Wipe USD to prevent double-counting if they switch
+      }
+    }
+
+    if (Object.keys(dbPayload).length > 0) {
+      const { error } = await supabase.from(targetTable).update(dbPayload).eq('id', baseTx.raw_db_id);
+      if (error) {
+        alert(`Error saving to database: ${error.message}`);
+        return;
+      }
+    }
+
+    // Safely clear the edit state and trigger a hard refresh to re-calculate everything perfectly
+    setEdits(prev => { const n = { ...prev }; delete n[id]; return n });
+    setEditingCell(null);
+    fetchData(); 
   }
 
   // --- TIME FILTER LOGIC ---
@@ -423,16 +548,16 @@ export default function BizDatabase() {
         
         {/* TOP ROW: TABS */}
         <div className="toolbar-tabs" style={{ width: '100%', borderBottom: '1px solid #e2e8f0', paddingBottom: '12px', marginBottom: '4px' }}>
-          <button className={activeTab === 'Wholesale Invoice Summary' ? 'tab active' : 'tab'} onClick={() => {setActiveTab('Wholesale Invoice Summary'); setSortConfig(null)}}>
+          <button className={activeTab === 'Wholesale Invoice Summary' ? 'tab active' : 'tab'} onClick={() => {setActiveTab('Wholesale Invoice Summary'); setSortConfig(null); setEditingCell(null)}}>
             🌾 Wholesale Invoice Summary
           </button>
-          <button className={activeTab === 'Wholesale Day Invoice Item' ? 'tab active' : 'tab'} onClick={() => {setActiveTab('Wholesale Day Invoice Item'); setSortConfig(null)}}>
+          <button className={activeTab === 'Wholesale Day Invoice Item' ? 'tab active' : 'tab'} onClick={() => {setActiveTab('Wholesale Day Invoice Item'); setSortConfig(null); setEditingCell(null)}}>
             🌾 Wholesale Day Invoice Item
           </button>
-          <button className={activeTab === 'Retails only' ? 'tab active' : 'tab'} onClick={() => {setActiveTab('Retails only'); setSortConfig(null)}}>
+          <button className={activeTab === 'Retails only' ? 'tab active' : 'tab'} onClick={() => {setActiveTab('Retails only'); setSortConfig(null); setEditingCell(null)}}>
             🛍️ Retails only
           </button>
-          <button className={activeTab === 'Expense log' ? 'tab active' : 'tab'} onClick={() => {setActiveTab('Expense log'); setSortConfig(null)}}>
+          <button className={activeTab === 'Expense log' ? 'tab active' : 'tab'} onClick={() => {setActiveTab('Expense log'); setSortConfig(null); setEditingCell(null)}}>
             📉 Expense log
           </button>
         </div>
@@ -515,47 +640,94 @@ export default function BizDatabase() {
               </tr>
             ) : (
               processedTransactions.map(t => (
-                <tr key={t.id} style={{ borderBottom: '1px solid #f1f5f9', transition: 'background 0.2s' }} onMouseEnter={e => e.currentTarget.style.backgroundColor = '#f8fafc'} onMouseLeave={e => e.currentTarget.style.backgroundColor = 'transparent'}>
-                  {activeColumns.map(col => (
-                    <td 
-                      key={col} 
-                      style={{ 
-                        padding: '14px 12px', 
-                        borderRight: '1px solid #f1f5f9', 
-                        overflow: 'hidden', 
-                        whiteSpace: 'nowrap', 
-                        textOverflow: 'ellipsis', 
-                        fontSize: '14px', 
-                        color: '#334155' 
-                      }}
-                    >
-                      {/* TEXT FIELDS */}
-                      {['invoice_id', 'transaction_id', 'customer_name', 'rice_types', 'rice_type', 'description'].includes(col) && (
-                        <span style={{ fontWeight: ['invoice_id', 'transaction_id'].includes(col) ? 'bold' : 'normal', color: ['invoice_id', 'transaction_id'].includes(col) ? '#1e293b' : 'inherit' }}>
-                          {t[col] || '-'}
-                        </span>
-                      )}
-                      
-                      {/* CAPS & BADGES */}
-                      {col === 'owner' && <span style={{ textTransform: 'capitalize', fontWeight: 'bold', color: '#64748b' }}>{t.owner || '-'}</span>}
-                      {col === 'category' && <span style={{ textTransform: 'capitalize', color: '#475569' }}>{t.category || '-'}</span>}
-                      {col === 'status' && <span style={{ color: '#64748b', fontStyle: 'italic' }}>{t.status || '-'}</span>}
-                      
-                      {/* NUMBERS & DATES */}
-                      {col === 'created_at' && formatDate(t.created_at)}
-                      {col === 'qty' && formatNumber(t[col] || 0)}
+                <tr key={t.id} style={{ borderBottom: '1px solid #f1f5f9', transition: 'background 0.2s', background: edits[t.id] ? '#fefcf3' : 'transparent' }} onMouseEnter={e => { if(!edits[t.id]) e.currentTarget.style.backgroundColor = '#f8fafc' }} onMouseLeave={e => { if(!edits[t.id]) e.currentTarget.style.backgroundColor = 'transparent' }}>
+                  {activeColumns.map(col => {
+                    
+                    // Core Data Resolvers
+                    const isEditing = editingCell?.id === t.id && editingCell?.col === col;
+                    const val = edits[t.id]?.[col] ?? t[col] ?? '';
+                    
+                    // Un-editable columns safety check
+                    const isUneditable = ['created_at', 'invoice_id', 'transaction_id'].includes(col);
 
-                      {/* CURRENCY FIELDS */}
-                      {['price_per_bag', 'cogs_price', 'total_sales', 'total_cogs', 'total_profit', 'amount'].includes(col) && (
-                        <span style={{ 
-                          fontWeight: 'bold', 
-                          color: (col === 'total_profit' && t[col] < 0) || col === 'total_cogs' || col === 'cogs_price' || col === 'amount' ? '#ef4444' : '#10b981' 
-                        }}>
-                          {formatRiel(t[col] || 0)}
-                        </span>
-                      )}
-                    </td>
-                  ))}
+                    return (
+                      <td 
+                        key={col} 
+                        className={isEditing ? 'cell-editing' : ''}
+                        onClick={() => { if (!isUneditable) setEditingCell({ id: t.id, col: col }) }}
+                        style={{ 
+                          padding: 0, 
+                          borderRight: '1px solid #f1f5f9', 
+                          overflow: 'hidden', 
+                          whiteSpace: 'nowrap', 
+                          textOverflow: 'ellipsis', 
+                          fontSize: '14px', 
+                          color: '#334155',
+                          position: 'relative'
+                        }}
+                      >
+                        {isEditing ? (
+                          // 🔥 RENDER INPUT FIELD WHEN EDITING
+                          ['price_per_bag', 'cogs_price', 'total_sales', 'total_cogs', 'total_profit', 'amount'].includes(col) ? (
+                            <CurrencyInput 
+                              autoFocus 
+                              value={val} 
+                              onChange={(v: any) => setEdits(prev => ({ ...prev, [t.id]: { ...(prev[t.id] || {}), [col]: v } }))} 
+                              onEnter={() => handleSaveRecord(t.id)}
+                            />
+                          ) : (
+                            <input 
+                              autoFocus 
+                              type={col === 'qty' ? 'number' : 'text'} 
+                              className="cell-input no-spinners" 
+                              value={val} 
+                              onChange={(e) => {
+                                const newVal = e.target.type === 'number' ? (e.target.value === '' ? '' : Number(e.target.value)) : e.target.value;
+                                setEdits(prev => ({ ...prev, [t.id]: { ...(prev[t.id] || {}), [col]: newVal } }))
+                              }} 
+                              onBlur={() => handleSaveRecord(t.id)} 
+                              onKeyDown={(e) => { 
+                                if (e.key === 'Enter') { e.currentTarget.blur(); handleSaveRecord(t.id); } 
+                                if (e.key === 'Escape') { 
+                                  setEdits(prev => { const n = { ...prev }; delete n[t.id]; return n }); 
+                                  setEditingCell(null); 
+                                } 
+                              }} 
+                            />
+                          )
+                        ) : (
+                          // 🔥 NORMAL DISPLAY (Not Editing)
+                          <div className="cell-display" style={{ cursor: isUneditable ? 'default' : 'text' }}>
+                            {/* TEXT FIELDS */}
+                            {['invoice_id', 'transaction_id', 'customer_name', 'rice_types', 'rice_type', 'description'].includes(col) && (
+                              <span style={{ fontWeight: ['invoice_id', 'transaction_id'].includes(col) ? 'bold' : 'normal', color: ['invoice_id', 'transaction_id'].includes(col) ? '#1e293b' : 'inherit' }}>
+                                {val || '-'}
+                              </span>
+                            )}
+                            
+                            {/* CAPS & BADGES */}
+                            {col === 'owner' && <span style={{ textTransform: 'capitalize', fontWeight: 'bold', color: '#64748b' }}>{val || '-'}</span>}
+                            {col === 'category' && <span style={{ textTransform: 'capitalize', color: '#475569' }}>{val || '-'}</span>}
+                            {col === 'status' && <span style={{ color: '#64748b', fontStyle: 'italic' }}>{val || '-'}</span>}
+                            
+                            {/* NUMBERS & DATES */}
+                            {col === 'created_at' && formatDate(t.created_at)}
+                            {col === 'qty' && formatNumber(val || 0)}
+
+                            {/* CURRENCY FIELDS */}
+                            {['price_per_bag', 'cogs_price', 'total_sales', 'total_cogs', 'total_profit', 'amount'].includes(col) && (
+                              <span style={{ 
+                                fontWeight: 'bold', 
+                                color: (col === 'total_profit' && val < 0) || col === 'total_cogs' || col === 'cogs_price' || col === 'amount' ? '#ef4444' : '#10b981' 
+                              }}>
+                                {formatRiel(val || 0)}
+                              </span>
+                            )}
+                          </div>
+                        )}
+                      </td>
+                    )
+                  })}
                 </tr>
               ))
             )}
@@ -695,6 +867,44 @@ export default function BizDatabase() {
           -webkit-overflow-scrolling: touch;
           box-shadow: 0 4px 6px rgba(0,0,0,0.02);
         }
+
+        /* 🔥 NEW INTERACTIVE CELL STYLES */
+        .cell-display {
+          padding: 14px 12px;
+          width: 100%;
+          height: 100%;
+          box-sizing: border-box;
+          display: flex;
+          align-items: center;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+        .cell-input {
+          width: 100%;
+          height: 100%;
+          padding: 14px 12px;
+          font-size: 14px;
+          border: none;
+          outline: 2px solid #b58a3d;
+          box-shadow: 0 0 5px rgba(181, 138, 61, 0.3);
+          background: #fff;
+          position: absolute;
+          top: 0;
+          left: 0;
+          z-index: 20;
+          box-sizing: border-box;
+          color: #0f172a;
+        }
+        .cell-editing {
+          z-index: 20;
+          position: relative;
+        }
+        input[type="number"].no-spinners::-webkit-inner-spin-button,
+        input[type="number"].no-spinners::-webkit-outer-spin-button {
+          -webkit-appearance: none; margin: 0;
+        }
+        input[type="number"].no-spinners { -moz-appearance: textfield; }
         
         /* 📱 MOBILE OVERRIDES */
         @media (max-width: 1023px) {

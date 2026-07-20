@@ -45,44 +45,57 @@ export default function MasterTestEngine() {
     }
   }
 
-  // --- CLEANUP ENGINE (Mirrors your precise SQL script) ---
+  // --- CLEANUP ENGINE ---
   const cleanupTestData = async (stepName: string) => {
     logInfo(stepName, 'Executing multi-stage DEV-TEST cascade wipe...');
     
     try {
+      // Wrapper to explicitly extract and throw Supabase errors.
+      // This prevents Foreign Key constraints from silently aborting the wipe.
+      const runDelete = async (query: any) => {
+        const { error } = await query;
+        if (error) throw new Error(error.message);
+      };
+
       // 1. DELETE CHILD TRANSACTIONS FIRST
-      await supabase.from('retail_sales').delete().ilike('transaction_id', '%DEV-TEST%');
-      await supabase.from('retail_sales').delete().ilike('rice_type', '%DEV-TEST%');
-      await supabase.from('sales').delete().ilike('invoice_id', '%DEV-TEST%');
-      await supabase.from('sales').delete().ilike('rice_type', '%DEV-TEST%');
-      await supabase.from('invoice_payments').delete().ilike('invoice_id', '%DEV-TEST%');
-      await supabase.from('cogs_settlements').delete().ilike('remarks', '%DEV-TEST%');
-      await supabase.from('expenses').delete().ilike('remarks', '%DEV-TEST%');
-      await supabase.from('staff_debt_history').delete().ilike('payment_method', '%DEV-TEST%');
+      await runDelete(supabase.from('retail_sales').delete().or('transaction_id.ilike.%DEV-TEST%,rice_type.ilike.%DEV-TEST%'));
+      await runDelete(supabase.from('sales').delete().or('invoice_id.ilike.%DEV-TEST%,rice_type.ilike.%DEV-TEST%'));
+      
+      await runDelete(supabase.from('invoice_payments').delete().ilike('invoice_id', '%DEV-TEST%'));
+      await runDelete(supabase.from('cogs_settlements').delete().ilike('remarks', '%DEV-TEST%'));
+      await runDelete(supabase.from('expenses').delete().ilike('remarks', '%DEV-TEST%'));
+
+      // Target staff_debt_history by the DEV-TEST Staff ID instead of payment method
+      const { data: stf } = await supabase.from('staff').select('id').ilike('name', '%DEV-TEST%');
+      if (stf && stf.length > 0) {
+        await runDelete(supabase.from('staff_debt_history').delete().in('staff_id', stf.map(s => s.id)));
+      }
 
       // 2. DELETE INTERMEDIATE DATA
-      await supabase.from('invoice_summaries').delete().ilike('invoice_id', '%DEV-TEST%');
-      await supabase.from('accounts_payable').delete().ilike('supplier_name', '%DEV-TEST%');
+      await runDelete(supabase.from('invoice_summaries').delete().ilike('invoice_id', '%DEV-TEST%'));
+      await runDelete(supabase.from('accounts_payable').delete().ilike('supplier_name', '%DEV-TEST%'));
+      await runDelete(supabase.from('imports').delete().ilike('status', '%DEV-TEST%')); 
       
       const { data: prods } = await supabase.from('products').select('id').ilike('name', '%DEV-TEST%');
       if (prods && prods.length > 0) {
         const pIds = prods.map(p => p.id);
-        await supabase.from('imports').delete().in('product_id', pIds);
-        await supabase.from('price_history').delete().in('product_id', pIds);
-        await supabase.from('inventory_batches').delete().in('product_id', pIds);
+        await runDelete(supabase.from('imports').delete().in('product_id', pIds));
+        await runDelete(supabase.from('price_history').delete().in('product_id', pIds));
+        await runDelete(supabase.from('inventory_batches').delete().in('product_id', pIds));
       }
+      
       const { data: sups } = await supabase.from('suppliers').select('id').ilike('name', '%DEV-TEST%');
       if (sups && sups.length > 0) {
-        await supabase.from('imports').delete().in('supplier_id', sups.map(s => s.id));
+        await runDelete(supabase.from('imports').delete().in('supplier_id', sups.map(s => s.id)));
       }
 
       // 3. DELETE INVENTORY & PRODUCT DATA
-      await supabase.from('products').delete().ilike('name', '%DEV-TEST%');
+      await runDelete(supabase.from('products').delete().ilike('name', '%DEV-TEST%'));
 
       // 4. DELETE PARENT DATA
-      await supabase.from('customers').delete().ilike('name', '%DEV-TEST%');
-      await supabase.from('suppliers').delete().ilike('name', '%DEV-TEST%');
-      await supabase.from('staff').delete().ilike('name', '%DEV-TEST%');
+      await runDelete(supabase.from('customers').delete().ilike('name', '%DEV-TEST%'));
+      await runDelete(supabase.from('suppliers').delete().ilike('name', '%DEV-TEST%'));
+      await runDelete(supabase.from('staff').delete().ilike('name', '%DEV-TEST%'));
 
       logInfo(stepName, 'Database is strictly clean.');
       setStatus(stepName, 'PASS');
