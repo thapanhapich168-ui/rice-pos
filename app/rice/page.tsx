@@ -59,8 +59,13 @@ type ColumnKey = keyof Product | 'expand' | 'linked_wholesale' | 'actions';
 const DEFAULT_WIDTHS: Record<string, number> = {
   expand: 40, id: 60, name: 240, price: 120, cost_price: 120, stock: 100, min_stock_level: 100, weight: 90, linked_wholesale: 220, mtd_kg_used: 120, mtd_bags_used: 120, actions: 160
 }
-
 const DEFAULT_ORDER: ColumnKey[] = ['expand', 'id', 'name', 'price', 'cost_price', 'stock', 'min_stock_level', 'weight', 'linked_wholesale', 'mtd_kg_used', 'mtd_bags_used', 'actions']
+
+const DEFAULT_PENDING_WIDTHS: Record<string, number> = { date: 120, supplier: 180, product: 200, total_cost: 140, paid_so_far: 140, remaining_debt: 150, actions: 200 };
+const DEFAULT_PENDING_ORDER: string[] = ['date', 'supplier', 'product', 'total_cost', 'paid_so_far', 'remaining_debt', 'actions'];
+
+const DEFAULT_SUPPLIER_WIDTHS: Record<string, number> = { select: 50, name: 240, phone: 160, location: 200, total_owed: 180 };
+const DEFAULT_SUPPLIER_ORDER: string[] = ['select', 'name', 'phone', 'location', 'total_owed'];
 
 // ==========================================
 // ROBUST LIVE COMMA FORMATTER 
@@ -135,6 +140,13 @@ export default function RiceControl() {
   const [isProcessing, setIsProcessing] = useState(false) 
   const isImportingRef = useRef(false);
 
+  // --- NOTIFICATION SYSTEM ---
+  const [toast, setToast] = useState<{show: boolean, type: 'success' | 'error' | 'info', title: string, msg: string} | null>(null);
+  const showToast = (type: 'success' | 'error' | 'info', title: string, msg: string) => {
+    setToast({ show: true, type, title, msg });
+    setTimeout(() => setToast(null), 4500);
+  };
+
   // --- CELL EDITING STATE ---
   const [editingCell, setEditingCell] = useState<{id: number, col: string} | null>(null)
   const [activeDropdownId, setActiveDropdownId] = useState<number | null>(null)
@@ -165,12 +177,27 @@ export default function RiceControl() {
   const [payPendingModal, setPayPendingModal] = useState<{isOpen: boolean, record: any, totalDue: number}>({ isOpen: false, record: null, totalDue: 0 })
   const [pendingPaymentRows, setPendingPaymentRows] = useState<PaymentRow[]>([{ id: Date.now(), method: 'Cash ៛', amount: '' }]);
 
+  // --- MAIN PRODUCTS TABLE STATE ---
   const [columnWidths, setColumnWidths] = useState<Record<string, number>>(DEFAULT_WIDTHS)
   const [columnOrder, setColumnOrder] = useState<ColumnKey[]>(DEFAULT_ORDER)
   const widthsRef = useRef(columnWidths)
   widthsRef.current = columnWidths
-
   const [sortConfig, setSortConfig] = useState<SortConfig>(null)
+
+  // --- PENDING IMPORTS TABLE STATE ---
+  const [pendingColWidths, setPendingColWidths] = useState<Record<string, number>>(DEFAULT_PENDING_WIDTHS)
+  const [pendingColOrder, setPendingColOrder] = useState<string[]>(DEFAULT_PENDING_ORDER)
+  const pendingWidthsRef = useRef(pendingColWidths)
+  pendingWidthsRef.current = pendingColWidths
+  const [pendingSort, setPendingSort] = useState<{key: string, direction: 'asc'|'desc'} | null>(null)
+
+  // --- SUPPLIERS TABLE STATE ---
+  const [supplierColWidths, setSupplierColWidths] = useState<Record<string, number>>(DEFAULT_SUPPLIER_WIDTHS)
+  const [supplierColOrder, setSupplierColOrder] = useState<string[]>(DEFAULT_SUPPLIER_ORDER)
+  const supplierWidthsRef = useRef(supplierColWidths)
+  supplierWidthsRef.current = supplierColWidths
+  const [supplierSort, setSupplierSort] = useState<{key: string, direction: 'asc'|'desc'} | null>(null)
+
   const [isFilterOpen, setIsFilterOpen] = useState(false)
   const [filterRules, setFilterRules] = useState<FilterRule[]>([])
 
@@ -209,7 +236,6 @@ export default function RiceControl() {
     })
   }
 
-  // --- DYNAMIC DEFAULT VALUES ADD PRODUCT ---
   const handleOpenAddProduct = () => {
     setNewItem({
       name: '',
@@ -222,7 +248,6 @@ export default function RiceControl() {
     setIsAddModalOpen(true);
   };
 
-  // --- LIFECYCLE & REALTIME SYNC ---
   useEffect(() => { 
     fetchProducts()
     fetchSettings()
@@ -249,11 +274,10 @@ export default function RiceControl() {
     }
   }, [])
 
-  // --- UNBREAKABLE RPC MANUAL PULL ---
   const handleManualPull = async (retailId: number, wholesaleId: number) => {
     const wholesaleProduct = products.find(p => p.id === wholesaleId);
     if (!wholesaleProduct || Number(wholesaleProduct.stock) < 1) {
-      alert("❌ Cannot pull: Wholesale bag is out of stock!");
+      showToast('error', 'Action Blocked', 'Cannot pull: Wholesale bag is out of stock!');
       return;
     }
 
@@ -266,34 +290,51 @@ export default function RiceControl() {
       });
 
       if (error) throw new Error(error.message);
+      showToast('success', 'Bags Pulled', 'Wholesale stock converted to retail successfully.');
 
     } catch (err: any) {
-      alert(`❌ ERROR: ${err.message}`);
+      showToast('error', 'Error', err.message);
     } finally {
       setIsProcessing(false);
     }
   }
 
-  // --- DATABASE OPERATIONS ---
   async function fetchSettings() {
-    const { data } = await supabase.from('app_settings').select('*').in('setting_key', ['column_widths', 'column_order', 'category_order'])
+    const { data } = await supabase.from('app_settings').select('*').in('setting_key', [
+      'column_widths', 'column_order', 'category_order', 
+      'pending_col_widths', 'pending_col_order',
+      'supplier_col_widths', 'supplier_col_order'
+    ])
     if (data) {
       const widths = data.find((d: any) => d.setting_key === 'column_widths')
       const order = data.find((d: any) => d.setting_key === 'column_order')
       const catOrder = data.find((d: any) => d.setting_key === 'category_order')
+      const pendWidths = data.find((d: any) => d.setting_key === 'pending_col_widths')
+      const pendOrder = data.find((d: any) => d.setting_key === 'pending_col_order')
+      const supWidths = data.find((d: any) => d.setting_key === 'supplier_col_widths')
+      const supOrder = data.find((d: any) => d.setting_key === 'supplier_col_order')
 
-      if (widths && widths.setting_value) setColumnWidths(widths.setting_value)
-      
-      if (order && order.setting_value) {
+      if (widths?.setting_value) setColumnWidths(widths.setting_value)
+      if (order?.setting_value) {
         const cleanOrder = order.setting_value.filter((o: string) => o !== 'actions' && o !== 'expand');
         cleanOrder.unshift('expand');
         setColumnOrder([...cleanOrder, 'actions'] as any);
       }
-
-      if (catOrder && catOrder.setting_value) {
+      if (catOrder?.setting_value) {
         const saved = catOrder.setting_value;
         const missing = RICE_CATEGORIES.filter(c => !saved.includes(c));
         setCategoryOrder([...saved, ...missing]);
+      }
+      if (pendWidths?.setting_value) setPendingColWidths(pendWidths.setting_value)
+      if (pendOrder?.setting_value) {
+        const cleanOrder = pendOrder.setting_value.filter((o: string) => o !== 'actions');
+        setPendingColOrder([...cleanOrder, 'actions']);
+      }
+      if (supWidths?.setting_value) setSupplierColWidths(supWidths.setting_value)
+      if (supOrder?.setting_value) {
+        const cleanOrder = supOrder.setting_value.filter((o: string) => o !== 'select');
+        cleanOrder.unshift('select');
+        setSupplierColOrder(cleanOrder);
       }
     }
   }
@@ -381,8 +422,9 @@ export default function RiceControl() {
       
       setHistoryModal(prev => ({...prev, activeBatches: updatedBatches || []}));
       setEditingHistoryId(null);
+      showToast('success', 'Batch Updated', 'Inventory limits adjusted successfully.');
     } else {
-      alert(`Error updating batch: ${error.message}`);
+      showToast('error', 'Update Failed', error.message);
     }
   }
 
@@ -413,30 +455,27 @@ export default function RiceControl() {
         .select('*').eq('product_id', targetProduct.id).gt('remaining_qty', 0).order('id', { ascending: true });
       
       setHistoryModal(prev => ({...prev, activeBatches: updatedBatches || []}));
+      showToast('success', 'Batch Deleted', 'Remaining stock deducted safely.');
       
     } else {
-      alert(`Delete failed: ${error.message}`);
+      showToast('error', 'Delete Failed', error.message);
     }
   }
 
-  // --- AUTOMATED IMPORT VOID SYSTEM ---
   const handleVoidImport = async (importId: number) => {
     if (!confirm(`🚨 Are you sure you want to VOID this import?\n\nThis will instantly:\n1. Remove the bags from stock\n2. Delete the linked batch\n3. Reverse supplier debt & expenses\n4. Permanently erase this import record`)) return;
 
     setIsProcessing(true);
     try {
-      // 1. Fetch import
       const { data: impData } = await supabase.from('imports').select('*').eq('id', importId).single();
       if (!impData) throw new Error("Import not found");
 
-      // 2. Reverse Stock
       const targetProduct = products.find(p => p.id === impData.product_id);
       if (targetProduct) {
         const newStock = Math.max(0, Number(targetProduct.stock) - Number(impData.qty));
         await supabase.from('products').update({ stock: newStock }).eq('id', targetProduct.id);
       }
 
-      // 3. Delete linked Batch
       const { data: batches } = await supabase.from('inventory_batches')
         .select('*')
         .eq('product_id', impData.product_id)
@@ -449,11 +488,9 @@ export default function RiceControl() {
         await supabase.from('inventory_batches').delete().eq('id', batches[0].id);
       }
 
-      // Fetch supplier for exact matching
       const { data: supData } = await supabase.from('suppliers').select('name, total_owed_riel').eq('id', impData.supplier_id).single();
       const supplierName = supData?.name || 'Unknown Supplier';
 
-      // 4. Reverse Debt & AP
       const debtAdded = Number(impData.total_cost) - Number(impData.paid_amount);
       if (debtAdded > 0) {
         if (supData) {
@@ -466,19 +503,15 @@ export default function RiceControl() {
           .eq('status', 'Unpaid');
       }
 
-      // 5. Reverse Expenses
       if (Number(impData.paid_amount) > 0) {
         await supabase.from('expenses')
           .delete()
           .eq('remarks', `Stock Import: ${supplierName}`);
       }
 
-      // 6. Delete Import
       await supabase.from('imports').delete().eq('id', importId);
 
-      alert("✅ Import successfully voided!");
-      
-      // Close modal & Refresh
+      showToast('success', 'Import Voided', 'Record and associated funds safely reversed.');
       setHistoryModal({ isOpen: false, product: null, data: [], activeBatches: [] });
       fetchProducts();
       fetchSuppliers();
@@ -486,14 +519,14 @@ export default function RiceControl() {
       fetchImports();
 
     } catch (err: any) {
-      alert(`Error voiding import: ${err.message}`);
+      showToast('error', 'Error Voiding Import', err.message);
     } finally {
       setIsProcessing(false);
     }
   }
 
   async function handleAddSupplier() {
-    if (!newSupplier.name) return alert('Supplier name is required');
+    if (!newSupplier.name) return showToast('error', 'Validation Error', 'Supplier name is required');
     setIsProcessing(true);
     try {
       const { data, error } = await supabase.from('suppliers').insert([{ name: newSupplier.name, phone: newSupplier.phone, location: newSupplier.location }]).select();
@@ -506,10 +539,11 @@ export default function RiceControl() {
         setSuppliers(prev => [...prev, data[0]]);
         setImportForm(prev => ({ ...prev, supplier_id: String(data[0].id) }));
         setActiveView('import');
+        showToast('success', 'Supplier Added', `${data[0].name} has been added successfully.`);
       }
 
     } catch (err: any) {
-      alert(`Error: ${err.message}`);
+      showToast('error', 'Database Error', err.message);
     } finally {
       setIsProcessing(false);
     }
@@ -519,7 +553,7 @@ export default function RiceControl() {
     if (isImportingRef.current) return;
 
     if (!importForm.supplier_id || !importForm.product_id || !importForm.qty || !importForm.unit_cost) {
-      return alert('Please fill in all required fields (Supplier, Product, Qty, Cost).');
+      return showToast('error', 'Missing Data', 'Please fill in Supplier, Product, Qty, and Cost.');
     }
 
     isImportingRef.current = true;
@@ -533,7 +567,7 @@ export default function RiceControl() {
     if (paidAmount > totalCost) {
       isImportingRef.current = false;
       setIsProcessing(false);
-      return alert('Cannot pay more than the total cost.');
+      return showToast('error', 'Invalid Amount', 'Cannot pay more than the total cost.');
     }
 
     const status = paidAmount >= totalCost ? 'Paid' : 'Pending';
@@ -601,13 +635,13 @@ export default function RiceControl() {
       }
 
       setImportForm({ supplier_id: '', product_id: '', qty: '', unit_cost: '', paid_amount: '', payment_method: 'Cash ៛' });
-      alert('Import processed successfully!');
+      showToast('success', 'Stock Received', `${qty} bags added to inventory. Batch logged.`);
       
       if (isPayLater) setActiveView('pending');
       else setActiveView('wholesale');
 
     } catch (err: any) {
-      alert(`Error processing import: ${err.message}`);
+      showToast('error', 'Import Error', err.message);
     } finally {
       isImportingRef.current = false;
       setIsProcessing(false);
@@ -636,9 +670,9 @@ export default function RiceControl() {
       methodStrings.push(`${r.method}: ${amt}`);
     }
 
-    if (totalRielEq <= 0) return alert('Enter a valid amount');
+    if (totalRielEq <= 0) return showToast('error', 'Invalid Amount', 'Enter a valid payment amount.');
     const remainingBefore = Number(record.total_cost) - Number(record.paid_amount);
-    if (totalRielEq > remainingBefore + 0.1) return alert('Cannot pay more than what is owed');
+    if (totalRielEq > remainingBefore + 0.1) return showToast('error', 'Overpayment', 'Cannot pay more than what is owed.');
 
     setIsProcessing(true); 
 
@@ -688,14 +722,19 @@ export default function RiceControl() {
       setPayPendingModal({ isOpen: false, record: null, totalDue: 0 });
       setPendingPaymentRows([{ id: Date.now(), method: 'Cash ៛', amount: '' }]);
       
+      if (newStatus === 'Paid') {
+        showToast('success', 'Bill Cleared', 'The supplier debt has been fully settled.');
+      } else {
+        showToast('info', 'Partial Payment', `Payment logged. ${formatRiel(remainingBefore - totalRielEq)} remaining.`);
+      }
+      
     } catch (err: any) {
-      alert(`Error: ${err.message}`);
+      showToast('error', 'Payment Error', err.message);
     } finally {
       setIsProcessing(false);
     }
   }
 
-  // --- SAVE EDIT LOGIC ---
   const handleSaveRecord = async (id: number) => {
     if (!edits[id]) return;
     const payload = { ...edits[id] } as any;
@@ -703,37 +742,35 @@ export default function RiceControl() {
     const mainProd = products.find(p => p.id === id);
     if (!mainProd) return;
 
-    const pBatches = activeBatchesMap[id] || [];
-    pBatches.sort((a,b) => a.id - b.id);
+    if (activeView === 'wholesale') {
+      const pBatches = activeBatchesMap[id] || [];
+      pBatches.sort((a,b) => a.id - b.id);
+      const currentBatch = pBatches.length > 0 ? pBatches[0] : null;
 
-    if (payload.cost_price !== undefined && pBatches.length > 0) { 
-       await supabase.from('inventory_batches').update({ cost_price: Number(payload.cost_price) }).eq('id', pBatches[0].id); 
-    }
+      if (currentBatch) {
+        const batchPayload: any = {};
+        let updateBatch = false;
 
-    if (payload.stock !== undefined) {
-       const newMasterStock = Number(payload.stock);
-       const oldMasterStock = Number(mainProd.stock);
-       let diff = newMasterStock - oldMasterStock;
-       
-       if (diff < 0) {
-         let remainingToReduce = Math.abs(diff);
-         for (const b of pBatches) {
-           if (remainingToReduce <= 0) break;
-           const bQty = Number(b.remaining_qty);
-           if (bQty > 0) {
-               const reduceBy = Math.min(bQty, remainingToReduce);
-               await supabase.from('inventory_batches').update({ remaining_qty: bQty - reduceBy }).eq('id', b.id);
-               remainingToReduce -= reduceBy;
-           }
-         }
-       } else if (diff > 0) {
-         if (pBatches.length > 0) {
-           await supabase.from('inventory_batches').update({ remaining_qty: Number(pBatches[0].remaining_qty) + diff }).eq('id', pBatches[0].id);
-         } else {
-           await supabase.from('inventory_batches').insert([{ product_id: id, cost_price: mainProd.cost_price || 0, remaining_qty: diff }]);
-         }
-       }
-       payload.stock = newMasterStock;
+        if (payload.cost_price !== undefined) { 
+           batchPayload.cost_price = Number(payload.cost_price); 
+           updateBatch = true; 
+        }
+
+        if (payload.stock !== undefined) {
+           const newMasterStock = Number(payload.stock);
+           const oldMasterStock = Number(mainProd.stock);
+           const diff = newMasterStock - oldMasterStock;
+           
+           batchPayload.remaining_qty = Math.max(0, Number(currentBatch.remaining_qty) + diff);
+           updateBatch = true;
+           
+           payload.stock = newMasterStock;
+        }
+
+        if (updateBatch) {
+           await supabase.from('inventory_batches').update(batchPayload).eq('id', currentBatch.id);
+        }
+      }
     }
 
     ['price', 'cost_price', 'weight', 'stock', 'mtd_kg_used', 'mtd_bags_used', 'min_stock_level'].forEach(key => {
@@ -743,7 +780,7 @@ export default function RiceControl() {
 
     if (Object.keys(payload).length > 0) {
        const { error } = await supabase.from('products').update(payload).eq('id', id);
-       if (error) alert(`Error saving to products: ${error.message}`);
+       if (error) showToast('error', 'Save Failed', error.message);
     }
 
     setEdits(prev => { const n = { ...prev }; delete n[id]; return n });
@@ -753,17 +790,25 @@ export default function RiceControl() {
   const handleDelete = async () => {
     if (!confirm(`Are you sure you want to delete ${selectedToDelete.size} item(s)?`)) return
     const { error } = await supabase.from('products').update({ is_archived: true }).in('id', Array.from(selectedToDelete))
-    if (!error) { setSelectedToDelete(new Set()); fetchProducts(); }
+    if (!error) { 
+      setSelectedToDelete(new Set()); 
+      fetchProducts(); 
+      showToast('success', 'Products Deleted', 'Items removed safely.');
+    }
   }
 
   const handleDeleteSuppliers = async () => {
     if (!confirm(`Are you sure you want to delete ${selectedSuppliersToDelete.size} supplier(s)?`)) return
     const { error } = await supabase.from('suppliers').update({ is_archived: true }).in('id', Array.from(selectedSuppliersToDelete))
-    if (!error) { setSelectedSuppliersToDelete(new Set()); fetchSuppliers(); }
+    if (!error) { 
+      setSelectedSuppliersToDelete(new Set()); 
+      fetchSuppliers(); 
+      showToast('success', 'Suppliers Deleted', 'Suppliers archived safely.');
+    }
   }
 
   const addProduct = async () => {
-    if (!newItem.name) return alert('Name is required')
+    if (!newItem.name) return showToast('error', 'Missing Data', 'Name is required');
     const payload = {
       name: newItem.name,
       price: Number(newItem.price) || 0,
@@ -783,9 +828,10 @@ export default function RiceControl() {
       setProducts(prev => [...prev, data[0]]);
       setImportForm(prev => ({ ...prev, product_id: String(data[0].id) }));
       setActiveView('import');
+      showToast('success', 'Product Created', 'Ready to receive stock.');
 
     } else if (error) {
-      alert(`Error: ${error.message}`)
+      showToast('error', 'Creation Failed', error.message);
     }
   }
 
@@ -803,25 +849,25 @@ export default function RiceControl() {
       setActiveDropdownId(null);
       setDropdownSearch('');
     } else {
-      alert(`Error linking wholesale product: ${error.message}`);
+      showToast('error', 'Link Failed', error.message);
     }
   }
 
-  const handleDragStart = (e: React.DragEvent, col: string) => {
-    if (col === 'actions' || col === 'expand') return; 
-    e.dataTransfer.setData('text/plain', col)
-    e.dataTransfer.effectAllowed = 'move'
+  // --- UNIVERSAL DRAG & DROP FOR ALL TABLES ---
+  const onDragStartCol = (e: React.DragEvent, col: string, unmovables: string[]) => {
+    if (unmovables.includes(col)) return;
+    e.dataTransfer.setData('text/plain', col);
+    e.dataTransfer.effectAllowed = 'move';
   }
 
-  const handleDragOver = (e: React.DragEvent) => {
-    e.preventDefault() 
-    e.dataTransfer.dropEffect = 'move'
+  const onDragOverCol = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
   }
 
-  const handleDrop = async (e: React.DragEvent, targetCol: string) => {
+  const handleProductDrop = async (e: React.DragEvent, targetCol: string) => {
     e.preventDefault()
     if (targetCol === 'actions' || targetCol === 'expand') return;
-
     const sourceCol = e.dataTransfer.getData('text/plain') as ColumnKey;
     if (!sourceCol || sourceCol === targetCol || sourceCol === 'actions' || sourceCol === 'expand') return
 
@@ -834,66 +880,134 @@ export default function RiceControl() {
       newOrder.splice(targetIdx, 0, sourceCol);
       const finalOrder = ['expand', ...newOrder, 'actions'] as ColumnKey[];
       
-      supabase.from('app_settings').upsert({
-        setting_key: 'column_order',
-        setting_value: finalOrder
-      }, { onConflict: 'setting_key' }).then()
-      
+      supabase.from('app_settings').upsert({ setting_key: 'column_order', setting_value: finalOrder }, { onConflict: 'setting_key' }).then();
       return finalOrder;
     })
   }
 
-  const handleResizeStart = (e: React.MouseEvent | React.TouchEvent, columnKey: string) => {
-    if (columnKey === 'expand') return;
+  const handlePendingDrop = async (e: React.DragEvent, targetCol: string) => {
     e.preventDefault()
-    e.stopPropagation() 
-    const startX = 'touches' in e ? e.touches[0].pageX : e.pageX
-    const startWidth = widthsRef.current[columnKey] || 150
+    if (targetCol === 'actions') return;
+    const sourceCol = e.dataTransfer.getData('text/plain');
+    if (!sourceCol || sourceCol === targetCol || sourceCol === 'actions') return;
 
-    const handleMove = (moveEvent: MouseEvent | TouchEvent) => {
-      const currentX = 'touches' in moveEvent ? moveEvent.touches[0].pageX : moveEvent.pageX
-      const newWidth = Math.max(40, startWidth + (currentX - startX))
-      setColumnWidths(prev => ({ ...prev, [columnKey]: newWidth }))
-    }
-
-    const handleUp = async () => {
-      document.removeEventListener('mousemove', handleMove)
-      document.removeEventListener('mouseup', handleUp)
-      document.removeEventListener('touchmove', handleMove)
-      document.removeEventListener('touchmove', handleMove)
-      document.removeEventListener('touchend', handleUp)
+    setPendingColOrder(prev => {
+      const movableOrder = prev.filter(c => c !== 'actions');
+      const newOrder = movableOrder.filter(c => c !== sourceCol);
+      const targetIdx = newOrder.indexOf(targetCol);
       
-      await supabase.from('app_settings').upsert({
-        setting_key: 'column_widths',
-        setting_value: widthsRef.current
-      }, { onConflict: 'setting_key' })
-    }
-
-    document.addEventListener('mousemove', handleMove)
-    document.addEventListener('mouseup', handleUp)
-    document.addEventListener('touchmove', handleMove, { passive: false })
-    document.addEventListener('touchmove', handleMove)
-    document.addEventListener('touchend', handleUp)
+      newOrder.splice(targetIdx, 0, sourceCol);
+      const finalOrder = [...newOrder, 'actions'];
+      
+      supabase.from('app_settings').upsert({ setting_key: 'pending_col_order', setting_value: finalOrder }, { onConflict: 'setting_key' }).then();
+      return finalOrder;
+    })
   }
 
-  const handleSort = (key: any) => {
+  const handleSupplierDrop = async (e: React.DragEvent, targetCol: string) => {
+    e.preventDefault()
+    if (targetCol === 'select') return;
+    const sourceCol = e.dataTransfer.getData('text/plain');
+    if (!sourceCol || sourceCol === targetCol || sourceCol === 'select') return;
+
+    setSupplierColOrder(prev => {
+      const movableOrder = prev.filter(c => c !== 'select');
+      const newOrder = movableOrder.filter(c => c !== sourceCol);
+      const targetIdx = newOrder.indexOf(targetCol);
+      
+      newOrder.splice(targetIdx, 0, sourceCol);
+      const finalOrder = ['select', ...newOrder];
+      
+      supabase.from('app_settings').upsert({ setting_key: 'supplier_col_order', setting_value: finalOrder }, { onConflict: 'setting_key' }).then();
+      return finalOrder;
+    })
+  }
+
+  const handleResizeStartProduct = (e: React.MouseEvent | React.TouchEvent, columnKey: string) => {
+    if (columnKey === 'expand') return;
+    e.preventDefault(); e.stopPropagation();
+    const startX = 'touches' in e ? e.touches[0].pageX : e.pageX;
+    const startWidth = widthsRef.current[columnKey] || 150;
+    const handleMove = (moveEvent: MouseEvent | TouchEvent) => {
+      const currentX = 'touches' in moveEvent ? moveEvent.touches[0].pageX : moveEvent.pageX;
+      const newWidth = Math.max(40, startWidth + (currentX - startX));
+      setColumnWidths(prev => ({ ...prev, [columnKey]: newWidth }));
+    }
+    const handleUp = async () => {
+      document.removeEventListener('mousemove', handleMove); document.removeEventListener('mouseup', handleUp);
+      document.removeEventListener('touchmove', handleMove); document.removeEventListener('touchend', handleUp);
+      await supabase.from('app_settings').upsert({ setting_key: 'column_widths', setting_value: widthsRef.current }, { onConflict: 'setting_key' });
+    }
+    document.addEventListener('mousemove', handleMove); document.addEventListener('mouseup', handleUp);
+    document.addEventListener('touchmove', handleMove, { passive: false }); document.addEventListener('touchend', handleUp);
+  }
+
+  const handleResizeStartPending = (e: React.MouseEvent | React.TouchEvent, columnKey: string) => {
+    if (columnKey === 'actions') return;
+    e.preventDefault(); e.stopPropagation();
+    const startX = 'touches' in e ? e.touches[0].pageX : e.pageX;
+    const startWidth = pendingWidthsRef.current[columnKey] || 150;
+    const handleMove = (moveEvent: MouseEvent | TouchEvent) => {
+      const currentX = 'touches' in moveEvent ? moveEvent.touches[0].pageX : moveEvent.pageX;
+      const newWidth = Math.max(40, startWidth + (currentX - startX));
+      setPendingColWidths(prev => ({ ...prev, [columnKey]: newWidth }));
+    }
+    const handleUp = async () => {
+      document.removeEventListener('mousemove', handleMove); document.removeEventListener('mouseup', handleUp);
+      document.removeEventListener('touchmove', handleMove); document.removeEventListener('touchend', handleUp);
+      await supabase.from('app_settings').upsert({ setting_key: 'pending_col_widths', setting_value: pendingWidthsRef.current }, { onConflict: 'setting_key' });
+    }
+    document.addEventListener('mousemove', handleMove); document.addEventListener('mouseup', handleUp);
+    document.addEventListener('touchmove', handleMove, { passive: false }); document.addEventListener('touchend', handleUp);
+  }
+
+  const handleResizeStartSupplier = (e: React.MouseEvent | React.TouchEvent, columnKey: string) => {
+    if (columnKey === 'select') return;
+    e.preventDefault(); e.stopPropagation();
+    const startX = 'touches' in e ? e.touches[0].pageX : e.pageX;
+    const startWidth = supplierWidthsRef.current[columnKey] || 150;
+    const handleMove = (moveEvent: MouseEvent | TouchEvent) => {
+      const currentX = 'touches' in moveEvent ? moveEvent.touches[0].pageX : moveEvent.pageX;
+      const newWidth = Math.max(40, startWidth + (currentX - startX));
+      setSupplierColWidths(prev => ({ ...prev, [columnKey]: newWidth }));
+    }
+    const handleUp = async () => {
+      document.removeEventListener('mousemove', handleMove); document.removeEventListener('mouseup', handleUp);
+      document.removeEventListener('touchmove', handleMove); document.removeEventListener('touchend', handleUp);
+      await supabase.from('app_settings').upsert({ setting_key: 'supplier_col_widths', setting_value: supplierWidthsRef.current }, { onConflict: 'setting_key' });
+    }
+    document.addEventListener('mousemove', handleMove); document.addEventListener('mouseup', handleUp);
+    document.addEventListener('touchmove', handleMove, { passive: false }); document.addEventListener('touchend', handleUp);
+  }
+
+  const handleProductSort = (key: any) => {
     if (key === 'linked_wholesale' || key === 'actions' || key === 'expand') return;
     let direction: 'asc' | 'desc' = 'asc';
-    if (sortConfig && sortConfig.key === key && sortConfig.direction === 'asc') {
-      direction = 'desc';
-    }
+    if (sortConfig && sortConfig.key === key && sortConfig.direction === 'asc') direction = 'desc';
     setSortConfig({ key, direction });
+  }
+
+  const handlePendingSort = (key: string) => {
+    if (key === 'actions') return;
+    let direction: 'asc' | 'desc' = 'asc';
+    if (pendingSort && pendingSort.key === key && pendingSort.direction === 'asc') direction = 'desc';
+    setPendingSort({ key, direction });
+  }
+
+  const handleSupplierSort = (key: string) => {
+    if (key === 'select') return;
+    let direction: 'asc' | 'desc' = 'asc';
+    if (supplierSort && supplierSort.key === key && supplierSort.direction === 'asc') direction = 'desc';
+    setSupplierSort({ key, direction });
   }
 
   const processedProducts = products
     .map(p => ({ ...p, ...edits[p.id] }))
     .filter(p => {
       const isEditingThisRow = editingCell?.id === p.id;
-
       if (searchQuery && !p.name?.toLowerCase().includes(searchQuery.toLowerCase())) return false;
       if (activeView === 'retail' && p.weight >= 50) return false;
       if (activeView === 'wholesale' && p.weight < 50) return false;
-      
       if (activeView === 'wholesale') {
         if (activeCategory === '❌ Out of Stock') {
             if (!isEditingThisRow && Number(p.stock) > 0) return false;
@@ -901,7 +1015,6 @@ export default function RiceControl() {
             if (!isEditingThisRow && Number(p.stock) <= 0) return false;
         }
       }
-
       if (activeView === 'wholesale' && activeCategory !== 'All' && activeCategory !== '❌ Out of Stock') {
         const name = p.name || '';
         if (activeCategory === 'ផ្សេងៗ') {
@@ -929,6 +1042,33 @@ export default function RiceControl() {
       return 0;
     });
 
+  const processedPending = imports.filter(i => i.status === 'Pending').sort((a, b) => {
+    if (!pendingSort) return 0;
+    const { key, direction } = pendingSort;
+    let valA, valB;
+    if (key === 'date') { valA = new Date(a.created_at).getTime(); valB = new Date(b.created_at).getTime(); }
+    else if (key === 'supplier') { valA = a.suppliers?.name || ''; valB = b.suppliers?.name || ''; }
+    else if (key === 'product') { valA = a.products?.name || ''; valB = b.products?.name || ''; }
+    else if (key === 'total_cost') { valA = Number(a.total_cost); valB = Number(b.total_cost); }
+    else if (key === 'paid_so_far') { valA = Number(a.paid_amount); valB = Number(b.paid_amount); }
+    else if (key === 'remaining_debt') { valA = Number(a.total_cost) - Number(a.paid_amount); valB = Number(b.total_cost) - Number(b.paid_amount); }
+    
+    if (valA < valB) return direction === 'asc' ? -1 : 1;
+    if (valA > valB) return direction === 'asc' ? 1 : -1;
+    return 0;
+  });
+
+  const processedSuppliers = [...suppliers].sort((a, b) => {
+    if (!supplierSort) return 0;
+    const { key, direction } = supplierSort;
+    let valA = a[key] || '';
+    let valB = b[key] || '';
+    if (key === 'total_owed') { valA = Number(a.total_owed_riel); valB = Number(b.total_owed_riel); }
+    if (valA < valB) return direction === 'asc' ? -1 : 1;
+    if (valA > valB) return direction === 'asc' ? 1 : -1;
+    return 0;
+  });
+
   const formatDisplayValue = (col: string, val: any) => {
     if (val === null || val === undefined) return '';
     if (['price', 'cost_price'].includes(col)) return `${new Intl.NumberFormat('en-US').format(val)} ៛`;
@@ -938,27 +1078,29 @@ export default function RiceControl() {
     return String(val);
   };
 
-  const Resizer = ({ columnKey }: { columnKey: string }) => (
-    <div
-      onMouseDown={(e) => handleResizeStart(e, columnKey)}
-      onTouchStart={(e) => handleResizeStart(e, columnKey)}
-      style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: '14px', cursor: 'col-resize', background: 'transparent', zIndex: 10, transform: 'translateX(50%)' }}
-    />
-  );
-
-  const pendingImports = imports.filter(i => i.status === 'Pending');
   const importTotalCalc = (Number(importForm.qty) || 0) * (Number(importForm.unit_cost) || 0);
-
   const liveTotalPendingReceived = pendingPaymentRows.reduce((sum, row) => {
     const amt = Number(row.amount) || 0;
     if (row.method.includes('$')) return sum + (amt * EXCHANGE_RATE);
     return sum + amt;
   }, 0);
-  
   const livePendingRemaining = payPendingModal.totalDue - liveTotalPendingReceived;
 
   return (
     <div className="main-wrapper">
+
+      {/* TOAST NOTIFICATION */}
+      {toast && (
+        <div className={`toast-notification fade-in ${toast.type}`}>
+          <div className="toast-icon">
+            {toast.type === 'success' ? '✅' : toast.type === 'error' ? '❌' : 'ℹ️'}
+          </div>
+          <div className="toast-content">
+            <div className="toast-title">{toast.title}</div>
+            <div className="toast-msg">{toast.msg}</div>
+          </div>
+        </div>
+      )}
       
       {/* HEADER */}
       <div className="header-container">
@@ -995,7 +1137,7 @@ export default function RiceControl() {
           <button className={activeView === 'retail' ? 'tab active' : 'tab'} onClick={() => { setActiveView('retail'); setActiveCategory('All'); }}>🛍️ Retail</button>
           <button className={activeView === 'wholesale' ? 'tab active' : 'tab'} onClick={() => setActiveView('wholesale')}>🌾 Wholesale</button>
           <button className={activeView === 'import' ? 'tab active' : 'tab'} onClick={() => setActiveView('import')}>🚚 Receive Stock</button>
-          <button className={activeView === 'pending' ? 'tab active' : 'tab'} onClick={() => setActiveView('pending')}>⏳ Pending Payments {pendingImports.length > 0 && `(${pendingImports.length})`}</button>
+          <button className={activeView === 'pending' ? 'tab active' : 'tab'} onClick={() => setActiveView('pending')}>⏳ Pending Payments {processedPending.length > 0 && `(${processedPending.length})`}</button>
           <button className={activeView === 'suppliers' ? 'tab active' : 'tab'} onClick={() => setActiveView('suppliers')}>🏢 Suppliers</button>
         </div>
         
@@ -1040,7 +1182,7 @@ export default function RiceControl() {
               key={cat} 
               draggable={true}
               onDragStart={(e) => handleCategoryDragStart(e, cat)}
-              onDragOver={handleDragOver}
+              onDragOver={onDragOverCol}
               onDrop={(e) => handleCategoryDrop(e, cat)}
               onClick={() => setActiveCategory(cat)} 
               style={{ flexShrink: 0, padding: '8px 16px', borderRadius: '20px', border: activeCategory === cat ? 'none' : '1px solid #cbd5e1', backgroundColor: activeCategory === cat ? '#b58a3d' : '#ffffff', color: activeCategory === cat ? '#fff' : '#475569', fontWeight: 'bold', cursor: 'grab', fontSize: '13px', whiteSpace: 'nowrap', boxShadow: activeCategory === cat ? '0 2px 4px rgba(181, 138, 61, 0.3)' : 'none' }}
@@ -1051,7 +1193,7 @@ export default function RiceControl() {
         </div>
       )}
 
-      {/* SPREADSHEET VIEWS */}
+      {/* SPREADSHEET VIEWS: RETAIL & WHOLESALE */}
       {(activeView === 'retail' || activeView === 'wholesale') && (
         <div className="table-wrapper fade-in">
           <table style={{ borderCollapse: 'collapse', tableLayout: 'fixed', width: 'max-content', minWidth: '100%' }}>
@@ -1072,15 +1214,15 @@ export default function RiceControl() {
                     <th 
                       key={key} 
                       draggable={isDraggable}
-                      onDragStart={(e) => handleDragStart(e, key as string)}
-                      onDragOver={handleDragOver}
-                      onDrop={(e) => handleDrop(e, key as string)}
-                      onClick={() => handleSort(key)}
-                      style={{ width: columnWidths[key as string] || 150, position: 'relative', padding: '16px 12px', textAlign: key === 'actions' ? 'center' : 'left', color: '#475569', fontSize: '13px', textTransform: 'uppercase', fontWeight: 'bold', borderRight: '1px solid #f1f5f9', cursor: isDraggable ? 'pointer' : 'default', whiteSpace: 'nowrap' }}
+                      onDragStart={(e) => onDragStartCol(e, key as string, ['actions', 'linked_wholesale', 'expand'])}
+                      onDragOver={onDragOverCol}
+                      onDrop={(e) => handleProductDrop(e, key as string)}
+                      onClick={() => handleProductSort(key)}
+                      style={{ width: columnWidths[key as string] || 150, position: 'relative', padding: '16px 12px', textAlign: key === 'actions' ? 'center' : 'left', color: '#475569', fontSize: '13px', textTransform: 'uppercase', fontWeight: 'bold', borderRight: '1px solid #f1f5f9', cursor: isDraggable ? 'pointer' : 'default', whiteSpace: 'nowrap', userSelect: 'none' }}
                     >
                       {key === 'linked_wholesale' ? 'Linked Wholesale Bag' : key === 'mtd_kg_used' ? 'MTD Used (Kg)' : key === 'mtd_bags_used' ? 'MTD Used (Bags)' : key === 'min_stock_level' ? 'Min Stock' : (key as string).replace('_', ' ')}
                       {isDraggable && (<span style={{ marginLeft: '6px', fontSize: '12px', opacity: sortConfig?.key === key ? 1 : 0.3 }}>{sortConfig?.key === key ? (sortConfig.direction === 'asc' ? '↑' : '↓') : '↕'}</span>)}
-                      {isDraggable && <Resizer columnKey={key as string} />}
+                      {isDraggable && <div onMouseDown={(e) => handleResizeStartProduct(e, key as string)} onTouchStart={(e) => handleResizeStartProduct(e, key as string)} style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: '14px', cursor: 'col-resize', background: 'transparent', zIndex: 10, transform: 'translateX(50%)' }} />}
                     </th>
                   )
                 })}
@@ -1099,7 +1241,6 @@ export default function RiceControl() {
 
                   return (
                     <React.Fragment key={p.id}>
-                      {/* Parent Row */}
                       <tr onMouseEnter={() => setHoveredId(p.id)} onMouseLeave={() => setHoveredId(null)} style={{ borderBottom: '1px solid #f1f5f9', background: edits[p.id] ? '#fefcf3' : 'transparent', transition: 'background 0.2s' }}>
                         {columnOrder.map(col => {
                           if (col === 'expand' && activeView !== 'wholesale') return null;
@@ -1277,22 +1418,22 @@ export default function RiceControl() {
                                if (col === 'id') return <td key={col} style={{ borderRight: '1px solid #f1f5f9' }}></td>;
                                
                                if (col === 'name') return (
-                                 <td key={col} style={{ padding: '12px 12px 12px 48px', borderRight: '1px solid #f1f5f9', color: '#475569', fontSize: '13px' }}>
+                                 <td key={col} style={{ padding: '12px 12px 12px 48px', borderRight: '1px solid #f1f5f9', color: '#475569', fontSize: '14px' }}>
                                    ↳ {batchLabel}
                                  </td>
                                );
                                
-                               if (col === 'price') return <td key={col} style={{ padding: '12px', borderRight: '1px solid #f1f5f9', color: '#475569', fontSize: '13px' }}>-</td>;
+                               if (col === 'price') return <td key={col} style={{ padding: '12px', borderRight: '1px solid #f1f5f9', color: '#475569', fontSize: '14px' }}>-</td>;
                                
-                               if (col === 'cost_price') return <td key={col} style={{ padding: '12px', borderRight: '1px solid #f1f5f9', color: '#475569', fontSize: '13px' }}>{formatRiel(batch.cost_price)}</td>;
+                               if (col === 'cost_price') return <td key={col} style={{ padding: '12px', borderRight: '1px solid #f1f5f9', color: '#475569', fontSize: '14px' }}>{formatRiel(batch.cost_price)}</td>;
                                
-                               if (col === 'stock') return <td key={col} style={{ padding: '12px', borderRight: '1px solid #f1f5f9', color: '#b58a3d', fontWeight: 'bold', fontSize: '13px' }}>{batch.remaining_qty}</td>;
+                               if (col === 'stock') return <td key={col} style={{ padding: '12px', borderRight: '1px solid #f1f5f9', color: '#b58a3d', fontWeight: 'bold', fontSize: '14px' }}>{batch.remaining_qty}</td>;
                                
                                if (col === 'actions') {
                                  return <td key={col} style={{ borderRight: '1px solid #f1f5f9' }}></td>;
                                }
                                
-                               return <td key={col} style={{ padding: '12px', borderRight: '1px solid #f1f5f9', color: '#94a3b8', fontSize: '13px', textAlign: 'center' }}>-</td>;
+                               return <td key={col} style={{ padding: '12px', borderRight: '1px solid #f1f5f9', color: '#94a3b8', fontSize: '14px', textAlign: 'center' }}>-</td>;
                              })}
                            </tr>
                          )
@@ -1442,52 +1583,90 @@ export default function RiceControl() {
       {/* PENDING PAYMENTS TAB */}
       {activeView === 'pending' && (
         <div className="table-wrapper fade-in">
-          <table style={{ borderCollapse: 'collapse', width: '100%', minWidth: '900px' }}>
+          <table style={{ borderCollapse: 'collapse', tableLayout: 'fixed', width: 'max-content', minWidth: '100%' }}>
             <thead>
               <tr style={{ background: '#fff1f2', borderBottom: '2px solid #fecaca' }}>
-                <th style={{ padding: '16px', textAlign: 'left', color: '#991b1b', fontSize: '13px', textTransform: 'uppercase' }}>Date</th>
-                <th style={{ padding: '16px', textAlign: 'left', color: '#991b1b', fontSize: '13px', textTransform: 'uppercase' }}>Supplier</th>
-                <th style={{ padding: '16px', textAlign: 'left', color: '#991b1b', fontSize: '13px', textTransform: 'uppercase' }}>Product</th>
-                <th style={{ padding: '16px', textAlign: 'right', color: '#991b1b', fontSize: '13px', textTransform: 'uppercase' }}>Total Cost (៛)</th>
-                <th style={{ padding: '16px', textAlign: 'right', color: '#991b1b', fontSize: '13px', textTransform: 'uppercase' }}>Paid So Far</th>
-                <th style={{ padding: '16px', textAlign: 'right', color: '#991b1b', fontSize: '13px', textTransform: 'uppercase' }}>Remaining Debt</th>
-                <th style={{ padding: '16px', textAlign: 'center', color: '#991b1b', fontSize: '13px', textTransform: 'uppercase' }}>Action</th>
+                {pendingColOrder.map(col => {
+                  const isDraggable = col !== 'actions';
+                  let label = col;
+                  if (col === 'date') label = 'Date';
+                  if (col === 'supplier') label = 'Supplier';
+                  if (col === 'product') label = 'Product';
+                  if (col === 'total_cost') label = 'Total Cost (៛)';
+                  if (col === 'paid_so_far') label = 'Paid So Far';
+                  if (col === 'remaining_debt') label = 'Remaining Debt';
+                  if (col === 'actions') label = 'Action';
+
+                  return (
+                    <th 
+                      key={col}
+                      draggable={isDraggable}
+                      onDragStart={(e) => onDragStartCol(e, col, ['actions'])}
+                      onDragOver={onDragOverCol}
+                      onDrop={(e) => handlePendingDrop(e, col)}
+                      onClick={() => handlePendingSort(col)}
+                      style={{ 
+                        width: pendingColWidths[col] || 150, 
+                        position: 'relative', 
+                        padding: '16px 12px', 
+                        textAlign: col === 'actions' ? 'center' : (['total_cost', 'paid_so_far', 'remaining_debt'].includes(col) ? 'right' : 'left'), 
+                        color: '#991b1b', 
+                        fontSize: '13px', 
+                        textTransform: 'uppercase', 
+                        fontWeight: 'bold', 
+                        borderRight: '1px solid #fee2e2', 
+                        cursor: isDraggable ? 'pointer' : 'default', 
+                        whiteSpace: 'nowrap', 
+                        userSelect: 'none' 
+                      }}
+                    >
+                      {label}
+                      {isDraggable && (<span style={{ marginLeft: '6px', fontSize: '12px', opacity: pendingSort?.key === col ? 1 : 0.3 }}>{pendingSort?.key === col ? (pendingSort.direction === 'asc' ? '↑' : '↓') : '↕'}</span>)}
+                      {isDraggable && <div onMouseDown={(e) => handleResizeStartPending(e, col)} onTouchStart={(e) => handleResizeStartPending(e, col)} style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: '14px', cursor: 'col-resize', background: 'transparent', zIndex: 10, transform: 'translateX(50%)' }} />}
+                    </th>
+                  );
+                })}
               </tr>
             </thead>
             <tbody>
-              {pendingImports.length === 0 ? (
-                <tr><td colSpan={7} style={{ padding: '40px', textAlign: 'center', color: '#10b981', fontWeight: 'bold', fontSize: '16px' }}>🎉 No pending payments to suppliers!</td></tr>
+              {processedPending.length === 0 ? (
+                <tr><td colSpan={pendingColOrder.length} style={{ padding: '40px', textAlign: 'center', color: '#10b981', fontWeight: 'bold', fontSize: '16px' }}>🎉 No pending payments to suppliers!</td></tr>
               ) : (
-                pendingImports.map((imp: any) => {
+                processedPending.map((imp: any) => {
                   const remaining = Number(imp.total_cost) - Number(imp.paid_amount);
                   return (
                     <tr key={imp.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                      <td style={{ padding: '16px', color: '#64748b' }}>{new Date(imp.created_at).toLocaleDateString()}</td>
-                      <td style={{ padding: '16px', fontWeight: 'bold', color: '#0f172a' }}>{imp.suppliers?.name}</td>
-                      <td style={{ padding: '16px', color: '#475569' }}>{imp.products?.name} <span style={{color:'#94a3b8'}}>(x{imp.qty})</span></td>
-                      <td style={{ padding: '16px', textAlign: 'right', color: '#475569' }}>{formatRiel(imp.total_cost)}</td>
-                      <td style={{ padding: '16px', textAlign: 'right', color: '#10b981' }}>{formatRiel(imp.paid_amount)}</td>
-                      <td style={{ padding: '16px', textAlign: 'right', fontWeight: 'bold', color: '#ef4444', fontSize: '16px' }}>{formatRiel(remaining)}</td>
-                      <td style={{ padding: '16px', textAlign: 'center' }}>
-                        <div style={{ display: 'flex', gap: '8px', justifyContent: 'center' }}>
-                          <button 
-                            onClick={() => {
-                              setPayPendingModal({ isOpen: true, record: imp, totalDue: remaining });
-                              setPendingPaymentRows([{ id: Date.now(), method: 'Cash ៛', amount: '' }]);
-                            }}
-                            style={{ padding: '8px 16px', background: '#3b82f6', color: '#fff', border: 'none', borderRadius: '6px', fontWeight: 'bold', cursor: 'pointer' }}
-                          >
-                            💸 Pay Now
-                          </button>
-                          <button 
-                            onClick={() => handleVoidImport(imp.id)}
-                            disabled={isProcessing}
-                            style={{ padding: '8px 16px', background: '#fee2e2', color: '#dc2626', border: 'none', borderRadius: '6px', fontWeight: 'bold', cursor: isProcessing ? 'not-allowed' : 'pointer' }}
-                          >
-                            ❌ Void
-                          </button>
-                        </div>
-                      </td>
+                      {pendingColOrder.map(col => {
+                        if (col === 'date') return <td key={col} style={{ padding: '14px 12px', color: '#64748b', fontSize: '14px', borderRight: '1px solid #f1f5f9', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{new Date(imp.created_at).toLocaleDateString()}</td>;
+                        if (col === 'supplier') return <td key={col} style={{ padding: '14px 12px', fontWeight: 'bold', color: '#0f172a', fontSize: '14px', borderRight: '1px solid #f1f5f9', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{imp.suppliers?.name}</td>;
+                        if (col === 'product') return <td key={col} style={{ padding: '14px 12px', color: '#475569', fontSize: '14px', borderRight: '1px solid #f1f5f9', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{imp.products?.name} <span style={{color:'#94a3b8'}}>(x{imp.qty})</span></td>;
+                        if (col === 'total_cost') return <td key={col} style={{ padding: '14px 12px', textAlign: 'right', color: '#475569', fontSize: '14px', borderRight: '1px solid #f1f5f9', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{formatRiel(imp.total_cost)}</td>;
+                        if (col === 'paid_so_far') return <td key={col} style={{ padding: '14px 12px', textAlign: 'right', color: '#10b981', fontSize: '14px', borderRight: '1px solid #f1f5f9', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{formatRiel(imp.paid_amount)}</td>;
+                        if (col === 'remaining_debt') return <td key={col} style={{ padding: '14px 12px', textAlign: 'right', fontWeight: 'bold', color: '#ef4444', fontSize: '14px', borderRight: '1px solid #f1f5f9', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{formatRiel(remaining)}</td>;
+                        if (col === 'actions') return (
+                          <td key={col} style={{ padding: '14px 12px', textAlign: 'center', borderRight: '1px solid #f1f5f9' }}>
+                            <div style={{ display: 'flex', gap: '8px', justifyContent: 'center' }}>
+                              <button 
+                                onClick={() => {
+                                  setPayPendingModal({ isOpen: true, record: imp, totalDue: remaining });
+                                  setPendingPaymentRows([{ id: Date.now(), method: 'Cash ៛', amount: '' }]);
+                                }}
+                                style={{ padding: '6px 12px', background: '#3b82f6', color: '#fff', border: 'none', borderRadius: '6px', fontWeight: 'bold', cursor: 'pointer', fontSize: '12px' }}
+                              >
+                                💸 Pay Now
+                              </button>
+                              <button 
+                                onClick={() => handleVoidImport(imp.id)}
+                                disabled={isProcessing}
+                                style={{ padding: '6px 12px', background: '#fee2e2', color: '#dc2626', border: 'none', borderRadius: '6px', fontWeight: 'bold', cursor: isProcessing ? 'not-allowed' : 'pointer', fontSize: '12px' }}
+                              >
+                                ❌ Void
+                              </button>
+                            </div>
+                          </td>
+                        );
+                        return null;
+                      })}
                     </tr>
                   )
                 })
@@ -1500,51 +1679,96 @@ export default function RiceControl() {
       {/* SUPPLIERS DATABASE TAB */}
       {activeView === 'suppliers' && (
         <div className="table-wrapper fade-in">
-          <table style={{ borderCollapse: 'collapse', width: '100%', minWidth: '700px' }}>
+          <table style={{ borderCollapse: 'collapse', tableLayout: 'fixed', width: 'max-content', minWidth: '100%' }}>
             <thead>
               <tr style={{ background: '#f8fafc', borderBottom: '2px solid #e2e8f0' }}>
-                <th style={{ width: '46px', minWidth: '46px', maxWidth: '46px', padding: '16px 8px', textAlign: 'center', borderRight: '1px solid #f1f5f9' }}>
-                   <input 
-                     type="checkbox" 
-                     checked={selectedSuppliersToDelete.size === suppliers.length && suppliers.length > 0}
-                     onChange={(e) => {
-                       if (e.target.checked) setSelectedSuppliersToDelete(new Set(suppliers.map(s => s.id)));
-                       else setSelectedSuppliersToDelete(new Set());
-                     }}
-                     style={{ cursor: 'pointer', accentColor: '#b58a3d', width: '16px', height: '16px' }}
-                   />
-                </th>
-                <th style={{ padding: '16px', textAlign: 'left', color: '#475569', fontSize: '13px', textTransform: 'uppercase' }}>Supplier Name</th>
-                <th style={{ padding: '16px', textAlign: 'left', color: '#475569', fontSize: '13px', textTransform: 'uppercase' }}>Phone</th>
-                <th style={{ padding: '16px', textAlign: 'left', color: '#475569', fontSize: '13px', textTransform: 'uppercase' }}>Location</th>
-                <th style={{ padding: '16px', textAlign: 'right', color: '#ef4444', fontSize: '13px', textTransform: 'uppercase' }}>Total Current Debt (៛)</th>
+                {supplierColOrder.map(col => {
+                  const isDraggable = col !== 'select';
+                  let label = col;
+                  if (col === 'name') label = 'Supplier Name';
+                  if (col === 'phone') label = 'Phone';
+                  if (col === 'location') label = 'Location';
+                  if (col === 'total_owed') label = 'Total Current Debt (៛)';
+
+                  if (col === 'select') {
+                    return (
+                      <th key={col} style={{ width: '50px', minWidth: '50px', maxWidth: '50px', padding: '16px 8px', textAlign: 'center', borderRight: '1px solid #f1f5f9' }}>
+                        <input 
+                          type="checkbox" 
+                          checked={selectedSuppliersToDelete.size === suppliers.length && suppliers.length > 0}
+                          onChange={(e) => {
+                            if (e.target.checked) setSelectedSuppliersToDelete(new Set(suppliers.map(s => s.id)));
+                            else setSelectedSuppliersToDelete(new Set());
+                          }}
+                          style={{ cursor: 'pointer', accentColor: '#b58a3d', width: '16px', height: '16px' }}
+                        />
+                      </th>
+                    );
+                  }
+
+                  return (
+                    <th 
+                      key={col}
+                      draggable={isDraggable}
+                      onDragStart={(e) => onDragStartCol(e, col, ['select'])}
+                      onDragOver={onDragOverCol}
+                      onDrop={(e) => handleSupplierDrop(e, col)}
+                      onClick={() => handleSupplierSort(col)}
+                      style={{ 
+                        width: supplierColWidths[col] || 150, 
+                        position: 'relative', 
+                        padding: '16px 12px', 
+                        textAlign: col === 'total_owed' ? 'right' : 'left', 
+                        color: '#475569', 
+                        fontSize: '13px', 
+                        textTransform: 'uppercase', 
+                        fontWeight: 'bold', 
+                        borderRight: '1px solid #f1f5f9', 
+                        cursor: isDraggable ? 'pointer' : 'default', 
+                        whiteSpace: 'nowrap', 
+                        userSelect: 'none' 
+                      }}
+                    >
+                      {label}
+                      {isDraggable && (<span style={{ marginLeft: '6px', fontSize: '12px', opacity: supplierSort?.key === col ? 1 : 0.3 }}>{supplierSort?.key === col ? (supplierSort.direction === 'asc' ? '↑' : '↓') : '↕'}</span>)}
+                      {isDraggable && <div onMouseDown={(e) => handleResizeStartSupplier(e, col)} onTouchStart={(e) => handleResizeStartSupplier(e, col)} style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: '14px', cursor: 'col-resize', background: 'transparent', zIndex: 10, transform: 'translateX(50%)' }} />}
+                    </th>
+                  );
+                })}
               </tr>
             </thead>
             <tbody>
-              {suppliers.length === 0 ? (
-                <tr><td colSpan={5} style={{ padding: '40px', textAlign: 'center', color: '#94a3b8' }}>No suppliers recorded.</td></tr>
+              {processedSuppliers.length === 0 ? (
+                <tr><td colSpan={supplierColOrder.length} style={{ padding: '40px', textAlign: 'center', color: '#94a3b8' }}>No suppliers recorded.</td></tr>
               ) : (
-                suppliers.map((s: any) => (
+                processedSuppliers.map((s: any) => (
                   <tr key={s.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                    <td style={{ padding: '16px', textAlign: 'center', borderRight: '1px solid #f1f5f9' }}>
-                      <input 
-                        type="checkbox" 
-                        checked={selectedSuppliersToDelete.has(s.id)}
-                        onChange={() => {
-                          const next = new Set(selectedSuppliersToDelete)
-                          next.has(s.id) ? next.delete(s.id) : next.add(s.id)
-                          setSelectedSuppliersToDelete(next)
-                        }} 
-                        style={{ cursor: 'pointer', accentColor: '#b58a3d', width: '16px', height: '16px' }} 
-                      />
-                    </td>
-                    <td className="supplier-name-cell" style={{ padding: '16px', fontWeight: 'bold', color: '#0f172a' }}>{s.name}</td>
-                    <td style={{ padding: '16px', color: '#475569' }}>{s.phone || '-'}</td>
-                    <td style={{ padding: '16px', color: '#475569' }}>{s.location || '-'}</td>
-                    <td style={{ padding: '16px', textAlign: 'right', fontWeight: 'bold', color: Number(s.total_owed_riel) > 0 ? '#ef4444' : '#10b981', fontSize: '16px' }}>
-                      {formatRiel(s.total_owed_riel || 0)}
-                      {Number(s.total_owed_usd) > 0 && <div style={{ fontSize: '14px', marginTop: '4px' }}>{formatUSD(s.total_owed_usd)}</div>}
-                    </td>
+                    {supplierColOrder.map(col => {
+                      if (col === 'select') return (
+                        <td key={col} style={{ padding: '14px 12px', textAlign: 'center', borderRight: '1px solid #f1f5f9' }}>
+                          <input 
+                            type="checkbox" 
+                            checked={selectedSuppliersToDelete.has(s.id)}
+                            onChange={() => {
+                              const next = new Set(selectedSuppliersToDelete)
+                              next.has(s.id) ? next.delete(s.id) : next.add(s.id)
+                              setSelectedSuppliersToDelete(next)
+                            }} 
+                            style={{ cursor: 'pointer', accentColor: '#b58a3d', width: '16px', height: '16px' }} 
+                          />
+                        </td>
+                      );
+                      if (col === 'name') return <td key={col} style={{ padding: '14px 12px', fontWeight: 'bold', color: '#0f172a', fontSize: '14px', borderRight: '1px solid #f1f5f9', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{s.name}</td>;
+                      if (col === 'phone') return <td key={col} style={{ padding: '14px 12px', color: '#475569', fontSize: '14px', borderRight: '1px solid #f1f5f9', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{s.phone || '-'}</td>;
+                      if (col === 'location') return <td key={col} style={{ padding: '14px 12px', color: '#475569', fontSize: '14px', borderRight: '1px solid #f1f5f9', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{s.location || '-'}</td>;
+                      if (col === 'total_owed') return (
+                        <td key={col} style={{ padding: '14px 12px', textAlign: 'right', fontWeight: 'bold', color: Number(s.total_owed_riel) > 0 ? '#ef4444' : '#10b981', fontSize: '14px', borderRight: '1px solid #f1f5f9', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                          {formatRiel(s.total_owed_riel || 0)}
+                          {Number(s.total_owed_usd) > 0 && <div style={{ fontSize: '12px', marginTop: '4px' }}>{formatUSD(s.total_owed_usd)}</div>}
+                        </td>
+                      );
+                      return null;
+                    })}
                   </tr>
                 ))
               )}
@@ -1883,6 +2107,41 @@ export default function RiceControl() {
           to { opacity: 1; transform: translateY(0); }
         }
 
+        /* 🔥 TOAST NOTIFICATION STYLES */
+        .toast-notification {
+          position: fixed;
+          top: 20px;
+          left: 50%;
+          transform: translateX(-50%);
+          z-index: 100000;
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          padding: 14px 20px;
+          border-radius: 12px;
+          box-shadow: 0 10px 25px rgba(0,0,0,0.15);
+          background: #ffffff;
+          min-width: 300px;
+          border-left: 4px solid #3b82f6;
+          animation: slideDown 0.4s cubic-bezier(0.16, 1, 0.3, 1), fadeOut 0.4s ease-in-out 4s forwards;
+        }
+        @keyframes slideDown {
+          from { opacity: 0; transform: translate(-50%, -20px); }
+          to { opacity: 1; transform: translate(-50%, 0); }
+        }
+        @keyframes fadeOut {
+          from { opacity: 1; transform: translate(-50%, 0); }
+          to { opacity: 0; transform: translate(-50%, -20px); }
+        }
+        .toast-notification.success { border-left-color: #10b981; }
+        .toast-notification.error { border-left-color: #ef4444; }
+        .toast-notification.info { border-left-color: #3b82f6; }
+        
+        .toast-icon { font-size: 20px; }
+        .toast-content { display: flex; flex-direction: column; gap: 2px; }
+        .toast-title { font-weight: bold; color: #0f172a; font-size: 14px; }
+        .toast-msg { color: #64748b; font-size: 13px; }
+
         /* 📱 RESPONSIVE CLASSES */
         .desktop-only-btn { display: block; }
         .mobile-only-btn { display: none !important; }
@@ -1912,11 +2171,11 @@ export default function RiceControl() {
 
         .header-container { 
           display: flex;
-          justify-content: space-between; /* Preserved to keep header-actions on the right */
+          justify-content: space-between;
           align-items: center; 
           margin-bottom: 24px; 
           margin-top: 0;
-          margin-left: 60px; /* 🔥 Clears the burger menu icon for horizontal alignment */
+          margin-left: 60px; 
           gap: 12px;
           min-height: 48px; 
         }
@@ -2064,7 +2323,7 @@ export default function RiceControl() {
           width: 100%;
           height: 100%;
           padding: 16px 12px;
-          font-size: 16px;
+          font-size: 14px;
           border: none;
           outline: 2px solid #b58a3d;
           box-shadow: 0 0 5px rgba(181, 138, 61, 0.3);
@@ -2173,23 +2432,20 @@ export default function RiceControl() {
           .mobile-only-flex { display: flex !important; }
 
           .main-wrapper { 
-            /* 🔥 Preserved: keeping 140px bottom padding for the shopping cart FAB */
-            padding: max(20px, env(safe-area-inset-top, 20px)) 16px 140px 16px !important; 
-            
-            /* 👇 MOBILE SCROLL FIX 👇 */
+            padding: max(20px, env(safe-area-inset-top, 20px)) 16px 16px 16px !important; 
             height: 100dvh !important;
             overflow-y: auto !important;
             -webkit-overflow-scrolling: touch !important;
           }
           
           .header-container { 
-            margin-left: 54px !important; /* Clears mobile hamburger button safely */
+            margin-left: 54px !important; 
             margin-right: 0 !important;
             margin-bottom: 24px !important; 
             margin-top: 0 !important;
             display: flex !important;
             flex-direction: row !important;
-            justify-content: space-between !important;
+            justify-content: flex-start !important;
             align-items: center !important; 
             min-height: 44px !important;
             width: calc(100% - 54px) !important;
@@ -2208,7 +2464,6 @@ export default function RiceControl() {
             white-space: nowrap !important; 
           }
 
-          /* 🔥 Forces tabs and action row to stack cleanly */
           .toolbar-container {
             flex-direction: column !important;
             align-items: stretch !important;
@@ -2219,15 +2474,14 @@ export default function RiceControl() {
             width: 100%;
           }
           
-          /* 🔥 Squeezes Search, Add, and Filter into one row exactly */
           .mobile-action-row {
             width: 100%;
             gap: 8px !important;
-            min-width: 0 !important; /* overrides desktop min-width */
+            min-width: 0 !important;
             justify-content: space-between;
           }
           .toolbar-search {
-            min-width: 0 !important; /* allows the search bar to shrink as needed */
+            min-width: 0 !important;
             width: 100%;
             padding: 8px 10px !important;
             font-size: 14px !important;
@@ -2237,11 +2491,10 @@ export default function RiceControl() {
           }
           .filter-btn, .add-btn-inline {
             padding: 8px 10px !important;
-            font-size: 12px !important; /* Reduced slightly to ensure it fits next to search */
+            font-size: 12px !important; 
             white-space: nowrap !important;
           }
 
-          /* SHRINK SUPPLIER NAME ON MOBILE */
           .supplier-name-cell {
             font-size: 14px !important;
           }
