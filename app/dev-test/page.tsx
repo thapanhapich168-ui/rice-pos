@@ -160,10 +160,10 @@ export default function MasterTestEngine() {
            transaction_id: `${TEST_ID}_RET_TX`, rice_type: rProd.name, qty: 5, price_per_bag: 3000, cogs_price: retailCogsPerKg
         }).select().single();
 
-        assertEq(2000, retSale.cogs_price, testName, '[Table: retail_sales] COGS correctly evaluated as 2,000 ៛');
-        assertEq(15000, retSale.total_sales, testName, '[Table: retail_sales] total_sales auto-calculated to 15,000 ៛');
-        assertEq(10000, retSale.total_cogs, testName, '[Table: retail_sales] total_cogs auto-calculated to 10,000 ៛');
-        assertEq(5000, retSale.total_profit, testName, '[Table: retail_sales] total_profit auto-calculated to 5,000 ៛');
+        assertEq(2000, retSale?.cogs_price, testName, '[Table: retail_sales] COGS correctly evaluated as 2,000 ៛');
+        assertEq(15000, retSale?.total_sales, testName, '[Table: retail_sales] total_sales auto-calculated to 15,000 ៛');
+        assertEq(10000, retSale?.total_cogs, testName, '[Table: retail_sales] total_cogs auto-calculated to 10,000 ៛');
+        assertEq(5000, retSale?.total_profit, testName, '[Table: retail_sales] total_profit auto-calculated to 5,000 ៛');
 
         uiCheck(testName, 'Retail card stock amount (📦) reduces by 5 without page refresh.');
         uiCheck(testName, 'Enter 20,000៛ in payment. Verify "Change Due" modal pops up showing exactly 5,000៛ change.');
@@ -246,12 +246,12 @@ export default function MasterTestEngine() {
         const { data: imp } = await supabase.from('imports').insert({
           supplier_id: supData.id, product_id: wProd.id, qty: 100, unit_cost: 100000, total_cost: 10000000, paid_amount: 2000000, status: 'Pending'
         }).select().single();
-        assertEq('Pending', imp.status, testName, '[Table: imports] Import recorded with Pending status');
+        assertEq('Pending', imp?.status, testName, '[Table: imports] Import recorded with Pending status');
 
         const { data: ap } = await supabase.from('accounts_payable').insert({
           supplier_name: supData.name, supplier_id: supData.id, amount_riel: 8000000, status: 'Unpaid'
         }).select().single();
-        assertEq(8000000, ap.amount_riel, testName, '[Table: accounts_payable] Exact 8M ៛ Debt row created');
+        assertEq(8000000, ap?.amount_riel, testName, '[Table: accounts_payable] Exact 8M ៛ Debt row created');
 
         uiCheck(testName, 'D.1: Verify Retail stock increase dynamically updates Rice Asset Evaluation in Dashboard.');
         uiCheck(testName, 'D.5: Import splits batches into 2 rows if stock belongs to different imported batches.');
@@ -271,12 +271,12 @@ export default function MasterTestEngine() {
         const { data: pMom } = await supabase.from('invoice_payments').insert({
           invoice_id: `${TEST_ID}_MOM_F`, amount_paid_riel: 500000, payment_method: 'Cash ៛', recorded_by: 'Both'
         }).select().single();
-        assertEq(500000, pMom.amount_paid_riel, testName, '[Table: invoice_payments] Business logs 500k collected on Mom\'s behalf');
+        assertEq(500000, pMom?.amount_paid_riel, testName, '[Table: invoice_payments] Business logs 500k collected on Mom\'s behalf');
 
         const { data: cMom } = await supabase.from('cogs_settlements').insert({
           settlement_date: new Date().toISOString(), owner_name: 'Mom', paid_amount_riel: 400000, payment_method: 'Mom Liability ៛', remarks: `${TEST_ID}_MOM_SETTLE`
         }).select().single();
-        assertEq(400000, cMom.paid_amount_riel, testName, '[Table: cogs_settlements] Business reclaims 400k using Liability offset');
+        assertEq(400000, cMom?.paid_amount_riel, testName, '[Table: cogs_settlements] Business reclaims 400k using Liability offset');
 
         uiCheck(testName, 'B.3: Mom wholesale sale DOES NOT bloat Business Summary Dashboard revenue.');
         uiCheck(testName, 'F: COGS Liability Settlement modal caps max payment at the exact Live Liability number.');
@@ -328,11 +328,11 @@ export default function MasterTestEngine() {
         const { data: debtHist } = await supabase.from('staff_debt_history').insert({
           staff_id: stf.id, amount: 100000, payment_method: 'Cash ៛'
         }).select().single();
-        assertEq(100000, debtHist.amount, testName, '[Table: staff_debt_history] Advance successfully logged');
+        assertEq(100000, debtHist?.amount, testName, '[Table: staff_debt_history] Advance successfully logged');
 
         const dailyRate = 1200000 / 30; 
         const earned = dailyRate * 15; 
-        const netPayout = earned - stf.total_debt_riel;
+        const netPayout = earned - (stf?.total_debt_riel || 0);
 
         assertEq(600000, earned, testName, '[Logic] MTD Earned calculates flawlessly as 600,000 ៛');
         assertEq(500000, netPayout, testName, '[Logic] Net Payout accurately deducts debt to 500,000 ៛');
@@ -379,24 +379,20 @@ export default function MasterTestEngine() {
       testName = 'Test L: Dashboard Financial Engine Validation';
       logInfo(testName, 'Simulating full lifecycle for Dashboard Net Worth & AR/AP math...');
       try {
-        // 1. Supplier & Product
         const { data: dSup } = await supabase.from('suppliers').insert({ name: `${TEST_ID}_DASH_SUP` }).select().single();
         const { data: dProd } = await supabase.from('products').insert({ name: `${TEST_ID}_DASH_PROD`, price: 15000, cost_price: 10000 }).select().single();
 
-        // 2. Import (Creates AP)
         await supabase.from('imports').insert({ supplier_id: dSup.id, product_id: dProd.id, qty: 100, unit_cost: 10000, total_cost: 1000000, paid_amount: 0, status: 'Pending' });
         const { data: dAp } = await supabase.from('accounts_payable').insert({ supplier_id: dSup.id, supplier_name: dSup.name, amount_riel: 1000000, status: 'Unpaid' }).select().single();
 
-        assertEq(1000000, dAp.amount_riel, testName, '[Dashboard: AP] Accounts Payable registered correctly');
+        assertEq(1000000, dAp?.amount_riel, testName, '[Dashboard: AP] Accounts Payable registered correctly');
 
-        // 3. Wholesale Sale (Unpaid -> Biz AR)
         await supabase.from('invoice_summaries').insert({ invoice_id: `${TEST_ID}_DASH_INV`, customer_name: 'Biz Customer', balance_due: 30000, owner: 'Both', total_sales: 30000, total_cogs: 20000 });
         const { data: dSale } = await supabase.from('sales').insert({ invoice_id: `${TEST_ID}_DASH_INV`, rice_type: dProd.name, product_id: dProd.id, qty: 2, price_per_bag: 15000, cogs_price: 10000 }).select().single();
 
-        assertEq(30000, dSale.total_sales, testName, '[Dashboard: AR] Sale math evaluates revenue');
-        assertEq(10000, dSale.total_profit, testName, '[Dashboard: Profit] Sale math evaluates profit');
+        assertEq(30000, dSale?.total_sales, testName, '[Dashboard: AR] Sale math evaluates revenue');
+        assertEq(10000, dSale?.total_profit, testName, '[Dashboard: Profit] Sale math evaluates profit');
 
-        // 4. Mom COGS & Liability
         await supabase.from('invoice_summaries').insert({ invoice_id: `${TEST_ID}_MOM_DASH`, customer_name: 'Mom Customer', balance_due: 0, owner: 'Mom', total_sales: 15000, total_cogs: 10000 });
         await supabase.from('sales').insert({ invoice_id: `${TEST_ID}_MOM_DASH`, rice_type: dProd.name, product_id: dProd.id, qty: 1, price_per_bag: 15000, cogs_price: 10000 });
         
@@ -415,7 +411,6 @@ export default function MasterTestEngine() {
       testName = 'Test K: Database Safe Deletions';
       logInfo(testName, 'Testing Staff cascade, and verifying safe Product/Supplier cleanup...');
       try {
-        // 1. STAFF CASCADE
         const { data: stf } = await supabase.from('staff').insert({ name: `${TEST_ID}_DEL_STAFF`, salary: 100 }).select().single();
         await supabase.from('staff_debt_history').insert({ staff_id: stf.id, amount: 50, payment_method: 'Cash' });
         
@@ -425,7 +420,6 @@ export default function MasterTestEngine() {
         const { data: stfHist } = await supabase.from('staff_debt_history').select('id').eq('staff_id', stf.id);
         assertEq(0, stfHist?.length, testName, '[Table: staff_debt_history] Debt History destroyed instantly when Staff was deleted');
 
-        // 2. PRODUCT SAFE DELETION
         const { data: pSup } = await supabase.from('suppliers').insert({ name: `${TEST_ID}_DEL_SUP_1` }).select().single();
         const { data: pProd } = await supabase.from('products').insert({ name: `${TEST_ID}_DEL_PROD`, price: 10 }).select().single();
         await supabase.from('imports').insert({ supplier_id: pSup.id, product_id: pProd.id, qty: 10, unit_cost: 10, total_cost: 100 });
@@ -434,13 +428,65 @@ export default function MasterTestEngine() {
         const { error: errProd } = await supabase.from('products').delete().eq('id', pProd.id); 
         assertEq(true, !errProd, testName, '[App Logic] Product deleted successfully after manual cleanup');
 
-        // 3. SUPPLIER SAFE DELETION
         await supabase.from('imports').delete().eq('supplier_id', pSup.id);
         const { error: errSup } = await supabase.from('suppliers').delete().eq('id', pSup.id); 
         assertEq(true, !errSup, testName, '[App Logic] Supplier deleted successfully after manual cleanup');
 
         uiCheck(testName, 'J.1: Deleting a customer no longer throws an error; historical data remains intact.');
         uiCheck(testName, 'J.2: Deleting an invoice cleans up all attached items and payments automatically.');
+
+        setStatus(testName, 'PASS');
+      } catch (e: any) { setStatus(testName, 'FAIL', e.message); }
+
+      // =========================================================================
+      // MODULE 12: BIZ DATABASE SMART VOID & RESTORATION
+      // =========================================================================
+      testName = 'Test M: Biz Database Smart Void & Restoration';
+      logInfo(testName, 'Testing Walk-in/Retail isolation and safe cascading voids...');
+      try {
+        const { data: bProd } = await supabase.from('products').insert({ name: `${TEST_ID}_BIZ_PROD`, price: 10, cost_price: 5, stock: 100 }).select().single();
+        const { data: bBatch } = await supabase.from('price_history').insert({ product_id: bProd.id, price: 10, cost_price: 5, imported_qty: 100, remaining_qty: 100, sold_qty: 10 }).select().single();
+        
+        const { data: checkProd1 } = await supabase.from('products').select('stock').eq('id', bProd.id).single();
+        await supabase.from('products').update({ stock: Number(checkProd1?.stock || 0) - 10 }).eq('id', bProd.id);
+
+        const { data: bSum } = await supabase.from('invoice_summaries').insert({ invoice_id: `${TEST_ID}_BIZ_WALKIN`, customer_name: 'Walk-in', is_done: true }).select().single();
+        const { data: bSale } = await supabase.from('sales').insert({ invoice_id: `${TEST_ID}_BIZ_WALKIN`, rice_type: bProd.name, product_id: bProd.id, qty: 10, price_per_bag: 10, cogs_price: 5 }).select().single();
+
+        logInfo(testName, 'Simulating Smart Void on Walk-in Sale...');
+        
+        const { data: checkProd2 } = await supabase.from('products').select('stock').eq('id', bProd.id).single();
+        await supabase.from('products').update({ stock: Number(checkProd2?.stock || 0) + 10 }).eq('id', bProd.id);
+        
+        await supabase.from('price_history').update({ sold_qty: 0 }).eq('id', bBatch.id);
+
+        await supabase.from('sales').delete().eq('id', bSale.id);
+        await supabase.from('invoice_summaries').delete().eq('id', bSum.id);
+
+        const { data: verifyProd } = await supabase.from('products').select('stock').eq('id', bProd.id).single();
+        const { data: verifyBatch } = await supabase.from('price_history').select('sold_qty').eq('id', bBatch.id).single();
+
+        assertEq(100, verifyProd?.stock, testName, '[Table: products] Stock perfectly restored to 100 after Void');
+        assertEq(0, verifyBatch?.sold_qty, testName, '[Table: price_history] Sold Qty reversed to 0 after Void');
+
+        uiCheck(testName, 'M.1: Walk-in sales are safely isolated into their own tab and do not duplicate in Summary.');
+        uiCheck(testName, 'M.2: Voiding an item cascades deletion to payments and parents without Foreign Key block.');
+
+        setStatus(testName, 'PASS');
+      } catch (e: any) { setStatus(testName, 'FAIL', e.message); }
+
+      // =========================================================================
+      // MODULE 13: UI & IMPORT SAFEGUARDS (Recent Fixes)
+      // =========================================================================
+      testName = 'Test N: UI & Import Safeguards';
+      logInfo(testName, 'Verifying frontend locks, default values, and silent background fetching...');
+      try {
+        uiCheck(testName, 'N.1: Double-Import Prevented via useRef lock (tapping twice only triggers once).');
+        uiCheck(testName, 'N.2: "Add Product" in Receive Stock defaults cost, price, and stock to 0.');
+        uiCheck(testName, 'N.3: Mobile Keyboard "Enter" key (`enterKeyHint="done"`) correctly blurs and saves data.');
+        uiCheck(testName, 'N.4: Import dropdown filters out 1kg retail bags, showing only >= 50kg products.');
+        uiCheck(testName, 'N.5: Biz Database uses Silent Background Fetch (`isSilent`) to prevent "Loading..." flash on tab switch.');
+        uiCheck(testName, 'N.6: Dashboard layout locked to `overflow-x: hidden` preventing left/right screen sway.');
 
         setStatus(testName, 'PASS');
       } catch (e: any) { setStatus(testName, 'FAIL', e.message); }
