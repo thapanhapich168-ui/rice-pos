@@ -2376,8 +2376,8 @@ export default function RiceControl() {
         .dropdown-results-tray {
           position: absolute;
           top: 100%;
-          left: 12px;
-          right: 12px;
+          left: 0px;
+          right: 0px;
           background: #ffffff;
           border: 1px solid #cbd5e1;
           border-radius: 8px;
@@ -2388,7 +2388,7 @@ export default function RiceControl() {
         }
         .dropdown-row {
           padding: 10px 12px;
-          font-size: 16px;
+          font-size: 14px;
           cursor: pointer;
           color: #0f172a;
           border-bottom: 1px solid #f1f5f9;
