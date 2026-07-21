@@ -396,7 +396,7 @@ export default function RiceControl() {
     
     const targetProduct = products.find(p => p.id === originalBatch.product_id);
     if (!targetProduct) return setEditingHistoryId(null);
-
+    
     const originalQty = Number(originalBatch.remaining_qty) || 0;
     const newQty = edits.remaining_qty !== undefined ? Number(edits.remaining_qty) : originalQty;
     const qtyDifference = newQty - originalQty;
@@ -1408,35 +1408,35 @@ export default function RiceControl() {
 
                       {/* Expandable Child Row Batch List (View Only) */}
                       {isExpanded && activeView === 'wholesale' && pBatches.length > 1 && pBatches.slice(1).map((batch, index) => {
-                         let batchLabel = index === 0 ? '2nd Batch' : index === 1 ? '3rd Batch' : `${index + 2}th Batch`;
-                         
-                         return (
-                           <tr key={`batch-${batch.id}`} style={{ background: '#f8fafc', borderBottom: index === pBatches.length - 2 ? '2px solid #cbd5e1' : '1px dashed #e2e8f0' }}>
-                             {columnOrder.map(col => {
-                               if (col === 'expand') return <td key={col} style={{ borderRight: '1px solid #f1f5f9' }}></td>;
-                               if (col === 'linked_wholesale' || col === 'mtd_kg_used' || col === 'mtd_bags_used') return null;
-                               if (col === 'id') return <td key={col} style={{ borderRight: '1px solid #f1f5f9' }}></td>;
-                               
-                               if (col === 'name') return (
-                                 <td key={col} style={{ padding: '12px 12px 12px 48px', borderRight: '1px solid #f1f5f9', color: '#475569', fontSize: '14px' }}>
-                                   ↳ {batchLabel}
-                                 </td>
-                               );
-                               
-                               if (col === 'price') return <td key={col} style={{ padding: '12px', borderRight: '1px solid #f1f5f9', color: '#475569', fontSize: '14px' }}>-</td>;
-                               
-                               if (col === 'cost_price') return <td key={col} style={{ padding: '12px', borderRight: '1px solid #f1f5f9', color: '#475569', fontSize: '14px' }}>{formatRiel(batch.cost_price)}</td>;
-                               
-                               if (col === 'stock') return <td key={col} style={{ padding: '12px', borderRight: '1px solid #f1f5f9', color: '#b58a3d', fontWeight: 'bold', fontSize: '14px' }}>{batch.remaining_qty}</td>;
-                               
-                               if (col === 'actions') {
-                                 return <td key={col} style={{ borderRight: '1px solid #f1f5f9' }}></td>;
-                               }
-                               
-                               return <td key={col} style={{ padding: '12px', borderRight: '1px solid #f1f5f9', color: '#94a3b8', fontSize: '14px', textAlign: 'center' }}>-</td>;
-                             })}
-                           </tr>
-                         )
+                          let batchLabel = index === 0 ? '2nd Batch' : index === 1 ? '3rd Batch' : `${index + 2}th Batch`;
+                          
+                          return (
+                            <tr key={`batch-${batch.id}`} style={{ background: '#f8fafc', borderBottom: index === pBatches.length - 2 ? '2px solid #cbd5e1' : '1px dashed #e2e8f0' }}>
+                               {columnOrder.map(col => {
+                                 if (col === 'expand') return <td key={col} style={{ borderRight: '1px solid #f1f5f9' }}></td>;
+                                 if (col === 'linked_wholesale' || col === 'mtd_kg_used' || col === 'mtd_bags_used') return null;
+                                 if (col === 'id') return <td key={col} style={{ borderRight: '1px solid #f1f5f9' }}></td>;
+                                 
+                                 if (col === 'name') return (
+                                   <td key={col} style={{ padding: '12px 12px 12px 48px', borderRight: '1px solid #f1f5f9', color: '#475569', fontSize: '14px' }}>
+                                     ↳ {batchLabel}
+                                   </td>
+                                 );
+                                 
+                                 if (col === 'price') return <td key={col} style={{ padding: '12px', borderRight: '1px solid #f1f5f9', color: '#475569', fontSize: '14px' }}>-</td>;
+                                 
+                                 if (col === 'cost_price') return <td key={col} style={{ padding: '12px', borderRight: '1px solid #f1f5f9', color: '#475569', fontSize: '14px' }}>{formatRiel(batch.cost_price)}</td>;
+                                 
+                                 if (col === 'stock') return <td key={col} style={{ padding: '12px', borderRight: '1px solid #f1f5f9', color: '#b58a3d', fontWeight: 'bold', fontSize: '14px' }}>{batch.remaining_qty}</td>;
+                                 
+                                 if (col === 'actions') {
+                                   return <td key={col} style={{ borderRight: '1px solid #f1f5f9' }}></td>;
+                                 }
+                                 
+                                 return <td key={col} style={{ padding: '12px', borderRight: '1px solid #f1f5f9', color: '#94a3b8', fontSize: '14px', textAlign: 'center' }}>-</td>;
+                               })}
+                            </tr>
+                          )
                       })}
                     </React.Fragment>
                   )
@@ -1505,7 +1505,6 @@ export default function RiceControl() {
                       onKeyDown={e => e.key === 'Escape' && setIsProductDropdownOpen(false)} 
                     />
                     <div className="dropdown-results-tray">
-                      {/* 🔥 Filter forces only >= 50kg bags to be shown */}
                       {products.filter(p => p.weight >= 50 && p.name.toLowerCase().includes(productSearch.toLowerCase())).map(p => (
                         <div key={p.id} className="dropdown-row" onMouseDown={(e) => { e.stopPropagation(); setImportForm({...importForm, product_id: String(p.id)}); setIsProductDropdownOpen(false); }}>
                           <span style={{ fontWeight: 'bold' }}>{p.name}</span>
@@ -1524,11 +1523,11 @@ export default function RiceControl() {
               <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap' }}>
                 <div style={{ flex: 1, minWidth: '150px' }}>
                   <label style={{ display: 'block', fontSize: '13px', color: '#0f172a', fontWeight: 'bold', marginBottom: '6px' }}>Quantity Imported</label>
-                  <input type="number" className="no-spinners" placeholder="" value={importForm.qty} onChange={e => setImportForm({...importForm, qty: e.target.value})} style={{ width: '100%', padding: '12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '15px', boxSizing: 'border-box' }} />
+                  <input type="number" className="no-spinners" placeholder="" value={importForm.qty} onChange={e => setImportForm({...importForm, qty: e.target.value})} style={{ width: '100%', padding: '12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '16px', boxSizing: 'border-box' }} />
                 </div>
                 <div style={{ flex: 1, minWidth: '150px' }}>
                   <label style={{ display: 'block', fontSize: '13px', color: '#0f172a', fontWeight: 'bold', marginBottom: '6px' }}>Unit Cost (៛)</label>
-                  <input type="number" className="no-spinners" placeholder="" value={importForm.unit_cost} onChange={e => setImportForm({...importForm, unit_cost: e.target.value})} style={{ width: '100%', padding: '12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '15px', boxSizing: 'border-box' }} />
+                  <input type="number" className="no-spinners" placeholder="" value={importForm.unit_cost} onChange={e => setImportForm({...importForm, unit_cost: e.target.value})} style={{ width: '100%', padding: '12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '16px', boxSizing: 'border-box' }} />
                 </div>
               </div>
 
@@ -1542,11 +1541,11 @@ export default function RiceControl() {
                 <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap' }}>
                   <div style={{ flex: 2, minWidth: '150px' }}>
                     <label style={{ display: 'block', fontSize: '12px', color: '#64748b', fontWeight: 'bold', marginBottom: '6px' }}>Amount Paying Now (៛)</label>
-                    <input type="number" className="no-spinners" placeholder="" value={importForm.paid_amount} onChange={e => setImportForm({...importForm, paid_amount: e.target.value})} style={{ width: '100%', padding: '12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '15px', boxSizing: 'border-box' }} />
+                    <input type="number" className="no-spinners" placeholder="" value={importForm.paid_amount} onChange={e => setImportForm({...importForm, paid_amount: e.target.value})} style={{ width: '100%', padding: '12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '16px', boxSizing: 'border-box' }} />
                   </div>
                   <div style={{ flex: 1, minWidth: '120px' }}>
                     <label style={{ display: 'block', fontSize: '12px', color: '#64748b', fontWeight: 'bold', marginBottom: '6px' }}>Payment Method</label>
-                    <select value={importForm.payment_method} onChange={e => setImportForm({...importForm, payment_method: e.target.value})} style={{ width: '100%', padding: '12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '15px', outline: 'none', backgroundColor: '#fff' }}>
+                    <select value={importForm.payment_method} onChange={e => setImportForm({...importForm, payment_method: e.target.value})} style={{ width: '100%', padding: '12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '16px', outline: 'none', backgroundColor: '#fff' }}>
                       <option value="Cash ៛">💵 Cash ៛</option>
                       <option value="Cash $">💵 Cash $</option>
                       <option value="QR ៛">📱 QR ៛</option>
@@ -1808,7 +1807,7 @@ export default function RiceControl() {
                       newRows[index].method = e.target.value;
                       setPendingPaymentRows(newRows);
                     }}
-                    style={{ width: '45%', padding: '12px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '14px', outline: 'none', backgroundColor: '#fff', cursor: 'pointer', color: '#334155' }}
+                    style={{ width: '45%', padding: '12px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '16px', outline: 'none', backgroundColor: '#fff', cursor: 'pointer', color: '#334155' }}
                   >
                     <option value="Cash ៛">💵 Cash ៛</option>
                     <option value="Cash $">💵 Cash $</option>
@@ -1828,7 +1827,7 @@ export default function RiceControl() {
                         setPendingPaymentRows(newRows);
                       }}
                       onEnter={handlePayPendingSubmit}
-                      style={{ width: '100%', padding: '12px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', outline: 'none', textAlign: 'right' }}
+                      style={{ width: '100%', padding: '12px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', outline: 'none', textAlign: 'right', fontSize: '16px' }}
                     />
                   </div>
                   
@@ -1905,11 +1904,11 @@ export default function RiceControl() {
                           <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', flex: 1 }}>
                             <div style={{ flex: '1 1 80px' }}>
                               <label style={{ fontSize: '11px', fontWeight: 'bold', color: '#64748b' }}>Remaining Qty</label>
-                              <input autoFocus type="number" className="no-spinners" value={editData.remaining_qty} onChange={e => setHistoryEdits({...historyEdits, [b.id]: {...editData, remaining_qty: Number(e.target.value)}})} onKeyDown={e => e.key === 'Enter' && handleSaveHistory(b.id)} style={{ width: '100%', padding: '6px', border: '1px solid #b58a3d', borderRadius: '4px', fontSize: '14px', color: '#0f172a', backgroundColor: '#fff' }} />
+                              <input autoFocus type="number" className="no-spinners" value={editData.remaining_qty} onChange={e => setHistoryEdits({...historyEdits, [b.id]: {...editData, remaining_qty: Number(e.target.value)}})} onKeyDown={e => e.key === 'Enter' && handleSaveHistory(b.id)} style={{ width: '100%', padding: '6px', border: '1px solid #b58a3d', borderRadius: '4px', fontSize: '16px', color: '#0f172a', backgroundColor: '#fff' }} />
                             </div>
                             <div style={{ flex: '1 1 100px' }}>
                               <label style={{ fontSize: '11px', fontWeight: 'bold', color: '#64748b' }}>Cost (៛)</label>
-                              <input type="number" className="no-spinners" value={editData.cost_price} onChange={e => setHistoryEdits({...historyEdits, [b.id]: {...editData, cost_price: Number(e.target.value)}})} onKeyDown={e => e.key === 'Enter' && handleSaveHistory(b.id)} style={{ width: '100%', padding: '6px', border: '1px solid #b58a3d', borderRadius: '4px', fontSize: '14px', color: '#0f172a', backgroundColor: '#fff' }} />
+                              <input type="number" className="no-spinners" value={editData.cost_price} onChange={e => setHistoryEdits({...historyEdits, [b.id]: {...editData, cost_price: Number(e.target.value)}})} onKeyDown={e => e.key === 'Enter' && handleSaveHistory(b.id)} style={{ width: '100%', padding: '6px', border: '1px solid #b58a3d', borderRadius: '4px', fontSize: '16px', color: '#0f172a', backgroundColor: '#fff' }} />
                             </div>
                           </div>
                         ) : (
@@ -2054,27 +2053,27 @@ export default function RiceControl() {
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
                 <div>
                   <label style={{ display: 'block', fontSize: '13px', color: '#0f172a', fontWeight: 'bold', marginBottom: '6px' }}>Selling Price (៛)</label>
-                  <CurrencyInput value={newItem.price} onChange={(v:any) => setNewItem({...newItem, price: v})} style={{ width: '100%', padding: '10px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box' }} />
+                  <CurrencyInput value={newItem.price} onChange={(v:any) => setNewItem({...newItem, price: v})} style={{ width: '100%', padding: '10px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', fontSize: '16px' }} />
                 </div>
                 <div>
                   <label style={{ display: 'block', fontSize: '13px', color: '#0f172a', fontWeight: 'bold', marginBottom: '6px' }}>Cost Price (៛)</label>
-                  <CurrencyInput value={newItem.cost_price} onChange={(v:any) => setNewItem({...newItem, cost_price: v})} style={{ width: '100%', padding: '10px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box' }} />
+                  <CurrencyInput value={newItem.cost_price} onChange={(v:any) => setNewItem({...newItem, cost_price: v})} style={{ width: '100%', padding: '10px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', fontSize: '16px' }} />
                 </div>
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '8px' }}>
                 <div>
                   <label style={{ display: 'block', fontSize: '13px', color: '#0f172a', fontWeight: 'bold', marginBottom: '6px' }}>Weight (kg)</label>
-                  <input type="number" className="no-spinners" value={newItem.weight} onChange={e => setNewItem({...newItem, weight: e.target.value})} style={{ width: '100%', padding: '10px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box' }} />
+                  <input type="number" className="no-spinners" value={newItem.weight} onChange={e => setNewItem({...newItem, weight: e.target.value})} style={{ width: '100%', padding: '10px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', fontSize: '16px' }} />
                 </div>
                 <div>
                   <label style={{ display: 'block', fontSize: '13px', color: '#0f172a', fontWeight: 'bold', marginBottom: '6px' }}>Initial Stock</label>
-                  <input type="number" className="no-spinners" value={newItem.stock} onChange={e => setNewItem({...newItem, stock: e.target.value})} style={{ width: '100%', padding: '10px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box' }} />
+                  <input type="number" className="no-spinners" value={newItem.stock} onChange={e => setNewItem({...newItem, stock: e.target.value})} style={{ width: '100%', padding: '10px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', fontSize: '16px' }} />
                 </div>
               </div>
               
               <div style={{ background: '#fef2f2', padding: '16px', borderRadius: '8px', border: '1px solid #fecaca' }}>
                 <label style={{ display: 'block', fontSize: '13px', color: '#991b1b', fontWeight: 'bold', marginBottom: '6px' }}>🚨 Min Stock Alert Level</label>
-                <input type="number" className="no-spinners" value={newItem.min_stock_level} onChange={e => setNewItem({...newItem, min_stock_level: e.target.value})} style={{ width: '100%', padding: '10px 12px', borderRadius: '6px', border: '1px solid #fca5a5', boxSizing: 'border-box', background: '#fff' }} />
+                <input type="number" className="no-spinners" value={newItem.min_stock_level} onChange={e => setNewItem({...newItem, min_stock_level: e.target.value})} style={{ width: '100%', padding: '10px 12px', borderRadius: '6px', border: '1px solid #fca5a5', boxSizing: 'border-box', background: '#fff', fontSize: '16px' }} />
                 <p style={{ fontSize: '11px', color: '#ef4444', marginTop: '6px', marginBottom: 0 }}>Triggers a Restock Alert if current stock falls below this amount.</p>
               </div>
             </div>
@@ -2089,6 +2088,12 @@ export default function RiceControl() {
 
       {/* --- GLOBAL CSS --- */}
       <style jsx global>{`
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+        * {
+          font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        }
+
         /* 🚀 FIXED CSS: Hide spin buttons on number inputs to stop scroll-wheel changes */
         input[type="number"].no-spinners::-webkit-inner-spin-button,
         input[type="number"].no-spinners::-webkit-outer-spin-button {
@@ -2158,7 +2163,7 @@ export default function RiceControl() {
         .main-wrapper { 
           padding: max(20px, env(safe-area-inset-top, 20px)) 24px 24px 24px; 
           background: #f8fafc; 
-          font-family: Arial, sans-serif; 
+          font-family: 'Inter', sans-serif; 
           box-sizing: border-box; 
           color: #333;
           width: 100%;
@@ -2323,7 +2328,7 @@ export default function RiceControl() {
           width: 100%;
           height: 100%;
           padding: 16px 12px;
-          font-size: 14px;
+          font-size: 16px;
           border: none;
           outline: 2px solid #b58a3d;
           box-shadow: 0 0 5px rgba(181, 138, 61, 0.3);
@@ -2359,10 +2364,10 @@ export default function RiceControl() {
         }
         .dropdown-search-input {
           width: 100%;
-          padding: 8px 12px;
+          padding: 10px 12px;
           border: 2px solid #b58a3d;
           border-radius: 6px;
-          font-size: 14px;
+          font-size: 16px;
           outline: none;
           box-sizing: border-box;
           color: #0f172a;
@@ -2484,7 +2489,7 @@ export default function RiceControl() {
             min-width: 0 !important;
             width: 100%;
             padding: 8px 10px !important;
-            font-size: 14px !important;
+            font-size: 16px !important;
           }
           .toolbar-filters {
             gap: 6px !important;
@@ -2497,6 +2502,10 @@ export default function RiceControl() {
 
           .supplier-name-cell {
             font-size: 14px !important;
+          }
+
+          .mobile-input-field {
+            font-size: 16px !important;
           }
         }
       `}</style>
