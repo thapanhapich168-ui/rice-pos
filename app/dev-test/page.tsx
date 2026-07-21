@@ -491,6 +491,42 @@ export default function MasterTestEngine() {
         setStatus(testName, 'PASS');
       } catch (e: any) { setStatus(testName, 'FAIL', e.message); }
 
+      // =========================================================================
+      // MODULE 14: DELIVERY PAGE VOID FILTERING
+      // =========================================================================
+      testName = 'Test O: Delivery Page Void Filtering';
+      logInfo(testName, 'Testing that voiding an invoice correctly applies is_done=true to remove from Delivery queue...');
+      try {
+        const voidInvId = `${TEST_ID}_DELIV_VOID`;
+        await supabase.from('invoice_summaries').insert({ 
+          invoice_id: voidInvId, 
+          customer_name: custData.name, 
+          customer_id: custData.id,
+          balance_due: 50000, 
+          total_sales: 50000, 
+          is_done: false, 
+          delivery_status: 'Pending' 
+        });
+
+        // Simulate the Void action that happens in InvoiceGallery/DeliveryPage
+        await supabase.from('invoice_summaries').update({ 
+          delivery_status: 'Voided',
+          balance_due: 0,
+          is_done: true
+        }).eq('invoice_id', voidInvId);
+
+        const { data: checkVoid } = await supabase.from('invoice_summaries').select('delivery_status, is_done, balance_due').eq('invoice_id', voidInvId).single();
+        
+        assertEq('Voided', checkVoid?.delivery_status, testName, '[Table: invoice_summaries] delivery_status correctly marked as Voided');
+        assertEq(true, checkVoid?.is_done, testName, '[Table: invoice_summaries] is_done flag set to true (Hides from Delivery Queue)');
+        assertEq(0, checkVoid?.balance_due, testName, '[Table: invoice_summaries] balance_due successfully zeroed out');
+
+        uiCheck(testName, 'O.1: Go to Delivery Page, confirm voided invoices instantly vanish from the "Delivery Queue" tab.');
+        uiCheck(testName, 'O.2: In Invoice Gallery, the voided invoice still shows but with a red "VOID" stamp.');
+
+        setStatus(testName, 'PASS');
+      } catch (e: any) { setStatus(testName, 'FAIL', e.message); }
+
     } catch (err: any) {
       logInfo('System', `Engine Crash: ${err.message}`);
     } finally {

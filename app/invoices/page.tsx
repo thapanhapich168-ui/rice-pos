@@ -95,12 +95,32 @@ export default function InvoiceGallery() {
           
           if (qty !== 0 && !isSpecial && item.product_id) {
             // A. Restore Master Stock
-            const { data: prod } = await supabase.from('products').select('stock').eq('id', item.product_id).single();
+            const { data: prod } = await supabase.from('products').select('stock, cost_price').eq('id', item.product_id).single();
             if (prod) {
               await supabase.from('products').update({ stock: Number(prod.stock) + qty }).eq('id', item.product_id);
             }
 
-            // B. Reverse FIFO Batches (Subtract from sold_qty)
+            // B. Restore Inventory Batch
+            const { data: batchesInv } = await supabase.from('inventory_batches')
+              .select('*')
+              .eq('product_id', item.product_id)
+              .order('id', { ascending: false })
+              .limit(1); 
+            
+            if (batchesInv && batchesInv.length > 0) {
+              await supabase.from('inventory_batches')
+                .update({ remaining_qty: Number(batchesInv[0].remaining_qty) + qty })
+                .eq('id', batchesInv[0].id);
+            } else {
+              await supabase.from('inventory_batches').insert([{
+                product_id: item.product_id,
+                product_name: item.rice_type || item.custom_rice_type || 'Unknown Product',
+                cost_price: item.cogs_price || prod?.cost_price || 0,
+                remaining_qty: qty
+              }]);
+            }
+
+            // C. Reverse FIFO Batches (Subtract from sold_qty in price_history)
             let remainingToReverse = qty;
             const { data: batches } = await supabase.from('price_history')
               .select('*')
@@ -128,10 +148,11 @@ export default function InvoiceGallery() {
       // 4. Delete Payments (Removes from Cash on Hand)
       await supabase.from('invoice_payments').delete().eq('invoice_id', invoiceId);
 
-      // 5. Update Master Invoice to Voided Status (Instead of deleting)
+      // 5. 🔥 FIX: Update Master Invoice to Voided Status AND is_done: true (Hides from Delivery Page)
       await supabase.from('invoice_summaries').update({ 
         delivery_status: 'Voided',
-        balance_due: 0
+        balance_due: 0,
+        is_done: true
       }).eq('invoice_id', invoiceId);
 
       alert(`✅ Invoice ${invoiceId} was successfully voided!`);

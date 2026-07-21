@@ -69,6 +69,11 @@ export default function DashboardPage() {
   const [activeTab, setActiveTab] = useState<'summary' | 'wholesale' | 'retail' | 'asset'>('summary')
   const [assetFilter, setAssetFilter] = useState<any>('month')
 
+  // --- 🔥 NEW RICE EVALUATION STATES ---
+  const [invTab, setInvTab] = useState<'wholesale_active' | 'wholesale_oos' | 'retail'>('wholesale_active')
+  const [invTabOrder, setInvTabOrder] = useState(['wholesale_active', 'wholesale_oos', 'retail'])
+  const [invSortConfig, setInvSortConfig] = useState<{key: string, direction: 'asc' | 'desc'} | null>(null)
+
   useEffect(() => {
     async function loadData() {
       const [{data: salesData}, {data: sumData}, {data: retData}, {data: expData}, {data: staffData}, {data: prodData}, {data: apData}, {data: cogsData}, {data: batchData}, {data: invPayData}] = await Promise.all([
@@ -294,6 +299,39 @@ export default function DashboardPage() {
     const productValuations: Record<number, { qty: number, totalValue: number, avgCost: number, batches: any[], unaccountedQty: number, unaccountedPrice: number }> = {};
     
     inventoryList.forEach((p: any) => {
+      let isRetail = Number(p.weight || 50) < 50;
+      let effectiveCostPrice = Number(p.cost_price || 0);
+
+      // 🔥 FIX: Correctly calculates retail COGS from its linked parent (/50)
+      if (isRetail) {
+        if (p.linked_wholesale_id) {
+          const parent = inventoryList.find(wp => wp.id === p.linked_wholesale_id);
+          if (parent) {
+            const pBatches = priceHistory.filter((b: any) => b.product_id === parent.id && Number(b.remaining_qty) > 0);
+            pBatches.sort((a: any, b: any) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+            const liveParentCogs = pBatches.length > 0 ? Number(pBatches[0].cost_price) : Number(parent.cost_price || 0);
+            effectiveCostPrice = liveParentCogs / 50; 
+          }
+        } else if (effectiveCostPrice > 5000) {
+          // Fallback if someone mistakenly entered 100,000 for a 1kg bag
+          effectiveCostPrice = effectiveCostPrice / 50;
+        }
+
+        let pStock = Math.max(0, Number(p.stock || 0)); 
+        let pValue = pStock * effectiveCostPrice;
+        
+        riceStockValue += pValue;
+        productValuations[p.id] = { 
+          qty: pStock, 
+          totalValue: pValue, 
+          avgCost: effectiveCostPrice, 
+          batches: [],
+          unaccountedQty: pStock,
+          unaccountedPrice: effectiveCostPrice
+        };
+        return; // Skip wholesale batching logic below
+      }
+
       let pStock = Math.max(0, Number(p.stock || 0)); 
       let pValue = 0; 
       
@@ -616,6 +654,39 @@ export default function DashboardPage() {
 
   const assetData = calculateAssets();
 
+  // --- 🔥 NEW: Filter and Sort Detailed Inventory ---
+  const filteredAndSortedInventory = inventoryList.filter((item: any) => {
+    let isRetail = Number(item.weight || 50) < 50;
+    let stock = Number(item.stock || 0);
+    
+    if (invTab === 'wholesale_active') return !isRetail && stock > 0;
+    if (invTab === 'wholesale_oos') return !isRetail && stock <= 0;
+    if (invTab === 'retail') return isRetail;
+    return true;
+  }).sort((a: any, b: any) => {
+    if (!invSortConfig) return 0;
+    const { key, direction } = invSortConfig;
+    let valA, valB;
+
+    if (key === 'name') {
+        valA = a.name.toLowerCase();
+        valB = b.name.toLowerCase();
+    } else if (key === 'stock') {
+        valA = Number(a.stock || 0);
+        valB = Number(b.stock || 0);
+    } else if (key === 'cost') {
+        valA = assetData.productValuations[a.id]?.avgCost || 0;
+        valB = assetData.productValuations[b.id]?.avgCost || 0;
+    } else if (key === 'total') {
+        valA = assetData.productValuations[a.id]?.totalValue || 0;
+        valB = assetData.productValuations[b.id]?.totalValue || 0;
+    }
+
+    if (valA < valB) return direction === 'asc' ? -1 : 1;
+    if (valA > valB) return direction === 'asc' ? 1 : -1;
+    return 0;
+  });
+
   const generateDailyArray = (dataSet: any[], isTargetMonth: any) => {
     const dailySales = new Array(31).fill(0)
     const dailyProfit = new Array(31).fill(0)
@@ -639,6 +710,7 @@ export default function DashboardPage() {
   return (
     <div className="main-wrapper">
       
+      {/* HEADER */}
       <div className="header-container">
         <div className="header-left">
           <h1 className="page-title">📊 Business Dashboard</h1>
@@ -859,85 +931,146 @@ export default function DashboardPage() {
             </div>
 
             <h3 style={{ margin: '0 0 16px 0', fontSize: '14px', color: '#1e293b', textTransform: 'uppercase' }}>🌾 Detailed Inventory Valuation</h3>
+            
+            {/* 🔥 DRAGGABLE TABS */}
+            <div style={{ display: 'flex', gap: '8px', marginBottom: '16px', overflowX: 'auto', paddingBottom: '4px' }}>
+              {invTabOrder.map(tab => {
+                const labels: any = {
+                  wholesale_active: '🌾 Active Wholesale',
+                  wholesale_oos: '❌ Out of Stock (Wholesale)',
+                  retail: '🛍️ Retail (1kg)'
+                };
+                return (
+                  <button
+                    key={tab}
+                    draggable
+                    onDragStart={(e) => { e.dataTransfer.setData('text/invtab', tab); }}
+                    onDragOver={(e) => e.preventDefault()}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      const sourceTab = e.dataTransfer.getData('text/invtab');
+                      if (!sourceTab || sourceTab === tab) return;
+                      setInvTabOrder(prev => {
+                        const newOrder = prev.filter(t => t !== sourceTab);
+                        newOrder.splice(newOrder.indexOf(tab), 0, sourceTab);
+                        return newOrder;
+                      });
+                    }}
+                    onClick={() => setInvTab(tab as any)}
+                    style={{
+                      padding: '8px 16px', borderRadius: '20px', cursor: 'grab', fontSize: '13px', fontWeight: 'bold', whiteSpace: 'nowrap',
+                      border: invTab === tab ? 'none' : '1px solid #cbd5e1',
+                      background: invTab === tab ? '#b58a3d' : '#fff',
+                      color: invTab === tab ? '#fff' : '#475569',
+                      boxShadow: invTab === tab ? '0 2px 4px rgba(181,138,61,0.3)' : 'none'
+                    }}
+                  >
+                    {labels[tab]}
+                  </button>
+                )
+              })}
+            </div>
+
             <div style={{ background: '#fff', borderRadius: '12px', border: '1px solid #e2e8f0', overflow: 'hidden', boxShadow: '0 2px 4px rgba(0,0,0,0.02)', marginBottom: '32px' }}>
               <div style={{ overflowX: 'auto' }}>
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '14px', minWidth: '600px' }}>
                   <thead style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0' }}>
                     <tr>
-                      <th style={{ padding: '14px 20px', textAlign: 'left', color: '#64748b', fontWeight: 'bold' }}>Product & Batches</th>
-                      <th style={{ padding: '14px 20px', textAlign: 'center', color: '#64748b', fontWeight: 'bold' }}>Stock Qty</th>
-                      <th style={{ padding: '14px 20px', textAlign: 'right', color: '#64748b', fontWeight: 'bold' }}>Cost Price</th>
-                      <th style={{ padding: '14px 20px', textAlign: 'right', color: '#64748b', fontWeight: 'bold' }}>Total Value (៛)</th>
+                      {[
+                        { key: 'name', label: 'Product & Batches', align: 'left' },
+                        { key: 'stock', label: 'Stock Qty', align: 'center' },
+                        { key: 'cost', label: 'Cost Price', align: 'right' },
+                        { key: 'total', label: 'Total Value (៛)', align: 'right' }
+                      ].map(col => (
+                        <th 
+                          key={col.key}
+                          onClick={() => {
+                            let direction: 'asc' | 'desc' = 'asc';
+                            if (invSortConfig && invSortConfig.key === col.key && invSortConfig.direction === 'asc') direction = 'desc';
+                            setInvSortConfig({ key: col.key, direction });
+                          }}
+                          style={{ padding: '14px 20px', textAlign: col.align as any, color: '#64748b', fontWeight: 'bold', cursor: 'pointer', userSelect: 'none' }}
+                        >
+                          {col.label}
+                          <span style={{ marginLeft: '6px', fontSize: '12px', opacity: invSortConfig?.key === col.key ? 1 : 0.3 }}>
+                            {invSortConfig?.key === col.key ? (invSortConfig.direction === 'asc' ? '↑' : '↓') : '↕'}
+                          </span>
+                        </th>
+                      ))}
                     </tr>
                   </thead>
                   <tbody>
-                    {inventoryList.map((item: any) => {
-                      const valData = assetData.productValuations[item.id];
-                      if (!valData) return null;
+                    {filteredAndSortedInventory.length === 0 ? (
+                      <tr><td colSpan={4} style={{ padding: '40px', textAlign: 'center', color: '#94a3b8' }}>No products found in this tab.</td></tr>
+                    ) : (
+                      filteredAndSortedInventory.map((item: any) => {
+                        const valData = assetData.productValuations[item.id];
+                        if (!valData) return null;
 
-                      const displayRows: any[] = [];
+                        const displayRows: any[] = [];
 
-                      valData.batches.forEach((b: any, idx: number) => {
-                         displayRows.push({
-                            isMain: idx === 0,
-                            label: idx === 0 ? item.name : `↳ ${idx + 1}${idx === 1 ? 'nd' : idx === 2 ? 'rd' : 'th'} batch`,
-                            qty: b.display_qty,
-                            cost: Number(b.cost_price || 0),
-                            total: b.display_qty * Number(b.cost_price || 0),
-                            id: b.id
-                         });
-                      });
+                        valData.batches.forEach((b: any, idx: number) => {
+                           displayRows.push({
+                              isMain: idx === 0,
+                              label: idx === 0 ? item.name : `↳ ${idx + 1}${idx === 1 ? 'nd' : idx === 2 ? 'rd' : 'th'} batch`,
+                              qty: b.display_qty,
+                              cost: Number(b.cost_price || 0),
+                              total: b.display_qty * Number(b.cost_price || 0),
+                              id: b.id
+                           });
+                        });
 
-                      if (valData.unaccountedQty > 0) {
-                         displayRows.push({
-                            isMain: displayRows.length === 0,
-                            label: displayRows.length === 0 ? item.name : `↳ unlinked batch`,
-                            qty: valData.unaccountedQty,
-                            cost: valData.unaccountedPrice,
-                            total: valData.unaccountedQty * valData.unaccountedPrice,
-                            id: 'unaccounted'
-                         });
-                      }
+                        if (valData.unaccountedQty > 0) {
+                           displayRows.push({
+                              isMain: displayRows.length === 0,
+                              label: displayRows.length === 0 ? item.name : `↳ unlinked stock`,
+                              qty: valData.unaccountedQty,
+                              cost: valData.unaccountedPrice,
+                              total: valData.unaccountedQty * valData.unaccountedPrice,
+                              id: 'unaccounted'
+                           });
+                        }
 
-                      if (displayRows.length === 0) {
-                         displayRows.push({
-                            isMain: true,
-                            label: item.name,
-                            qty: 0,
-                            cost: valData.avgCost,
-                            total: 0,
-                            id: 'empty'
-                         });
-                      }
+                        if (displayRows.length === 0) {
+                           displayRows.push({
+                              isMain: true,
+                              label: item.name,
+                              qty: 0,
+                              cost: valData.avgCost,
+                              total: 0,
+                              id: 'empty'
+                           });
+                        }
 
-                      return (
-                        <React.Fragment key={item.id}>
-                          {displayRows.map((row: any, rIdx: number) => {
-                             const isLast = rIdx === displayRows.length - 1;
-                             return (
-                               <tr key={row.id} style={{ borderBottom: isLast ? '1px solid #f1f5f9' : 'none', background: row.isMain ? '#ffffff' : '#f8fafc' }}>
-                                 <td style={{ padding: row.isMain ? '14px 20px' : '8px 20px 8px 40px', color: row.isMain ? '#1e293b' : '#64748b', fontWeight: row.isMain ? 'bold' : 'normal', fontSize: row.isMain ? '14px' : '12px' }}>
-                                   {row.label}
-                                 </td>
-                                 <td style={{ padding: row.isMain ? '14px 20px' : '8px 20px', textAlign: 'center', color: (row.qty < 10 && row.isMain) ? '#ef4444' : '#475569', fontWeight: row.isMain ? 'bold' : 'normal', fontSize: row.isMain ? '14px' : '13px' }}>
-                                   {formatNumber(row.qty)}
-                                 </td>
-                                 <td style={{ padding: row.isMain ? '14px 20px' : '8px 20px', textAlign: 'right', color: '#64748b', fontWeight: 'normal', fontSize: row.isMain ? '14px' : '13px' }}>
-                                   {formatRiel(row.cost)}
-                                 </td>
-                                 <td style={{ padding: row.isMain ? '14px 20px' : '8px 20px', textAlign: 'right', color: '#10b981', fontWeight: row.isMain ? 'bold' : 'normal', fontSize: row.isMain ? '14px' : '13px' }}>
-                                   {formatRiel(row.total)}
-                                 </td>
-                               </tr>
-                             )
-                          })}
-                        </React.Fragment>
-                      )
-                    })}
+                        return (
+                          <React.Fragment key={item.id}>
+                            {displayRows.map((row: any, rIdx: number) => {
+                               const isLast = rIdx === displayRows.length - 1;
+                               return (
+                                 <tr key={row.id} style={{ borderBottom: isLast ? '1px solid #f1f5f9' : 'none', background: row.isMain ? '#ffffff' : '#f8fafc' }}>
+                                   <td style={{ padding: row.isMain ? '14px 20px' : '8px 20px 8px 40px', color: row.isMain ? '#1e293b' : '#64748b', fontWeight: row.isMain ? 'bold' : 'normal', fontSize: row.isMain ? '14px' : '12px' }}>
+                                     {row.label}
+                                   </td>
+                                   <td style={{ padding: row.isMain ? '14px 20px' : '8px 20px', textAlign: 'center', color: (row.qty < 10 && row.isMain) ? '#ef4444' : '#475569', fontWeight: row.isMain ? 'bold' : 'normal', fontSize: row.isMain ? '14px' : '13px' }}>
+                                     {formatNumber(row.qty)}
+                                   </td>
+                                   <td style={{ padding: row.isMain ? '14px 20px' : '8px 20px', textAlign: 'right', color: '#64748b', fontWeight: 'normal', fontSize: row.isMain ? '14px' : '13px' }}>
+                                     {formatRiel(row.cost)}
+                                   </td>
+                                   <td style={{ padding: row.isMain ? '14px 20px' : '8px 20px', textAlign: 'right', color: '#10b981', fontWeight: row.isMain ? 'bold' : 'normal', fontSize: row.isMain ? '14px' : '13px' }}>
+                                     {formatRiel(row.total)}
+                                   </td>
+                                 </tr>
+                               )
+                            })}
+                          </React.Fragment>
+                        )
+                      })
+                    )}
                   </tbody>
                   <tfoot>
                     <tr style={{ background: '#f8fafc' }}>
-                      <td colSpan={3} style={{ padding: '16px 20px', textAlign: 'right', color: '#334155', fontWeight: 'bold' }}>Total Inventory Asset Value</td>
+                      <td colSpan={3} style={{ padding: '16px 20px', textAlign: 'right', color: '#334155', fontWeight: 'bold' }}>Global Inventory Asset Value</td>
                       <td style={{ padding: '16px 20px', textAlign: 'right', color: '#b58a3d', fontWeight: 'bold', fontSize: '16px' }}>{formatRiel(assetData.riceStockValue)}</td>
                     </tr>
                   </tfoot>

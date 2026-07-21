@@ -452,11 +452,11 @@ export default function POSPage() {
   }
 
   async function loadBatches() {
-    const { data } = await supabase.from('price_history').select('*').order('created_at', { ascending: true });
+    const { data } = await supabase.from('inventory_batches').select('*').order('created_at', { ascending: true });
     if (data) {
       const batchMap: Record<number, any[]> = {};
       data.forEach(b => {
-        const remaining = (b.imported_qty || 0) - (b.sold_qty || 0);
+        const remaining = b.remaining_qty || 0;
         if (remaining > 0) {
           if (!batchMap[b.product_id]) batchMap[b.product_id] = [];
           batchMap[b.product_id].push(b);
@@ -618,19 +618,24 @@ export default function POSPage() {
   }
 
   async function getFIFOSplits(productId: number, qtySold: number, fallbackCogs: number) {
-    let remainingQty = qtySold;
+    let remainingQtyToFulfill = qtySold;
     const splits: any[] = [];
-    const { data: batches } = await supabase.from('price_history').select('*').eq('product_id', productId).gt('imported_qty', 0).order('created_at', { ascending: true });
-    const availableBatches = (batches || []).filter(b => (b.sold_qty || 0) < (b.imported_qty || 0));
+    const { data: batches } = await supabase.from('inventory_batches')
+      .select('*')
+      .eq('product_id', productId)
+      .gt('remaining_qty', 0)
+      .order('created_at', { ascending: true });
+      
+    const availableBatches = batches || [];
 
     for (const batch of availableBatches) {
-      if (remainingQty <= 0) break;
-      const availableInBatch = (batch.imported_qty || 0) - (batch.sold_qty || 0);
-      const qtyTaken = Math.min(availableInBatch, remainingQty);
-      splits.push({ qty: qtyTaken, cogs_price: batch.cost_price, batch_id: batch.id, current_sold: batch.sold_qty || 0 });
-      remainingQty -= qtyTaken;
+      if (remainingQtyToFulfill <= 0) break;
+      const availableInBatch = batch.remaining_qty || 0;
+      const qtyTaken = Math.min(availableInBatch, remainingQtyToFulfill);
+      splits.push({ qty: qtyTaken, cogs_price: batch.cost_price, batch_id: batch.id, current_remaining: availableInBatch });
+      remainingQtyToFulfill -= qtyTaken;
     }
-    if (remainingQty > 0) splits.push({ qty: remainingQty, cogs_price: fallbackCogs, batch_id: null, current_sold: 0 });
+    if (remainingQtyToFulfill > 0) splits.push({ qty: remainingQtyToFulfill, cogs_price: fallbackCogs, batch_id: null, current_remaining: 0 });
     return splits;
   }
 
@@ -841,7 +846,7 @@ export default function POSPage() {
               cogs_price: specificBatch ? specificBatch.cost_price : (item.cost_price || 0), owner: finalOwner
             });
             if (specificBatch) {
-                fifoUpdates[specificBatch.id] = (fifoUpdates[specificBatch.id] || specificBatch.sold_qty || 0) + finalQty;
+                fifoUpdates[specificBatch.id] = (fifoUpdates[specificBatch.id] !== undefined ? fifoUpdates[specificBatch.id] : specificBatch.remaining_qty) - finalQty;
             }
           } else {
             const splits = await getFIFOSplits(item.product_id, finalQty, item.cost_price || 0);
@@ -852,7 +857,7 @@ export default function POSPage() {
                 cogs_price: split.cogs_price, owner: finalOwner
               });
               if (split.batch_id) {
-                fifoUpdates[split.batch_id] = (fifoUpdates[split.batch_id] || split.current_sold) + split.qty;
+                fifoUpdates[split.batch_id] = (fifoUpdates[split.batch_id] !== undefined ? fifoUpdates[split.batch_id] : split.current_remaining) - split.qty;
               }
             }
           }
@@ -904,8 +909,8 @@ export default function POSPage() {
         for (const [prodId, newStock] of Object.entries(stockUpdates)) {
            await supabase.from('products').update({ stock: newStock }).eq('id', prodId);
         }
-        for (const [batchId, newSold] of Object.entries(fifoUpdates)) {
-           await supabase.from('price_history').update({ sold_qty: newSold }).eq('id', batchId);
+        for (const [batchId, newRemaining] of Object.entries(fifoUpdates)) {
+           await supabase.from('inventory_batches').update({ remaining_qty: newRemaining }).eq('id', batchId);
         }
       }
 
@@ -1274,7 +1279,7 @@ export default function POSPage() {
                       >
                         <option value="AUTO">▼ Auto</option>
                         {activeBatches[item.product_id]?.map((b: any) => {
-                          const remaining = (b.imported_qty || 0) - (b.sold_qty || 0);
+                          const remaining = b.remaining_qty || 0;
                           return <option key={b.id} value={b.id}>{formatRiel(b.cost_price)} ({remaining})</option>;
                         })}
                       </select>

@@ -695,6 +695,7 @@ export default function RiceControl() {
     }
   }
 
+  // --- SAVE EDIT LOGIC ---
   const handleSaveRecord = async (id: number) => {
     if (!edits[id]) return;
     const payload = { ...edits[id] } as any;
@@ -702,35 +703,37 @@ export default function RiceControl() {
     const mainProd = products.find(p => p.id === id);
     if (!mainProd) return;
 
-    if (activeView === 'wholesale') {
-      const pBatches = activeBatchesMap[id] || [];
-      pBatches.sort((a,b) => a.id - b.id);
-      const currentBatch = pBatches.length > 0 ? pBatches[0] : null;
+    const pBatches = activeBatchesMap[id] || [];
+    pBatches.sort((a,b) => a.id - b.id);
 
-      if (currentBatch) {
-        const batchPayload: any = {};
-        let updateBatch = false;
+    if (payload.cost_price !== undefined && pBatches.length > 0) { 
+       await supabase.from('inventory_batches').update({ cost_price: Number(payload.cost_price) }).eq('id', pBatches[0].id); 
+    }
 
-        if (payload.cost_price !== undefined) { 
-           batchPayload.cost_price = Number(payload.cost_price); 
-           updateBatch = true; 
-        }
-
-        if (payload.stock !== undefined) {
-           const newMasterStock = Number(payload.stock);
-           const oldMasterStock = Number(mainProd.stock);
-           const diff = newMasterStock - oldMasterStock;
-           
-           batchPayload.remaining_qty = Math.max(0, Number(currentBatch.remaining_qty) + diff);
-           updateBatch = true;
-           
-           payload.stock = newMasterStock;
-        }
-
-        if (updateBatch) {
-           await supabase.from('inventory_batches').update(batchPayload).eq('id', currentBatch.id);
-        }
-      }
+    if (payload.stock !== undefined) {
+       const newMasterStock = Number(payload.stock);
+       const oldMasterStock = Number(mainProd.stock);
+       let diff = newMasterStock - oldMasterStock;
+       
+       if (diff < 0) {
+         let remainingToReduce = Math.abs(diff);
+         for (const b of pBatches) {
+           if (remainingToReduce <= 0) break;
+           const bQty = Number(b.remaining_qty);
+           if (bQty > 0) {
+               const reduceBy = Math.min(bQty, remainingToReduce);
+               await supabase.from('inventory_batches').update({ remaining_qty: bQty - reduceBy }).eq('id', b.id);
+               remainingToReduce -= reduceBy;
+           }
+         }
+       } else if (diff > 0) {
+         if (pBatches.length > 0) {
+           await supabase.from('inventory_batches').update({ remaining_qty: Number(pBatches[0].remaining_qty) + diff }).eq('id', pBatches[0].id);
+         } else {
+           await supabase.from('inventory_batches').insert([{ product_id: id, cost_price: mainProd.cost_price || 0, remaining_qty: diff }]);
+         }
+       }
+       payload.stock = newMasterStock;
     }
 
     ['price', 'cost_price', 'weight', 'stock', 'mtd_kg_used', 'mtd_bags_used', 'min_stock_level'].forEach(key => {

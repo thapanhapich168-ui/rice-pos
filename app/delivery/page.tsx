@@ -101,8 +101,12 @@ export default function DeliveryPage() {
       .not('customer_name', 'ilike', '%Walk-in%')
       .order('created_at', { ascending: false });
 
-    if (error) console.error(error);
-    else if (data) setDeliveries(data);
+    if (error) {
+      console.error(error);
+    } else if (data) {
+      // 🔥 FIX: Completely filter out Voided invoices so they disappear instantly!
+      setDeliveries(data.filter((d: any) => d.delivery_status !== 'Voided'));
+    }
     
     setLoading(false);
   }
