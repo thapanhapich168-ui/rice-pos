@@ -1335,7 +1335,7 @@ export default function RiceControl() {
                                           <div className="dropdown-row clear-option" onMouseDown={(e) => { e.stopPropagation(); handleLinkWholesaleBag(p.id, null); }}>❌ Clear Linked Bag</div>
                                           {products.filter(wp => wp.weight >= 50 && wp.name.toLowerCase().includes(dropdownSearch.toLowerCase())).map(wp => (
                                             <div key={wp.id} className="dropdown-row" onMouseDown={(e) => { e.stopPropagation(); handleLinkWholesaleBag(p.id, wp); }}>
-                                              <span style={{ fontWeight: 'bold' }}>{wp.name}</span>
+                                              <span style={{ fontWeight: 'normal', color: '#334155' }}>{wp.name}</span>
                                               <span style={{ fontSize: '11px', color: '#64748b' }}> ({formatRiel(wp.cost_price)})</span>
                                             </div>
                                           ))}
@@ -1371,11 +1371,20 @@ export default function RiceControl() {
                                   style={{ paddingLeft: isIdCol ? '36px' : '12px' }} 
                                   value={val as any} 
                                   onChange={(e) => { const newVal = e.target.type === 'number' ? (e.target.value === '' ? '' : Number(e.target.value)) : e.target.value; setEdits(prev => ({ ...prev, [p.id]: { ...(prev[p.id] || {}), [col]: newVal } })) }} 
-                                  onBlur={() => handleSaveRecord(p.id)} 
+                                  onBlur={() => {
+                                    const originalVal = p[col as keyof Product];
+                                    const editVal = edits[p.id]?.[col as keyof Product];
+                                    if (editVal === undefined || editVal === originalVal || editVal === '') {
+                                      setEdits(prev => { const n = { ...prev }; delete n[p.id]; return n });
+                                      setEditingCell(null);
+                                    } else {
+                                      setEditingCell(null);
+                                    }
+                                  }} 
                                   onKeyDown={(e) => { 
                                     if (e.key === 'Enter' || e.keyCode === 13) { 
                                       e.preventDefault();
-                                      e.currentTarget.blur(); 
+                                      handleSaveRecord(p.id);
                                     } 
                                     if (e.key === 'Escape') { 
                                       setEdits(prev => { const n = { ...prev }; delete n[p.id]; return n }); 
@@ -1384,7 +1393,7 @@ export default function RiceControl() {
                                   }} 
                                 />
                               ) : (
-                                <div className="cell-display" style={{ paddingLeft: isIdCol ? '36px' : '12px', fontWeight: col === 'name' ? 'bold' : 'normal', color: col === 'name' ? '#1e293b' : (['mtd_kg_used', 'mtd_bags_used'].includes(col) ? '#b58a3d' : '#334155'), cursor: 'text' }} onClick={() => { setEditingCell({ id: p.id, col: col as string }) }}>
+                                <div className="cell-display" style={{ paddingLeft: isIdCol ? '36px' : '12px', fontWeight: 'normal', color: ['mtd_kg_used', 'mtd_bags_used'].includes(col) ? '#b58a3d' : '#334155', cursor: 'text' }} onClick={() => { setEditingCell({ id: p.id, col: col as string }) }}>
                                   
                                   {col === 'name' ? (
                                     <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -1427,7 +1436,7 @@ export default function RiceControl() {
                                  
                                  if (col === 'cost_price') return <td key={col} style={{ padding: '12px', borderRight: '1px solid #f1f5f9', color: '#475569', fontSize: '14px' }}>{formatRiel(batch.cost_price)}</td>;
                                  
-                                 if (col === 'stock') return <td key={col} style={{ padding: '12px', borderRight: '1px solid #f1f5f9', color: '#b58a3d', fontWeight: 'bold', fontSize: '14px' }}>{batch.remaining_qty}</td>;
+                                 if (col === 'stock') return <td key={col} style={{ padding: '12px', borderRight: '1px solid #f1f5f9', color: '#b58a3d', fontWeight: 'normal', fontSize: '14px' }}>{batch.remaining_qty}</td>;
                                  
                                  if (col === 'actions') {
                                    return <td key={col} style={{ borderRight: '1px solid #f1f5f9' }}></td>;
@@ -1475,7 +1484,7 @@ export default function RiceControl() {
                     <div className="dropdown-results-tray">
                       {suppliers.filter(s => s.name.toLowerCase().includes(supplierSearch.toLowerCase())).map(s => (
                         <div key={s.id} className="dropdown-row" onMouseDown={(e) => { e.stopPropagation(); setImportForm({...importForm, supplier_id: String(s.id)}); setIsSupplierDropdownOpen(false); }}>
-                          <span style={{ fontWeight: 'bold' }}>{s.name}</span>
+                          <span style={{ fontWeight: 'normal', color: '#334155' }}>{s.name}</span>
                         </div>
                       ))}
                     </div>
@@ -1507,7 +1516,7 @@ export default function RiceControl() {
                     <div className="dropdown-results-tray">
                       {products.filter(p => p.weight >= 50 && p.name.toLowerCase().includes(productSearch.toLowerCase())).map(p => (
                         <div key={p.id} className="dropdown-row" onMouseDown={(e) => { e.stopPropagation(); setImportForm({...importForm, product_id: String(p.id)}); setIsProductDropdownOpen(false); }}>
-                          <span style={{ fontWeight: 'bold' }}>{p.name}</span>
+                          <span style={{ fontWeight: 'normal', color: '#334155' }}>{p.name}</span>
                           <span style={{ fontSize: '11px', color: '#64748b', marginLeft: '8px' }}>({p.weight}kg)</span>
                         </div>
                       ))}
@@ -1637,11 +1646,11 @@ export default function RiceControl() {
                     <tr key={imp.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
                       {pendingColOrder.map(col => {
                         if (col === 'date') return <td key={col} style={{ padding: '14px 12px', color: '#64748b', fontSize: '14px', borderRight: '1px solid #f1f5f9', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{new Date(imp.created_at).toLocaleDateString()}</td>;
-                        if (col === 'supplier') return <td key={col} style={{ padding: '14px 12px', fontWeight: 'bold', color: '#0f172a', fontSize: '14px', borderRight: '1px solid #f1f5f9', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{imp.suppliers?.name}</td>;
+                        if (col === 'supplier') return <td key={col} style={{ padding: '14px 12px', fontWeight: 'normal', color: '#334155', fontSize: '14px', borderRight: '1px solid #f1f5f9', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{imp.suppliers?.name}</td>;
                         if (col === 'product') return <td key={col} style={{ padding: '14px 12px', color: '#475569', fontSize: '14px', borderRight: '1px solid #f1f5f9', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{imp.products?.name} <span style={{color:'#94a3b8'}}>(x{imp.qty})</span></td>;
                         if (col === 'total_cost') return <td key={col} style={{ padding: '14px 12px', textAlign: 'right', color: '#475569', fontSize: '14px', borderRight: '1px solid #f1f5f9', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{formatRiel(imp.total_cost)}</td>;
                         if (col === 'paid_so_far') return <td key={col} style={{ padding: '14px 12px', textAlign: 'right', color: '#10b981', fontSize: '14px', borderRight: '1px solid #f1f5f9', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{formatRiel(imp.paid_amount)}</td>;
-                        if (col === 'remaining_debt') return <td key={col} style={{ padding: '14px 12px', textAlign: 'right', fontWeight: 'bold', color: '#ef4444', fontSize: '14px', borderRight: '1px solid #f1f5f9', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{formatRiel(remaining)}</td>;
+                        if (col === 'remaining_debt') return <td key={col} style={{ padding: '14px 12px', textAlign: 'right', fontWeight: 'normal', color: '#ef4444', fontSize: '14px', borderRight: '1px solid #f1f5f9', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{formatRiel(remaining)}</td>;
                         if (col === 'actions') return (
                           <td key={col} style={{ padding: '14px 12px', textAlign: 'center', borderRight: '1px solid #f1f5f9' }}>
                             <div style={{ display: 'flex', gap: '8px', justifyContent: 'center' }}>
@@ -1757,11 +1766,11 @@ export default function RiceControl() {
                           />
                         </td>
                       );
-                      if (col === 'name') return <td key={col} style={{ padding: '14px 12px', fontWeight: 'bold', color: '#0f172a', fontSize: '14px', borderRight: '1px solid #f1f5f9', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{s.name}</td>;
+                      if (col === 'name') return <td key={col} style={{ padding: '14px 12px', fontWeight: 'normal', color: '#334155', fontSize: '14px', borderRight: '1px solid #f1f5f9', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{s.name}</td>;
                       if (col === 'phone') return <td key={col} style={{ padding: '14px 12px', color: '#475569', fontSize: '14px', borderRight: '1px solid #f1f5f9', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{s.phone || '-'}</td>;
                       if (col === 'location') return <td key={col} style={{ padding: '14px 12px', color: '#475569', fontSize: '14px', borderRight: '1px solid #f1f5f9', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{s.location || '-'}</td>;
                       if (col === 'total_owed') return (
-                        <td key={col} style={{ padding: '14px 12px', textAlign: 'right', fontWeight: 'bold', color: Number(s.total_owed_riel) > 0 ? '#ef4444' : '#10b981', fontSize: '14px', borderRight: '1px solid #f1f5f9', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        <td key={col} style={{ padding: '14px 12px', textAlign: 'right', fontWeight: 'normal', color: Number(s.total_owed_riel) > 0 ? '#ef4444' : '#10b981', fontSize: '14px', borderRight: '1px solid #f1f5f9', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                           {formatRiel(s.total_owed_riel || 0)}
                           {Number(s.total_owed_usd) > 0 && <div style={{ fontSize: '12px', marginTop: '4px' }}>{formatUSD(s.total_owed_usd)}</div>}
                         </td>
@@ -2350,7 +2359,7 @@ export default function RiceControl() {
           border: 1px solid #cbd5e1;
           border-radius: 6px;
           background: #f8fafc;
-          font-size: 13px;
+          font-size: 14px;
           color: #334155;
           cursor: pointer;
           white-space: nowrap;
@@ -2504,7 +2513,7 @@ export default function RiceControl() {
             font-size: 14px !important;
           }
 
-          .mobile-input-field {
+          .mobile-input-field, .dropdown-row, .interactive-select-trigger {
             font-size: 16px !important;
           }
         }
