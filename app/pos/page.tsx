@@ -1432,49 +1432,18 @@ export default function POSPage() {
               <input type="text" placeholder={currentT.searchPlaceholder} value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} style={{ flex: 1, minWidth: '240px', padding: '10px 14px', borderRadius: '6px', border: '1px solid #dcd7cc', outline: 'none', fontSize: '16px', color: '#334155', backgroundColor: '#ffffff' }} className="mobile-input-field" />
               
               {activeTab === 'wholesale' && (
-                <div style={{ flex: 1, minWidth: '300px', position: 'relative', zIndex: isCustomerModalOpen ? 100 : 2 }}>
+                <div style={{ flex: 1, minWidth: '300px', position: 'relative' }}>
                   {!selectedCustomer ? (
                     <div style={{ position: 'relative' }}>
                       <input 
                         type="text"
                         placeholder={currentT.selectCustomer}
                         value={customerSearchTerm}
-                        onChange={e => setCustomerSearchTerm(e.target.value)}
-                        onFocus={() => setIsCustomerModalOpen(true)}
-                        onBlur={() => setTimeout(() => setIsCustomerModalOpen(false), 200)}
-                        style={{ width: '100%', padding: '10px 14px', borderRadius: '6px', border: '1px solid #dcd7cc', outline: 'none', fontSize: '16px', color: '#334155', backgroundColor: '#ffffff', boxSizing: 'border-box' }}
+                        readOnly
+                        onClick={() => setIsCustomerModalOpen(true)}
+                        style={{ width: '100%', padding: '10px 14px', borderRadius: '6px', border: '1px solid #dcd7cc', outline: 'none', fontSize: '16px', color: '#334155', backgroundColor: '#ffffff', boxSizing: 'border-box', cursor: 'pointer' }}
                         className="mobile-input-field"
                       />
-                      
-                      {isCustomerModalOpen && (
-                        <div style={{ position: 'absolute', top: 'calc(100% + 4px)', left: 0, right: 0, backgroundColor: '#ffffff', border: '1px solid #cbd5e1', borderRadius: '8px', boxShadow: '0 10px 25px rgba(0,0,0,0.1)', maxHeight: '350px', overflowY: 'auto', zIndex: 1000, display: 'flex', flexDirection: 'column', padding: '8px' }}>
-                          <button 
-                            onMouseDown={(e) => { e.preventDefault(); setIsCreateCustomerModalOpen(true); setIsCustomerModalOpen(false); }} 
-                            style={{ width: '100%', padding: '10px', backgroundColor: '#f8fafc', color: '#3b82f6', border: '1px dashed #cbd5e1', borderRadius: '6px', cursor: 'pointer', fontWeight: 'normal', fontSize: '15px', marginBottom: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}
-                          >
-                            <span style={{ fontSize: '16px' }}>+</span> Add New Customer
-                          </button>
-                          
-                          {filteredCustomers.length === 0 ? (
-                            <div style={{ textAlign: 'center', padding: '16px', color: '#94a3b8', fontSize: '14px' }}>No customers found</div>
-                          ) : (
-                            filteredCustomers.map(c => (
-                              <div 
-                                key={c.id} 
-                                onMouseDown={(e) => { e.preventDefault(); setSelectedCustomerId(c.id.toString()); setCustomerSearchTerm(''); setIsCustomerModalOpen(false); }} 
-                                style={{ padding: '12px', borderBottom: '1px solid #f1f5f9', cursor: 'pointer', backgroundColor: '#fff' }}
-                              >
-                                <div style={{ fontWeight: 'normal', fontSize: '15px', color: '#334155', marginBottom: '4px' }}>{c.name}</div>
-                                <div style={{ fontSize: '13px', color: '#64748b', display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
-                                  <span>📞 {c.phone || '-'}</span>
-                                  <span>📍 {c.location || '-'}</span>
-                                  <span>🏷️ {c.type || '-'}</span>
-                                </div>
-                              </div>
-                            ))
-                          )}
-                        </div>
-                      )}
                     </div>
                   ) : (
                     <div style={{ width: '100%', padding: '12px', backgroundColor: '#fefcf3', border: '1px solid #eadeca', borderRadius: '6px', fontSize: '14px', color: '#4a3b1b', position: 'relative' }}>
@@ -1844,7 +1813,7 @@ export default function POSPage() {
                     onClick={() => { setSelectedCustomerId(c.id.toString()); setCustomerSearchTerm(''); setIsCustomerModalOpen(false); }} 
                     style={{ border: '1px solid #e2e8f0', borderRadius: '8px', padding: '16px', cursor: 'pointer', backgroundColor: '#fff', position: 'relative' }}
                   >
-                    <div style={{ fontWeight: 'bold', fontSize: '15px', color: '#1e293b', marginBottom: '8px' }}>{c.name}</div>
+                    <div style={{ fontWeight: 'normal', fontSize: '15px', color: '#1e293b', marginBottom: '8px' }}>{c.name}</div>
                     <div style={{ fontSize: '13px', color: '#64748b', marginBottom: '4px' }}>Location: <span style={{ color: '#0f172a' }}>{c.location || '-'}</span></div>
                     <div style={{ fontSize: '13px', color: '#64748b', marginBottom: '4px' }}>Phone Number: <span style={{ color: '#0f172a' }}>{c.phone || '-'}</span></div>
                     <div style={{ fontSize: '13px', color: '#64748b' }}>Types: <span style={{ color: '#0f172a' }}>{c.type || '-'}</span></div>

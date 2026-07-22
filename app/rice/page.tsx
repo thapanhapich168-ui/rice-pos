@@ -310,46 +310,67 @@ export default function RiceControl() {
     if (!repackModal.product || !repackModal.product.linked_wholesale_id) return;
     setIsProcessing(true);
     try {
-        const retailProduct = repackModal.product;
-        const wholesaleId = retailProduct.linked_wholesale_id;
-        const wholesaleProduct = products.find(p => p.id === wholesaleId);
+        const retailId = repackModal.product.id;
+        const wholesaleId = repackModal.product.linked_wholesale_id;
+        
+        // 0. Fetch fresh data directly from DB to prevent stale UI state bugs
+        const { data: freshRetail, error: fetchErr1 } = await supabase.from('products').select('*').eq('id', retailId).single();
+        const { data: freshWholesale, error: fetchErr2 } = await supabase.from('products').select('*').eq('id', wholesaleId).single();
 
-        if (!wholesaleProduct) throw new Error("Linked wholesale product not found.");
+        if (fetchErr1 || !freshRetail) throw new Error("Could not fetch latest retail data.");
+        if (fetchErr2 || !freshWholesale) throw new Error("Linked wholesale product not found.");
 
-        // 1. Deduct from retail
-        const newRetailStock = Number(retailProduct.stock) - 50;
-        const { error: err1 } = await supabase.from('products').update({ stock: newRetailStock }).eq('id', retailProduct.id);
+        // 1. Deduct 50 from retail stock
+        const newRetailStock = Number(freshRetail.stock) - 50;
+        const { error: err1 } = await supabase.from('products').update({ stock: newRetailStock }).eq('id', retailId);
         if (err1) throw new Error("Failed to deduct retail stock: " + err1.message);
 
-        // 2. Add to wholesale
-        const newWholesaleStock = Number(wholesaleProduct.stock) + 1;
+        // 2. Add 1 to wholesale stock
+        const newWholesaleStock = Number(freshWholesale.stock) + 1;
         const { error: err2 } = await supabase.from('products').update({ stock: newWholesaleStock }).eq('id', wholesaleId);
         if (err2) throw new Error("Failed to add wholesale stock: " + err2.message);
 
         // 3. Create Inventory Batch
         const { error: err3 } = await supabase.from('inventory_batches').insert([{
             product_id: wholesaleId,
-            cost_price: wholesaleProduct.cost_price,
+            product_name: freshWholesale.name,
+            cost_price: Number(freshWholesale.cost_price) || 0,
             remaining_qty: 1
         }]);
         if (err3) throw new Error("Failed to create batch: " + err3.message);
 
-        // 4. Log it (Fire and forget, if table doesn't exist it won't crash the repack)
+        // 4. Log it
         const { error: logErr } = await supabase.from('repack_logs').insert([{
-            action_type: 'REPACK_BAG',
-            retail_product_id: retailProduct.id,
+            retail_product_id: retailId,
             wholesale_product_id: wholesaleId,
-            kg_amount: 50,
-            bag_amount: 1,
-            cogs_value: wholesaleProduct.cost_price
+            kg_deducted: 50,
+            bags_created: 1,
+            cogs_applied: Number(freshWholesale.cost_price) || 0
         }]);
         
         if (logErr) {
-            console.warn("Repack logged skipped (table might not exist yet):", logErr.message);
+            console.warn("Repack log skipped:", logErr.message);
         }
+
+        // 🔥 Clear any lingering local edits for these products so UI shows fresh DB stock
+        setEdits(prev => {
+            const next = { ...prev };
+            delete next[retailId];
+            delete next[wholesaleId];
+            return next;
+        });
+
+        // 🔥 Immediately update local products state so UI reflects changes instantly
+        setProducts(prev => prev.map(p => {
+            if (p.id === retailId) return { ...p, stock: newRetailStock };
+            if (p.id === wholesaleId) return { ...p, stock: newWholesaleStock };
+            return p;
+        }));
 
         showToast('success', 'Repack Successful', 'Converted 50kg loose rice into 1 sealed bag.');
         setRepackModal({ isOpen: false, product: null });
+        
+        // Background sync
         fetchProducts();
         fetchBatches();
     } catch (err: any) {
