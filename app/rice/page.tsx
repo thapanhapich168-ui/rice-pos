@@ -2396,12 +2396,12 @@ export default function RiceControl() {
           margin-top: 4px;
         }
         .dropdown-row {
-          padding: 10px 12px;
-          font-size: 14px;
-          cursor: pointer;
-          color: #0f172a;
-          border-bottom: 1px solid #f1f5f9;
-        }
+  padding: 10px 16px;  /* ⬅️ Bumped left/right to 16px */
+  font-size: 14px;
+  cursor: pointer;
+  color: #0f172a;
+  border-bottom: 1px solid #f1f5f9;
+}
         .dropdown-row:hover {
           background: #f1f5f9;
         }
