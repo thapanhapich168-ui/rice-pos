@@ -57,7 +57,7 @@ type PaymentRow = { id: number, method: string, amount: number | '' };
 type ColumnKey = keyof Product | 'expand' | 'linked_wholesale' | 'actions';
 
 const DEFAULT_WIDTHS: Record<string, number> = {
-  expand: 40, id: 60, name: 240, price: 120, cost_price: 120, stock: 100, min_stock_level: 100, weight: 90, linked_wholesale: 220, mtd_kg_used: 120, mtd_bags_used: 120, actions: 160
+  expand: 40, id: 60, name: 320, price: 120, cost_price: 120, stock: 100, min_stock_level: 100, weight: 90, linked_wholesale: 220, mtd_kg_used: 120, mtd_bags_used: 120, actions: 160
 }
 const DEFAULT_ORDER: ColumnKey[] = ['expand', 'id', 'name', 'price', 'cost_price', 'stock', 'min_stock_level', 'weight', 'linked_wholesale', 'mtd_kg_used', 'mtd_bags_used', 'actions']
 
@@ -177,6 +177,9 @@ export default function RiceControl() {
   const [payPendingModal, setPayPendingModal] = useState<{isOpen: boolean, record: any, totalDue: number}>({ isOpen: false, record: null, totalDue: 0 })
   const [pendingPaymentRows, setPendingPaymentRows] = useState<PaymentRow[]>([{ id: Date.now(), method: 'Cash ៛', amount: '' }]);
 
+  // --- REPACK MODAL ---
+  const [repackModal, setRepackModal] = useState<{ isOpen: boolean, product: Product | null }>({ isOpen: false, product: null });
+
   // --- MAIN PRODUCTS TABLE STATE ---
   const [columnWidths, setColumnWidths] = useState<Record<string, number>>(DEFAULT_WIDTHS)
   const [columnOrder, setColumnOrder] = useState<ColumnKey[]>(DEFAULT_ORDER)
@@ -292,10 +295,67 @@ export default function RiceControl() {
       if (error) throw new Error(error.message);
       showToast('success', 'Bags Pulled', 'Wholesale stock converted to retail successfully.');
 
+      fetchProducts();
+      fetchBatches();
+
     } catch (err: any) {
       showToast('error', 'Error', err.message);
     } finally {
       setIsProcessing(false);
+    }
+  }
+
+  // --- REPACK CONFIRMATION LOGIC ---
+  const handleConfirmRepack = async () => {
+    if (!repackModal.product || !repackModal.product.linked_wholesale_id) return;
+    setIsProcessing(true);
+    try {
+        const retailProduct = repackModal.product;
+        const wholesaleId = retailProduct.linked_wholesale_id;
+        const wholesaleProduct = products.find(p => p.id === wholesaleId);
+
+        if (!wholesaleProduct) throw new Error("Linked wholesale product not found.");
+
+        // 1. Deduct from retail
+        const newRetailStock = Number(retailProduct.stock) - 50;
+        const { error: err1 } = await supabase.from('products').update({ stock: newRetailStock }).eq('id', retailProduct.id);
+        if (err1) throw new Error("Failed to deduct retail stock: " + err1.message);
+
+        // 2. Add to wholesale
+        const newWholesaleStock = Number(wholesaleProduct.stock) + 1;
+        const { error: err2 } = await supabase.from('products').update({ stock: newWholesaleStock }).eq('id', wholesaleId);
+        if (err2) throw new Error("Failed to add wholesale stock: " + err2.message);
+
+        // 3. Create Inventory Batch
+        const { error: err3 } = await supabase.from('inventory_batches').insert([{
+            product_id: wholesaleId,
+            cost_price: wholesaleProduct.cost_price,
+            remaining_qty: 1
+        }]);
+        if (err3) throw new Error("Failed to create batch: " + err3.message);
+
+        // 4. Log it (Fire and forget, if table doesn't exist it won't crash the repack)
+        const { error: logErr } = await supabase.from('repack_logs').insert([{
+            action_type: 'REPACK_BAG',
+            retail_product_id: retailProduct.id,
+            wholesale_product_id: wholesaleId,
+            kg_amount: 50,
+            bag_amount: 1,
+            cogs_value: wholesaleProduct.cost_price
+        }]);
+        
+        if (logErr) {
+            console.warn("Repack logged skipped (table might not exist yet):", logErr.message);
+        }
+
+        showToast('success', 'Repack Successful', 'Converted 50kg loose rice into 1 sealed bag.');
+        setRepackModal({ isOpen: false, product: null });
+        fetchProducts();
+        fetchBatches();
+    } catch (err: any) {
+        showToast('error', 'Repack Error', err.message);
+    } finally {
+        setIsProcessing(false);
     }
   }
 
@@ -396,7 +456,7 @@ export default function RiceControl() {
     
     const targetProduct = products.find(p => p.id === originalBatch.product_id);
     if (!targetProduct) return setEditingHistoryId(null);
-    
+
     const originalQty = Number(originalBatch.remaining_qty) || 0;
     const newQty = edits.remaining_qty !== undefined ? Number(edits.remaining_qty) : originalQty;
     const qtyDifference = newQty - originalQty;
@@ -610,7 +670,6 @@ export default function RiceControl() {
 
       await supabase.from('inventory_batches').insert([{
         product_id: Number(importForm.product_id),
-        product_name: product.name,
         cost_price: unitCost,
         remaining_qty: qty
       }]);
@@ -1238,6 +1297,7 @@ export default function RiceControl() {
                   const currentBatch = pBatches.length > 0 ? pBatches[0] : null;
                   const isExpanded = expandedProductId === p.id;
                   const totalActiveBatchStock = pBatches.reduce((sum, b) => sum + Number(b.remaining_qty), 0);
+                  const linkedRetail = products.find(r => r.linked_wholesale_id === p.id);
 
                   return (
                     <React.Fragment key={p.id}>
@@ -1398,11 +1458,32 @@ export default function RiceControl() {
                                   {col === 'name' ? (
                                     <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                                       {activeView === 'wholesale' && (
-                                        <span style={{ fontSize: '11px', background: '#fef3c7', color: '#b45309', padding: '2px 6px', borderRadius: '4px', fontWeight: 'bold' }}>
-                                          📦 {totalActiveBatchStock} Total
+                                        <span style={{ fontSize: '11px', background: '#fef3c7', color: '#b45309', padding: '2px 6px', borderRadius: '4px', display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                                          <span style={{ fontWeight: 'bold' }}>📦 {totalActiveBatchStock} Total</span>
+                                          {linkedRetail && (
+                                            <>
+                                              <span style={{ width: '1px', height: '10px', background: '#d97706', opacity: 0.5 }}></span>
+                                              <span style={{ fontWeight: 'normal' }}>⚖️ {linkedRetail.stock} kg Loose</span>
+                                            </>
+                                          )}
                                         </span>
                                       )}
                                       {formatDisplayValue(col as string, val)}
+                                      
+                                      {/* 🔥 FIX: Changed to onClick and separated from the parent click handler to avoid edit mode */}
+                                      {activeView === 'retail' && p.stock >= 50 && p.linked_wholesale_id && (
+                                        <button 
+                                          onClick={(e) => { 
+                                            e.preventDefault(); 
+                                            e.stopPropagation(); 
+                                            setRepackModal({ isOpen: true, product: p }); 
+                                          }}
+                                          onMouseDown={(e) => e.stopPropagation()} 
+                                          style={{ marginLeft: '12px', padding: '4px 8px', background: '#f0fdf4', color: '#166534', border: '1px solid #bbf7d0', borderRadius: '6px', fontSize: '11px', fontWeight: 'bold', cursor: 'pointer', position: 'relative', zIndex: 10 }}
+                                        >
+                                          📦 Repack 50kg
+                                        </button>
+                                      )}
                                     </span>
                                   ) : (
                                     formatDisplayValue(col as string, val)
@@ -1417,35 +1498,35 @@ export default function RiceControl() {
 
                       {/* Expandable Child Row Batch List (View Only) */}
                       {isExpanded && activeView === 'wholesale' && pBatches.length > 1 && pBatches.slice(1).map((batch, index) => {
-                          let batchLabel = index === 0 ? '2nd Batch' : index === 1 ? '3rd Batch' : `${index + 2}th Batch`;
-                          
-                          return (
-                            <tr key={`batch-${batch.id}`} style={{ background: '#f8fafc', borderBottom: index === pBatches.length - 2 ? '2px solid #cbd5e1' : '1px dashed #e2e8f0' }}>
-                               {columnOrder.map(col => {
-                                 if (col === 'expand') return <td key={col} style={{ borderRight: '1px solid #f1f5f9' }}></td>;
-                                 if (col === 'linked_wholesale' || col === 'mtd_kg_used' || col === 'mtd_bags_used') return null;
-                                 if (col === 'id') return <td key={col} style={{ borderRight: '1px solid #f1f5f9' }}></td>;
-                                 
-                                 if (col === 'name') return (
-                                   <td key={col} style={{ padding: '12px 12px 12px 48px', borderRight: '1px solid #f1f5f9', color: '#475569', fontSize: '14px' }}>
-                                     ↳ {batchLabel}
-                                   </td>
-                                 );
-                                 
-                                 if (col === 'price') return <td key={col} style={{ padding: '12px', borderRight: '1px solid #f1f5f9', color: '#475569', fontSize: '14px' }}>-</td>;
-                                 
-                                 if (col === 'cost_price') return <td key={col} style={{ padding: '12px', borderRight: '1px solid #f1f5f9', color: '#475569', fontSize: '14px' }}>{formatRiel(batch.cost_price)}</td>;
-                                 
-                                 if (col === 'stock') return <td key={col} style={{ padding: '12px', borderRight: '1px solid #f1f5f9', color: '#b58a3d', fontWeight: 'normal', fontSize: '14px' }}>{batch.remaining_qty}</td>;
-                                 
-                                 if (col === 'actions') {
-                                   return <td key={col} style={{ borderRight: '1px solid #f1f5f9' }}></td>;
-                                 }
-                                 
-                                 return <td key={col} style={{ padding: '12px', borderRight: '1px solid #f1f5f9', color: '#94a3b8', fontSize: '14px', textAlign: 'center' }}>-</td>;
-                               })}
-                            </tr>
-                          )
+                         let batchLabel = index === 0 ? '2nd Batch' : index === 1 ? '3rd Batch' : `${index + 2}th Batch`;
+                         
+                         return (
+                           <tr key={`batch-${batch.id}`} style={{ background: '#f8fafc', borderBottom: index === pBatches.length - 2 ? '2px solid #cbd5e1' : '1px dashed #e2e8f0' }}>
+                              {columnOrder.map(col => {
+                                if (col === 'expand') return <td key={col} style={{ borderRight: '1px solid #f1f5f9' }}></td>;
+                                if (col === 'linked_wholesale' || col === 'mtd_kg_used' || col === 'mtd_bags_used') return null;
+                                if (col === 'id') return <td key={col} style={{ borderRight: '1px solid #f1f5f9' }}></td>;
+                                
+                                if (col === 'name') return (
+                                  <td key={col} style={{ padding: '12px 12px 12px 48px', borderRight: '1px solid #f1f5f9', color: '#475569', fontSize: '14px' }}>
+                                    ↳ {batchLabel}
+                                  </td>
+                                );
+                                
+                                if (col === 'price') return <td key={col} style={{ padding: '12px', borderRight: '1px solid #f1f5f9', color: '#475569', fontSize: '14px' }}>-</td>;
+                                
+                                if (col === 'cost_price') return <td key={col} style={{ padding: '12px', borderRight: '1px solid #f1f5f9', color: '#475569', fontSize: '14px' }}>{formatRiel(batch.cost_price)}</td>;
+                                
+                                if (col === 'stock') return <td key={col} style={{ padding: '12px', borderRight: '1px solid #f1f5f9', color: '#b58a3d', fontWeight: 'normal', fontSize: '14px' }}>{batch.remaining_qty}</td>;
+                                
+                                if (col === 'actions') {
+                                  return <td key={col} style={{ borderRight: '1px solid #f1f5f9' }}></td>;
+                                }
+                                
+                                return <td key={col} style={{ padding: '12px', borderRight: '1px solid #f1f5f9', color: '#94a3b8', fontSize: '14px', textAlign: 'center' }}>-</td>;
+                              })}
+                           </tr>
+                         )
                       })}
                     </React.Fragment>
                   )
@@ -1514,6 +1595,7 @@ export default function RiceControl() {
                       onKeyDown={e => e.key === 'Escape' && setIsProductDropdownOpen(false)} 
                     />
                     <div className="dropdown-results-tray">
+                      {/* 🔥 Filter forces only >= 50kg bags to be shown */}
                       {products.filter(p => p.weight >= 50 && p.name.toLowerCase().includes(productSearch.toLowerCase())).map(p => (
                         <div key={p.id} className="dropdown-row" onMouseDown={(e) => { e.stopPropagation(); setImportForm({...importForm, product_id: String(p.id)}); setIsProductDropdownOpen(false); }}>
                           <span style={{ fontWeight: 'normal', color: '#334155' }}>{p.name}</span>
@@ -1816,7 +1898,7 @@ export default function RiceControl() {
                       newRows[index].method = e.target.value;
                       setPendingPaymentRows(newRows);
                     }}
-                    style={{ width: '45%', padding: '12px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '16px', outline: 'none', backgroundColor: '#fff', cursor: 'pointer', color: '#334155' }}
+                    style={{ width: '45%', padding: '12px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '14px', outline: 'none', backgroundColor: '#fff', cursor: 'pointer', color: '#334155' }}
                   >
                     <option value="Cash ៛">💵 Cash ៛</option>
                     <option value="Cash $">💵 Cash $</option>
@@ -1836,7 +1918,7 @@ export default function RiceControl() {
                         setPendingPaymentRows(newRows);
                       }}
                       onEnter={handlePayPendingSubmit}
-                      style={{ width: '100%', padding: '12px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', outline: 'none', textAlign: 'right', fontSize: '16px' }}
+                      style={{ width: '100%', padding: '12px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', outline: 'none', textAlign: 'right' }}
                     />
                   </div>
                   
@@ -1913,11 +1995,11 @@ export default function RiceControl() {
                           <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', flex: 1 }}>
                             <div style={{ flex: '1 1 80px' }}>
                               <label style={{ fontSize: '11px', fontWeight: 'bold', color: '#64748b' }}>Remaining Qty</label>
-                              <input autoFocus type="number" className="no-spinners" value={editData.remaining_qty} onChange={e => setHistoryEdits({...historyEdits, [b.id]: {...editData, remaining_qty: Number(e.target.value)}})} onKeyDown={e => e.key === 'Enter' && handleSaveHistory(b.id)} style={{ width: '100%', padding: '6px', border: '1px solid #b58a3d', borderRadius: '4px', fontSize: '16px', color: '#0f172a', backgroundColor: '#fff' }} />
+                              <input autoFocus type="number" className="no-spinners" value={editData.remaining_qty} onChange={e => setHistoryEdits({...historyEdits, [b.id]: {...editData, remaining_qty: Number(e.target.value)}})} onKeyDown={e => e.key === 'Enter' && handleSaveHistory(b.id)} style={{ width: '100%', padding: '6px', border: '1px solid #b58a3d', borderRadius: '4px', fontSize: '14px', color: '#0f172a', backgroundColor: '#fff' }} />
                             </div>
                             <div style={{ flex: '1 1 100px' }}>
                               <label style={{ fontSize: '11px', fontWeight: 'bold', color: '#64748b' }}>Cost (៛)</label>
-                              <input type="number" className="no-spinners" value={editData.cost_price} onChange={e => setHistoryEdits({...historyEdits, [b.id]: {...editData, cost_price: Number(e.target.value)}})} onKeyDown={e => e.key === 'Enter' && handleSaveHistory(b.id)} style={{ width: '100%', padding: '6px', border: '1px solid #b58a3d', borderRadius: '4px', fontSize: '16px', color: '#0f172a', backgroundColor: '#fff' }} />
+                              <input type="number" className="no-spinners" value={editData.cost_price} onChange={e => setHistoryEdits({...historyEdits, [b.id]: {...editData, cost_price: Number(e.target.value)}})} onKeyDown={e => e.key === 'Enter' && handleSaveHistory(b.id)} style={{ width: '100%', padding: '6px', border: '1px solid #b58a3d', borderRadius: '4px', fontSize: '14px', color: '#0f172a', backgroundColor: '#fff' }} />
                             </div>
                           </div>
                         ) : (
@@ -1988,6 +2070,33 @@ export default function RiceControl() {
           </div>
         </div>
       )}
+
+      {/* CONFIRM REPACK MODAL */}
+      {repackModal.isOpen && repackModal.product && (() => {
+          const wholesaleProd = products.find(wp => wp.id === repackModal.product?.linked_wholesale_id);
+          return (
+            <div className="modal-overlay" onMouseDown={() => setRepackModal({ isOpen: false, product: null })}>
+              <div className="modal-content" style={{ maxWidth: '400px' }} onMouseDown={e => e.stopPropagation()}>
+                <h3 style={{ marginTop: 0, color: '#1e293b' }}>📦 Confirm Repack</h3>
+                <p style={{ color: '#475569', fontSize: '14px', lineHeight: '1.5' }}>
+                  Are you sure you want to convert <b>50kg</b> of loose <span style={{ color: '#b58a3d', fontWeight: 'bold' }}>{repackModal.product.name}</span> into 1 sealed wholesale bag of <span style={{ color: '#10b981', fontWeight: 'bold' }}>{wholesaleProd?.name}</span>?
+                </p>
+                <div style={{ background: '#f8fafc', padding: '12px', borderRadius: '8px', border: '1px solid #e2e8f0', marginTop: '16px', fontSize: '13px', color: '#64748b' }}>
+                  This action will:
+                  <ul style={{ paddingLeft: '20px', marginTop: '8px', marginBottom: 0 }}>
+                    <li>Deduct 50kg from Retail Stock</li>
+                    <li>Add 1 Bag to Wholesale Stock</li>
+                    <li>Log to Repack History</li>
+                  </ul>
+                </div>
+                <div style={{ marginTop: '24px', display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
+                  <button onClick={() => setRepackModal({ isOpen: false, product: null })} style={{ padding: '10px 16px', background: '#f1f5f9', color: '#475569', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', fontSize: '14px' }}>Cancel</button>
+                  <button onClick={handleConfirmRepack} disabled={isProcessing} style={{ padding: '10px 16px', background: '#10b981', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', fontSize: '14px' }}>{isProcessing ? 'Packing...' : 'Confirm Repack'}</button>
+                </div>
+              </div>
+            </div>
+          );
+      })()}
 
       {/* ADD SUPPLIER MODAL */}
       {isAddSupplierOpen && (
@@ -2172,7 +2281,6 @@ export default function RiceControl() {
         .main-wrapper { 
           padding: max(20px, env(safe-area-inset-top, 20px)) 24px 24px 24px; 
           background: #f8fafc; 
-          font-family: 'Inter', sans-serif; 
           box-sizing: border-box; 
           color: #333;
           width: 100%;
@@ -2385,8 +2493,8 @@ export default function RiceControl() {
         .dropdown-results-tray {
           position: absolute;
           top: 100%;
-          left: 0px;
-          right: 0px;
+          left: 12px;
+          right: 12px;
           background: #ffffff;
           border: 1px solid #cbd5e1;
           border-radius: 8px;
@@ -2396,12 +2504,12 @@ export default function RiceControl() {
           margin-top: 4px;
         }
         .dropdown-row {
-  padding: 10px 16px;  /* ⬅️ Bumped left/right to 16px */
-  font-size: 14px;
-  cursor: pointer;
-  color: #0f172a;
-  border-bottom: 1px solid #f1f5f9;
-}
+          padding: 10px 16px;
+          font-size: 14px;
+          cursor: pointer;
+          color: #0f172a;
+          border-bottom: 1px solid #f1f5f9;
+        }
         .dropdown-row:hover {
           background: #f1f5f9;
         }
@@ -2441,6 +2549,17 @@ export default function RiceControl() {
 
         /* 🔥 MOBILE OVERRIDES */
         @media (max-width: 1023px) { 
+          
+          /* 🛑 IOS SAFARI ANTI-ZOOM LOCK 🛑 */
+          input, select, textarea, 
+          .toolbar-search, 
+          .dropdown-search-input, 
+          .cell-input, 
+          .mobile-input-field, 
+          .mobile-select-menu {
+            font-size: 16px !important;
+          }
+          
           .desktop-only-btn { display: none !important; }
           .mobile-only-btn { display: flex !important; }
           .mobile-only-flex { display: flex !important; }
@@ -2498,7 +2617,6 @@ export default function RiceControl() {
             min-width: 0 !important;
             width: 100%;
             padding: 8px 10px !important;
-            font-size: 16px !important;
           }
           .toolbar-filters {
             gap: 6px !important;
@@ -2511,10 +2629,6 @@ export default function RiceControl() {
 
           .supplier-name-cell {
             font-size: 14px !important;
-          }
-
-          .mobile-input-field, .dropdown-row, .interactive-select-trigger {
-            font-size: 16px !important;
           }
         }
       `}</style>

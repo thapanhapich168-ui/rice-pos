@@ -1,18 +1,63 @@
 'use client'
 
-import { useEffect, useState, useRef } from 'react'
+import React, { useEffect, useState, useRef } from 'react'
 import { supabase } from '@/lib/supabaseClient'
 import * as htmlToImage from 'html-to-image'
 
+// --- TYPES & INTERFACES ---
+interface Product {
+  id: number
+  name: string
+  price: number
+  cost_price: number
+  weight: number
+  stock: number
+  linked_wholesale_id?: number | null
+  min_stock_level?: number
+  is_archived?: boolean
+  bags_needed?: number
+}
+
+interface InventoryBatch {
+  id: number
+  product_id: number
+  cost_price: number
+  remaining_qty: number
+  created_at?: string
+}
+
+interface Customer {
+  id: number
+  name: string
+  phone?: string
+  location?: string
+  owner?: string
+  type?: string
+}
+
+interface CartItem extends Product {
+  product_id: number
+  quantity: number | ''
+  custom_name: string
+  custom_price_riel: number | ''
+  isSpecial?: boolean
+  isReturnFullBag?: boolean
+  bypass_stock?: boolean
+  add_loose_kg?: number
+  loose_retail_id?: number | null
+  sortOrder?: number
+  selected_batch_id?: number | null
+  db_row_id?: number
+}
+
 // ==========================================
-// ⚠️ SAFARI IOS IMAGE FIX
+// SAFARI IOS IMAGE FIX
 // ==========================================
 const LOGO_LEFT_SRC = "/logo-left.png";
 const LOGO_RIGHT_SRC = "/logo-right.png";
 const WATERMARK_SRC = "/watermark.png";
 
-// 🛠️ SAFARI INVOICE IMAGE CONVERTER 
-const fetchImageAsBase64 = async (path: string) => {
+const fetchImageAsBase64 = async (path: string): Promise<string> => {
   try {
     const absoluteUrl = new URL(path, window.location.origin).href;
     const res = await fetch(absoluteUrl);
@@ -23,7 +68,7 @@ const fetchImageAsBase64 = async (path: string) => {
       reader.onerror = reject;
       reader.readAsDataURL(blob);
     });
-  } catch (error) {
+  } catch {
     console.warn(`Base64 conversion failed for ${path}, using raw URL`);
     return path; 
   }
@@ -42,7 +87,7 @@ const t: Record<'en' | 'kh', any> = {
     retail: "🛍️ Retail (1kg)",
     wholesale: "🌾 Wholesale (50kg)",
     searchPlaceholder: "🔍 Search products...",
-    selectCustomer: "🔍 Search Wholesale Customer...",
+    selectCustomer: "🔍 Search Customer...",
     noProducts: "No products match selection filter",
     stock: "Stock",
     cartTitle: "🛒 Shopping Cart",
@@ -101,7 +146,6 @@ function CurrencyInput({ value, onChange, placeholder, style, autoFocus, classNa
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     let raw = e.target.value.replace(/[^0-9.]/g, '');
-    
     const parts = raw.split('.');
     if (parts.length > 2) raw = parts[0] + '.' + parts.slice(1).join('');
 
@@ -174,23 +218,27 @@ function CartInput({ value, onChange, isQty, fontSize = '14px', onFocus }: { val
 }
 
 export default function POSPage() {
-  const [products, setProducts] = useState<any[]>([])
-  const [customers, setCustomers] = useState<any[]>([])
-  const [cart, setCart] = useState<any[]>([])
+  const [products, setProducts] = useState<Product[]>([])
+  const [customers, setCustomers] = useState<Customer[]>([])
+  const [cart, setCart] = useState<CartItem[]>([])
   const [productOrder, setProductOrder] = useState<number[]>([])
-  const [activeBatches, setActiveBatches] = useState<Record<number, any[]>>({})
+  const [activeBatches, setActiveBatches] = useState<Record<number, InventoryBatch[]>>({})
   const [mtdSalesStats, setMtdSalesStats] = useState<Record<number, number>>({})
   
+  // 🟢 Active vs Non-Active Retail Tab States
+  const [retailSubTab, setRetailSubTab] = useState<'active' | 'inactive'>('active')
+  const [hiddenRetailIds, setHiddenRetailIds] = useState<number[]>([])
+
   const [invoiceImages, setInvoiceImages] = useState({ left: LOGO_LEFT_SRC, right: LOGO_RIGHT_SRC, watermark: WATERMARK_SRC });
 
-  const [lang, setLang] = useState<'en' | 'kh'>('en')
+  const [lang] = useState<'en' | 'kh'>('en')
   const [searchQuery, setSearchQuery] = useState('')
   const [activeTab, setActiveTab] = useState<'retail' | 'wholesale'>('retail')
   const [activeCategory, setActiveCategory] = useState<string>('All')
   
   const [isMobileCartOpen, setIsMobileCartOpen] = useState(false)
   const [isProcessing, setIsProcessing] = useState(false)
-  const [isDeviceMobile, setIsDeviceMobile] = useState(false)
+  const [, setIsDeviceMobile] = useState(false)
 
   const [selectedCustomerId, setSelectedCustomerId] = useState('')
   const [customerSearchTerm, setCustomerSearchTerm] = useState('')
@@ -210,9 +258,11 @@ export default function POSPage() {
   const [mobileQty, setMobileQty] = useState<number | ''>('')
   const [mobileName, setMobileName] = useState<string>('')
 
-  const [exchangeModal, setExchangeModal] = useState<{ isOpen: boolean, product: any, consumedKg: string | number }>({
+  const [exchangeModal, setExchangeModal] = useState<{ isOpen: boolean, product: Product | null, consumedKg: string | number }>({
     isOpen: false, product: null, consumedKg: ''
   })
+  
+  const [autoOpenModal, setAutoOpenModal] = useState<{ isOpen: boolean, items: (Product & { bags_needed: number })[] }>({ isOpen: false, items: [] });
 
   const [saleSummary, setSaleSummary] = useState<{ total: number, receivedRiel: number, receivedUsd: number, totalReceivedInRiel: number, change: number, type?: 'retail' | 'wholesale', isCashless?: boolean, items?: any[], isDebt?: boolean } | null>(null)
   const [showInvoicePreview, setShowInvoicePreview] = useState(false)
@@ -306,15 +356,15 @@ export default function POSPage() {
           
           const { data: saleRows } = await supabase.from('sales').select('*').eq('invoice_id', editId);
           if (saleRows && saleRows.length > 0) {
-            const rebuiltCart = saleRows.map(row => {
+            const rebuiltCart = saleRows.map((row: any) => {
               const isSpecialRow = (row.custom_rice_type || row.rice_type).includes('ដូរ') || (row.custom_rice_type || row.rice_type).includes('បានប្រើ');
               let sortOrder = 0;
               if ((row.custom_rice_type || row.rice_type).includes('ដូរ')) sortOrder = 1;
               if ((row.custom_rice_type || row.rice_type).includes('បានប្រើ')) sortOrder = 2;
 
               return {
-                id: row.id, // Explicitly match database ID to avoid grouping
-                db_row_id: row.id, // Keep reference to exact DB row for upserting
+                id: row.id,
+                db_row_id: row.id,
                 product_id: row.product_id, 
                 name: row.rice_type, 
                 custom_name: row.custom_rice_type || row.rice_type, 
@@ -322,6 +372,8 @@ export default function POSPage() {
                 quantity: Number(row.qty),
                 cost_price: Number(row.cogs_price || 0),
                 stock: 0, 
+                price: Number(row.price_per_bag || 0),
+                weight: 50,
                 isSpecial: isSpecialRow,
                 bypass_stock: (row.custom_rice_type || row.rice_type).includes('បានប្រើ'),
                 sortOrder: sortOrder,
@@ -347,7 +399,6 @@ export default function POSPage() {
     
     stabilizeConnection()
 
-    // 🚀 NEW: True Realtime Live View for POS Inventory Sync!
     const posProductsChannel = supabase.channel('pos-products-update')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'products' }, () => loadProductsAndSettings())
       .subscribe();
@@ -444,6 +495,9 @@ export default function POSPage() {
     if (prodData) setProducts(prodData)
     const { data: setObj } = await supabase.from('app_settings').select('*').eq('setting_key', 'pos_product_order').single()
     if (setObj && setObj.setting_value) setProductOrder(setObj.setting_value)
+
+    const { data: hiddenSet } = await supabase.from('app_settings').select('*').eq('setting_key', 'hidden_retail_ids').single()
+    if (hiddenSet && hiddenSet.setting_value) setHiddenRetailIds(hiddenSet.setting_value)
   }
 
   async function loadCustomers() {
@@ -454,8 +508,8 @@ export default function POSPage() {
   async function loadBatches() {
     const { data } = await supabase.from('inventory_batches').select('*').order('created_at', { ascending: true });
     if (data) {
-      const batchMap: Record<number, any[]> = {};
-      data.forEach(b => {
+      const batchMap: Record<number, InventoryBatch[]> = {};
+      data.forEach((b: any) => {
         const remaining = b.remaining_qty || 0;
         if (remaining > 0) {
           if (!batchMap[b.product_id]) batchMap[b.product_id] = [];
@@ -472,7 +526,7 @@ export default function POSPage() {
     const { data } = await supabase.from('sales').select('product_id, qty').gte('created_at', firstDay);
     if (data) {
       const stats: Record<number, number> = {};
-      data.forEach(s => {
+      data.forEach((s: any) => {
         stats[s.product_id] = (stats[s.product_id] || 0) + Number(s.qty);
       });
       setMtdSalesStats(stats);
@@ -482,7 +536,22 @@ export default function POSPage() {
   const formatRielSymbol = (amountInRiel: number) => `${new Intl.NumberFormat('en-US').format(Math.round(amountInRiel))} ៛`;
   const formatRielFromNative = (rielAmount: number) => `${new Intl.NumberFormat('en-US').format(Math.round(rielAmount))} ៛`;
 
-  function handleProductClick(product: any) {
+  // 🟢 Move Retail Rice Cards between Active and Non-Active Tabs
+  const toggleProductActiveStatus = async (productId: number, targetStatus: 'active' | 'inactive') => {
+    let newHidden: number[];
+    if (targetStatus === 'inactive') {
+      newHidden = Array.from(new Set([...hiddenRetailIds, productId]));
+    } else {
+      newHidden = hiddenRetailIds.filter(id => id !== productId);
+    }
+    setHiddenRetailIds(newHidden);
+    await supabase.from('app_settings').upsert(
+      { setting_key: 'hidden_retail_ids', setting_value: newHidden },
+      { onConflict: 'setting_key' }
+    );
+  }
+
+  function handleProductClick(product: Product) {
     const isMobile = typeof window !== 'undefined' && window.innerWidth < 1024;
     const defaultQty = 1; 
     if (isMobile) {
@@ -495,7 +564,7 @@ export default function POSPage() {
     }
   }
 
-  function addToCartDirect(product: any, qtyToAdd: number | '' = 1) {
+  function addToCartDirect(product: Product, qtyToAdd: number | '' = 1) {
     const existing = cart.find((item) => item.product_id === product.id && !item.isSpecial)
     const priceInRiel = activeTab === 'wholesale' ? 0 : Number(product.price); 
     if (existing) {
@@ -529,26 +598,103 @@ export default function POSPage() {
     setSelectedMobileProduct(null);
   }
 
-  function handleConfirmExchange() {
+  // 🔥 CORE FIX: Reverted to 2-Row UI (ដូរ and បានប្រើ) but keeps the Retail Restock Magic!
+  async function handleConfirmExchange() {
     if (!exchangeModal.product) return;
     const prod = exchangeModal.product;
     const consumedKg = Number(exchangeModal.consumedKg) || 0;
-    const perKgCogs = Math.round(Number(prod.cost_price || 0) / 50);
+    let linkedRetail = products.find(p => p.linked_wholesale_id === prod.id);
 
-    const newItems = [{
-      ...prod, id: Math.random(), product_id: prod.id, custom_name: `ដូរ ${prod.name}`, custom_price_riel: 0,
-      cost_price: Number(prod.cost_price || 0), quantity: 1, isSpecial: true, bypass_stock: false, sortOrder: 1
-    }];
-
-    if (consumedKg > 0) {
-      newItems.push({
-        ...prod, id: Math.random(), product_id: prod.id, custom_name: `បានប្រើ ${prod.name}`, custom_price_riel: 0,
-        cost_price: perKgCogs, quantity: consumedKg, isSpecial: true, bypass_stock: true, sortOrder: 2
-      });
+    if (consumedKg >= 50) {
+       return alert("Consumed amount cannot be 50kg or more for a single bag return.");
     }
 
-    setCart([...cart, ...newItems]);
-    setExchangeModal({ isOpen: false, product: null, consumedKg: '' });
+    setIsProcessing(true);
+
+    try {
+      if (consumedKg > 0 && !linkedRetail) {
+         // Auto-Create Missing Retail 1kg Rice for this Wholesale Bag!
+         const newRetailName = prod.name; // <--- 🔥 FIX: Removed (សល់/Loose)
+         const perKgPrice = Math.round(Number(prod.price || 0) / 50);
+         const perKgCogs = Math.round(Number(prod.cost_price || 0) / 50);
+
+         const { data: newProd, error } = await supabase.from('products').insert([{
+           name: newRetailName,
+           price: perKgPrice,
+           cost_price: perKgCogs,
+           weight: 1,
+           stock: 0,
+           min_stock_level: 10,
+           linked_wholesale_id: prod.id,
+           is_archived: false
+         }]).select().single();
+
+         if (error) throw new Error("Failed to auto-create retail product: " + error.message);
+         
+         linkedRetail = newProd as Product;
+         setProducts(prev => [...prev, newProd]);
+
+         // Auto-drop the new 1kg retail product into Non-Active tab so it doesn't clutter main screen!
+         const newHidden = Array.from(new Set([...hiddenRetailIds, newProd.id]));
+         setHiddenRetailIds(newHidden);
+         await supabase.from('app_settings').upsert(
+           { setting_key: 'hidden_retail_ids', setting_value: newHidden },
+           { onConflict: 'setting_key' }
+         );
+      }
+
+      const newItems: any[] = [];
+
+      if (consumedKg === 0) {
+        // 100% Bag returned (0kg consumed) - Returns 1 Wholesale Bag
+        newItems.push({
+          ...prod, product_id: prod.id, id: Math.random(), custom_name: `ដូរ ${prod.name}`, custom_price_riel: prod.price,
+          cost_price: Number(prod.cost_price || 0), quantity: 1, isSpecial: true, isReturnFullBag: true, bypass_stock: false, sortOrder: 1
+        });
+      } else {
+        // Partial Return 
+        const returnedKg = 50 - consumedKg;
+        const perKgPrice = Math.round(Number(prod.price || 0) / 50);
+        const perKgCogs = Math.round(Number(prod.cost_price || 0) / 50);
+
+        // Row 1: Full Bag Refund (UI Shows full bag returned. Backend adds remainder to retail bin)
+        newItems.push({
+          ...prod, 
+          id: Math.random(), 
+          product_id: prod.id, 
+          custom_name: `ដូរ ${prod.name}`, 
+          custom_price_riel: prod.price,
+          cost_price: Number(prod.cost_price || 0), 
+          quantity: 1, 
+          isSpecial: true, 
+          bypass_stock: true, // Skips wholesale stock math so it doesn't give a full bag back!
+          add_loose_kg: returnedKg, // Tells checkout to add the leftovers (+40kg) to Retail stock!
+          loose_retail_id: linkedRetail?.id, 
+          sortOrder: 1
+        });
+
+        // Row 2: Charge for consumed Kg
+        newItems.push({
+          ...(linkedRetail || prod), 
+          id: Math.random(), 
+          product_id: linkedRetail ? linkedRetail.id : prod.id, 
+          custom_name: `បានប្រើ ${prod.name}`, 
+          custom_price_riel: perKgPrice,
+          cost_price: perKgCogs, 
+          quantity: consumedKg, 
+          isSpecial: true, 
+          bypass_stock: true, 
+          sortOrder: 2
+        });
+      }
+
+      setCart([...cart, ...newItems]);
+      setExchangeModal({ isOpen: false, product: null, consumedKg: '' });
+    } catch (err: any) {
+      alert(err.message);
+    } finally {
+      setIsProcessing(false);
+    }
   }
 
   function updateCartItem(id: number, field: string, value: any) {
@@ -556,13 +702,15 @@ export default function POSPage() {
 
     if (field === 'custom_price_riel') {
       const editedItem = updatedCart.find(i => i.id === id);
-      if (editedItem && editedItem.custom_name.includes('ដូរ')) {
+      if (editedItem && editedItem.custom_name.startsWith('ដូរ ')) {
         const baseName = editedItem.custom_name.replace('ដូរ ', '');
         const consumedName = `បានប្រើ ${baseName}`;
         const newPerKgPrice = Math.round(Number(value) / 50) || 0;
 
         updatedCart = updatedCart.map(item => {
-          if (item.product_id === editedItem.product_id && item.custom_name === consumedName) {
+          // 🔥 FIX: Removed product_id matching because the consumed item uses the Retail ID, 
+          // while the returned bag uses the Wholesale ID. Matching perfectly by name instead!
+          if (item.custom_name === consumedName) {
             return { ...item, custom_price_riel: newPerKgPrice };
           }
           return item;
@@ -579,6 +727,7 @@ export default function POSPage() {
 
   const handleProductDragStart = (e: React.DragEvent, id: number) => {
     e.dataTransfer.setData('text/plain', String(id));
+    e.dataTransfer.setData('product_id', String(id));
     e.dataTransfer.effectAllowed = 'move';
   }
 
@@ -639,78 +788,6 @@ export default function POSPage() {
     return splits;
   }
 
-  const orderedProducts = [...products].sort((a, b) => {
-    const idxA = productOrder.indexOf(a.id);
-    const idxB = productOrder.indexOf(b.id);
-    if (idxA === -1 && idxB === -1) return a.id - b.id;
-    if (idxA === -1) return 1;
-    if (idxB === -1) return -1;
-    return idxA - idxB;
-  });
-
-  const filteredProducts = orderedProducts.filter(p => {
-    if (searchQuery && !p.name?.toLowerCase().includes(searchQuery.toLowerCase())) return false;
-    const weightVal = parseFloat(p.weight || 0);
-    if (activeTab === 'wholesale' && weightVal < 50) return false;
-    if (activeTab === 'retail' && weightVal >= 50) return false;
-    
-    if (activeTab === 'wholesale') {
-      if (activeCategory === '❌ Out of Stock') return Number(p.stock) <= 0;
-      if (Number(p.stock) <= 0) return false; 
-    }
-
-    if (activeTab !== 'retail' && activeCategory !== 'All' && activeCategory !== '❌ Out of Stock') {
-      if (activeCategory === '🔥 Hot') {
-        const top10Ids = Object.entries(mtdSalesStats).sort(([,a], [,b]) => b - a).slice(0, 10).map(([id]) => Number(id));
-        return top10Ids.includes(p.id);
-      }
-      
-      const name = p.name || '';
-      if (activeCategory === 'ផ្សេងៗ') {
-        if (MAIN_KEYWORDS.some(kw => name.includes(kw))) return false;
-      } else {
-        if (!name.includes(activeCategory)) return false;
-      }
-    }
-    return true;
-  })
-
-  if (activeCategory === '🔥 Hot') {
-    filteredProducts.sort((a, b) => (mtdSalesStats[b.id] || 0) - (mtdSalesStats[a.id] || 0));
-  }
-
-  const filteredCustomers = customers.filter(c => 
-    (c.name || '').toLowerCase().includes(customerSearchTerm.toLowerCase()) || (c.phone || '').includes(customerSearchTerm)
-  )
-  const selectedCustomer = customers.find(c => c.id.toString() === selectedCustomerId.toString())
-
-  const isSimpleCustomer = !selectedCustomer || ['walk-in', 'walk in', 'mom'].includes((selectedCustomer.name || '').toLowerCase());
-  const showPaymentSelector = activeTab === 'retail' || isSimpleCustomer;
-
-  const liveTotalReceivedInRiel = paymentRows.reduce((sum, row) => {
-    const amt = Number(row.amount) || 0;
-    if (row.method.includes('$')) return sum + (amt * EXCHANGE_RATE);
-    return sum + amt;
-  }, 0);
-
-  const hasValidPayment = !showPaymentSelector || liveTotalReceivedInRiel >= totalRiel;
-
-  const getCategorizedItemsForInvoice = (cartItems: any[]) => {
-    let normalItems: any[] = [], specialItems: any[] = [], negativeItems: any[] = [], serviceItems: any[] = [];
-    cartItems.forEach(item => {
-      if (Number(item.custom_price_riel) === 0) return;
-
-      const desc = item.custom_name;
-      const total = item.custom_price_riel * item.quantity;
-      if (desc.includes('សេវាឡាន (អតិថិជន)')) serviceItems.push({ ...item, total: total });
-      else if (desc.includes('សេវាឡាន')) {  }
-      else if (desc.includes('ដូរ') || desc.includes('បញ្ចុះតម្លៃ') || desc.includes('កក់')) negativeItems.push({ ...item, total: -Math.abs(total) });
-      else if (desc.includes('ថ្លៃបាវ') || desc.includes('បានប្រើ')) specialItems.push({ ...item, total: total });
-      else normalItems.push({ ...item, total: total });
-    });
-    return [...normalItems, ...specialItems, ...negativeItems, ...serviceItems];
-  }
-
   function cancelEditMode() {
     setEditingInvoiceId(null);
     setCart([]);
@@ -720,11 +797,88 @@ export default function POSPage() {
     window.history.replaceState({}, document.title, window.location.pathname);
   }
 
-  async function confirmCheckout() {
+  // 🔥 CHECKOUT INTERCEPTOR: Warns if Retail Stock < 0 before finishing checkout
+  async function initiateCheckout() {
     if (!isCartValid) return alert("Please ensure all items have a valid quantity and price.");
     if (activeTab === 'wholesale' && !selectedCustomerId) return alert(lang === 'kh' ? 'សូមជ្រើសរើសអតិថិជនសម្រាប់ដុំ!' : 'Please select a customer for wholesale');
     if (showPaymentSelector && liveTotalReceivedInRiel < totalRiel && !editingInvoiceId) return alert("Amount received must be equal to or greater than the total due.");
 
+    const simulatedStockUpdates: Record<number, number> = {};
+    
+    for (const item of cart) {
+         const isReturn = item.custom_name.includes('ដូរ');
+         const isCharge = item.custom_name.includes('បានប្រើ');
+         const isBypass = item.bypass_stock || isCharge;
+         const finalQty = isReturn ? -Math.abs(Number(item.quantity)) : Number(item.quantity);
+         
+         if (!editingInvoiceId && !isBypass) {
+             simulatedStockUpdates[item.product_id] = (simulatedStockUpdates[item.product_id] ?? products.find(p=>p.id===item.product_id)?.stock ?? 0) - finalQty;
+         }
+         if (item.add_loose_kg && item.loose_retail_id && !editingInvoiceId) {
+             simulatedStockUpdates[item.loose_retail_id] = (simulatedStockUpdates[item.loose_retail_id] ?? products.find(p=>p.id===item.loose_retail_id)?.stock ?? 0) + item.add_loose_kg;
+         }
+    }
+
+    const itemsNeedingBags: (Product & { bags_needed: number })[] = [];
+    for (const [prodId, finalStock] of Object.entries(simulatedStockUpdates)) {
+        if (finalStock < 0) {
+            const p = products.find(x => x.id === Number(prodId));
+            if (p && p.weight < 50 && p.linked_wholesale_id) {
+                const bagsNeeded = Math.ceil(Math.abs(finalStock) / 50);
+                itemsNeedingBags.push({ ...p, bags_needed: bagsNeeded });
+            } else if (p && p.weight < 50 && !p.linked_wholesale_id) {
+                return alert(`Not enough stock for ${p.name} and no linked wholesale bag to open!`);
+            } else if (p && p.weight >= 50) {
+                return alert(`Not enough stock for wholesale bag ${p.name}!`);
+            }
+        }
+    }
+
+    if (itemsNeedingBags.length > 0) {
+        for (const p of itemsNeedingBags) {
+            const wProd = products.find(w => w.id === p.linked_wholesale_id);
+            if (!wProd || wProd.stock < p.bags_needed) {
+                return alert(`Cannot open a bag for ${p.name} because its wholesale bag (${wProd?.name || 'Unknown'}) is out of stock!`);
+            }
+        }
+        setAutoOpenModal({ isOpen: true, items: itemsNeedingBags });
+        return;
+    }
+
+    executeCheckout(products);
+  }
+
+  async function handleConfirmAutoOpen() {
+    setIsProcessing(true);
+    try {
+        for (const p of autoOpenModal.items) {
+            const wholesaleProd = products.find(w => w.id === p.linked_wholesale_id);
+            if (wholesaleProd && wholesaleProd.stock >= p.bags_needed) {
+                const { error } = await supabase.rpc('pull_wholesale_bags', {
+                    p_retail_id: p.id,
+                    p_wholesale_id: wholesaleProd.id,
+                    p_bags_needed: p.bags_needed
+                });
+                if (error) throw error;
+            }
+        }
+        
+        setAutoOpenModal({ isOpen: false, items: [] });
+        
+        const { data: prodData } = await supabase.from('products').select('*').eq('is_archived', false).order('id', { ascending: true });
+        if (prodData) {
+            setProducts(prodData);
+            await loadBatches(); 
+            await executeCheckout(prodData);
+        }
+    } catch (err: any) {
+        alert('Auto-Open Failed: ' + err.message);
+        setIsProcessing(false);
+    }
+  }
+
+  // MAIN CHECKOUT ENGINE
+  async function executeCheckout(latestProducts: Product[]) {
     setIsProcessing(true);
 
     try {
@@ -779,13 +933,14 @@ export default function POSPage() {
 
       if (activeTab === 'retail') {
         const retailRows = [];
+        const stockUpdates: Record<number, number> = {};
 
         for (const item of currentCart) {
-           const dbProduct = products.find(p => p.id === item.product_id);
+           const dbProduct = latestProducts.find(p => p.id === item.product_id);
            let retailCogsPerKg = Number(item.cost_price || 0);
 
            if (dbProduct && dbProduct.linked_wholesale_id) {
-              const wholesaleProd = products.find(wp => wp.id === dbProduct.linked_wholesale_id);
+              const wholesaleProd = latestProducts.find(wp => wp.id === dbProduct.linked_wholesale_id);
               if (wholesaleProd) {
                  const wBatches = activeBatches[wholesaleProd.id] || [];
                  const currentBatch = wBatches.length > 0 ? [...wBatches].sort((a,b) => a.id - b.id)[0] : null;
@@ -805,22 +960,20 @@ export default function POSPage() {
              cogs_price: retailCogsPerKg,
              payment_method: primaryMethodStr
            });
+           
+           stockUpdates[item.product_id] = (stockUpdates[item.product_id] ?? latestProducts.find(p=>p.id === item.product_id)?.stock ?? 0) - Number(item.quantity);
         }
 
         const { error: retailErr } = await supabase.from('retail_sales').insert(retailRows);
         if (retailErr) throw new Error(`Retail Error: ${retailErr.message}`);
 
-        const stockUpdates: Record<number, number> = {};
-        for (const item of currentCart) {
-            stockUpdates[item.product_id] = (stockUpdates[item.product_id] || item.stock) - item.quantity;
-        }
-        for (const [prodId, newStock] of Object.entries(stockUpdates)) {
-            await supabase.from('products').update({ stock: newStock }).eq('id', prodId);
+        for (const [prodIdStr, newStock] of Object.entries(stockUpdates)) {
+            await supabase.from('products').update({ stock: newStock }).eq('id', Number(prodIdStr));
         }
 
       } else {
         const combinedRiceTypes = currentCart.map(item => `${item.custom_name} (x${item.quantity})`).join(', ');
-        const baseSaleRows = [];
+        const baseSaleRows: any[] = [];
         const stockUpdates: Record<number, number> = {}; 
         const fifoUpdates: Record<number, number> = {}; 
 
@@ -828,7 +981,28 @@ export default function POSPage() {
           const isReturn = item.custom_name.includes('ដូរ');
           const isCharge = item.custom_name.includes('បានប្រើ');
           const isBypass = item.bypass_stock || isCharge;
-          const finalQty = isReturn ? -Math.abs(item.quantity) : item.quantity;
+          const finalQty = isReturn ? -Math.abs(Number(item.quantity)) : Number(item.quantity);
+
+          // Full Wholesale Bag Refund (+1 active batch)
+          if (item.isReturnFullBag && !editingInvoiceId) {
+             const wBatches = activeBatches[item.product_id] || [];
+             if (wBatches.length > 0) {
+                 const latestBatch = [...wBatches].sort((a,b) => b.id - a.id)[0];
+                 fifoUpdates[latestBatch.id] = (fifoUpdates[latestBatch.id] !== undefined ? fifoUpdates[latestBatch.id] : latestBatch.remaining_qty) + 1;
+             } else {
+                 const returnedProd = latestProducts.find(p => p.id === item.product_id);
+                 await supabase.from('inventory_batches').insert([{
+                     product_id: item.product_id,
+                     cost_price: returnedProd ? returnedProd.cost_price : item.cost_price,
+                     remaining_qty: 1
+                 }]);
+             }
+          }
+
+          // Partial Return - Add to Loose Retail Bin (+40kg etc)
+          if (item.add_loose_kg && item.loose_retail_id && !editingInvoiceId) {
+             stockUpdates[item.loose_retail_id] = (stockUpdates[item.loose_retail_id] ?? latestProducts.find(p => p.id === item.loose_retail_id)?.stock ?? 0) + item.add_loose_kg;
+          }
           
           if (isReturn || isBypass || editingInvoiceId) {
             const newRow: any = {
@@ -862,8 +1036,9 @@ export default function POSPage() {
             }
           }
 
-          if (!editingInvoiceId && !isBypass) {
-            stockUpdates[item.product_id] = (stockUpdates[item.product_id] || item.stock) - finalQty;
+          // Normal Sales Deduction
+          if (!editingInvoiceId && !isBypass && !item.isReturnFullBag) {
+            stockUpdates[item.product_id] = (stockUpdates[item.product_id] ?? latestProducts.find(p => p.id === item.product_id)?.stock ?? 0) - finalQty;
           }
         }
 
@@ -882,8 +1057,6 @@ export default function POSPage() {
         const finalSaleRows = baseSaleRows.map(r => ({ ...r, invoice_id: activeTxId, payment_method: primaryMethodStr }));
         let splitCogsSum = baseSaleRows.reduce((sum, r) => sum + (r.cogs_price * r.qty), 0);
 
-        // 1. Create the Master Invoice FIRST so the database doesn't block the line items
-        // We now do this for ALL wholesale customers (even Walk-ins) to satisfy the strict database rules.
         const summaryRow = {
           invoice_id: activeTxId,
           customer_name: finalCustomerName,
@@ -896,21 +1069,20 @@ export default function POSPage() {
           payment_method: primaryMethodStr,
           balance_due: actualRemaining > 0 ? actualRemaining : 0,
           customer_location: finalLocation,
-          is_done: actualRemaining <= 0 // Automatically mark as done if paid in full
+          is_done: actualRemaining <= 0 
         };
 
         const { error: summaryErr } = await supabase.from('invoice_summaries').upsert([summaryRow], { onConflict: 'invoice_id' });
         if (summaryErr) throw new Error(`Failed to save to Summaries table: ${summaryErr.message}`);
 
-        // 2. NOW it is safe to insert the child line items
         const { error: salesErr } = await supabase.from('sales').upsert(finalSaleRows, { onConflict: 'id' });
         if (salesErr) throw new Error(`Failed to save to Sales table: ${salesErr.message}`);
 
-        for (const [prodId, newStock] of Object.entries(stockUpdates)) {
-           await supabase.from('products').update({ stock: newStock }).eq('id', prodId);
+        for (const [prodIdStr, newStock] of Object.entries(stockUpdates)) {
+           await supabase.from('products').update({ stock: newStock }).eq('id', Number(prodIdStr));
         }
-        for (const [batchId, newRemaining] of Object.entries(fifoUpdates)) {
-           await supabase.from('inventory_batches').update({ remaining_qty: newRemaining }).eq('id', batchId);
+        for (const [batchIdStr, newRemaining] of Object.entries(fifoUpdates)) {
+           await supabase.from('inventory_batches').update({ remaining_qty: newRemaining }).eq('id', Number(batchIdStr));
         }
       }
 
@@ -1022,6 +1194,85 @@ export default function POSPage() {
   const currentT = t[lang] || t['en'];
   const sortedCart = [...cart].sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0));
 
+  const orderedProducts = [...products].sort((a, b) => {
+    const idxA = productOrder.indexOf(a.id);
+    const idxB = productOrder.indexOf(b.id);
+    if (idxA === -1 && idxB === -1) return a.id - b.id;
+    if (idxA === -1) return 1;
+    if (idxB === -1) return -1;
+    return idxA - idxB;
+  });
+
+  // 🟢 Filter items for Active and Non-Active Retail tabs
+  const filteredProducts = orderedProducts.filter(p => {
+    if (searchQuery && !p.name?.toLowerCase().includes(searchQuery.toLowerCase())) return false;
+    const weightVal = parseFloat(String(p.weight) || '0');
+    if (activeTab === 'wholesale' && weightVal < 50) return false;
+    if (activeTab === 'retail' && weightVal >= 50) return false;
+
+    if (activeTab === 'retail') {
+      const isHidden = hiddenRetailIds.includes(p.id);
+      if (retailSubTab === 'active' && isHidden) return false;
+      if (retailSubTab === 'inactive' && !isHidden) return false;
+    }
+    
+    if (activeTab === 'wholesale') {
+      if (activeCategory === '❌ Out of Stock') return Number(p.stock) <= 0;
+      if (Number(p.stock) <= 0) return false; 
+    }
+
+    if (activeTab !== 'retail' && activeCategory !== 'All' && activeCategory !== '❌ Out of Stock') {
+      if (activeCategory === '🔥 Hot') {
+        const top10Ids = Object.entries(mtdSalesStats).sort(([,a], [,b]) => b - a).slice(0, 10).map(([id]) => Number(id));
+        return top10Ids.includes(p.id);
+      }
+      
+      const name = p.name || '';
+      if (activeCategory === 'ផ្សេងៗ') {
+        if (MAIN_KEYWORDS.some(kw => name.includes(kw))) return false;
+      } else {
+        if (!name.includes(activeCategory)) return false;
+      }
+    }
+    return true;
+  });
+
+  if (activeCategory === '🔥 Hot' && activeTab === 'wholesale') {
+    filteredProducts.sort((a, b) => (mtdSalesStats[b.id] || 0) - (mtdSalesStats[a.id] || 0));
+  }
+
+  const filteredCustomers = customers.filter(c => 
+    (c.name || '').toLowerCase().includes(customerSearchTerm.toLowerCase()) || (c.phone || '').includes(customerSearchTerm)
+  )
+  const selectedCustomer = customers.find(c => c.id.toString() === selectedCustomerId.toString())
+
+  const isSimpleCustomer = !selectedCustomer || ['walk-in', 'walk in', 'mom'].includes((selectedCustomer.name || '').toLowerCase());
+  const showPaymentSelector = activeTab === 'retail' || isSimpleCustomer;
+
+  const liveTotalReceivedInRiel = paymentRows.reduce((sum, row) => {
+    const amt = Number(row.amount) || 0;
+    if (row.method.includes('$')) return sum + (amt * EXCHANGE_RATE);
+    return sum + amt;
+  }, 0);
+
+  const hasValidPayment = !showPaymentSelector || liveTotalReceivedInRiel >= totalRiel;
+
+  const getCategorizedItemsForInvoice = (cartItems: any[]) => {
+    let normalItems: any[] = [], specialItems: any[] = [], negativeItems: any[] = [], serviceItems: any[] = [];
+    cartItems.forEach(item => {
+      if (Number(item.custom_price_riel) === 0) return;
+
+      const desc = item.custom_name;
+      const total = item.custom_price_riel * item.quantity;
+      if (desc.includes('សេវាឡាន (អតិថិជន)')) serviceItems.push({ ...item, total: total });
+      else if (desc.includes('សេវាឡាន')) {  }
+      else if (desc.includes('ដូរ') || desc.includes('បញ្ចុះតម្លៃ') || desc.includes('កក់')) negativeItems.push({ ...item, total: -Math.abs(total) });
+      else if (desc.includes('ថ្លៃបាវ') || desc.includes('បានប្រើ')) specialItems.push({ ...item, total: total });
+      else normalItems.push({ ...item, total: total });
+    });
+    return [...normalItems, ...specialItems, ...negativeItems, ...serviceItems];
+  }
+
   const renderPaymentSection = (isMobileCart: boolean = false) => {
     if (!showPaymentSelector) return null;
     return (
@@ -1088,7 +1339,7 @@ export default function POSPage() {
   return (
     <div className="pos-layout-wrapper" style={{ display: 'flex', width: '100%', height: '100dvh', overflow: 'hidden', backgroundColor: '#ffffff', boxSizing: 'border-box' }}>
       
-      {/* SELECTION ENGINE VIEW GRID PANEL (Now correctly handles its own scrolling) */}
+      {/* SELECTION ENGINE VIEW GRID PANEL */}
       <div className="pos-main-engine hide-scrollbar" style={{ flex: 1, height: '100%', overflowY: 'auto', backgroundColor: '#f8fafc', minWidth: 0, WebkitOverflowScrolling: 'touch' }}>
         
         <div className="main-wrapper">
@@ -1108,15 +1359,67 @@ export default function POSPage() {
 
           <div className="pos-tools-area" style={{ marginBottom: '24px' }}>
             <div style={{ display: 'flex', gap: '12px', marginBottom: '16px', flexWrap: 'wrap', width: '100%' }}>
-              <button onClick={() => { setActiveTab('retail'); setSelectedCustomerId(''); setCustomerSearchTerm(''); }} style={{ flex: 1, padding: '12px', borderRadius: '8px', border: 'none', fontWeight: 'bold', cursor: 'pointer', backgroundColor: activeTab === 'retail' ? '#b58a3d' : '#fff', color: activeTab === 'retail' ? '#ffffff' : '#6b582f', borderBottom: activeTab === 'retail' ? 'none' : '1px solid #e2e8f0', minWidth: '120px' }}>{currentT.retail}</button>
+              <button onClick={() => { 
+                setActiveTab('retail'); 
+                setSelectedCustomerId(''); 
+                setCustomerSearchTerm(''); 
+                loadProductsAndSettings();
+                loadBatches();
+              }} style={{ flex: 1, padding: '12px', borderRadius: '8px', border: 'none', fontWeight: 'bold', cursor: 'pointer', backgroundColor: activeTab === 'retail' ? '#b58a3d' : '#fff', color: activeTab === 'retail' ? '#ffffff' : '#6b582f', borderBottom: activeTab === 'retail' ? 'none' : '1px solid #e2e8f0', minWidth: '120px' }}>{currentT.retail}</button>
+              
               <button onClick={() => { 
                 setActiveTab('wholesale');
                 if (!selectedCustomerId) {
                   const walkInCust = customers.find(c => c.name.toLowerCase() === 'walk-in' || c.name.toLowerCase() === 'walk in');
                   if (walkInCust) setSelectedCustomerId(walkInCust.id.toString());
                 }
+                loadProductsAndSettings();
+                loadBatches();
               }} style={{ flex: 1, padding: '12px', borderRadius: '8px', border: 'none', fontWeight: 'bold', cursor: 'pointer', backgroundColor: activeTab === 'wholesale' ? '#b58a3d' : '#fff', color: activeTab === 'wholesale' ? '#ffffff' : '#6b582f', borderBottom: activeTab === 'wholesale' ? 'none' : '1px solid #e2e8f0', minWidth: '120px' }}>{currentT.wholesale}</button>
             </div>
+
+            {/* 🟢 Active vs Non-Active Drag-and-Drop Sub-tabs for Retail View */}
+            {activeTab === 'retail' && (
+              <div style={{ display: 'flex', gap: '8px', marginBottom: '16px', alignItems: 'center', flexWrap: 'wrap' }}>
+                <button 
+                  onClick={() => setRetailSubTab('active')} 
+                  onDragOver={(e) => e.preventDefault()} 
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    const pid = Number(e.dataTransfer.getData('product_id'));
+                    if (pid) toggleProductActiveStatus(pid, 'active');
+                  }}
+                  style={{ 
+                    padding: '6px 16px', borderRadius: '20px', 
+                    border: retailSubTab === 'active' ? 'none' : '1px solid #cbd5e1', 
+                    backgroundColor: retailSubTab === 'active' ? '#10b981' : '#ffffff', 
+                    color: retailSubTab === 'active' ? '#fff' : '#475569', 
+                    fontWeight: 'bold', cursor: 'pointer', fontSize: '13px' 
+                  }}
+                >
+                  Active ({products.filter(p => parseFloat(String(p.weight)) < 50 && !hiddenRetailIds.includes(p.id)).length})
+                </button>
+                
+                <button 
+                  onClick={() => setRetailSubTab('inactive')} 
+                  onDragOver={(e) => e.preventDefault()} 
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    const pid = Number(e.dataTransfer.getData('product_id'));
+                    if (pid) toggleProductActiveStatus(pid, 'inactive');
+                  }}
+                  style={{ 
+                    padding: '6px 16px', borderRadius: '20px', 
+                    border: retailSubTab === 'inactive' ? 'none' : '1px solid #cbd5e1', 
+                    backgroundColor: retailSubTab === 'inactive' ? '#ef4444' : '#ffffff', 
+                    color: retailSubTab === 'inactive' ? '#fff' : '#475569', 
+                    fontWeight: 'bold', cursor: 'pointer', fontSize: '13px' 
+                  }}
+                >
+                  Non-Active ({products.filter(p => parseFloat(String(p.weight)) < 50 && hiddenRetailIds.includes(p.id)).length})
+                </button>
+              </div>
+            )}
 
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px', alignItems: 'flex-start', width: '100%' }}>
               <input type="text" placeholder={currentT.searchPlaceholder} value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} style={{ flex: 1, minWidth: '240px', padding: '10px 14px', borderRadius: '6px', border: '1px solid #dcd7cc', outline: 'none', fontSize: '16px', color: '#334155', backgroundColor: '#ffffff' }} className="mobile-input-field" />
@@ -1126,17 +1429,17 @@ export default function POSPage() {
                   {!selectedCustomer ? (
                     <button 
                       onClick={() => setIsCustomerModalOpen(true)}
-                      style={{ width: '100%', padding: '10px 14px', borderRadius: '6px', border: '1px solid #dcd7cc', outline: 'none', fontSize: '16px', color: '#94a3b8', backgroundColor: '#ffffff', textAlign: 'left', cursor: 'pointer' }}
+                      style={{ width: '100%', padding: '10px 14px', borderRadius: '6px', border: '1px solid #cbd5e1', outline: 'none', fontSize: '16px', color: '#94a3b8', backgroundColor: '#ffffff', textAlign: 'left', cursor: 'pointer' }}
                     >
                       {currentT.selectCustomer}
                     </button>
                   ) : (
-                    <div style={{ width: '100%', padding: '12px', backgroundColor: '#fefcf3', border: '1px solid #eadeca', borderRadius: '6px', fontSize: '13px', color: '#4a3b1b', position: 'relative' }}>
+                    <div style={{ width: '100%', padding: '12px', backgroundColor: '#fefcf3', border: '1px solid #eadeca', borderRadius: '6px', fontSize: '14px', color: '#4a3b1b', position: 'relative' }}>
                       <button onClick={() => { setSelectedCustomerId(''); setCustomerSearchTerm(''); }} style={{ position: 'absolute', top: '6px', right: '6px', background: 'none', border: 'none', cursor: 'pointer', fontSize: '14px' }}>❌</button>
                       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '10px', paddingRight: '20px' }}>
-                        <div><strong style={{ color: '#8a7650', fontSize: '11px', display: 'block', marginBottom: '2px', fontWeight: 'normal' }}>👤 NAME</strong>{selectedCustomer.name}</div>
-                        <div><strong style={{ color: '#8a7650', fontSize: '11px', display: 'block', marginBottom: '2px', fontWeight: 'normal' }}>📞 PHONE</strong>{selectedCustomer.phone || '-'}</div>
-                        <div><strong style={{ color: '#8a7650', fontSize: '11px', display: 'block', marginBottom: '2px', fontWeight: 'normal' }}>📍 LOCATION</strong>{selectedCustomer.location || '-'}</div>
+                        <div><span style={{ color: '#8a7650', fontSize: '11px', display: 'block', marginBottom: '2px', fontWeight: 'bold' }}>👤 NAME</span>{selectedCustomer.name}</div>
+                        <div><span style={{ color: '#8a7650', fontSize: '11px', display: 'block', marginBottom: '2px', fontWeight: 'bold' }}>📞 PHONE</span>{selectedCustomer.phone || '-'}</div>
+                        <div><span style={{ color: '#8a7650', fontSize: '11px', display: 'block', marginBottom: '2px', fontWeight: 'bold' }}>📍 LOCATION</span>{selectedCustomer.location || '-'}</div>
                       </div>
                     </div>
                   )}
@@ -1144,7 +1447,7 @@ export default function POSPage() {
               )}
             </div>
 
-            {/* 🔥 SCROLLABLE CATEGORY TABS */}
+            {/* SCROLLABLE CATEGORY TABS */}
             {activeTab !== 'retail' && (
               <div className="hide-scrollbar" style={{ display: 'flex', overflowX: 'auto', gap: '8px', paddingBottom: '8px', marginTop: '16px', width: '100%', WebkitOverflowScrolling: 'touch', scrollSnapType: 'x mandatory' }}>
                 {RICE_CATEGORIES.map(cat => (
@@ -1192,19 +1495,18 @@ export default function POSPage() {
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                       <div style={{ fontSize: '14px', color: '#334155', marginBottom: '8px', fontWeight: 'bold' }}>{p.name}</div>
                     </div>
+
                     <div style={{ borderTop: '1px dashed #f1f5f9', paddingTop: '8px', marginTop: 'auto', position: 'relative', minHeight: activeTab === 'wholesale' ? '35px' : 'auto' }}>
                       <div style={{ fontSize: '14px', color: '#b58a3d', fontWeight: 'bold' }}>
                         {formatRielSymbol(activeTab === 'retail' ? (p.price || 0) : (p.cost_price || 0))}
                       </div>
                       
-                      {/* Retail Stock Emoji Logic */}
                       {activeTab === 'retail' && (
                         <div style={{ fontSize: '11px', marginTop: '4px', color: Number(p.stock) < 15 ? '#dc2626' : '#10b981', fontWeight: 'bold' }}>
                           📦 {p.stock} kg left
                         </div>
                       )}
 
-                      {/* Wholesale Stock Logic */}
                       {activeTab === 'wholesale' && (
                         <div style={{ fontSize: '11px', marginTop: '4px', color: Number(p.stock) < 5 ? '#dc2626' : '#10b981', fontWeight: 'bold' }}>
                           📦 {currentT.stock}: {p.stock}
@@ -1229,9 +1531,7 @@ export default function POSPage() {
         </div>
       </div>
 
-      {/* ==============================================================================================
-          DESKTOP SIDEBAR CART
-          ============================================================================================== */}
+      {/* DESKTOP SIDEBAR CART */}
       <div className="desktop-cart-panel" style={{ width: '400px', backgroundColor: '#ffffff', borderLeft: '1px solid #e5e7eb', display: 'flex', flexDirection: 'column', height: '100%' }}>
         <div style={{ paddingTop: '16px', paddingRight: '20px', paddingBottom: '16px', paddingLeft: '20px', borderBottom: '1px solid #f1f5f9', backgroundColor: '#f8fafc', flexShrink: 0 }}>
           <h2 style={{ fontSize: '16px', margin: 0, fontWeight: 'bold', color: '#334155' }}>{currentT.cartTitle} ({cart.length})</h2>
@@ -1241,7 +1541,7 @@ export default function POSPage() {
           
           {activeTab === 'wholesale' && selectedCustomerId && (
             <div style={{ background: '#f8fafc', padding: '10px', borderRadius: '8px', border: '1px solid #e2e8f0', marginBottom: '16px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
-              <input type="text" placeholder="Invoice Name Override..." value={cartCustomerNameOverride} onChange={e => setCartCustomerNameOverride(e.target.value)} style={{ width: '100%', padding: '8px 10px', fontSize: '13px', fontWeight: 'normal', borderRadius: '4px', border: '1px solid #cbd5e1', outline: 'none', color: '#334155' }} className="mobile-input-field" />
+              <input type="text" placeholder="Invoice Name Override..." value={cartCustomerNameOverride} onChange={e => setCartCustomerNameOverride(e.target.value)} style={{ width: '100%', padding: '8px 10px', fontSize: '14px', fontWeight: 'normal', borderRadius: '4px', border: '1px solid #cbd5e1', outline: 'none', color: '#334155' }} className="mobile-input-field" />
             </div>
           )}
 
@@ -1265,7 +1565,7 @@ export default function POSPage() {
                       placeholder="Item Name"
                       readOnly={isSpecial}
                       style={{ 
-                        fontSize: '13px', color: isReturn ? '#dc2626' : isCharge ? '#b45309' : '#334155', 
+                        fontSize: '14px', color: isReturn ? '#dc2626' : isCharge ? '#b45309' : '#334155', 
                         flex: 1, border: 'none', background: 'transparent', outline: 'none', padding: '2px 0'
                       }} 
                       className="mobile-input-field"
@@ -1278,7 +1578,7 @@ export default function POSPage() {
                         style={{ marginLeft: '8px', padding: '2px 4px', background: '#f8fafc', border: '1px solid #cbd5e1', borderRadius: '4px', fontSize: '11px', color: '#b58a3d', outline: 'none', cursor: 'pointer', maxWidth: '90px' }}
                       >
                         <option value="AUTO">▼ Auto</option>
-                        {activeBatches[item.product_id]?.map((b: any) => {
+                        {activeBatches[item.product_id]?.map((b: InventoryBatch) => {
                           const remaining = b.remaining_qty || 0;
                           return <option key={b.id} value={b.id}>{formatRiel(b.cost_price)} ({remaining})</option>;
                         })}
@@ -1289,11 +1589,11 @@ export default function POSPage() {
                   <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-end' }}>
                     <div style={{ flex: 1 }}>
                       <span style={{ display: 'block', fontSize: '10px', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '4px' }}>{currentT.quantity}</span>
-                      <CartInput value={item.quantity} onChange={(v) => updateCartItem(item.id, 'quantity', v)} onFocus={() => updateCartItem(item.id, 'quantity', '')} isQty={true} fontSize="13px" />
+                      <CartInput value={item.quantity} onChange={(v) => updateCartItem(item.id, 'quantity', v)} onFocus={() => updateCartItem(item.id, 'quantity', '')} isQty={true} fontSize="14px" />
                     </div>
                     <div style={{ flex: 1 }}>
                       <span style={{ display: 'block', fontSize: '10px', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '4px' }}>{currentT.unitPrice} (៛)</span>
-                      <CartInput value={item.custom_price_riel} onChange={(v) => updateCartItem(item.id, 'custom_price_riel', v)} onFocus={() => updateCartItem(item.id, 'custom_price_riel', '')} isQty={false} fontSize="13px" />
+                      <CartInput value={item.custom_price_riel} onChange={(v) => updateCartItem(item.id, 'custom_price_riel', v)} onFocus={() => updateCartItem(item.id, 'custom_price_riel', '')} isQty={false} fontSize="14px" />
                     </div>
                   </div>
                 </div>
@@ -1315,7 +1615,7 @@ export default function POSPage() {
           {renderPaymentSection(false)}
           
           <button 
-            onClick={confirmCheckout} 
+            onClick={initiateCheckout} 
             disabled={!isCartValid || !hasValidPayment || isProcessing} 
             style={{ 
               width: '100%', 
@@ -1335,10 +1635,7 @@ export default function POSPage() {
         </div>
       </div>
 
-
-      {/* ==============================================================================================
-          MOBILE CART TRAY (BOTTOM SHEET)
-          ============================================================================================== */}
+      {/* MOBILE CART TRAY */}
       {cart.length > 0 && !isMobileCartOpen && !completedSale && !saleSummary && (
         <div className="mobile-fab" onClick={() => setIsMobileCartOpen(true)}>
           <div style={{ fontSize: '16px', fontWeight: 'bold' }}>🛒 View Cart ({cart.length})</div>
@@ -1426,7 +1723,7 @@ export default function POSPage() {
               {renderPaymentSection(true)}
 
               <button 
-                onClick={confirmCheckout} 
+                onClick={initiateCheckout} 
                 disabled={!isCartValid || !hasValidPayment || isProcessing} 
                 style={{ 
                   width: '100%', 
@@ -1448,7 +1745,31 @@ export default function POSPage() {
         </div>
       )}
 
-      {/* CUSTOMER SEARCH MODAL (No-Zoom, Pop-up Style) */}
+      {/* AUTO OPEN BAG MODAL */}
+      {autoOpenModal.isOpen && (
+        <div className="modal-overlay" onMouseDown={() => setAutoOpenModal({ isOpen: false, items: [] })}>
+          <div className="modal-content" style={{ maxWidth: '400px' }} onMouseDown={e => e.stopPropagation()}>
+            <h3 style={{ marginTop: 0, color: '#1e293b' }}>⚠️ Auto-Open Bag Required</h3>
+            <p style={{ color: '#475569', fontSize: '14px', lineHeight: '1.5' }}>
+              You do not have enough loose retail rice for this sale. Proceeding will automatically open a wholesale bag to restock the loose bin.
+            </p>
+            <div style={{ background: '#f8fafc', padding: '12px', borderRadius: '8px', border: '1px solid #e2e8f0', marginTop: '16px', fontSize: '13px', color: '#64748b' }}>
+              Items needing restocking:
+              <ul style={{ paddingLeft: '20px', marginTop: '8px', marginBottom: 0 }}>
+                {autoOpenModal.items.map((p) => (
+                    <li key={p.id}>{p.name} (Needs {p.bags_needed} bag)</li>
+                ))}
+              </ul>
+            </div>
+            <div style={{ marginTop: '24px', display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
+              <button onClick={() => setAutoOpenModal({ isOpen: false, items: [] })} style={{ padding: '10px 16px', background: '#f1f5f9', color: '#475569', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', fontSize: '14px' }}>Cancel</button>
+              <button onClick={handleConfirmAutoOpen} disabled={isProcessing} style={{ padding: '10px 16px', background: '#10b981', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', fontSize: '14px' }}>{isProcessing ? 'Processing...' : 'Yes, Open Bag'}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* CUSTOMER SEARCH MODAL */}
       {isCustomerModalOpen && (
         <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(4px)', zIndex: 10000, display: 'flex', justifyContent: 'center', alignItems: 'flex-start', paddingTop: '80px', paddingLeft: '16px', paddingRight: '16px', boxSizing: 'border-box' }} onMouseDown={() => setIsCustomerModalOpen(false)}>
           <div style={{ backgroundColor: '#ffffff', width: '100%', maxWidth: '400px', maxHeight: '75vh', borderRadius: '12px', display: 'flex', flexDirection: 'column', boxShadow: '0 10px 30px rgba(0,0,0,0.15)' }} onMouseDown={e => e.stopPropagation()}>
@@ -1566,13 +1887,13 @@ export default function POSPage() {
               />
               <p style={{ fontSize: '11px', color: '#94a3b8', marginTop: '6px', lineHeight: 1.4 }}>
                 * Enter 0 if the bag is fully intact and unopened.<br/>
-                * The consumed amount will be added to the cart and properly tracked for profit.
+                * Partial returns add leftover rice to 1kg Retail pool automatically.
               </p>
             </div>
 
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
               <button onClick={() => setExchangeModal({ isOpen: false, product: null, consumedKg: '' })} style={{ padding: '10px 16px', backgroundColor: '#f1f5f9', border: 'none', borderRadius: '6px', cursor: 'pointer', color: '#64748b', fontSize: '14px' }}>Cancel</button>
-              <button onClick={handleConfirmExchange} style={{ padding: '10px 16px', backgroundColor: '#ef4444', border: 'none', borderRadius: '6px', cursor: 'pointer', color: '#fff', fontSize: '14px' }}>Confirm Return</button>
+              <button onClick={handleConfirmExchange} disabled={isProcessing} style={{ padding: '10px 16px', backgroundColor: '#ef4444', border: 'none', borderRadius: '6px', cursor: 'pointer', color: '#fff', fontSize: '14px' }}>{isProcessing ? 'Processing...' : 'Confirm Return'}</button>
             </div>
           </div>
         </div>
@@ -1846,7 +2167,6 @@ export default function POSPage() {
           font-variant-numeric: tabular-nums lining-nums;
         }
 
-        /* 🔥 DESKTOP LAYOUT FIXES (Aligned with other pages) */
         .main-wrapper { 
           padding: max(20px, env(safe-area-inset-top, 20px)) 24px 24px 24px; 
           font-family: Arial, sans-serif; 
@@ -1862,7 +2182,7 @@ export default function POSPage() {
           align-items: center; 
           margin-bottom: 24px; 
           margin-top: 0;
-          margin-left: 60px; /* 🔥 Clears the burger menu icon for horizontal alignment */
+          margin-left: 60px;
           gap: 12px;
           min-height: 48px; 
           width: 100%;
@@ -1919,18 +2239,16 @@ export default function POSPage() {
           .desktop-controls { display: flex !important; }
         }
         
-        /* 🔥 MOBILE OVERRIDES */
         @media (max-width: 1023px) { 
           .desktop-controls { display: none !important; }
           .desktop-cart-panel { display: none !important; }
           
           .main-wrapper { 
-            /* 🔥 Preserved: keeping 140px bottom padding for the shopping cart FAB */
             padding: max(20px, env(safe-area-inset-top, 20px)) 16px 140px 16px !important; 
           }
           
           .header-container { 
-            margin-left: 54px !important; /* Clears mobile hamburger button safely */
+            margin-left: 54px !important; 
             margin-right: 0 !important;
             margin-bottom: 24px !important; 
             margin-top: 0 !important;
