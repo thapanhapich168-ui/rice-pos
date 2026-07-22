@@ -821,7 +821,8 @@ export default function POSPage() {
 
     const itemsNeedingBags: (Product & { bags_needed: number })[] = [];
     for (const [prodId, finalStock] of Object.entries(simulatedStockUpdates)) {
-        if (finalStock < 0) {
+        // 🔥 FIX: Explicitly changed to <= -1 so it only triggers Auto-Restock on negatives
+        if (finalStock <= -1) {
             const p = products.find(x => x.id === Number(prodId));
             if (p && p.weight < 50 && p.linked_wholesale_id) {
                 const bagsNeeded = Math.ceil(Math.abs(finalStock) / 50);
@@ -985,18 +986,27 @@ export default function POSPage() {
 
           // Full Wholesale Bag Refund (+1 active batch)
           if (item.isReturnFullBag && !editingInvoiceId) {
-             // 🔥 FIX: Query DB directly for the latest batch, even if its remaining_qty is 0!
-             // This prevents creating a brand new row when returning an out-of-stock item.
-             const { data: latestDbBatches } = await supabase.from('inventory_batches')
+             // Fetch all batches ordered by ID ascending (FIFO order)
+             const { data: dbBatches } = await supabase.from('inventory_batches')
                 .select('*')
                 .eq('product_id', item.product_id)
-                .order('id', { ascending: false })
-                .limit(1);
+                .order('id', { ascending: true });
 
-             if (latestDbBatches && latestDbBatches.length > 0) {
-                 const latestBatch = latestDbBatches[0];
-                 fifoUpdates[latestBatch.id] = (fifoUpdates[latestBatch.id] !== undefined ? fifoUpdates[latestBatch.id] : latestBatch.remaining_qty) + 1;
+             let targetBatch = null;
+             if (dbBatches && dbBatches.length > 0) {
+                 // 1. Try to find the earliest batch that currently has stock (Active FIFO)
+                 targetBatch = dbBatches.find(b => b.remaining_qty > 0);
+                 
+                 // 2. If all batches are empty (stock = 0), add to the most recent existing row
+                 if (!targetBatch) {
+                     targetBatch = dbBatches[dbBatches.length - 1];
+                 }
+             }
+
+             if (targetBatch) {
+                 fifoUpdates[targetBatch.id] = (fifoUpdates[targetBatch.id] !== undefined ? fifoUpdates[targetBatch.id] : targetBatch.remaining_qty) + 1;
              } else {
+                 // 3. Only create a new row if absolutely no batches exist for this product
                  const returnedProd = latestProducts.find(p => p.id === item.product_id);
                  await supabase.from('inventory_batches').insert([{
                      product_id: item.product_id,
@@ -1759,13 +1769,15 @@ export default function POSPage() {
 
       {/* AUTO OPEN BAG MODAL */}
       {autoOpenModal.isOpen && (
-        <div className="modal-overlay" onMouseDown={() => setAutoOpenModal({ isOpen: false, items: [] })}>
-          <div className="modal-content" style={{ maxWidth: '400px' }} onMouseDown={e => e.stopPropagation()}>
-            <h3 style={{ marginTop: 0, color: '#1e293b' }}>⚠️ Auto-Open Bag Required</h3>
-            <p style={{ color: '#475569', fontSize: '14px', lineHeight: '1.5' }}>
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 10000, display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '20px' }} onMouseDown={() => setAutoOpenModal({ isOpen: false, items: [] })}>
+          <div style={{ backgroundColor: '#ffffff', width: '100%', maxWidth: '400px', borderRadius: '12px', padding: '24px', boxShadow: '0 10px 25px rgba(0,0,0,0.2)' }} onMouseDown={e => e.stopPropagation()}>
+            <h3 style={{ marginTop: 0, marginBottom: '12px', color: '#1e293b', fontSize: '18px' }}>
+              ⚠️ Auto-Open Bag Required
+            </h3>
+            <p style={{ color: '#475569', fontSize: '14px', lineHeight: '1.5', margin: '0 0 16px 0' }}>
               You do not have enough loose retail rice for this sale. Proceeding will automatically open a wholesale bag to restock the loose bin.
             </p>
-            <div style={{ background: '#f8fafc', padding: '12px', borderRadius: '8px', border: '1px solid #e2e8f0', marginTop: '16px', fontSize: '13px', color: '#64748b' }}>
+            <div style={{ background: '#f8fafc', padding: '12px', borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '13px', color: '#64748b' }}>
               Items needing restocking:
               <ul style={{ paddingLeft: '20px', marginTop: '8px', marginBottom: 0 }}>
                 {autoOpenModal.items.map((p) => (
