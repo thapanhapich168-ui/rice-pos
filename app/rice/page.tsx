@@ -670,6 +670,7 @@ export default function RiceControl() {
 
       await supabase.from('inventory_batches').insert([{
         product_id: Number(importForm.product_id),
+        product_name: product.name, // 👈 Added this line!
         cost_price: unitCost,
         remaining_qty: qty
       }]);
@@ -2493,8 +2494,8 @@ export default function RiceControl() {
         .dropdown-results-tray {
           position: absolute;
           top: 100%;
-          left: 12px;
-          right: 12px;
+          left: 0px;
+          right: 0px;
           background: #ffffff;
           border: 1px solid #cbd5e1;
           border-radius: 8px;

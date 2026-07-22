@@ -985,9 +985,16 @@ export default function POSPage() {
 
           // Full Wholesale Bag Refund (+1 active batch)
           if (item.isReturnFullBag && !editingInvoiceId) {
-             const wBatches = activeBatches[item.product_id] || [];
-             if (wBatches.length > 0) {
-                 const latestBatch = [...wBatches].sort((a,b) => b.id - a.id)[0];
+             // 🔥 FIX: Query DB directly for the latest batch, even if its remaining_qty is 0!
+             // This prevents creating a brand new row when returning an out-of-stock item.
+             const { data: latestDbBatches } = await supabase.from('inventory_batches')
+                .select('*')
+                .eq('product_id', item.product_id)
+                .order('id', { ascending: false })
+                .limit(1);
+
+             if (latestDbBatches && latestDbBatches.length > 0) {
+                 const latestBatch = latestDbBatches[0];
                  fifoUpdates[latestBatch.id] = (fifoUpdates[latestBatch.id] !== undefined ? fifoUpdates[latestBatch.id] : latestBatch.remaining_qty) + 1;
              } else {
                  const returnedProd = latestProducts.find(p => p.id === item.product_id);
@@ -1037,7 +1044,7 @@ export default function POSPage() {
           }
 
           // Normal Sales Deduction
-          if (!editingInvoiceId && !isBypass && !item.isReturnFullBag) {
+          if (!editingInvoiceId && !isBypass) {
             stockUpdates[item.product_id] = (stockUpdates[item.product_id] ?? latestProducts.find(p => p.id === item.product_id)?.stock ?? 0) - finalQty;
           }
         }
@@ -1457,8 +1464,7 @@ export default function POSPage() {
                                 onMouseDown={(e) => { e.preventDefault(); setSelectedCustomerId(c.id.toString()); setCustomerSearchTerm(''); setIsCustomerModalOpen(false); }} 
                                 style={{ padding: '12px', borderBottom: '1px solid #f1f5f9', cursor: 'pointer', backgroundColor: '#fff' }}
                               >
-                                {/* Changed to normal font weight and softened the text color */}
-                                <div style={{ fontWeight: 'normal', fontSize: '14px', color: '#334155', marginBottom: '4px' }}>{c.name}</div>
+                                <div style={{ fontWeight: 'normal', fontSize: '15px', color: '#334155', marginBottom: '4px' }}>{c.name}</div>
                                 <div style={{ fontSize: '13px', color: '#64748b', display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
                                   <span>📞 {c.phone || '-'}</span>
                                   <span>📍 {c.location || '-'}</span>
@@ -1474,9 +1480,9 @@ export default function POSPage() {
                     <div style={{ width: '100%', padding: '12px', backgroundColor: '#fefcf3', border: '1px solid #eadeca', borderRadius: '6px', fontSize: '14px', color: '#4a3b1b', position: 'relative' }}>
                       <button onClick={() => { setSelectedCustomerId(''); setCustomerSearchTerm(''); }} style={{ position: 'absolute', top: '6px', right: '6px', background: 'none', border: 'none', cursor: 'pointer', fontSize: '14px' }}>❌</button>
                       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '10px', paddingRight: '20px' }}>
-                        <div><span style={{ color: '#8a7650', fontSize: '11px', display: 'block', marginBottom: '2px', fontWeight: 'regular' }}>👤 NAME</span>{selectedCustomer.name}</div>
-                        <div><span style={{ color: '#8a7650', fontSize: '11px', display: 'block', marginBottom: '2px', fontWeight: 'regular' }}>📞 PHONE</span>{selectedCustomer.phone || '-'}</div>
-                        <div><span style={{ color: '#8a7650', fontSize: '11px', display: 'block', marginBottom: '2px', fontWeight: 'regular' }}>📍 LOCATION</span>{selectedCustomer.location || '-'}</div>
+                        <div><span style={{ color: '#8a7650', fontSize: '11px', display: 'block', marginBottom: '2px', fontWeight: 'bold' }}>👤 NAME</span>{selectedCustomer.name}</div>
+                        <div><span style={{ color: '#8a7650', fontSize: '11px', display: 'block', marginBottom: '2px', fontWeight: 'bold' }}>📞 PHONE</span>{selectedCustomer.phone || '-'}</div>
+                        <div><span style={{ color: '#8a7650', fontSize: '11px', display: 'block', marginBottom: '2px', fontWeight: 'bold' }}>📍 LOCATION</span>{selectedCustomer.location || '-'}</div>
                       </div>
                     </div>
                   )}
@@ -1530,7 +1536,7 @@ export default function POSPage() {
                     onMouseUp={e => e.currentTarget.style.transform = 'scale(1)'}
                   >
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                      <div style={{ fontSize: '14px', color: '#334155', marginBottom: '8px', fontWeight: 'bold' }}>{p.name}</div>
+                      <div style={{ fontSize: '14px', color: '#334155', marginBottom: '8px', fontWeight: 'normal' }}>{p.name}</div>
                     </div>
 
                     <div style={{ borderTop: '1px dashed #f1f5f9', paddingTop: '8px', marginTop: 'auto', position: 'relative', minHeight: activeTab === 'wholesale' ? '35px' : 'auto' }}>
@@ -1801,6 +1807,50 @@ export default function POSPage() {
             <div style={{ marginTop: '24px', display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
               <button onClick={() => setAutoOpenModal({ isOpen: false, items: [] })} style={{ padding: '10px 16px', background: '#f1f5f9', color: '#475569', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', fontSize: '14px' }}>Cancel</button>
               <button onClick={handleConfirmAutoOpen} disabled={isProcessing} style={{ padding: '10px 16px', background: '#10b981', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', fontSize: '14px' }}>{isProcessing ? 'Processing...' : 'Yes, Open Bag'}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* CUSTOMER SEARCH MODAL */}
+      {isCustomerModalOpen && (
+        <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(4px)', zIndex: 10000, display: 'flex', justifyContent: 'center', alignItems: 'flex-start', paddingTop: '80px', paddingLeft: '16px', paddingRight: '16px', boxSizing: 'border-box' }} onMouseDown={() => setIsCustomerModalOpen(false)}>
+          <div style={{ backgroundColor: '#ffffff', width: '100%', maxWidth: '400px', maxHeight: '75vh', borderRadius: '12px', display: 'flex', flexDirection: 'column', boxShadow: '0 10px 30px rgba(0,0,0,0.15)' }} onMouseDown={e => e.stopPropagation()}>
+            <div style={{ padding: '12px', borderBottom: '1px solid #f1f5f9', display: 'flex', gap: '8px', alignItems: 'center' }}>
+              <span style={{ fontSize: '18px', color: '#94a3b8' }}>🔍</span>
+              <input 
+                autoFocus
+                type="text" 
+                placeholder="Search for option..." 
+                value={customerSearchTerm} 
+                onChange={e => setCustomerSearchTerm(e.target.value)} 
+                style={{ flex: 1, padding: '8px', border: '1px solid transparent', fontSize: '16px', outline: 'none', color: '#0f172a', backgroundColor: 'transparent' }} 
+                className="mobile-input-field"
+              />
+              <button onClick={() => setIsCustomerModalOpen(false)} style={{ background: 'none', border: 'none', fontSize: '20px', color: '#94a3b8', cursor: 'pointer', padding: '0 8px' }}>✕</button>
+            </div>
+            
+            <div style={{ flex: 1, overflowY: 'auto', padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px', backgroundColor: '#fcfcfc' }}>
+              <button onClick={() => { setIsCreateCustomerModalOpen(true); setIsCustomerModalOpen(false); }} style={{ width: '100%', padding: '12px', backgroundColor: '#ffffff', color: '#0f172a', border: '1px dashed #cbd5e1', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold', fontSize: '15px', marginBottom: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
+                <span style={{ fontSize: '18px' }}>+</span> Add New Customer
+              </button>
+              
+              {filteredCustomers.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: '20px', color: '#94a3b8', fontSize: '14px' }}>No customers found</div>
+              ) : (
+                filteredCustomers.map(c => (
+                  <div 
+                    key={c.id} 
+                    onClick={() => { setSelectedCustomerId(c.id.toString()); setCustomerSearchTerm(''); setIsCustomerModalOpen(false); }} 
+                    style={{ border: '1px solid #e2e8f0', borderRadius: '8px', padding: '16px', cursor: 'pointer', backgroundColor: '#fff', position: 'relative' }}
+                  >
+                    <div style={{ fontWeight: 'bold', fontSize: '15px', color: '#1e293b', marginBottom: '8px' }}>{c.name}</div>
+                    <div style={{ fontSize: '13px', color: '#64748b', marginBottom: '4px' }}>Location: <span style={{ color: '#0f172a' }}>{c.location || '-'}</span></div>
+                    <div style={{ fontSize: '13px', color: '#64748b', marginBottom: '4px' }}>Phone Number: <span style={{ color: '#0f172a' }}>{c.phone || '-'}</span></div>
+                    <div style={{ fontSize: '13px', color: '#64748b' }}>Types: <span style={{ color: '#0f172a' }}>{c.type || '-'}</span></div>
+                  </div>
+                ))
+              )}
             </div>
           </div>
         </div>
