@@ -98,8 +98,8 @@ const t: Record<'en' | 'kh', any> = {
     totalUsd: "Total in USD:",
     checkout: "Checkout",
     successTitle: "Invoice Ready",
-    openInvoice: "💾 Download Image",
-    shareInvoice: "📤 Share / Save",
+    openInvoice: "Download Image",
+    shareInvoice: "Share / Save",
     close: "Close Window",
     mobileModalTitle: "Adjust Item Properties",
     cancel: "Cancel",
@@ -1439,24 +1439,74 @@ export default function POSPage() {
             )}
 
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px', alignItems: 'flex-start', width: '100%' }}>
-              <input type="text" placeholder={currentT.searchPlaceholder} value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} style={{ flex: 1, minWidth: '240px', padding: '10px 14px', borderRadius: '6px', border: '1px solid #dcd7cc', outline: 'none', fontSize: '16px', color: '#334155', backgroundColor: '#ffffff' }} className="mobile-input-field" />
               
+              {/* PRODUCT SEARCH */}
+              <div style={{ flex: 1, minWidth: '240px', position: 'relative' }}>
+                <span style={{ position: 'absolute', left: '14px', top: '50%', transform: 'translateY(-50%)', color: '#94a3b8', fontSize: '16px', zIndex: 2 }}>🔍</span>
+                <input 
+                  type="text" 
+                  placeholder={currentT.searchPlaceholder.replace('🔍 ', '').replace('🔍', '').trim()} 
+                  value={searchQuery} 
+                  onChange={(e) => setSearchQuery(e.target.value)} 
+                  style={{ width: '100%', padding: '10px 14px 10px 38px', borderRadius: '6px', border: '1px solid #dcd7cc', outline: 'none', fontSize: '16px', color: '#334155', backgroundColor: '#ffffff', boxSizing: 'border-box' }} 
+                  className="mobile-input-field" 
+                />
+              </div>
+              
+              {/* CUSTOMER SEARCH */}
               {activeTab === 'wholesale' && (
                 <div style={{ flex: 1, minWidth: '300px', position: 'relative' }}>
                   {!selectedCustomer ? (
                     <div style={{ position: 'relative' }}>
+                      
+                      {/* Invisible Overlay to catch outside clicks and close dropdown */}
+                      {isCustomerModalOpen && (
+                        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, zIndex: 99 }} onMouseDown={() => setIsCustomerModalOpen(false)}></div>
+                      )}
+                      
+                      {/* Customer Search Input (Typable Trigger) */}
+                      <span style={{ position: 'absolute', left: '14px', top: '50%', transform: 'translateY(-50%)', color: '#94a3b8', fontSize: '16px', zIndex: isCustomerModalOpen ? 101 : 2 }}>🔍</span>
                       <input 
                         type="text"
-                        placeholder={currentT.selectCustomer}
+                        placeholder={currentT.selectCustomer.replace('🔍 ', '').replace('🔍', '').trim()}
                         value={customerSearchTerm}
-                        readOnly
-                        onClick={() => setIsCustomerModalOpen(true)}
-                        style={{ width: '100%', padding: '10px 14px', borderRadius: '6px', border: '1px solid #dcd7cc', outline: 'none', fontSize: '16px', color: '#334155', backgroundColor: '#ffffff', boxSizing: 'border-box', cursor: 'pointer' }}
+                        onChange={e => setCustomerSearchTerm(e.target.value)}
+                        onFocus={() => setIsCustomerModalOpen(true)}
+                        style={{ width: '100%', padding: '10px 14px 10px 38px', borderRadius: '6px', border: isCustomerModalOpen ? '1px solid #b58a3d' : '1px solid #dcd7cc', outline: 'none', fontSize: '16px', color: '#334155', backgroundColor: '#ffffff', boxSizing: 'border-box', position: 'relative', zIndex: isCustomerModalOpen ? 100 : 1 }}
                         className="mobile-input-field"
                       />
+
+                      {/* Inline Dropdown Menu */}
+                      {isCustomerModalOpen && (
+                        <div style={{ position: 'absolute', top: 'calc(100% + 6px)', left: 0, right: 0, backgroundColor: '#ffffff', borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: '0 10px 30px rgba(0,0,0,0.15)', zIndex: 101, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+                          <div className="hide-scrollbar" style={{ maxHeight: '350px', overflowY: 'auto', padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px', backgroundColor: '#fcfcfc' }}>
+                            
+                            <button onMouseDown={(e) => { e.preventDefault(); setIsCreateCustomerModalOpen(true); setIsCustomerModalOpen(false); }} style={{ width: '100%', padding: '12px', backgroundColor: '#ffffff', color: '#0f172a', border: '1px dashed #cbd5e1', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold', fontSize: '15px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', flexShrink: 0 }}>
+                              <span style={{ fontSize: '18px' }}>+</span> Add New Customer
+                            </button>
+                            
+                            {filteredCustomers.length === 0 ? (
+                              <div style={{ textAlign: 'center', padding: '20px', color: '#94a3b8', fontSize: '14px' }}>No customers found</div>
+                            ) : (
+                              filteredCustomers.map(c => (
+                                <div 
+                                  key={c.id} 
+                                  onMouseDown={(e) => { e.preventDefault(); setSelectedCustomerId(c.id.toString()); setCustomerSearchTerm(''); setIsCustomerModalOpen(false); }} 
+                                  style={{ border: '1px solid #e2e8f0', borderRadius: '8px', padding: '16px', cursor: 'pointer', backgroundColor: '#fff', display: 'flex', flexDirection: 'column', gap: '4px', transition: 'background 0.2s' }}
+                                >
+                                  <div style={{ fontWeight: 'normal', fontSize: '14px', color: '#1e293b', marginBottom: '4px' }}>{c.name}</div>
+                                  <div style={{ fontSize: '13px', color: '#64748b' }}>Location: <span style={{ color: '#0f172a' }}>{c.location || '-'}</span></div>
+                                  <div style={{ fontSize: '13px', color: '#64748b' }}>Phone Number: <span style={{ color: '#0f172a' }}>{c.phone || '-'}</span></div>
+                                  <div style={{ fontSize: '13px', color: '#64748b' }}>Types: <span style={{ color: '#0f172a' }}>{c.type || '-'}</span></div>
+                                </div>
+                              ))
+                            )}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   ) : (
-                    <div style={{ width: '100%', padding: '12px', backgroundColor: '#fefcf3', border: '1px solid #eadeca', borderRadius: '6px', fontSize: '14px', color: '#4a3b1b', position: 'relative' }}>
+                    <div style={{ width: '100%', padding: '12px', backgroundColor: '#fefcf3', border: '1px solid #eadeca', borderRadius: '8px', fontSize: '14px', color: '#4a3b1b', position: 'relative', boxSizing: 'border-box' }}>
                       <button onClick={() => { setSelectedCustomerId(''); setCustomerSearchTerm(''); }} style={{ position: 'absolute', top: '6px', right: '6px', background: 'none', border: 'none', cursor: 'pointer', fontSize: '14px' }}>❌</button>
                       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '10px', paddingRight: '20px' }}>
                         <div><span style={{ color: '#8a7650', fontSize: '11px', display: 'block', marginBottom: '2px', fontWeight: 'bold' }}>👤 NAME</span>{selectedCustomer.name}</div>
@@ -1788,50 +1838,6 @@ export default function POSPage() {
             <div style={{ marginTop: '24px', display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
               <button onClick={() => setAutoOpenModal({ isOpen: false, items: [] })} style={{ padding: '10px 16px', background: '#f1f5f9', color: '#475569', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', fontSize: '14px' }}>Cancel</button>
               <button onClick={handleConfirmAutoOpen} disabled={isProcessing} style={{ padding: '10px 16px', background: '#10b981', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', fontSize: '14px' }}>{isProcessing ? 'Processing...' : 'Yes, Open Bag'}</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* CUSTOMER SEARCH MODAL */}
-      {isCustomerModalOpen && (
-        <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(4px)', zIndex: 10000, display: 'flex', justifyContent: 'center', alignItems: 'flex-start', paddingTop: '80px', paddingLeft: '16px', paddingRight: '16px', boxSizing: 'border-box' }} onMouseDown={() => setIsCustomerModalOpen(false)}>
-          <div style={{ backgroundColor: '#ffffff', width: '100%', maxWidth: '400px', maxHeight: '75vh', borderRadius: '12px', display: 'flex', flexDirection: 'column', boxShadow: '0 10px 30px rgba(0,0,0,0.15)' }} onMouseDown={e => e.stopPropagation()}>
-            <div style={{ padding: '12px', borderBottom: '1px solid #f1f5f9', display: 'flex', gap: '8px', alignItems: 'center' }}>
-              <span style={{ fontSize: '18px', color: '#94a3b8' }}>🔍</span>
-              <input 
-                autoFocus
-                type="text" 
-                placeholder="Search for option..." 
-                value={customerSearchTerm} 
-                onChange={e => setCustomerSearchTerm(e.target.value)} 
-                style={{ flex: 1, padding: '8px', border: '1px solid transparent', fontSize: '16px', outline: 'none', color: '#0f172a', backgroundColor: 'transparent' }} 
-                className="mobile-input-field"
-              />
-              <button onClick={() => setIsCustomerModalOpen(false)} style={{ background: 'none', border: 'none', fontSize: '20px', color: '#94a3b8', cursor: 'pointer', padding: '0 8px' }}>✕</button>
-            </div>
-            
-            <div style={{ flex: 1, overflowY: 'auto', padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px', backgroundColor: '#fcfcfc' }}>
-              <button onClick={() => { setIsCreateCustomerModalOpen(true); setIsCustomerModalOpen(false); }} style={{ width: '100%', padding: '12px', backgroundColor: '#ffffff', color: '#0f172a', border: '1px dashed #cbd5e1', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold', fontSize: '15px', marginBottom: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
-                <span style={{ fontSize: '18px' }}>+</span> Add New Customer
-              </button>
-              
-              {filteredCustomers.length === 0 ? (
-                <div style={{ textAlign: 'center', padding: '20px', color: '#94a3b8', fontSize: '14px' }}>No customers found</div>
-              ) : (
-                filteredCustomers.map(c => (
-                  <div 
-                    key={c.id} 
-                    onClick={() => { setSelectedCustomerId(c.id.toString()); setCustomerSearchTerm(''); setIsCustomerModalOpen(false); }} 
-                    style={{ border: '1px solid #e2e8f0', borderRadius: '8px', padding: '16px', cursor: 'pointer', backgroundColor: '#fff', position: 'relative' }}
-                  >
-                    <div style={{ fontWeight: 'normal', fontSize: '15px', color: '#1e293b', marginBottom: '8px' }}>{c.name}</div>
-                    <div style={{ fontSize: '13px', color: '#64748b', marginBottom: '4px' }}>Location: <span style={{ color: '#0f172a' }}>{c.location || '-'}</span></div>
-                    <div style={{ fontSize: '13px', color: '#64748b', marginBottom: '4px' }}>Phone Number: <span style={{ color: '#0f172a' }}>{c.phone || '-'}</span></div>
-                    <div style={{ fontSize: '13px', color: '#64748b' }}>Types: <span style={{ color: '#0f172a' }}>{c.type || '-'}</span></div>
-                  </div>
-                ))
-              )}
             </div>
           </div>
         </div>

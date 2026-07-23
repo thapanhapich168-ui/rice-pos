@@ -478,11 +478,11 @@ export default function DashboardPage() {
                      momTotalPaidRiel += bAmtEq;
                  }
              } else {
-                 subFunds(bAmtEq, mName.trim());
-                 if (owner === 'mom' && !lowerM.includes('mom qr')) {
-                     if (isUsd) momPaidOutUsd += bAmtFace;
-                     else momPaidOutRiel += bAmtFace;
-                     momTotalPaidRiel += bAmtEq;
+                 // ✅ FIX: Business is RECEIVING money for COGS, so we Add Funds
+                 addFunds(bAmtEq, mName.trim()); 
+                 if (owner === 'mom') {
+                     // ✅ FIX: Only clear the COGS Debt, do NOT touch personal liability here
+                     momTotalPaidRiel += bAmtEq; 
                  }
              }
           });
@@ -497,11 +497,11 @@ export default function DashboardPage() {
                   momTotalPaidRiel += totalAmtEq;
               }
           } else {
-              subFunds(totalAmtEq, c.payment_method);
-              if (owner === 'mom' && !methodStr.includes('mom qr')) {
-                  if (isUsd) momPaidOutUsd += faceValue;
-                  else momPaidOutRiel += faceValue;
-                  momTotalPaidRiel += totalAmtEq;
+              // ✅ FIX: Business is RECEIVING money for COGS, so we Add Funds
+              addFunds(totalAmtEq, c.payment_method); 
+              if (owner === 'mom') {
+                  // ✅ FIX: Only clear the COGS Debt, do NOT touch personal liability here
+                  momTotalPaidRiel += totalAmtEq; 
               }
           }
        }
@@ -613,10 +613,19 @@ export default function DashboardPage() {
     [...wholesaleSales, ...retailSales].forEach((s: any) => {
        const owner = parseOwner(s.owner);
        if (owner === 'mom') {
-          let cogsAmt = Number(s.qty || 0) * Number(s.cogs_price || 0);
+          let qty = Number(s.qty || 0);
+          let price = Number(s.cogs_price || 0);
+          let cogsAmt = qty * price;
           let desc = (s.custom_rice_type || s.rice_type || '').toLowerCase();
+          
           if (!desc.includes('សេវាដឹក') && !(desc.includes('បាវ') && cogsAmt === 0)) {
-              momTotalCogsRiel += cogsAmt;
+              if (desc.includes('ដូរ') || desc.includes('បញ្ចុះតម្លៃ') || desc.includes('កក់') || cogsAmt < 0) {
+                  // 🚀 FIX: Add returns directly to Mom's Personal Liability (treat it like she gave cash back)
+                  momCollectedRiel += Math.abs(cogsAmt); 
+              } else {
+                  // 🌾 Normal sales still increase her COGS debt
+                  momTotalCogsRiel += Math.abs(cogsAmt);
+              }
           }
        }
     });
@@ -793,22 +802,20 @@ export default function DashboardPage() {
             </div>
 
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '16px', marginBottom: '16px' }}>
-              <div style={{ background: '#10b981', padding: '24px', borderRadius: '16px', color: '#fff', boxShadow: '0 10px 15px -3px rgba(16, 185, 129, 0.3)' }}>
-                <div style={{ fontSize: '13px', fontWeight: 'bold', textTransform: 'uppercase', opacity: 0.9, letterSpacing: '0.5px' }}>Total Net Worth</div>
-                <div style={{ display: 'flex', gap: '16px', margin: '12px 0 0 0' }}>
-                  <div>
-                    <div style={{ fontSize: '11px', color: '#d1fae5', fontWeight: 'bold', textTransform: 'uppercase', marginBottom: '2px' }}>Total ៛</div>
-                    <div style={{ fontSize: '24px', fontWeight: 'bold' }}>{formatRiel(assetData.netWorthRiel)}</div>
-                  </div>
-                  <div>
-                    <div style={{ fontSize: '11px', color: '#d1fae5', fontWeight: 'bold', textTransform: 'uppercase', marginBottom: '2px' }}>Total $</div>
-                    <div style={{ fontSize: '24px', fontWeight: 'bold' }}>{formatUSD(assetData.netWorthUsd)}</div>
-                  </div>
+              
+              {/* TOTAL NET WORTH - Soft Pastel Mint */}
+              <div style={{ background: '#ecfdf5', padding: '24px', borderRadius: '16px', border: '1px solid #a7f3d0', boxShadow: '0 8px 16px -4px rgba(16, 185, 129, 0.08)' }}>
+                <div style={{ fontSize: '13px', fontWeight: 'bold', color: '#047857', textTransform: 'uppercase', letterSpacing: '0.5px' }}>💵 Total Net Worth</div>
+                <div style={{ display: 'flex', gap: '16px', alignItems: 'baseline', margin: '12px 0 0 0' }}>
+                  <div style={{ fontSize: '28px', fontWeight: 'bold', color: '#10b981' }}>{formatRiel(assetData.netWorthRiel)}</div>
+                  <div style={{ fontSize: '18px', fontWeight: 'bold', color: '#34d399' }}>{formatUSD(assetData.netWorthUsd)}</div>
                 </div>
               </div>
-              <div style={{ background: '#fff', padding: '24px', borderRadius: '16px', border: '1px solid #e2e8f0', boxShadow: '0 4px 6px rgba(0,0,0,0.02)' }}>
-                <div style={{ fontSize: '13px', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 'bold' }}>📦 Total Rice Stock Asset</div>
-                <div style={{ fontSize: '32px', margin: '8px 0 0 0', color: '#b58a3d', fontWeight: 'normal' }}>{formatRiel(assetData.riceStockValue)}</div>
+
+              {/* RICE STOCK ASSET - Soft Pastel Mint */}
+              <div style={{ background: '#ecfdf5', padding: '24px', borderRadius: '16px', border: '1px solid #a7f3d0', boxShadow: '0 8px 16px -4px rgba(16, 185, 129, 0.08)' }}>
+                <div style={{ fontSize: '13px', fontWeight: 'bold', color: '#047857', textTransform: 'uppercase', letterSpacing: '0.5px' }}>📦 Total Rice Stock Asset</div>
+                <div style={{ fontSize: '28px', margin: '12px 0 0 0', fontWeight: 'bold', color: '#10b981' }}>{formatRiel(assetData.riceStockValue)}</div>
               </div>
               <div style={{ background: '#fff', padding: '24px', borderRadius: '16px', border: '1px solid #e2e8f0', boxShadow: '0 4px 6px rgba(0,0,0,0.02)' }}>
                 <div style={{ fontSize: '13px', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 'bold' }}>💵 Cash on Hand</div>

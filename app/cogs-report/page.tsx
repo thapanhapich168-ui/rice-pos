@@ -862,6 +862,10 @@ export default function CogsReportPage() {
                                     >
                                       <option value="Mom Liability ៛">📉 Mom Liability ៛</option>
                                       <option value="Mom Liability $">📉 Mom Liability $</option>
+                                      <option value="Cash ៛">💵 Cash ៛</option>
+                                      <option value="Cash $">💵 Cash $</option>
+                                      <option value="QR ៛">📱 QR ៛</option>
+                                      <option value="QR $">📱 QR $</option>
                                     </select>
                                     {paymentState.length > 1 && (
                                       <button onClick={() => removeInlineSplit(d.key, row.id, remaining)} style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', fontSize: '16px' }}>✕</button>
@@ -939,6 +943,10 @@ export default function CogsReportPage() {
                   >
                     <option value="Mom Liability ៛">📉 Mom Liability ៛</option>
                     <option value="Mom Liability $">📉 Mom Liability $</option>
+                    <option value="Cash ៛">💵 Cash ៛</option>
+                    <option value="Cash $">💵 Cash $</option>
+                    <option value="QR ៛">📱 QR ៛</option>
+                    <option value="QR $">📱 QR $</option>
                   </select>
                   
                   <div style={{ flex: 1 }}>

@@ -23,6 +23,7 @@ interface MixHistory {
   rice3Name?: string
   rice3Ratio?: number
   mixedCogs: number
+  yieldStr: string
 }
 
 const formatRiel = (amount: number) => `${new Intl.NumberFormat('en-US').format(Math.round(amount))} ៛`;
@@ -34,12 +35,12 @@ function CurrencyInput({ value, onChange, placeholder, style, autoFocus }: any) 
   const [inputValue, setInputValue] = useState('');
 
   useEffect(() => {
-    if (value === '' || value === 0) {
+    if (value === '' || value === 0 || value === undefined) {
       setInputValue('');
     } else {
       const parsed = parseFloat(inputValue.replace(/,/g, ''));
-      if (parsed !== value) {
-        setInputValue(new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 }).format(value));
+      if (parsed !== Number(value)) {
+        setInputValue(new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 }).format(Number(value)));
       }
     }
   }, [value]);
@@ -72,6 +73,7 @@ function CurrencyInput({ value, onChange, placeholder, style, autoFocus }: any) 
         fontSize: '16px', // Prevents iOS Zoom
         fontWeight: 'normal' 
       }}
+      className="mobile-input-field"
     />
   )
 }
@@ -79,77 +81,78 @@ function CurrencyInput({ value, onChange, placeholder, style, autoFocus }: any) 
 export default function RiceMixCalculator() {
   const [products, setProducts] = useState<Product[]>([])
   
-  // Selection States - Rice 1
+  // Selection States
   const [rice1Id, setRice1Id] = useState<string>('')
-  const [search1, setSearch1] = useState('')
-  const [isDropdown1Open, setIsDropdown1Open] = useState(false)
-  const [rice1Ratio, setRice1Ratio] = useState<number | ''>('')
+  const [rice1Qty, setRice1Qty] = useState<number | ''>('')
   
-  // Selection States - Rice 2
   const [rice2Id, setRice2Id] = useState<string>('')
-  const [search2, setSearch2] = useState('')
-  const [isDropdown2Open, setIsDropdown2Open] = useState(false)
-  const [rice2Ratio, setRice2Ratio] = useState<number | ''>('')
+  const [rice2Qty, setRice2Qty] = useState<number | ''>('')
 
-  // Selection States - Rice 3 (Optional)
   const [showThirdRice, setShowThirdRice] = useState(false)
   const [rice3Id, setRice3Id] = useState<string>('')
-  const [search3, setSearch3] = useState('')
-  const [isDropdown3Open, setIsDropdown3Open] = useState(false)
-  const [rice3Ratio, setRice3Ratio] = useState<number | ''>('')
+  const [rice3Qty, setRice3Qty] = useState<number | ''>('')
+
+  // 🟢 INLINE DROPDOWN STATES
+  const [activeDropdown, setActiveDropdown] = useState<'rice1' | 'rice2' | 'rice3' | 'target' | null>(null)
+  const [dropdownSearch, setDropdownSearch] = useState('')
+  const [dropdownTab, setDropdownTab] = useState<'wholesale' | 'retail'>('wholesale')
 
   // Auto-Calc Results & History
-  const [calcResult, setCalcResult] = useState<{ cogs: number, totalRatio: number } | null>(null)
+  const [calcResult, setCalcResult] = useState<{ blendedCogsPerKg: number, totalYieldKg: number, totalCost: number } | null>(null)
   const [history, setHistory] = useState<MixHistory[]>([])
   const [isProcessing, setIsProcessing] = useState(false)
   
   // Inline Sync Action States
   const [syncMode, setSyncMode] = useState<'none' | 'existing' | 'new'>('none')
   const [targetProductId, setTargetProductId] = useState<string>('')
+  
   const [newMixName, setNewMixName] = useState('')
   const [newMixPrice, setNewMixPrice] = useState<number | ''>('')
-  
-  const [addStockQty, setAddStockQty] = useState<number | ''>('')
-  const [deductRice1Qty, setDeductRice1Qty] = useState<number | ''>('')
-  const [deductRice2Qty, setDeductRice2Qty] = useState<number | ''>('')
-  const [deductRice3Qty, setDeductRice3Qty] = useState<number | ''>('')
+  const [newMixType, setNewMixType] = useState<'wholesale' | 'retail'>('wholesale')
 
   useEffect(() => {
     fetchProducts()
     fetchHistory()
   }, [])
 
-  // Auto-Calculation Engine
+  const rice1 = products.find(p => p.id.toString() === rice1Id)
+  const rice2 = products.find(p => p.id.toString() === rice2Id)
+  const rice3 = products.find(p => p.id.toString() === rice3Id)
+  const targetProd = products.find(p => p.id.toString() === targetProductId)
+
+  // 🧠 SMART MATH ENGINE
   useEffect(() => {
-    const r1 = Number(rice1Ratio) || 0;
-    const r2 = Number(rice2Ratio) || 0;
-    const r3 = showThirdRice ? (Number(rice3Ratio) || 0) : 0;
-    const totalRatio = r1 + r2 + r3;
+    const q1 = Number(rice1Qty) || 0;
+    const q2 = Number(rice2Qty) || 0;
+    const q3 = showThirdRice ? (Number(rice3Qty) || 0) : 0;
 
-    const r1Data = products.find(p => p.id.toString() === rice1Id);
-    const r2Data = products.find(p => p.id.toString() === rice2Id);
-    const r3Data = showThirdRice ? products.find(p => p.id.toString() === rice3Id) : null;
+    const hasValidThird = showThirdRice ? rice3 : true;
 
-    const hasValidThird = showThirdRice ? r3Data : true;
+    if (rice1 && rice2 && hasValidThird && (q1 + q2 + q3) > 0) {
+      const w1 = Number(rice1.weight) >= 50 ? 50 : 1;
+      const w2 = Number(rice2.weight) >= 50 ? 50 : 1;
+      const w3 = rice3 ? (Number(rice3.weight) >= 50 ? 50 : 1) : 1;
 
-    if (r1Data && r2Data && hasValidThird && totalRatio > 0) {
-      const cost1 = r1Data.cost_price * r1;
-      const cost2 = r2Data.cost_price * r2;
-      const cost3 = r3Data ? r3Data.cost_price * r3 : 0;
+      // Convert all inputs to raw Kg to find true blend
+      const kg1 = q1 * w1;
+      const kg2 = q2 * w2;
+      const kg3 = q3 * w3;
+      const totalYieldKg = kg1 + kg2 + kg3;
 
-      const mixedCogs = (cost1 + cost2 + cost3) / totalRatio;
-      setCalcResult({ cogs: mixedCogs, totalRatio });
+      // Calculate total physical cost of the mixture
+      const cost1 = q1 * rice1.cost_price;
+      const cost2 = q2 * rice2.cost_price;
+      const cost3 = rice3 ? (q3 * rice3.cost_price) : 0;
+      const totalCost = cost1 + cost2 + cost3;
+
+      const blendedCogsPerKg = totalYieldKg > 0 ? (totalCost / totalYieldKg) : 0;
       
-      // Auto-fill deduction fields based on portions
-      setDeductRice1Qty(r1);
-      setDeductRice2Qty(r2);
-      if (showThirdRice) setDeductRice3Qty(r3);
-      setAddStockQty(totalRatio);
+      setCalcResult({ blendedCogsPerKg, totalYieldKg, totalCost });
     } else {
       setCalcResult(null);
       setSyncMode('none');
     }
-  }, [rice1Id, rice2Id, rice3Id, rice1Ratio, rice2Ratio, rice3Ratio, showThirdRice, products])
+  }, [rice1Id, rice2Id, rice3Id, rice1Qty, rice2Qty, rice3Qty, showThirdRice, products, rice1, rice2, rice3])
 
   async function fetchProducts() {
     const { data } = await supabase.from('products').select('*').order('name', { ascending: true })
@@ -163,30 +166,15 @@ export default function RiceMixCalculator() {
     }
   }
 
-  const rice1 = products.find(p => p.id.toString() === rice1Id)
-  const rice2 = products.find(p => p.id.toString() === rice2Id)
-  const rice3 = products.find(p => p.id.toString() === rice3Id)
-
-  const filteredProducts1 = products.filter(p => p.name.toLowerCase().includes(search1.toLowerCase()))
-  const filteredProducts2 = products.filter(p => p.name.toLowerCase().includes(search2.toLowerCase()))
-  const filteredProducts3 = products.filter(p => p.name.toLowerCase().includes(search3.toLowerCase()))
-
   const handleReset = () => {
-    setRice1Id('')
-    setSearch1('')
-    setRice1Ratio('')
-    setRice2Id('')
-    setSearch2('')
-    setRice2Ratio('')
-    setRice3Id('')
-    setSearch3('')
-    setRice3Ratio('')
-    setShowThirdRice(false)
-    setCalcResult(null)
-    setSyncMode('none')
-    setNewMixName('')
-    setNewMixPrice('')
-    setTargetProductId('')
+    setRice1Id(''); setRice1Qty('');
+    setRice2Id(''); setRice2Qty('');
+    setRice3Id(''); setRice3Qty('');
+    setShowThirdRice(false);
+    setCalcResult(null);
+    setSyncMode('none');
+    setNewMixName(''); setNewMixPrice(''); setTargetProductId('');
+    setActiveDropdown(null);
   }
 
   const clearHistory = async () => {
@@ -198,14 +186,53 @@ export default function RiceMixCalculator() {
     }, { onConflict: 'setting_key' })
   }
 
+  // 🟢 Filter Products for the active Dropdown Box
+  const dropdownFilteredProducts = products.filter(p => {
+    if (dropdownSearch && !p.name.toLowerCase().includes(dropdownSearch.toLowerCase())) return false;
+    const isWholesale = Number(p.weight) >= 50;
+    if (dropdownTab === 'wholesale' && !isWholesale) return false;
+    if (dropdownTab === 'retail' && isWholesale) return false;
+    return true;
+  });
+
+  const handleSelectProduct = (p: Product, target: string) => {
+    if (target === 'rice1') setRice1Id(p.id.toString());
+    if (target === 'rice2') setRice2Id(p.id.toString());
+    if (target === 'rice3') setRice3Id(p.id.toString());
+    if (target === 'target') setTargetProductId(p.id.toString());
+    setActiveDropdown(null);
+  }
+
+  // 🧮 DYNAMIC OUTPUT YIELD CALCULATION
+  let outputUnit = 'Kg';
+  let outputMultiplier = 1;
+  let finalYield = 0;
+  let finalCogs = 0;
+
+  if (calcResult) {
+    if (syncMode === 'new') {
+      outputMultiplier = newMixType === 'wholesale' ? 50 : 1;
+      outputUnit = newMixType === 'wholesale' ? 'Bags' : 'Kg';
+    } else if (syncMode === 'existing' && targetProd) {
+      outputMultiplier = Number(targetProd.weight) >= 50 ? 50 : 1;
+      outputUnit = Number(targetProd.weight) >= 50 ? 'Bags' : 'Kg';
+    } else {
+      // Default generic display
+      outputMultiplier = 50;
+      outputUnit = 'Bags';
+    }
+    
+    finalYield = calcResult.totalYieldKg / outputMultiplier;
+    finalCogs = calcResult.blendedCogsPerKg * outputMultiplier;
+  }
+
   const handleExecuteInventorySync = async () => {
     if (!calcResult || !rice1 || !rice2) return;
     if (showThirdRice && !rice3) return alert('Please select the 3rd rice or remove it.');
     
-    const qtyToAdd = Number(addStockQty) || 0;
-    const qtyToDeduct1 = Number(deductRice1Qty) || 0;
-    const qtyToDeduct2 = Number(deductRice2Qty) || 0;
-    const qtyToDeduct3 = showThirdRice ? (Number(deductRice3Qty) || 0) : 0;
+    const qtyToDeduct1 = Number(rice1Qty) || 0;
+    const qtyToDeduct2 = Number(rice2Qty) || 0;
+    const qtyToDeduct3 = showThirdRice ? (Number(rice3Qty) || 0) : 0;
 
     if (syncMode === 'new' && (!newMixName || !newMixPrice)) {
       return alert('Please enter a name and selling price for the new mix.');
@@ -217,52 +244,46 @@ export default function RiceMixCalculator() {
     setIsProcessing(true);
 
     try {
-      // 1. Process Deductions from Source Rice
-      if (qtyToDeduct1 > 0) {
-        await supabase.from('products').update({ stock: rice1.stock - qtyToDeduct1 }).eq('id', rice1.id);
-      }
-      if (qtyToDeduct2 > 0) {
-        await supabase.from('products').update({ stock: rice2.stock - qtyToDeduct2 }).eq('id', rice2.id);
-      }
+      // 1. DEDUCT: Take ingredients out of stock
+      if (qtyToDeduct1 > 0) await supabase.from('products').update({ stock: rice1.stock - qtyToDeduct1 }).eq('id', rice1.id);
+      if (qtyToDeduct2 > 0) await supabase.from('products').update({ stock: rice2.stock - qtyToDeduct2 }).eq('id', rice2.id);
       if (showThirdRice && qtyToDeduct3 > 0 && rice3) {
         await supabase.from('products').update({ stock: rice3.stock - qtyToDeduct3 }).eq('id', rice3.id);
       }
 
-      // 2. Process Target Addition
+      // 2. ADD: Put mixed result into target
       if (syncMode === 'new') {
         const payload = {
           name: newMixName,
           price: Number(newMixPrice),
-          cost_price: Math.round(calcResult.cogs),
-          weight: 50, 
-          stock: qtyToAdd
+          cost_price: Math.round(finalCogs),
+          weight: newMixType === 'wholesale' ? 50 : 1, 
+          stock: finalYield
         }
         const { error } = await supabase.from('products').insert([payload]);
         if (error) throw error;
-      } else {
-        const targetProd = products.find(p => p.id.toString() === targetProductId);
-        if (targetProd) {
-          const newStock = targetProd.stock + qtyToAdd;
-          // Update both stock AND adjust the new blended COGS of the existing product
-          const { error } = await supabase.from('products').update({ 
-            stock: newStock, 
-            cost_price: Math.round(calcResult.cogs) 
-          }).eq('id', targetProd.id);
-          if (error) throw error;
-        }
+      } else if (targetProd) {
+        const newStock = targetProd.stock + finalYield;
+        const { error } = await supabase.from('products').update({ 
+          stock: newStock, 
+          cost_price: Math.round(finalCogs) 
+        }).eq('id', targetProd.id);
+        if (error) throw error;
       }
 
-      // 3. Log History
+      // 3. LOG HISTORY
+      const yieldStr = `${finalYield.toLocaleString('en-US', { maximumFractionDigits: 2 })} ${outputUnit}`;
       const newRecord: MixHistory = {
         id: Date.now().toString(),
         time: new Date().toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }),
         rice1Name: rice1.name,
-        rice1Ratio: Number(rice1Ratio) || 0,
+        rice1Ratio: qtyToDeduct1,
         rice2Name: rice2.name,
-        rice2Ratio: Number(rice2Ratio) || 0,
+        rice2Ratio: qtyToDeduct2,
         rice3Name: showThirdRice && rice3 ? rice3.name : undefined,
-        rice3Ratio: showThirdRice ? (Number(rice3Ratio) || 0) : undefined,
-        mixedCogs: calcResult.cogs
+        rice3Ratio: showThirdRice ? qtyToDeduct3 : undefined,
+        mixedCogs: finalCogs,
+        yieldStr: yieldStr
       }
       const updatedHistory = [newRecord, ...history].slice(0, 50) 
       setHistory(updatedHistory)
@@ -279,6 +300,109 @@ export default function RiceMixCalculator() {
     }
   }
 
+  // 🟢 REUSABLE DROPDOWN COMPONENT
+  const renderDropdownMenu = (target: string) => {
+    if (activeDropdown !== target) return null;
+    return (
+      <div style={{ position: 'absolute', top: 'calc(100% + 4px)', left: 0, right: 0, backgroundColor: '#fff', border: '1px solid #cbd5e1', borderRadius: '8px', boxShadow: '0 10px 25px rgba(0,0,0,0.15)', zIndex: 101, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+        
+        {/* Search Bar */}
+        <div style={{ padding: '8px', borderBottom: '1px solid #e2e8f0' }}>
+          <input 
+            autoFocus 
+            type="text" 
+            placeholder="Search rice..." 
+            value={dropdownSearch} 
+            onChange={e => setDropdownSearch(e.target.value)} 
+            style={{ width: '100%', padding: '10px', border: '1px solid #cbd5e1', borderRadius: '6px', outline: 'none', fontSize: '14px', boxSizing: 'border-box' }} 
+            className="mobile-input-field" 
+          />
+        </div>
+        
+        {/* Category Tabs */}
+        <div style={{ display: 'flex', borderBottom: '1px solid #e2e8f0', background: '#f8fafc' }}>
+          <button onClick={() => setDropdownTab('wholesale')} style={{ flex: 1, padding: '10px', fontWeight: 'bold', border: 'none', background: dropdownTab === 'wholesale' ? '#fff' : 'transparent', color: dropdownTab === 'wholesale' ? '#b58a3d' : '#64748b', borderBottom: dropdownTab === 'wholesale' ? '2px solid #b58a3d' : 'none', cursor: 'pointer', fontSize: '13px', transition: 'all 0.2s' }}>🌾 Wholesale</button>
+          <button onClick={() => setDropdownTab('retail')} style={{ flex: 1, padding: '10px', fontWeight: 'bold', border: 'none', background: dropdownTab === 'retail' ? '#fff' : 'transparent', color: dropdownTab === 'retail' ? '#b58a3d' : '#64748b', borderBottom: dropdownTab === 'retail' ? '2px solid #b58a3d' : 'none', cursor: 'pointer', fontSize: '13px', transition: 'all 0.2s' }}>🛍️ Retail</button>
+        </div>
+        
+        {/* Scrollable Results */}
+        <div className="hide-scrollbar" style={{ maxHeight: '220px', overflowY: 'auto', padding: '8px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+          {dropdownFilteredProducts.length === 0 ? (
+            <div style={{ padding: '16px', textAlign: 'center', color: '#94a3b8', fontSize: '13px' }}>No products found</div>
+          ) : (
+            dropdownFilteredProducts.map(p => (
+              <div 
+                key={p.id} 
+                onClick={() => handleSelectProduct(p, target)} 
+                style={{ padding: '12px', borderBottom: '1px solid #f1f5f9', cursor: 'pointer', borderRadius: '6px', transition: 'background 0.2s' }}
+              >
+                <div style={{ fontWeight: 'bold', fontSize: '14px', color: '#1e293b', marginBottom: '4px' }}>{p.name}</div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: '#64748b' }}>
+                  <span>Cost: <b style={{ color: '#b58a3d' }}>{formatRiel(p.cost_price)}</b></span>
+                  <span>Stock: <b style={{ color: p.stock > 0 ? '#10b981' : '#ef4444' }}>{p.stock}</b></span>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+    )
+  }
+
+  // 🟢 RICE INGREDIENT CARD GENERATOR
+  const renderRiceCard = (label: string, riceData: Product | undefined, qty: number | '', setQty: any, target: 'rice1' | 'rice2' | 'rice3') => {
+    const isWholesale = riceData ? Number(riceData.weight) >= 50 : true;
+    const unitLabel = isWholesale ? 'Bags' : 'Kg';
+
+    return (
+      <div className="calc-card fade-in">
+        <h2 className="card-header">{label}</h2>
+        <div className="input-group" style={{ position: 'relative' }}>
+          <label>Select Rice Ingredient</label>
+          
+          {/* Invisible Overlay to catch outside clicks and close the dropdown */}
+          {activeDropdown === target && (
+            <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, zIndex: 99 }} onClick={() => setActiveDropdown(null)}></div>
+          )}
+
+          {/* Trigger Box */}
+          <div 
+            onClick={() => { setActiveDropdown(target); setDropdownSearch(''); setDropdownTab('wholesale'); }}
+            style={{ width: '100%', padding: '12px 14px', borderRadius: '8px', border: activeDropdown === target ? '2px solid #b58a3d' : '1px solid #cbd5e1', cursor: 'pointer', backgroundColor: '#fff', fontSize: '15px', color: riceData ? '#1e293b' : '#94a3b8', display: 'flex', justifyContent: 'space-between', alignItems: 'center', position: 'relative', zIndex: activeDropdown === target ? 100 : 1 }}
+          >
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {riceData ? riceData.name : '🔍 Tap to Search...'}
+            </span>
+            <span>▼</span>
+          </div>
+
+          {/* Dropdown Menu */}
+          {renderDropdownMenu(target)}
+        </div>
+        
+        {riceData && (
+          <div className="price-display fade-in">
+            <span className="label">Current Cost (COGS)</span>
+            <span className="value">{formatRiel(riceData.cost_price)}</span>
+            <div style={{ fontSize: '11px', color: '#64748b', marginTop: '4px' }}>
+              Current Stock: <b style={{ color: riceData.stock > 0 ? '#10b981' : '#ef4444'}}>{riceData.stock} {unitLabel}</b>
+            </div>
+          </div>
+        )}
+
+        <div className="input-group" style={{ marginTop: '16px' }}>
+          <label>Portion / Quantity ({unitLabel})</label>
+          <CurrencyInput 
+            placeholder="0" 
+            value={qty} 
+            onChange={(v: any) => setQty(v)} 
+            style={{ width: '100%', padding: '12px', borderRadius: '8px', border: '1px solid #cbd5e1', boxSizing: 'border-box' }}
+          />
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="main-wrapper">
       {/* HEADER */}
@@ -291,159 +415,14 @@ export default function RiceMixCalculator() {
 
       {/* CALCULATOR WORKSPACE */}
       <div className="calculator-grid">
-        
-        {/* RICE 1 BOX */}
-        <div className="calc-card fade-in">
-          <h2 className="card-header">Base Rice A</h2>
-          <div className="input-group" style={{ position: 'relative' }}>
-            <label>Search & Select Rice</label>
-            <input 
-              type="text"
-              placeholder="Search..."
-              value={search1}
-              onChange={(e) => { setSearch1(e.target.value); setIsDropdown1Open(true); setRice1Id(''); }}
-              onFocus={() => setIsDropdown1Open(true)}
-              onBlur={() => setTimeout(() => setIsDropdown1Open(false), 200)}
-            />
-            {isDropdown1Open && (
-              <div className="dropdown-menu">
-                {filteredProducts1.length === 0 ? (
-                  <div style={{ padding: '12px', color: '#94a3b8', fontSize: '14px', textAlign: 'center' }}>No products found</div>
-                ) : (
-                  filteredProducts1.map(p => (
-                    <div key={p.id} className="dropdown-item" onMouseDown={(e) => { e.preventDefault(); setRice1Id(p.id.toString()); setSearch1(p.name); setIsDropdown1Open(false); }}>
-                      <div style={{ fontWeight: 'bold', color: '#1e293b', marginBottom: '2px', fontSize: '15px' }}>{p.name}</div>
-                      <div style={{ fontSize: '12px', color: '#64748b' }}>
-                        Cost: <span style={{ color: '#b58a3d', fontWeight: 'bold' }}>{formatRiel(p.cost_price)}</span> &nbsp;|&nbsp; Stock: <span style={{ color: '#10b981', fontWeight: 'bold' }}>{p.stock}</span>
-                      </div>
-                    </div>
-                  ))
-                )}
-              </div>
-            )}
-          </div>
-          
-          {rice1 && (
-            <div className="price-display fade-in">
-              <span className="label">Current Cost (COGS)</span>
-              <span className="value">{formatRiel(rice1.cost_price)}</span>
-            </div>
-          )}
-
-          <div className="input-group" style={{ marginTop: '16px' }}>
-            <label>Portion (Kg / Bags)</label>
-            <CurrencyInput 
-              placeholder="0" 
-              value={rice1Ratio} 
-              onChange={(v: any) => setRice1Ratio(v)} 
-              style={{ width: '100%', padding: '12px', borderRadius: '8px', border: '1px solid #cbd5e1', boxSizing: 'border-box' }}
-            />
-          </div>
-        </div>
-
-        {/* PLUS SIGN */}
+        {renderRiceCard('Base Rice A', rice1, rice1Qty, setRice1Qty, 'rice1')}
         <div className="math-symbol">+</div>
-
-        {/* RICE 2 BOX */}
-        <div className="calc-card fade-in">
-          <h2 className="card-header">Base Rice B</h2>
-          <div className="input-group" style={{ position: 'relative' }}>
-            <label>Search & Select Rice</label>
-            <input 
-              type="text"
-              placeholder="Search..."
-              value={search2}
-              onChange={(e) => { setSearch2(e.target.value); setIsDropdown2Open(true); setRice2Id(''); }}
-              onFocus={() => setIsDropdown2Open(true)}
-              onBlur={() => setTimeout(() => setIsDropdown2Open(false), 200)}
-            />
-            {isDropdown2Open && (
-              <div className="dropdown-menu">
-                {filteredProducts2.length === 0 ? (
-                  <div style={{ padding: '12px', color: '#94a3b8', fontSize: '14px', textAlign: 'center' }}>No products found</div>
-                ) : (
-                  filteredProducts2.map(p => (
-                    <div key={p.id} className="dropdown-item" onMouseDown={(e) => { e.preventDefault(); setRice2Id(p.id.toString()); setSearch2(p.name); setIsDropdown2Open(false); }}>
-                      <div style={{ fontWeight: 'bold', color: '#1e293b', marginBottom: '2px', fontSize: '15px' }}>{p.name}</div>
-                      <div style={{ fontSize: '12px', color: '#64748b' }}>
-                        Cost: <span style={{ color: '#b58a3d', fontWeight: 'bold' }}>{formatRiel(p.cost_price)}</span> &nbsp;|&nbsp; Stock: <span style={{ color: '#10b981', fontWeight: 'bold' }}>{p.stock}</span>
-                      </div>
-                    </div>
-                  ))
-                )}
-              </div>
-            )}
-          </div>
-          
-          {rice2 && (
-            <div className="price-display fade-in">
-              <span className="label">Current Cost (COGS)</span>
-              <span className="value">{formatRiel(rice2.cost_price)}</span>
-            </div>
-          )}
-
-          <div className="input-group" style={{ marginTop: '16px' }}>
-            <label>Portion (Kg / Bags)</label>
-            <CurrencyInput 
-              placeholder="0" 
-              value={rice2Ratio} 
-              onChange={(v: any) => setRice2Ratio(v)} 
-              style={{ width: '100%', padding: '12px', borderRadius: '8px', border: '1px solid #cbd5e1', boxSizing: 'border-box' }}
-            />
-          </div>
-        </div>
-
-        {/* OPTIONAL RICE 3 BOX */}
+        {renderRiceCard('Base Rice B', rice2, rice2Qty, setRice2Qty, 'rice2')}
+        
         {showThirdRice && (
           <>
             <div className="math-symbol">+</div>
-            <div className="calc-card fade-in" style={{ border: '2px dashed #cbd5e1' }}>
-              <h2 className="card-header">Base Rice C</h2>
-              <div className="input-group" style={{ position: 'relative' }}>
-                <label>Search & Select Rice</label>
-                <input 
-                  type="text"
-                  placeholder="Search..."
-                  value={search3}
-                  onChange={(e) => { setSearch3(e.target.value); setIsDropdown3Open(true); setRice3Id(''); }}
-                  onFocus={() => setIsDropdown3Open(true)}
-                  onBlur={() => setTimeout(() => setIsDropdown3Open(false), 200)}
-                />
-                {isDropdown3Open && (
-                  <div className="dropdown-menu">
-                    {filteredProducts3.length === 0 ? (
-                      <div style={{ padding: '12px', color: '#94a3b8', fontSize: '14px', textAlign: 'center' }}>No products found</div>
-                    ) : (
-                      filteredProducts3.map(p => (
-                        <div key={p.id} className="dropdown-item" onMouseDown={(e) => { e.preventDefault(); setRice3Id(p.id.toString()); setSearch3(p.name); setIsDropdown3Open(false); }}>
-                          <div style={{ fontWeight: 'bold', color: '#1e293b', marginBottom: '2px', fontSize: '15px' }}>{p.name}</div>
-                          <div style={{ fontSize: '12px', color: '#64748b' }}>
-                            Cost: <span style={{ color: '#b58a3d', fontWeight: 'bold' }}>{formatRiel(p.cost_price)}</span> &nbsp;|&nbsp; Stock: <span style={{ color: '#10b981', fontWeight: 'bold' }}>{p.stock}</span>
-                          </div>
-                        </div>
-                      ))
-                    )}
-                  </div>
-                )}
-              </div>
-              
-              {rice3 && (
-                <div className="price-display fade-in">
-                  <span className="label">Current Cost (COGS)</span>
-                  <span className="value">{formatRiel(rice3.cost_price)}</span>
-                </div>
-              )}
-
-              <div className="input-group" style={{ marginTop: '16px' }}>
-                <label>Portion (Kg / Bags)</label>
-                <CurrencyInput 
-                  placeholder="0" 
-                  value={rice3Ratio} 
-                  onChange={(v: any) => setRice3Ratio(v)} 
-                  style={{ width: '100%', padding: '12px', borderRadius: '8px', border: '1px solid #cbd5e1', boxSizing: 'border-box' }}
-                />
-              </div>
-            </div>
+            {renderRiceCard('Base Rice C', rice3, rice3Qty, setRice3Qty, 'rice3')}
           </>
         )}
       </div>
@@ -455,7 +434,7 @@ export default function RiceMixCalculator() {
              ➕ Add 3rd Rice to Mix
            </button>
         ) : (
-           <button onClick={() => { setShowThirdRice(false); setRice3Id(''); setSearch3(''); setRice3Ratio(''); setDeductRice3Qty(''); }} style={{ background: '#fef2f2', border: '1px dashed #fca5a5', padding: '12px 24px', borderRadius: '8px', color: '#ef4444', fontWeight: 'bold', cursor: 'pointer', transition: 'all 0.2s' }}>
+           <button onClick={() => { setShowThirdRice(false); setRice3Id(''); setRice3Qty(''); }} style={{ background: '#fef2f2', border: '1px dashed #fca5a5', padding: '12px 24px', borderRadius: '8px', color: '#ef4444', fontWeight: 'bold', cursor: 'pointer', transition: 'all 0.2s' }}>
              ➖ Remove 3rd Rice
            </button>
         )}
@@ -465,25 +444,34 @@ export default function RiceMixCalculator() {
       {calcResult && (
         <div className="result-panel fade-in" style={{ marginTop: '30px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px', flexWrap: 'wrap', gap: '12px' }}>
-            <h2 className="card-header" style={{ margin: 0 }}>Auto-Calculated Mixture</h2>
-            <div style={{ display: 'flex', gap: '8px' }}>
+            <h2 className="card-header" style={{ margin: 0 }}>Auto-Calculated Yield</h2>
+            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
               <button onClick={() => setSyncMode('existing')} style={{ padding: '10px 16px', borderRadius: '8px', border: syncMode === 'existing' ? '2px solid #3b82f6' : '1px solid #cbd5e1', background: syncMode === 'existing' ? '#eff6ff' : '#fff', color: syncMode === 'existing' ? '#1e40af' : '#475569', fontWeight: 'bold', cursor: 'pointer', transition: 'all 0.2s', fontSize: '14px' }}>
-                📦 Add to Existing Stock
+                📦 Add to Existing
               </button>
               <button onClick={() => setSyncMode('new')} style={{ padding: '10px 16px', borderRadius: '8px', border: syncMode === 'new' ? '2px solid #10b981' : '1px solid #cbd5e1', background: syncMode === 'new' ? '#f0fdf4' : '#fff', color: syncMode === 'new' ? '#166534' : '#475569', fontWeight: 'bold', cursor: 'pointer', transition: 'all 0.2s', fontSize: '14px' }}>
-                ✨ Create New Rice
+                ✨ Create New
               </button>
             </div>
           </div>
           
           <div className="result-stats" style={{ marginBottom: syncMode !== 'none' ? '24px' : '0' }}>
-            <div className="stat-box">
-              <span className="label">Total Output Portion</span>
-              <span className="value">{calcResult.totalRatio}</span>
+            <div className="stat-box" style={{ flex: 1.5 }}>
+              <span className="label">Total Raw Mix Weight</span>
+              <span className="value" style={{ color: '#3b82f6' }}>
+                {calcResult.totalYieldKg.toLocaleString('en-US', { maximumFractionDigits: 2 })} <span style={{ fontSize: '16px', fontWeight: 'normal' }}>Kg</span>
+              </span>
             </div>
-            <div className="stat-box highlight">
-              <span className="label">New Blended Cost (COGS)</span>
-              <span className="value text-gold">{formatRiel(calcResult.cogs)}</span>
+            
+            {/* Dynamic View showing exactly what this makes */}
+            <div className="stat-box highlight" style={{ flex: 2 }}>
+              <span className="label">Will Generate Output of:</span>
+              <span className="value text-gold" style={{ display: 'flex', alignItems: 'baseline', gap: '8px' }}>
+                 {finalYield.toLocaleString('en-US', { maximumFractionDigits: 2 })} <span style={{ fontSize: '16px', fontWeight: 'bold', color: '#8a7650' }}>{outputUnit}</span>
+              </span>
+              <div style={{ fontSize: '12px', color: '#64748b', marginTop: '6px', fontWeight: 'bold' }}>
+                At new COGS: <span style={{ color: '#0f172a' }}>{formatRiel(finalCogs)} per {outputUnit.slice(0,-1)}</span>
+              </div>
             </div>
           </div>
 
@@ -491,7 +479,7 @@ export default function RiceMixCalculator() {
           {syncMode !== 'none' && (
             <div className="fade-in" style={{ background: '#f8fafc', padding: '20px', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
               <div style={{ fontSize: '14px', fontWeight: 'bold', color: '#1e293b', marginBottom: '16px' }}>
-                {syncMode === 'new' ? 'Create & Sync New Product' : 'Sync to Existing Product'}
+                {syncMode === 'new' ? 'Create & Sync New Product' : 'Select Target to Sync & Overwrite'}
               </div>
 
               {syncMode === 'new' ? (
@@ -501,44 +489,37 @@ export default function RiceMixCalculator() {
                     <input type="text" placeholder={`e.g. Mix ${rice1?.name.split(' ')[0]}-${rice2?.name.split(' ')[0]}`} value={newMixName} onChange={e => setNewMixName(e.target.value)} style={{ width: '100%', padding: '12px', borderRadius: '8px', border: '1px solid #cbd5e1', boxSizing: 'border-box', fontSize: '16px', color: '#0f172a', outline: 'none' }} />
                   </div>
                   <div style={{ flex: 1, minWidth: '150px' }}>
-                    <label style={{ display: 'block', fontSize: '12px', fontWeight: 'bold', color: '#475569', marginBottom: '6px', textTransform: 'uppercase' }}>Target Selling Price (៛)</label>
+                    <label style={{ display: 'block', fontSize: '12px', fontWeight: 'bold', color: '#475569', marginBottom: '6px', textTransform: 'uppercase' }}>Size Type</label>
+                    <select value={newMixType} onChange={(e: any) => setNewMixType(e.target.value)} style={{ width: '100%', padding: '12px', borderRadius: '8px', border: '1px solid #cbd5e1', boxSizing: 'border-box', fontSize: '16px', color: '#0f172a', outline: 'none', backgroundColor: '#fff', cursor: 'pointer' }}>
+                      <option value="wholesale">Wholesale (50kg Bag)</option>
+                      <option value="retail">Retail (1kg)</option>
+                    </select>
+                  </div>
+                  <div style={{ flex: 1, minWidth: '150px' }}>
+                    <label style={{ display: 'block', fontSize: '12px', fontWeight: 'bold', color: '#475569', marginBottom: '6px', textTransform: 'uppercase' }}>Selling Price (៛)</label>
                     <CurrencyInput value={newMixPrice} onChange={(v: any) => setNewMixPrice(v)} style={{ width: '100%', padding: '12px', borderRadius: '8px', border: '1px solid #cbd5e1', boxSizing: 'border-box', color: '#0f172a' }} />
                   </div>
                 </div>
               ) : (
-                <div style={{ marginBottom: '20px' }}>
-                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 'bold', color: '#475569', marginBottom: '6px', textTransform: 'uppercase' }}>Select Target Product</label>
-                  <select value={targetProductId} onChange={e => setTargetProductId(e.target.value)} style={{ width: '100%', padding: '12px', borderRadius: '8px', border: '1px solid #cbd5e1', boxSizing: 'border-box', fontSize: '16px', color: '#0f172a', outline: 'none', backgroundColor: '#fff', cursor: 'pointer' }}>
-                    <option value="">-- Choose Existing Product --</option>
-                    {products.map(p => <option key={p.id} value={p.id}>{p.name} (Current Cost: {formatRiel(p.cost_price)})</option>)}
-                  </select>
+                <div style={{ marginBottom: '20px', position: 'relative' }}>
+                  {activeDropdown === 'target' && (
+                    <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, zIndex: 99 }} onClick={() => setActiveDropdown(null)}></div>
+                  )}
+                  <div 
+                    onClick={() => { setActiveDropdown('target'); setDropdownSearch(''); setDropdownTab('wholesale'); }}
+                    style={{ width: '100%', padding: '14px', borderRadius: '8px', border: activeDropdown === 'target' ? '2px solid #3b82f6' : '1px solid #3b82f6', cursor: 'pointer', backgroundColor: '#fff', fontSize: '15px', color: targetProd ? '#1e293b' : '#3b82f6', fontWeight: 'bold', display: 'flex', justifyContent: 'space-between', position: 'relative', zIndex: activeDropdown === 'target' ? 100 : 1 }}
+                  >
+                    <span>{targetProd ? `${targetProd.name} (Cost: ${formatRiel(targetProd.cost_price)})` : '🔍 Tap to Select Target Product...'}</span>
+                    <span>▼</span>
+                  </div>
+                  
+                  {renderDropdownMenu('target')}
                 </div>
               )}
 
-              <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap', borderTop: '1px dashed #cbd5e1', paddingTop: '20px' }}>
-                <div style={{ flex: 1, minWidth: '120px' }}>
-                  <label style={{ display: 'block', fontSize: '11px', color: '#64748b', marginBottom: '4px', fontWeight: 'bold' }}>➕ ADD Output Stock</label>
-                  <CurrencyInput value={addStockQty} onChange={(v:any) => setAddStockQty(v)} style={{ width: '100%', padding: '12px', borderRadius: '8px', border: '1px solid #10b981', boxSizing: 'border-box' }} />
-                </div>
-                <div style={{ flex: 1, minWidth: '120px' }}>
-                  <label style={{ display: 'block', fontSize: '11px', color: '#64748b', marginBottom: '4px', fontWeight: 'bold', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>➖ DEDUCT: {rice1?.name}</label>
-                  <CurrencyInput value={deductRice1Qty} onChange={(v:any) => setDeductRice1Qty(v)} style={{ width: '100%', padding: '12px', borderRadius: '8px', border: '1px solid #ef4444', boxSizing: 'border-box' }} />
-                </div>
-                <div style={{ flex: 1, minWidth: '120px' }}>
-                  <label style={{ display: 'block', fontSize: '11px', color: '#64748b', marginBottom: '4px', fontWeight: 'bold', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>➖ DEDUCT: {rice2?.name}</label>
-                  <CurrencyInput value={deductRice2Qty} onChange={(v:any) => setDeductRice2Qty(v)} style={{ width: '100%', padding: '12px', borderRadius: '8px', border: '1px solid #ef4444', boxSizing: 'border-box' }} />
-                </div>
-                {showThirdRice && rice3 && (
-                  <div style={{ flex: 1, minWidth: '120px' }}>
-                    <label style={{ display: 'block', fontSize: '11px', color: '#64748b', marginBottom: '4px', fontWeight: 'bold', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>➖ DEDUCT: {rice3?.name}</label>
-                    <CurrencyInput value={deductRice3Qty} onChange={(v:any) => setDeductRice3Qty(v)} style={{ width: '100%', padding: '12px', borderRadius: '8px', border: '1px solid #ef4444', boxSizing: 'border-box' }} />
-                  </div>
-                )}
-              </div>
-
               <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '24px' }}>
                 <button onClick={handleExecuteInventorySync} disabled={isProcessing} style={{ padding: '14px 24px', background: '#10b981', color: '#fff', border: 'none', borderRadius: '8px', cursor: (isProcessing) ? 'not-allowed' : 'pointer', fontWeight: 'bold', fontSize: '15px', boxShadow: '0 4px 6px rgba(16, 185, 129, 0.2)' }}>
-                  {isProcessing ? 'Processing...' : '✅ Confirm & Sync Inventory'}
+                  {isProcessing ? 'Processing...' : `✅ Sync and Inject ${finalYield.toLocaleString('en-US', { maximumFractionDigits: 2 })} ${outputUnit}`}
                 </button>
               </div>
             </div>
@@ -557,17 +538,18 @@ export default function RiceMixCalculator() {
         </div>
         
         <div style={{ background: '#fff', borderRadius: '12px', border: '1px solid #e2e8f0', overflowX: 'auto', boxShadow: '0 2px 4px rgba(0,0,0,0.02)' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', minWidth: '500px' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', minWidth: '600px' }}>
             <thead>
               <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0' }}>
                 <th style={{ padding: '14px 16px', color: '#475569', fontSize: '12px', textTransform: 'uppercase', fontWeight: 'bold' }}>Time</th>
                 <th style={{ padding: '14px 16px', color: '#475569', fontSize: '12px', textTransform: 'uppercase', fontWeight: 'bold' }}>Recipe Formula</th>
+                <th style={{ padding: '14px 16px', color: '#475569', fontSize: '12px', textTransform: 'uppercase', fontWeight: 'bold' }}>Final Yield</th>
                 <th style={{ padding: '14px 16px', color: '#475569', fontSize: '12px', textTransform: 'uppercase', fontWeight: 'bold' }}>Mixed COGS</th>
               </tr>
             </thead>
             <tbody>
               {history.length === 0 ? (
-                <tr><td colSpan={3} style={{ padding: '30px', textAlign: 'center', color: '#94a3b8' }}>No calculations logged yet.</td></tr>
+                <tr><td colSpan={4} style={{ padding: '30px', textAlign: 'center', color: '#94a3b8' }}>No calculations logged yet.</td></tr>
               ) : (
                 history.map(h => (
                   <tr key={h.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
@@ -579,6 +561,7 @@ export default function RiceMixCalculator() {
                         <> + ({h.rice3Ratio} × <span style={{ fontWeight: 'bold', color: '#1e293b' }}>{h.rice3Name}</span>)</>
                       ) : null}
                     </td>
+                    <td style={{ padding: '14px 16px', color: '#10b981', fontWeight: 'bold', fontSize: '13px' }}>{h.yieldStr || '-'}</td>
                     <td style={{ padding: '14px 16px', color: '#b58a3d', fontWeight: 'bold', fontSize: '14px' }}>{formatRiel(h.mixedCogs)}</td>
                   </tr>
                 ))
@@ -616,7 +599,7 @@ export default function RiceMixCalculator() {
           margin-left: 60px; /* 🔥 Clears the burger menu icon for horizontal alignment */
           gap: 12px;
           min-height: 42px; 
-          width: 100%;
+          width: calc(100% - 60px); /* 👈 FIX: Subtracts the 60px margin so it fits perfectly */
           max-width: 1600px;
         }
         
@@ -691,43 +674,6 @@ export default function RiceMixCalculator() {
           margin-bottom: 6px;
           text-transform: uppercase;
         }
-        .input-group input {
-          width: 100%;
-          padding: 12px;
-          border-radius: 8px;
-          border: 1px solid #cbd5e1;
-          background: #fff;
-          font-size: 16px;
-          outline: none;
-          box-sizing: border-box;
-          color: #0f172a;
-        }
-        .input-group input:focus {
-          border-color: #3b82f6;
-        }
-        
-        .dropdown-menu {
-          position: absolute;
-          top: 100%;
-          left: 0;
-          right: 0;
-          background: #fff;
-          border: 1px solid #cbd5e1;
-          border-radius: 8px;
-          margin-top: 4px;
-          max-height: 250px;
-          overflow-y: auto;
-          z-index: 100;
-          box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1);
-        }
-        .dropdown-item {
-          padding: 12px 16px;
-          cursor: pointer;
-          border-bottom: 1px solid #f1f5f9;
-        }
-        .dropdown-item:hover {
-          background: #f8fafc;
-        }
         
         .price-display {
           margin-top: 16px;
@@ -794,6 +740,9 @@ export default function RiceMixCalculator() {
         .history-section {
           margin-top: 40px;
         }
+
+        .hide-scrollbar::-webkit-scrollbar { display: none; }
+        .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
 
         /* 🔥 MOBILE OVERRIDES */
         @media (max-width: 1023px) {
