@@ -85,7 +85,7 @@ function CurrencyInput({ value, onChange, placeholder, style, autoFocus, onEnter
 }
 
 // --- UNIFIED TRANSACTION TYPE ---
-type TabType = 'Wholesale Invoice Summary' | 'Walk-in Wholesale' | 'Non-Walk-in Wholesale' | 'Retails only' | 'Expense log';
+type TabType = 'Wholesale Invoice Summary' | 'Walk-in Wholesale' | 'Non-Walk-in Wholesale' | 'Retails only' | 'Biz Expense' | 'Personal Expense' | 'Staff Debt';
 
 interface UnifiedTransaction {
   [key: string]: any; 
@@ -204,12 +204,28 @@ export default function BizDatabase() {
       console.warn("Retail table not found or accessible yet. Defaulting to empty.", e)
     }
 
-    let expensesData: any[] = []
+    let bizExpensesData: any[] = []
     try {
       const { data, error } = await supabase.from('expenses').select('*')
-      if (data && !error) expensesData = data;
+      if (data && !error) bizExpensesData = data;
     } catch (e) {
       console.warn("Expenses table not found or accessible yet. Defaulting to empty.", e)
+    }
+
+    let personalExpensesData: any[] = []
+    try {
+      const { data, error } = await supabase.from('personal_expenses').select('*')
+      if (data && !error) personalExpensesData = data;
+    } catch (e) {
+      console.warn("Personal expenses table not found or accessible yet. Defaulting to empty.", e)
+    }
+
+    let staffDebtData: any[] = []
+    try {
+      const { data, error } = await supabase.from('staff_debt').select('*')
+      if (data && !error) staffDebtData = data;
+    } catch (e) {
+      console.warn("Staff debt table not found or accessible yet. Defaulting to empty.", e)
     }
 
     const unified: UnifiedTransaction[] = []
@@ -300,18 +316,58 @@ export default function BizDatabase() {
       })
     }
 
-    if (expensesData && expensesData.length > 0) {
-      expensesData.forEach(e => {
+    if (bizExpensesData && bizExpensesData.length > 0) {
+      bizExpensesData.forEach(e => {
         const amtRiel = Number(e.amount_riel || 0);
         const amtUsd = Number(e.amount_usd || 0);
         const totalRielValue = amtRiel !== 0 ? Math.abs(amtRiel) : Math.abs(amtUsd) * EXCHANGE_RATE;
 
         unified.push({
-          id: `exp_${e.id}`,
+          id: `biz_exp_${e.id}`,
           raw_db_id: e.id, 
-          source: 'Expense log',
+          source: 'Biz Expense',
           created_at: e.created_at,
-          description: e.remarks || e.description || `Expense #${e.id}`,
+          description: e.remarks || e.description || `Biz Expense #${e.id}`,
+          amount: totalRielValue,
+          category: e.description || e.category || 'Uncategorized',
+          status: e.payment_method || e.status || 'cleared',
+          owner: e.spender || e.owner || '-'
+        })
+      })
+    }
+
+    if (personalExpensesData && personalExpensesData.length > 0) {
+      personalExpensesData.forEach(e => {
+        const amtRiel = Number(e.amount_riel || 0);
+        const amtUsd = Number(e.amount_usd || 0);
+        const totalRielValue = amtRiel !== 0 ? Math.abs(amtRiel) : Math.abs(amtUsd) * EXCHANGE_RATE;
+
+        unified.push({
+          id: `pers_exp_${e.id}`,
+          raw_db_id: e.id, 
+          source: 'Personal Expense',
+          created_at: e.created_at,
+          description: e.remarks || e.description || `Personal Expense #${e.id}`,
+          amount: totalRielValue,
+          category: e.description || e.category || 'Uncategorized',
+          status: e.payment_method || e.status || 'cleared',
+          owner: e.spender || e.owner || '-'
+        })
+      })
+    }
+
+    if (staffDebtData && staffDebtData.length > 0) {
+      staffDebtData.forEach(e => {
+        const amtRiel = Number(e.amount_riel || 0);
+        const amtUsd = Number(e.amount_usd || 0);
+        const totalRielValue = amtRiel !== 0 ? Math.abs(amtRiel) : Math.abs(amtUsd) * EXCHANGE_RATE;
+
+        unified.push({
+          id: `staff_debt_${e.id}`,
+          raw_db_id: e.id, 
+          source: 'Staff Debt',
+          created_at: e.created_at,
+          description: e.remarks || e.description || `Staff Debt #${e.id}`,
           amount: totalRielValue,
           category: e.description || e.category || 'Uncategorized',
           status: e.payment_method || e.status || 'cleared',
@@ -335,7 +391,9 @@ export default function BizDatabase() {
     const sumIds: any[] = [];
     const dailyIds: any[] = [];
     const retIds: any[] = [];
-    const expIds: any[] = [];
+    const bizExpIds: any[] = [];
+    const persExpIds: any[] = [];
+    const staffDebtIds: any[] = [];
 
     const itemsToRestore: UnifiedTransaction[] = [];
     const invoiceIdsToCascade = new Set<string>(); // If deleting summary, delete children
@@ -360,8 +418,14 @@ export default function BizDatabase() {
           retIds.push(t.raw_db_id);
           itemsToRestore.push(t);
         }
-        else if (t.source === 'Expense log') {
-          expIds.push(t.raw_db_id);
+        else if (t.source === 'Biz Expense') {
+          bizExpIds.push(t.raw_db_id);
+        }
+        else if (t.source === 'Personal Expense') {
+          persExpIds.push(t.raw_db_id);
+        }
+        else if (t.source === 'Staff Debt') {
+          staffDebtIds.push(t.raw_db_id);
         }
       }
     });
@@ -414,10 +478,12 @@ export default function BizDatabase() {
         await supabase.from('invoice_payments').delete().in('invoice_id', Array.from(allInvoicesToDelete));
       }
 
-      // B. Delete children sales
+      // B. Delete children sales & expenses
       if (dailyIds.length > 0) await supabase.from('sales').delete().in('id', dailyIds);
       if (retIds.length > 0) await supabase.from('retail_sales').delete().in('id', retIds);
-      if (expIds.length > 0) await supabase.from('expenses').delete().in('id', expIds);
+      if (bizExpIds.length > 0) await supabase.from('expenses').delete().in('id', bizExpIds);
+      if (persExpIds.length > 0) await supabase.from('personal_expenses').delete().in('id', persExpIds);
+      if (staffDebtIds.length > 0) await supabase.from('staff_debt').delete().in('id', staffDebtIds);
       
       // C. Delete parent summaries safely
       if (sumIds.length > 0) await supabase.from('invoice_summaries').delete().in('id', sumIds);
@@ -501,8 +567,8 @@ export default function BizDatabase() {
       dbPayload.total_cogs = newQty * newCogs;
       dbPayload.total_profit = (newPrice - newCogs) * newQty;
     }
-    else if (baseTx.source === 'Expense log') {
-      targetTable = 'expenses';
+    else if (baseTx.source === 'Biz Expense' || baseTx.source === 'Personal Expense' || baseTx.source === 'Staff Debt') {
+      targetTable = baseTx.source === 'Biz Expense' ? 'expenses' : baseTx.source === 'Personal Expense' ? 'personal_expenses' : 'staff_debt';
       if (payload.description !== undefined) dbPayload.remarks = payload.description; 
       if (payload.category !== undefined) dbPayload.description = payload.category; 
       if (payload.owner !== undefined) dbPayload.spender = payload.owner; 
@@ -629,7 +695,7 @@ export default function BizDatabase() {
     document.addEventListener('mouseup', handleUp)
     document.addEventListener('touchmove', handleMove, { passive: false })
     document.addEventListener('touchmove', handleMove, { passive: false })
-    document.addEventListener('touchend', handleUp)
+    document.addEventListener('touchmove', handleUp)
   }
 
   // --- DATA PROCESSING & CALCULATIONS ---
@@ -728,8 +794,14 @@ export default function BizDatabase() {
           <button className={activeTab === 'Retails only' ? 'tab active' : 'tab'} onClick={() => {setActiveTab('Retails only'); setSortConfig(null); setEditingCell(null); setSelectedToDelete(new Set());}}>
             🛍️ Retails only
           </button>
-          <button className={activeTab === 'Expense log' ? 'tab active' : 'tab'} onClick={() => {setActiveTab('Expense log'); setSortConfig(null); setEditingCell(null); setSelectedToDelete(new Set());}}>
-            📉 Expense log
+          <button className={activeTab === 'Biz Expense' ? 'tab active' : 'tab'} onClick={() => {setActiveTab('Biz Expense'); setSortConfig(null); setEditingCell(null); setSelectedToDelete(new Set());}}>
+            📉 Biz Expense
+          </button>
+          <button className={activeTab === 'Personal Expense' ? 'tab active' : 'tab'} onClick={() => {setActiveTab('Personal Expense'); setSortConfig(null); setEditingCell(null); setSelectedToDelete(new Set());}}>
+            🍕 Personal Expense
+          </button>
+          <button className={activeTab === 'Staff Debt' ? 'tab active' : 'tab'} onClick={() => {setActiveTab('Staff Debt'); setSortConfig(null); setEditingCell(null); setSelectedToDelete(new Set());}}>
+            💸 Staff Debt
           </button>
         </div>
 
