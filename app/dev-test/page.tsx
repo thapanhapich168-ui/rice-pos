@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { supabase } from '@/lib/supabaseClient'
+import EmptyState from '@/components/EmptyState'
 
 type TestResult = { name: string; status: 'PENDING' | 'RUNNING' | 'PASS' | 'FAIL'; log: { type: 'info' | 'assert' | 'ui', msg: string }[] };
 
@@ -242,7 +243,6 @@ export default function MasterTestEngine() {
       testName = 'Test D & E: Pulls, Imports & Accounts Payable';
       logInfo(testName, 'Testing RPC pulling and 10M import...');
       try {
-        // 🔥 FIX 2: Dynamically check the stock BEFORE pulling, because Module 3 added 35kg!
         const { data: preCr } = await supabase.from('products').select('stock').eq('id', rProd.id).single();
         const preStock = preCr?.stock || 0;
 

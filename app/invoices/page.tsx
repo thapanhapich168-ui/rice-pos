@@ -5,6 +5,9 @@ import { supabase } from '@/lib/supabaseClient'
 import { useFocusRefresh } from '@/lib/useFocusRefresh'
 import { useToast } from '@/components/ToastProvider'
 import { formatRiel } from '@/utils/formatters'
+import { useDebounce } from '@/lib/useDebounce'
+import TableSkeleton from '@/components/TableSkeleton'
+import EmptyState from '@/components/EmptyState'
 
 // --- TYPESCRIPT INTERFACES ---
 interface Invoice {
@@ -32,8 +35,10 @@ export default function InvoiceGallery() {
   const [selectedInvoices, setSelectedInvoices] = useState<Set<string>>(new Set())
   const [filterTab, setFilterTab] = useState<FilterTab>('All')
   const [statusFilter, setStatusFilter] = useState<StatusTab>('Active')
-  const [searchQuery, setSearchQuery] = useState<string>('')
   
+  const [searchQuery, setSearchQuery] = useState<string>('')
+  const debouncedSearch = useDebounce(searchQuery, 300) // 🚀 Lightning fast mobile search
+
   const [viewMode, setViewMode] = useState<'grid' | 'table'>('grid')
 
   useEffect(() => {
@@ -152,7 +157,7 @@ export default function InvoiceGallery() {
       // 4. Delete Payments (Removes from Cash on Hand)
       await supabase.from('invoice_payments').delete().eq('invoice_id', invoiceId);
 
-      // 5. 🔥 FIX: Update Master Invoice to Voided Status AND is_done: true (Hides from Delivery Page)
+      // 5. Update Master Invoice to Voided Status AND is_done: true
       await supabase.from('invoice_summaries').update({ 
         delivery_status: 'Voided',
         balance_due: 0,
@@ -291,14 +296,15 @@ export default function InvoiceGallery() {
       if (statusFilter === 'Active' && isVoided) return false;
       if (statusFilter === 'Voided' && !isVoided) return false;
 
-      if (!searchQuery) return true;
-      const term = searchQuery.toLowerCase().trim();
+      // 🚀 Debounced fast search
+      if (!debouncedSearch) return true;
+      const term = debouncedSearch.toLowerCase().trim();
       return (
         inv.invoice_id?.toLowerCase().includes(term) ||
         inv.customer_name?.toLowerCase().includes(term)
       );
     })
-    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()); // Always newest first naturally
+    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 
   const formatDate = (dateStr: string) => {
     return new Date(dateStr).toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
@@ -312,76 +318,76 @@ export default function InvoiceGallery() {
       {/* HEADER */}
       <div className="header-container">
         <div className="header-left">
-          <h1 className="page-title">🖼️ Invoice Image Gallery</h1>
+          <h1 className="saas-page-title">🖼️ Invoice Image Gallery</h1>
         </div>
       </div>
 
       {/* NEW: STATUS FILTER TABS */}
-      <div className="status-tabs-container">
+      <div className="saas-tab-container hide-scrollbar" style={{ width: 'fit-content', border: 'none', padding: 0, boxShadow: 'none', background: 'transparent', marginBottom: '16px' }}>
         <button 
           onClick={() => { setStatusFilter('Active'); setSelectedInvoices(new Set()); }} 
-          className={`status-tab ${statusFilter === 'Active' ? 'active' : ''}`}
+          className={`saas-tab ${statusFilter === 'Active' ? 'active' : ''}`}
+          style={statusFilter === 'Active' ? { background: '#10b981', color: '#fff' } : { border: '1px solid #cbd5e1', background: '#fff' }}
         >
           ✅ Valid Invoices
         </button>
         <button 
           onClick={() => { setStatusFilter('Voided'); setSelectedInvoices(new Set()); }} 
-          className={`status-tab void-tab ${statusFilter === 'Voided' ? 'active' : ''}`}
+          className={`saas-tab ${statusFilter === 'Voided' ? 'active' : ''}`}
+          style={statusFilter === 'Voided' ? { background: '#ef4444', color: '#fff' } : { border: '1px solid #cbd5e1', background: '#fff' }}
         >
           ❌ Voided Invoices
         </button>
       </div>
 
       {/* FILTER TABS & SEARCH CONTAINER */}
-      <div className="toolbar-container">
-        
-        {/* Time Filter Tabs */}
-        <div className="tab-group">
-          {(['All', 'Today', 'This Week', 'This Month'] as FilterTab[]).map(tab => (
-            <button
-              key={tab}
-              onClick={() => setFilterTab(tab)}
-              className={`tab-btn ${filterTab === tab ? 'active' : ''}`}
-            >
-              {tab}
-            </button>
-          ))}
-        </div>
+      <div className="saas-card" style={{ marginBottom: '24px', padding: '16px 20px' }}>
+        <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between' }}>
+          
+          <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', flex: 1 }}>
+            <input 
+              type="text"
+              placeholder="🔍 Search ID or Customer..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
+              className="saas-input"
+              style={{ minWidth: '200px', flex: 1 }}
+            />
+            
+            <div className="saas-tab-container hide-scrollbar" style={{ margin: 0, padding: '4px', background: '#f1f5f9', border: 'none', boxShadow: 'none' }}>
+              {(['All', 'Today', 'This Week', 'This Month'] as FilterTab[]).map(tab => (
+                <button
+                  key={tab}
+                  onClick={() => setFilterTab(tab)}
+                  className={`saas-tab ${filterTab === tab ? 'active' : ''}`}
+                  style={filterTab === tab ? { background: '#0f172a', color: '#fff', padding: '8px 16px' } : { padding: '8px 16px' }}
+                >
+                  {tab}
+                </button>
+              ))}
+            </div>
+          </div>
 
-        {/* Live Text Search Field */}
-        <div className="search-box-wrapper">
-          <input 
-            type="text"
-            placeholder="🔍 Search ID or Customer..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') {
-                e.currentTarget.blur(); 
-              }
-            }}
-            className="search-input"
-          />
-        </div>
-
-        {/* Layout Toggle Buttons */}
-        <div className="view-toggle-container">
-          <button onClick={() => setViewMode('grid')} className={`toggle-btn ${viewMode === 'grid' ? 'active' : ''}`}>Grid</button>
-          <button onClick={() => setViewMode('table')} className={`toggle-btn ${viewMode === 'table' ? 'active' : ''}`}>Table</button>
+          <div className="saas-tab-container hide-scrollbar" style={{ margin: 0, padding: '4px', background: '#e2e8f0', border: 'none', boxShadow: 'none' }}>
+            <button onClick={() => setViewMode('grid')} className={`saas-tab ${viewMode === 'grid' ? 'active' : ''}`} style={viewMode === 'grid' ? { background: '#10b981', color: '#fff', padding: '8px 16px' } : { padding: '8px 16px' }}>Grid</button>
+            <button onClick={() => setViewMode('table')} className={`saas-tab ${viewMode === 'table' ? 'active' : ''}`} style={viewMode === 'table' ? { background: '#10b981', color: '#fff', padding: '8px 16px' } : { padding: '8px 16px' }}>Table</button>
+          </div>
+          
         </div>
 
         {/* Global Action Modifiers */}
-        <div className="actions-wrapper">
-          <button onClick={toggleSelectAll} disabled={processedInvoices.length === 0} className="secondary-action-btn">
+        <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', marginTop: '16px', borderTop: '1px solid #f1f5f9', paddingTop: '16px' }}>
+          <button onClick={toggleSelectAll} disabled={processedInvoices.length === 0} className="saas-btn saas-btn-secondary">
             {selectedInvoices.size === processedInvoices.length && processedInvoices.length > 0 ? 'Deselect All' : 'Select All'}
           </button>
 
           {selectedInvoices.size > 0 && (
             <>
-              <button onClick={deleteSelected} className="danger-action-btn">
+              <button onClick={deleteSelected} className="saas-btn saas-btn-danger">
                 Clear ({selectedInvoices.size})
               </button>
-              <button onClick={handleBulkAction} className="primary-action-btn">
+              <button onClick={handleBulkAction} className="saas-btn saas-btn-primary">
                 {isDeviceMobile ? `Share (${selectedInvoices.size})` : `Download (${selectedInvoices.size})`}
               </button>
             </>
@@ -391,11 +397,17 @@ export default function InvoiceGallery() {
 
       {/* CONTENT AREA */}
       {isLoading ? (
-        <p className="status-message">Loading records...</p>
+        viewMode === 'table' ? (
+          <TableSkeleton columns={6} rows={6} />
+        ) : (
+          <div style={{ textAlign: 'center', padding: '40px', color: '#94a3b8' }}>Loading records...</div>
+        )
       ) : processedInvoices.length === 0 ? (
-        <div className="empty-message-box">
-          No records found matching the chosen filters.
-        </div>
+        <EmptyState 
+          icon="🖼️" 
+          title="No invoices found" 
+          message="Adjust your filters or date ranges to see more results." 
+        />
       ) : viewMode === 'grid' ? (
         
         /* --- GRID VIEW --- */
@@ -405,12 +417,12 @@ export default function InvoiceGallery() {
             const isVoided = inv.delivery_status === 'Voided';
 
             return (
-              <div key={inv.id} className={`grid-card ${isSelected ? 'selected' : ''} ${isVoided ? 'voided-card' : ''}`}>
+              <div key={inv.id} className={`saas-card ${isSelected ? 'selected-grid-card' : ''} ${isVoided ? 'voided-grid-card' : ''}`} style={{ padding: 0, overflow: 'hidden', position: 'relative' }}>
                 
                 <input type="checkbox" checked={isSelected} onChange={() => toggleSelect(inv.invoice_id)} className="card-checkbox" />
 
                 <div onClick={() => toggleSelect(inv.invoice_id)} className="card-image-box">
-                  <img src={inv.invoice_url} alt="Invoice Document File" className={`card-img ${isSelected ? 'img-selected' : ''}`} />
+                  <img src={inv.invoice_url} alt="Invoice Document" className={`card-img ${isSelected ? 'img-selected' : ''}`} />
                   {isVoided && (
                     <div className="void-overlay">
                       <span className="void-stamp">VOID</span>
@@ -418,19 +430,19 @@ export default function InvoiceGallery() {
                   )}
                 </div>
 
-                <div className="card-body">
-                  <div className={`card-id-title ${isVoided ? 'voided-text' : ''}`}>{inv.invoice_id}</div>
-                  <div className="card-customer-row">Customer: {inv.customer_name}</div>
-                  <div className="card-amount-row">💰 {formatRiel(inv.total_sales)}</div>
+                <div style={{ padding: '16px', borderBottom: '1px solid #e2e8f0' }}>
+                  <div className={`saas-card-title ${isVoided ? 'voided-text' : ''}`} style={{ fontSize: '15px', color: '#0f172a', margin: 0 }}>{inv.invoice_id}</div>
+                  <div style={{ fontSize: '14px', color: '#475569', marginTop: '6px', fontWeight: 'bold' }}>Customer: {inv.customer_name}</div>
+                  <div style={{ fontSize: '16px', color: '#b58a3d', marginTop: '6px', fontWeight: 'bold' }}>💰 {formatRiel(inv.total_sales)}</div>
                 </div>
 
-                <div className="card-footer">
-                  <div className="card-date-label">{formatDate(inv.created_at)}</div>
+                <div style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px', background: '#f8fafc', marginTop: 'auto' }}>
+                  <div style={{ fontSize: '13px', color: '#64748b', textAlign: 'center', fontWeight: 'bold' }}>{formatDate(inv.created_at)}</div>
                   
-                  <div className="card-action-buttons">
-                    {!isVoided && <button onClick={() => window.location.href = `/pos?edit=${inv.invoice_id}`} className="card-edit-btn">Edit</button>}
-                    {!isVoided && <button onClick={() => handleVoidInvoice(inv.invoice_id)} className="card-void-btn">Void</button>}
-                    <button onClick={() => handleAction(inv.invoice_url, inv.invoice_id)} className="card-download-btn">
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    {!isVoided && <button onClick={() => window.location.href = `/pos?edit=${inv.invoice_id}`} className="saas-btn" style={{ flex: 1, padding: '8px 4px', background: '#fef3c7', color: '#b45309', border: '1px solid #fde047' }}>Edit</button>}
+                    {!isVoided && <button onClick={() => handleVoidInvoice(inv.invoice_id)} className="saas-btn" style={{ flex: 1, padding: '8px 4px', background: '#fee2e2', color: '#dc2626', border: '1px solid #fca5a5' }}>Void</button>}
+                    <button onClick={() => handleAction(inv.invoice_url, inv.invoice_id)} className="saas-btn saas-btn-secondary" style={{ flex: 1, padding: '8px 4px' }}>
                       {isDeviceMobile ? 'Share' : 'Download'}
                     </button>
                   </div>
@@ -443,297 +455,101 @@ export default function InvoiceGallery() {
       ) : (
 
         /* --- TABLE VIEW --- */
-        <div className="table-responsive-wrapper">
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th className="gallery-th-check">
-                  <input type="checkbox" checked={selectedInvoices.size === processedInvoices.length && processedInvoices.length > 0} onChange={toggleSelectAll} className="gallery-checkbox" />
-                </th>
-                <th className="gallery-th">Invoice ID</th>
-                <th className="gallery-th">Customer</th>
-                <th className="gallery-th">Total Amount</th>
-                <th className="gallery-th">Date</th>
-                <th className="gallery-th-center">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {processedInvoices.map((inv) => {
-                const isSelected = selectedInvoices.has(inv.invoice_id);
-                const isVoided = inv.delivery_status === 'Voided';
+        <div className="saas-table-wrapper">
+          <div className="saas-table-responsive">
+            <table className="saas-table">
+              <thead>
+                <tr>
+                  <th className="saas-th" style={{ width: '50px', textAlign: 'center' }}>
+                    <input type="checkbox" checked={selectedInvoices.size === processedInvoices.length && processedInvoices.length > 0} onChange={toggleSelectAll} style={{ cursor: 'pointer', width: '16px', height: '16px' }} />
+                  </th>
+                  <th className="saas-th">Invoice ID</th>
+                  <th className="saas-th">Customer</th>
+                  <th className="saas-th" style={{ textAlign: 'right' }}>Total Amount</th>
+                  <th className="saas-th">Date</th>
+                  <th className="saas-th" style={{ textAlign: 'center' }}>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {processedInvoices.map((inv) => {
+                  const isSelected = selectedInvoices.has(inv.invoice_id);
+                  const isVoided = inv.delivery_status === 'Voided';
 
-                return (
-                  <tr key={inv.id} className={`${isSelected ? 'row-selected' : ''} ${isVoided ? 'row-voided' : ''}`}>
-                    <td className="gallery-td-check">
-                      <input type="checkbox" checked={isSelected} onChange={() => toggleSelect(inv.invoice_id)} className="gallery-checkbox" />
-                    </td>
-                    <td className={`gallery-td-bold ${isVoided ? 'voided-text' : ''}`}>{inv.invoice_id}</td>
-                    <td className="gallery-td-bold text-slate">{inv.customer_name}</td>
-                    <td className="gallery-td-bold text-gold">{formatRiel(inv.total_sales)}</td>
-                    <td className="gallery-td text-slate-light">{formatDate(inv.created_at)}</td>
-                    <td className="gallery-td">
-                      <div className="gallery-action-group">
-                        {!isVoided && <button onClick={() => window.location.href = `/pos?edit=${inv.invoice_id}`} className="table-edit-btn">Edit</button>}
-                        {!isVoided && <button onClick={() => handleVoidInvoice(inv.invoice_id)} className="table-void-btn">Void</button>}
-                        <button onClick={() => handleAction(inv.invoice_url, inv.invoice_id)} className="table-download-btn">
-                          {isDeviceMobile ? 'Share' : 'Download'}
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
+                  return (
+                    <tr key={inv.id} className={`saas-tr ${isSelected ? 'selected' : ''} ${isVoided ? 'row-voided' : ''}`}>
+                      <td className="saas-td" style={{ textAlign: 'center' }}>
+                        <input type="checkbox" checked={isSelected} onChange={() => toggleSelect(inv.invoice_id)} style={{ cursor: 'pointer', width: '16px', height: '16px' }} />
+                      </td>
+                      <td className={`saas-td ${isVoided ? 'voided-text' : ''}`} style={{ fontWeight: 'bold' }}>{inv.invoice_id}</td>
+                      <td className="saas-td" style={{ fontWeight: 'bold' }}>{inv.customer_name}</td>
+                      <td className="saas-td" style={{ textAlign: 'right', fontWeight: 'bold', color: '#b58a3d' }}>{formatRiel(inv.total_sales)}</td>
+                      <td className="saas-td" style={{ color: '#475569' }}>{formatDate(inv.created_at)}</td>
+                      <td className="saas-td" style={{ textAlign: 'center' }}>
+                        <div style={{ display: 'flex', gap: '8px', justifyContent: 'center' }}>
+                          {!isVoided && <button onClick={() => window.location.href = `/pos?edit=${inv.invoice_id}`} className="saas-btn" style={{ padding: '6px 12px', background: '#fef3c7', color: '#b45309', border: 'none', fontSize: '12px' }}>Edit</button>}
+                          {!isVoided && <button onClick={() => handleVoidInvoice(inv.invoice_id)} className="saas-btn" style={{ padding: '6px 12px', background: '#fee2e2', color: '#dc2626', border: 'none', fontSize: '12px' }}>Void</button>}
+                          <button onClick={() => handleAction(inv.invoice_url, inv.invoice_id)} className="saas-btn saas-btn-secondary" style={{ padding: '6px 12px', fontSize: '12px' }}>
+                            {isDeviceMobile ? 'Share' : 'Download'}
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 
-      {/* --- REINFORCED STYLING FOR RESPONSIVENESS --- */}
+      {/* --- PAGE SPECIFIC CSS --- */}
       <style jsx global>{`
-        /* DE-INLINED CSS CLASSES */
+        .hide-scrollbar::-webkit-scrollbar { display: none; }
+        .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
         .img-selected { opacity: 0.7; }
         .voided-text { text-decoration: line-through; }
-        
-        .gallery-th { padding: 16px; color: #0f172a; text-align: left; }
-        .gallery-th-center { padding: 16px; color: #0f172a; text-align: center; }
-        .gallery-th-check { width: 50px; text-align: center; padding: 16px; }
-        
-        .gallery-td { padding: 16px; }
-        .gallery-td-bold { padding: 16px; font-weight: bold; }
-        .gallery-td-check { text-align: center; padding: 16px; }
-        
-        .text-slate { color: #334155; }
-        .text-slate-light { color: #475569; }
-        .text-gold { color: #b58a3d; }
-        
-        .gallery-checkbox { width: 18px; height: 18px; accent-color: #b58a3d; cursor: pointer; }
-        .gallery-action-group { display: flex; gap: 8px; justify-content: center; }
+        .row-voided { background: #fef2f2 !important; opacity: 0.8; }
+        .row-voided td { color: #991b1b !important; }
 
-        /* 🔥 DESKTOP LAYOUT */
-        .main-wrapper { 
-          padding: max(20px, env(safe-area-inset-top, 20px)) 24px 24px 24px; 
-          background: #f8fafc; 
-          font-family: Arial, sans-serif; 
-          box-sizing: border-box; 
-          color: #0f172a;
-          width: 100%;
-          
-          /* 👇 DESKTOP SCROLL FIX 👇 */
-          height: 100dvh;
-          overflow-y: auto;
-          -webkit-overflow-scrolling: touch;
+        .selected-grid-card {
+          border: 2px solid #b58a3d !important;
+          background: #fefcf3 !important;
+          box-shadow: 0 4px 12px rgba(181, 138, 61, 0.15) !important;
         }
-        .header-container { 
-          display: flex;
-          justify-content: flex-start;
-          align-items: center; 
-          margin-bottom: 24px; 
-          margin-top: 0;
-          margin-left: 60px; 
-          gap: 12px;
-          min-height: 42px; 
-          width: 100%;
-          max-width: 1600px;
-        }
-        .header-left {
-          display: flex;
-          align-items: center;
-          gap: 12px;
-        }
-        .page-title { 
-          font-size: 24px !important; 
-          color: #4a3b1b !important; 
-          margin: 0 !important; 
-          font-weight: bold;
-          letter-spacing: -0.5px;
-          line-height: normal !important; 
-          display: flex;
-          align-items: center;
-          min-width: 0;
-          white-space: nowrap !important; 
+        .voided-grid-card {
+          border-color: #fca5a5 !important;
+          background: #fef2f2 !important;
         }
 
-        /* NEW STATUS TABS */
-        .status-tabs-container {
-          display: flex;
-          gap: 10px;
-          margin-bottom: 20px;
-        }
-        .status-tab {
-          padding: 10px 20px;
-          border-radius: 8px;
-          border: 1px solid #cbd5e1;
-          background: #ffffff;
-          color: #475569;
-          font-weight: bold;
-          font-size: 14px;
-          cursor: pointer;
-          transition: all 0.2s;
-          box-shadow: 0 2px 4px rgba(0,0,0,0.02);
-        }
-        .status-tab.active {
-          background: #10b981;
-          color: #ffffff;
-          border-color: #10b981;
-        }
-        .status-tab.void-tab.active {
-          background: #ef4444;
-          border-color: #ef4444;
-        }
-
-        /* TOOLBAR CONFIGURATION */
-        .toolbar-container {
-          background: #ffffff; 
-          padding: 16px 20px; 
-          border-radius: 12px; 
-          border: 1px solid #cbd5e1; 
-          margin-bottom: 20px; 
-          display: flex; 
-          gap: 16px; 
-          align-items: center; 
-          flex-wrap: wrap; 
-          box-shadow: 0 4px 6px rgba(0,0,0,0.02);
-        }
-
-        /* FILTER TABS */
-        .tab-group {
-          display: flex;
-          background: #f1f5f9;
-          padding: 4px;
-          border-radius: 8px;
-          gap: 2px;
-        }
-        .tab-btn {
-          padding: 8px 16px;
-          border-radius: 6px;
-          border: none;
-          font-weight: bold;
-          cursor: pointer;
-          font-size: 14px;
-          background: transparent;
-          color: #475569;
-          transition: all 0.2s;
-        }
-        .tab-btn.active {
-          background: #b58a3d;
-          color: #ffffff;
-        }
-
-        /* LIVE SEARCH FIELD */
-        .search-box-wrapper {
-          flex: 1;
-          min-width: 200px;
-        }
-        .search-input {
-          width: 100%;
-          padding: 10px 14px;
-          border: 1px solid #cbd5e1;
-          border-radius: 6px;
-          font-size: 16px; 
-          outline: none;
-          color: #0f172a;
-          background-color: #ffffff;
-          box-sizing: border-box;
-        }
-        .search-input:focus {
-          border-color: #b58a3d;
-          box-shadow: 0 0 0 2px rgba(181, 138, 61, 0.2);
-        }
-
-        /* VIEW TOGGLE LAYOUT BUTTONS */
-        .view-toggle-container {
-          display: flex;
-          background: #e2e8f0;
-          padding: 4px;
-          border-radius: 8px;
-          gap: 2px;
-        }
-        .toggle-btn {
-          padding: 8px 14px;
-          border-radius: 6px;
-          border: none;
-          font-weight: bold;
-          cursor: pointer;
-          font-size: 13px;
-          background: transparent;
-          color: #475569;
-        }
-        .toggle-btn.active {
-          background: #10b981;
-          color: #ffffff;
-        }
-
-        /* GLOBAL BUTTONS WITH HIGH-CONTRAST LABELS */
-        .actions-wrapper {
-          display: flex;
-          gap: 10px;
-          flex-wrap: wrap;
-        }
-        .secondary-action-btn {
-          padding: 10px 16px;
-          background: #ffffff;
-          color: #0f172a;
-          border: 1px solid #94a3b8;
-          border-radius: 6px;
-          cursor: pointer;
-          font-weight: bold;
-          font-size: 14px;
-        }
-        .secondary-action-btn:disabled {
-          background: #f1f5f9;
-          color: #94a3b8;
-          border-color: #cbd5e1;
-          cursor: not-allowed;
-        }
-        .primary-action-btn {
-          padding: 10px 16px;
-          background: #3b82f6;
-          color: #ffffff;
-          border: none;
-          border-radius: 6px;
-          cursor: pointer;
-          font-weight: bold;
-          font-size: 14px;
-        }
-        .danger-action-btn {
-          padding: 10px 16px;
-          background: #ef4444;
-          color: #ffffff;
-          border: none;
-          border-radius: 6px;
-          cursor: pointer;
-          font-weight: bold;
-          font-size: 14px;
-        }
-
-        /* GRID VIEW ELEMENTS */
         .grid-layout {
           display: grid;
-          /* 🔥 FIX: Wider 340px minimum width so buttons fit perfectly */
           grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
           gap: 20px;
         }
-        .grid-card {
-          background: #ffffff;
-          border-radius: 12px;
-          border: 1px solid #cbd5e1;
+        .card-checkbox {
+          position: absolute;
+          top: 12px;
+          left: 12px;
+          z-index: 10;
+          cursor: pointer;
+          accent-color: #b58a3d;
+          width: 22px;
+          height: 22px;
+        }
+        .card-image-box {
+          width: 100%;
+          height: 220px;
           overflow: hidden;
-          box-shadow: 0 2px 4px rgba(0,0,0,0.02);
-          display: flex;
-          flex-direction: column;
+          background: #f8fafc;
+          border-bottom: 1px solid #e2e8f0;
+          cursor: pointer;
           position: relative;
-          transition: transform 0.2s, box-shadow 0.2s;
         }
-        .grid-card.selected {
-          border: 2px solid #b58a3d;
-          background: #fefcf3;
-          box-shadow: 0 4px 12px rgba(181, 138, 61, 0.15);
-        }
-        
-        /* VOIDED CARD STYLES */
-        .voided-card {
-          border-color: #fca5a5 !important;
-          background: #fef2f2 !important;
+        .card-img {
+          width: 100%;
+          height: 100%;
+          object-fit: contain;
         }
         .void-overlay {
           position: absolute;
@@ -758,198 +574,25 @@ export default function InvoiceGallery() {
           box-shadow: 0 4px 10px rgba(0,0,0,0.1);
         }
 
-        .card-checkbox {
-          position: absolute;
-          top: 12px;
-          left: 12px;
-          z-index: 10;
-          cursor: pointer;
-          accentColor: #b58a3d;
-          width: 22px;
-          height: 22px;
-        }
-        .card-image-box {
-          width: 100%;
-          height: 220px;
-          overflow: hidden;
-          background: #f8fafc;
-          border-bottom: 1px solid #e2e8f0;
-          cursor: pointer;
-          position: relative;
-        }
-        .card-img {
-          width: 100%;
-          height: 100%;
-          object-fit: contain;
-        }
-        .card-body {
-          padding: 16px;
-          border-bottom: 1px solid #e2e8f0;
-        }
-        .card-id-title {
-          font-weight: bold;
-          color: #0f172a;
-          font-size: 15px;
-        }
-        .card-customer-row {
-          font-size: 14px;
-          color: #475569;
-          margin-top: 6px;
-          font-weight: bold;
-        }
-        .card-amount-row {
-          font-size: 16px;
-          color: #b58a3d;
-          margin-top: 6px;
-          font-weight: bold;
-        }
-
-        /* 🔥 FIX: Vertically stacked footer for perfect button alignment */
-        .card-footer {
-          padding: 16px;
+        .header-container { 
           display: flex;
-          flex-direction: column;
-          align-items: stretch;
+          justify-content: flex-start;
+          align-items: center; 
+          margin-bottom: 24px; 
+          margin-top: 0;
+          margin-left: 60px; 
           gap: 12px;
-          background: #f8fafc;
-          margin-top: auto;
-        }
-        .card-date-label {
-          font-size: 13px;
-          color: #64748b;
-          text-align: center;
-          font-weight: 500;
-        }
-        .card-action-buttons {
-          display: flex;
-          gap: 8px;
-        }
-        .card-edit-btn {
-          flex: 1;
-          padding: 8px 4px;
-          text-align: center;
-          background: #fef3c7;
-          color: #b45309;
-          border: 1px solid #fde047;
-          border-radius: 6px;
-          font-size: 13px;
-          font-weight: bold;
-          cursor: pointer;
-        }
-        .card-void-btn {
-          flex: 1;
-          padding: 8px 4px;
-          text-align: center;
-          background: #fee2e2;
-          color: #dc2626;
-          border: 1px solid #fca5a5;
-          border-radius: 6px;
-          font-size: 13px;
-          font-weight: bold;
-          cursor: pointer;
-        }
-        .card-download-btn {
-          flex: 1;
-          padding: 8px 4px;
-          text-align: center;
-          background: #ffffff;
-          color: #334155;
-          border: 1px solid #cbd5e1;
-          border-radius: 6px;
-          font-size: 13px;
-          font-weight: bold;
-          cursor: pointer;
-        }
-
-        /* TABLE VIEW ELEMENTS */
-        .table-responsive-wrapper {
-          background: #ffffff;
-          border-radius: 12px;
-          border: 1px solid #cbd5e1;
-          overflow-x: auto;
-          box-shadow: 0 4px 6px rgba(0,0,0,0.02);
-        }
-        .data-table {
+          min-height: 42px; 
           width: 100%;
-          border-collapse: collapse;
-          textAlign: left;
-          font-size: 14px;
+          max-width: 1600px;
         }
-        .data-table th {
-          background: #f8fafc;
-          border-bottom: 2px solid #cbd5e1;
-          font-weight: bold;
-        }
-        .data-table tr {
-          border-bottom: 1px solid #e2e8f0;
-          transition: background 0.2s;
-        }
-        .data-table tr.row-selected {
-          background: #fefcf3;
-        }
-        .row-voided {
-          background: #fef2f2 !important;
-          opacity: 0.8;
-        }
-        .row-voided td {
-          color: #991b1b !important;
-        }
-        .table-edit-btn {
-          padding: 8px 14px;
-          background: #fef3c7;
-          color: #b45309;
-          border: none;
-          border-radius: 6px;
-          font-size: 13px;
-          font-weight: bold;
-          cursor: pointer;
-        }
-        .table-void-btn {
-          padding: 8px 14px;
-          background: #fee2e2;
-          color: #dc2626;
-          border: none;
-          border-radius: 6px;
-          font-size: 13px;
-          font-weight: bold;
-          cursor: pointer;
-        }
-        .table-download-btn {
-          padding: 8px 14px;
-          background: #f1f5f9;
-          color: #334155;
-          border: 1px solid #cbd5e1;
-          border-radius: 6px;
-          font-size: 13px;
-          font-weight: bold;
-          cursor: pointer;
+        .header-left {
+          display: flex;
+          align-items: center;
+          gap: 12px;
         }
 
-        .status-message {
-          color: #475569;
-          font-size: 16px;
-          text-align: center;
-          padding: 40px;
-        }
-        .empty-message-box {
-          padding: 40px;
-          text-align: center;
-          color: #475569;
-          background: #ffffff;
-          border-radius: 12px;
-          border: 2px dashed #cbd5e1;
-          font-size: 16px;
-          font-weight: bold;
-        }
-
-        /* MATCHED MOBILE OVERRIDES */
         @media (max-width: 1023px) { 
-          .main-wrapper { 
-            padding: max(20px, env(safe-area-inset-top, 20px)) 16px 16px 16px !important; 
-            height: 100dvh !important;
-            overflow-y: auto !important;
-            -webkit-overflow-scrolling: touch !important;
-          }
           .header-container { 
             margin-left: 54px !important; 
             margin-right: 0 !important;
@@ -967,38 +610,6 @@ export default function InvoiceGallery() {
             flex-direction: row !important;
             align-items: center !important;
             gap: 12px !important;
-          }
-          .page-title {
-            font-size: 21px !important; 
-            line-height: normal !important; 
-            white-space: nowrap !important; 
-          }
-          
-          .toolbar-container {
-            flex-direction: column;
-            align-items: stretch;
-            padding: 14px;
-            gap: 12px;
-          }
-          .tab-group, .view-toggle-container, .search-box-wrapper, .actions-wrapper {
-            width: 100%;
-          }
-          .tab-group {
-            justify-content: space-between;
-          }
-          .tab-btn {
-            flex: 1;
-            text-align: center;
-            padding: 10px 4px;
-            font-size: 13px;
-          }
-          .actions-wrapper {
-            flex-direction: column;
-          }
-          .secondary-action-btn, .primary-action-btn, .danger-action-btn {
-            width: 100%;
-            text-align: center;
-            padding: 12px;
           }
         }
       `}</style>

@@ -6,6 +6,9 @@ import { useFocusRefresh } from '@/lib/useFocusRefresh'
 import { formatRiel, formatNumber, EXCHANGE_RATE } from '@/utils/formatters'
 import { CurrencyInput } from '@/components/Inputs'
 import { useToast } from '@/components/ToastProvider'
+import { useDebounce } from '@/lib/useDebounce'
+import TableSkeleton from '@/components/TableSkeleton'
+import EmptyState from '@/components/EmptyState'
 
 // Formats 'total_sales' into 'Total Sales', 'qty' to 'Quantity'
 const formatHeader = (key: string) => {
@@ -65,6 +68,7 @@ export default function BizDatabase() {
   const [transactions, setTransactions] = useState<UnifiedTransaction[]>([])
   const [activeTab, setActiveTab] = useState<TabType>('Wholesale Invoice Summary')
   const [searchQuery, setSearchQuery] = useState('')
+  const debouncedSearch = useDebounce(searchQuery, 300) // 🚀 Lightning fast mobile search
   const [timeFilter, setTimeFilter] = useState<TimeFilter>('Today')
   const [isLoading, setIsLoading] = useState(true)
 
@@ -118,11 +122,9 @@ export default function BizDatabase() {
     }
   }
 
-  // 🚀 Fetch with precise Walk-in Isolation (HARD FETCH)
   async function fetchData(isSilent = false) {
     if (!isSilent) setIsLoading(true)
     
-    // Removed is_archived logic, fetching purely raw records
     const { data: summaryData } = await supabase.from('invoice_summaries').select('*')
     const { data: dailyData } = await supabase.from('sales').select('*')
     
@@ -131,7 +133,7 @@ export default function BizDatabase() {
       const { data, error } = await supabase.from('retail_sales').select('*')
       if (data && !error) retailData = data;
     } catch (e) {
-      console.warn("Retail table not found or accessible yet. Defaulting to empty.", e)
+      console.warn("Retail table not found", e)
     }
 
     let bizExpensesData: any[] = []
@@ -139,7 +141,7 @@ export default function BizDatabase() {
       const { data, error } = await supabase.from('expenses').select('*')
       if (data && !error) bizExpensesData = data;
     } catch (e) {
-      console.warn("Expenses table not found or accessible yet. Defaulting to empty.", e)
+      console.warn("Expenses table not found", e)
     }
 
     let personalExpensesData: any[] = []
@@ -147,7 +149,7 @@ export default function BizDatabase() {
       const { data, error } = await supabase.from('personal_expenses').select('*')
       if (data && !error) personalExpensesData = data;
     } catch (e) {
-      console.warn("Personal expenses table not found or accessible yet. Defaulting to empty.", e)
+      console.warn("Personal expenses table not found", e)
     }
 
     let staffDebtData: any[] = []
@@ -155,22 +157,18 @@ export default function BizDatabase() {
       const { data, error } = await supabase.from('staff_debt').select('*')
       if (data && !error) staffDebtData = data;
     } catch (e) {
-      console.warn("Staff debt table not found or accessible yet. Defaulting to empty.", e)
+      console.warn("Staff debt table not found", e)
     }
 
     const unified: UnifiedTransaction[] = []
-    
-    // Dictionary to map parent invoice data to child line items
     const invoiceDict: Record<string, any> = {};
 
     if (summaryData) {
       summaryData.forEach(s => {
         if (s.invoice_id) invoiceDict[s.invoice_id] = s;
-
         const custName = s.customer_name || 'Walk-in';
         const isWalkIn = custName.trim().toLowerCase() === 'walk-in';
 
-        // Do NOT push Walk-in sales to the Invoice Summary tab!
         if (isWalkIn) return;
 
         unified.push({
@@ -195,7 +193,6 @@ export default function BizDatabase() {
         const price = Number(d.price_per_bag || 0);
         const cogs = Number(d.cogs_price || 0);
         
-        // Borrow customer_name and owner from the parent invoice dictionary safely
         const parentInvoice = invoiceDict[d.invoice_id] || {};
         const custName = d.customer_name || parentInvoice.customer_name || 'Walk-in';
         const ownerName = d.owner || parentInvoice.owner || '-';
@@ -205,7 +202,7 @@ export default function BizDatabase() {
         unified.push({
           id: `daily_${d.id}`,
           raw_db_id: d.id,
-          product_id: d.product_id, // Attached for smart voiding
+          product_id: d.product_id,
           invoice_id: d.invoice_id,
           source: isWalkIn ? 'Walk-in Wholesale' : 'Non-Walk-in Wholesale',
           created_at: d.created_at,
@@ -231,7 +228,7 @@ export default function BizDatabase() {
         unified.push({
           id: `ret_${r.id}`,
           raw_db_id: r.id, 
-          product_id: r.product_id, // Attached for smart voiding
+          product_id: r.product_id,
           source: 'Retails only',
           created_at: r.created_at,
           transaction_id: r.transaction_id,
@@ -315,7 +312,6 @@ export default function BizDatabase() {
   const handleDelete = async () => {
     if (!confirm(`🚨 Are you sure you want to PERMANENTLY DELETE ${selectedToDelete.size} records?\n\nThis will completely erase the transaction and physically return the items to your inventory stock.`)) return;
     
-    // Optimistic UI Removal
     setTransactions(prev => prev.filter(t => !selectedToDelete.has(t.id)));
 
     const sumIds: any[] = [];
@@ -326,8 +322,8 @@ export default function BizDatabase() {
     const staffDebtIds: any[] = [];
 
     const itemsToRestore: UnifiedTransaction[] = [];
-    const invoiceIdsToCascade = new Set<string>(); // If deleting summary, delete children
-    const summaryIdsToCascade = new Set<string>(); // If deleting walk-in, delete parent
+    const invoiceIdsToCascade = new Set<string>(); 
+    const summaryIdsToCascade = new Set<string>(); 
 
     transactions.forEach(t => {
       if (selectedToDelete.has(t.id)) {
@@ -360,7 +356,6 @@ export default function BizDatabase() {
       }
     });
 
-    // Gather children of deleted summaries to restore their stock too
     if (invoiceIdsToCascade.size > 0) {
       const children = transactions.filter(t => (t.source === 'Non-Walk-in Wholesale' || t.source === 'Walk-in Wholesale') && t.invoice_id && invoiceIdsToCascade.has(t.invoice_id) && !selectedToDelete.has(t.id));
       children.forEach(c => {
@@ -370,7 +365,6 @@ export default function BizDatabase() {
     }
 
     try {
-      // 1. SMART VOID: RESTORE STOCK & FIFO FOR SALES
       for (const item of itemsToRestore) {
         const qty = Number(item.qty) || 0;
         const isSpecial = (item.rice_type || '').includes('បានប្រើ') || (item.rice_type || '').includes('សេវាដឹក');
@@ -399,7 +393,6 @@ export default function BizDatabase() {
         }
       }
 
-      // 2. HARD DELETE WITH FOREIGN KEY SAFETY
       const allInvoicesToDelete = new Set([...Array.from(invoiceIdsToCascade), ...Array.from(summaryIdsToCascade)]);
       
       if (allInvoicesToDelete.size > 0) {
@@ -458,7 +451,6 @@ export default function BizDatabase() {
     if (payload.invoice_id !== undefined) dbPayload.invoice_id = payload.invoice_id;
     if (payload.transaction_id !== undefined) dbPayload.transaction_id = payload.transaction_id;
 
-    // Automatically calculate Totals if Qty or Price was edited!
     const newQty = payload.qty !== undefined ? Number(payload.qty) : Number(baseTx.qty || 0);
     const newPrice = payload.price_per_bag !== undefined ? Number(payload.price_per_bag) : Number(baseTx.price_per_bag || 0);
     const newCogs = payload.cogs_price !== undefined ? Number(payload.cogs_price) : Number(baseTx.cogs_price || 0);
@@ -626,14 +618,15 @@ export default function BizDatabase() {
     document.addEventListener('touchmove', handleUp)
   }
 
-  // --- DATA PROCESSING & CALCULATIONS ---
+  // --- DATA PROCESSING (USING DEBOUNCED SEARCH!) ---
   const processedTransactions = transactions
     .filter(t => {
       if (t.source !== activeTab) return false;
       if (!isWithinTimeFilter(t.created_at)) return false;
 
-      if (searchQuery) {
-        const query = searchQuery.toLowerCase()
+      // 🚀 Now uses debouncedSearch for massive mobile performance gain
+      if (debouncedSearch) {
+        const query = debouncedSearch.toLowerCase()
         const searchableText = `${t.invoice_id || ''} ${t.transaction_id || ''} ${t.customer_name || ''} ${t.rice_types || ''} ${t.rice_type || ''} ${t.description || ''} ${t.category || ''}`.toLowerCase()
         if (!searchableText.includes(query)) return false
       }
@@ -681,65 +674,64 @@ export default function BizDatabase() {
       {/* HEADER */}
       <div className="header-container">
         <div className="header-left">
-          <h1 className="page-title">🔐 Business Database</h1>
+          <h1 className="saas-page-title">🔐 Business Database</h1>
         </div>
-        <div className="header-actions">
+        <div className="header-actions" style={{ display: 'flex', gap: '12px' }}>
           {selectedToDelete.size > 0 && (
-            <button onClick={handleDelete} className="delete-btn">
+            <button onClick={handleDelete} className="saas-btn saas-btn-danger">
               🗑️ Delete ({selectedToDelete.size})
             </button>
           )}
-          <button className="refresh-btn" onClick={() => fetchData(false)}>
+          <button className="saas-btn saas-btn-secondary" onClick={() => fetchData(false)}>
             {isLoading ? '🔄 Loading...' : '🔄 Refresh Data'}
           </button>
         </div>
       </div>
 
       {/* TOOLBAR */}
-      <div className="toolbar-container">
+      <div className="saas-card" style={{ padding: '16px', marginBottom: '24px' }}>
         
         {/* TOP ROW: TABS */}
-        <div className="toolbar-tabs" style={{ width: '100%', borderBottom: '1px solid #e2e8f0', paddingBottom: '12px', marginBottom: '4px' }}>
-          <button className={activeTab === 'Wholesale Invoice Summary' ? 'tab active' : 'tab'} onClick={() => {setActiveTab('Wholesale Invoice Summary'); setSortConfig(null); setEditingCell(null); setSelectedToDelete(new Set());}}>
+        <div className="saas-tab-container" style={{ border: 'none', padding: 0, boxShadow: 'none', borderBottom: '1px solid #e2e8f0', borderRadius: 0, paddingBottom: '12px', marginBottom: '16px' }}>
+          <button className={`saas-tab ${activeTab === 'Wholesale Invoice Summary' ? 'active' : ''}`} onClick={() => {setActiveTab('Wholesale Invoice Summary'); setSortConfig(null); setEditingCell(null); setSelectedToDelete(new Set());}}>
             🌾 Wholesale Invoice Summary
           </button>
-          <button className={activeTab === 'Walk-in Wholesale' ? 'tab active' : 'tab'} onClick={() => {setActiveTab('Walk-in Wholesale'); setSortConfig(null); setEditingCell(null); setSelectedToDelete(new Set());}}>
+          <button className={`saas-tab ${activeTab === 'Walk-in Wholesale' ? 'active' : ''}`} onClick={() => {setActiveTab('Walk-in Wholesale'); setSortConfig(null); setEditingCell(null); setSelectedToDelete(new Set());}}>
             🚶 Walk-in Wholesale
           </button>
-          <button className={activeTab === 'Non-Walk-in Wholesale' ? 'tab active' : 'tab'} onClick={() => {setActiveTab('Non-Walk-in Wholesale'); setSortConfig(null); setEditingCell(null); setSelectedToDelete(new Set());}}>
+          <button className={`saas-tab ${activeTab === 'Non-Walk-in Wholesale' ? 'active' : ''}`} onClick={() => {setActiveTab('Non-Walk-in Wholesale'); setSortConfig(null); setEditingCell(null); setSelectedToDelete(new Set());}}>
             🚚 Non-Walk-in Wholesale
           </button>
-          <button className={activeTab === 'Retails only' ? 'tab active' : 'tab'} onClick={() => {setActiveTab('Retails only'); setSortConfig(null); setEditingCell(null); setSelectedToDelete(new Set());}}>
+          <button className={`saas-tab ${activeTab === 'Retails only' ? 'active' : ''}`} onClick={() => {setActiveTab('Retails only'); setSortConfig(null); setEditingCell(null); setSelectedToDelete(new Set());}}>
             🛍️ Retails only
           </button>
-          <button className={activeTab === 'Biz Expense' ? 'tab active' : 'tab'} onClick={() => {setActiveTab('Biz Expense'); setSortConfig(null); setEditingCell(null); setSelectedToDelete(new Set());}}>
+          <button className={`saas-tab ${activeTab === 'Biz Expense' ? 'active' : ''}`} onClick={() => {setActiveTab('Biz Expense'); setSortConfig(null); setEditingCell(null); setSelectedToDelete(new Set());}}>
             📉 Biz Expense
           </button>
-          <button className={activeTab === 'Personal Expense' ? 'tab active' : 'tab'} onClick={() => {setActiveTab('Personal Expense'); setSortConfig(null); setEditingCell(null); setSelectedToDelete(new Set());}}>
+          <button className={`saas-tab ${activeTab === 'Personal Expense' ? 'active' : ''}`} onClick={() => {setActiveTab('Personal Expense'); setSortConfig(null); setEditingCell(null); setSelectedToDelete(new Set());}}>
             🍕 Personal Expense
           </button>
-          <button className={activeTab === 'Staff Debt' ? 'tab active' : 'tab'} onClick={() => {setActiveTab('Staff Debt'); setSortConfig(null); setEditingCell(null); setSelectedToDelete(new Set());}}>
+          <button className={`saas-tab ${activeTab === 'Staff Debt' ? 'active' : ''}`} onClick={() => {setActiveTab('Staff Debt'); setSortConfig(null); setEditingCell(null); setSelectedToDelete(new Set());}}>
             💸 Staff Debt
           </button>
         </div>
 
         {/* BOTTOM ROW: FILTERS & SEARCH */}
         <div className="toolbar-bottom-row">
-          
-          {/* TIME PRE-FILTERS */}
           <div className="time-filters-wrapper">
-            <button className={timeFilter === 'Today' ? 'time-btn active' : 'time-btn'} onClick={() => setTimeFilter('Today')}>Today</button>
-            <button className={timeFilter === 'This Week' ? 'time-btn active' : 'time-btn'} onClick={() => setTimeFilter('This Week')}>This Week</button>
-            <button className={timeFilter === 'This Month' ? 'time-btn active' : 'time-btn'} onClick={() => setTimeFilter('This Month')}>This Month</button>
-            <button className={timeFilter === 'All Time' ? 'time-btn active' : 'time-btn'} onClick={() => setTimeFilter('All Time')}>All Time</button>
+            <button className={`time-btn ${timeFilter === 'Today' ? 'active' : ''}`} onClick={() => setTimeFilter('Today')}>Today</button>
+            <button className={`time-btn ${timeFilter === 'This Week' ? 'active' : ''}`} onClick={() => setTimeFilter('This Week')}>This Week</button>
+            <button className={`time-btn ${timeFilter === 'This Month' ? 'active' : ''}`} onClick={() => setTimeFilter('This Month')}>This Month</button>
+            <button className={`time-btn ${timeFilter === 'All Time' ? 'active' : ''}`} onClick={() => setTimeFilter('All Time')}>All Time</button>
           </div>
 
           <input 
-            className="toolbar-search" 
+            className="saas-input" 
             placeholder="🔍 Search records..." 
             value={searchQuery} 
             onChange={(e) => setSearchQuery(e.target.value)} 
             onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
+            style={{ flex: 1, minWidth: '200px' }}
           />
         </div>
       </div>
@@ -750,237 +742,201 @@ export default function BizDatabase() {
       </div>
 
       {/* MAIN SPREADSHEET */}
-      <div className="table-wrapper">
-        <table className="biz-table">
-          <thead>
-            <tr className="biz-thead-tr">
-              <th className="biz-th-checkbox">
-                <input 
-                  type="checkbox" 
-                  className="biz-checkbox"
-                  checked={selectedToDelete.size === processedTransactions.length && processedTransactions.length > 0} 
-                  onChange={toggleSelectAll} 
-                />
-              </th>
-
-              {activeColumns.map(key => (
-                <th 
-                  key={key} 
-                  className="biz-th"
-                  draggable 
-                  onDragStart={(e) => handleDragStart(e, key)}
-                  onDragOver={handleDragOver}
-                  onDrop={(e) => handleDrop(e, key)}
-                  onClick={() => handleSort(key)}
-                  style={{ width: columnWidths[key] || 150 }}
-                  title="Click to sort, Drag to reorder"
-                >
-                  {formatHeader(key)}
-                  <span className="sort-icon" style={{ opacity: sortConfig?.key === key ? 1 : 0.3 }}>
-                    {sortConfig?.key === key ? (sortConfig.direction === 'asc' ? '↑' : '↓') : '↕'}
-                  </span>
-                  <Resizer columnKey={key} />
+      <div className="saas-table-wrapper">
+        <div className="saas-table-responsive">
+          <table className="saas-table" style={{ minWidth: '100%', tableLayout: 'fixed' }}>
+            <thead>
+              <tr>
+                <th className="saas-th" style={{ width: '50px', textAlign: 'center', borderRight: '1px solid #f1f5f9' }}>
+                  <input 
+                    type="checkbox" 
+                    className="biz-checkbox"
+                    checked={selectedToDelete.size === processedTransactions.length && processedTransactions.length > 0} 
+                    onChange={toggleSelectAll} 
+                  />
                 </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {isLoading && transactions.length === 0 ? (
-              <tr><td colSpan={activeColumns.length + 1} className="empty-table-cell">Loading database...</td></tr>
-            ) : processedTransactions.length === 0 ? (
-              <tr><td colSpan={activeColumns.length + 1} className="empty-table-cell">No records match your view.</td></tr>
-            ) : (
-              processedTransactions.map(t => {
-                const isRowSelected = selectedToDelete.has(t.id);
-                const isRowEditing = edits[t.id] ? true : false;
-                
-                return (
-                  <tr key={t.id} className={`biz-tr ${isRowSelected ? 'selected' : ''} ${isRowEditing ? 'editing' : ''}`}>
-                    <td className="biz-td-checkbox">
-                      <input 
-                        type="checkbox" 
-                        className="biz-checkbox"
-                        checked={isRowSelected} 
-                        onChange={() => toggleSelect(t.id)} 
-                      />
-                    </td>
 
-                    {activeColumns.map(col => {
-                      const isEditing = editingCell?.id === t.id && editingCell?.col === col;
-                      const val = edits[t.id]?.[col] ?? t[col] ?? '';
+                {activeColumns.map(key => (
+                  <th 
+                    key={key} 
+                    className="saas-th"
+                    draggable 
+                    onDragStart={(e) => handleDragStart(e, key)}
+                    onDragOver={handleDragOver}
+                    onDrop={(e) => handleDrop(e, key)}
+                    onClick={() => handleSort(key)}
+                    style={{ width: columnWidths[key] || 150, borderRight: '1px solid #f1f5f9', cursor: 'pointer', position: 'relative' }}
+                    title="Click to sort, Drag to reorder"
+                  >
+                    {formatHeader(key)}
+                    <span className="sort-icon" style={{ opacity: sortConfig?.key === key ? 1 : 0.3 }}>
+                      {sortConfig?.key === key ? (sortConfig.direction === 'asc' ? '↑' : '↓') : '↕'}
+                    </span>
+                    <Resizer columnKey={key} />
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {isLoading && transactions.length === 0 ? (
+                <TableSkeleton columns={activeColumns.length + 1} rows={8} />
+              ) : processedTransactions.length === 0 ? (
+                <tr>
+                  <td colSpan={activeColumns.length + 1} style={{ padding: 0 }}>
+                    <EmptyState 
+                      icon="🔍" 
+                      title="No records found" 
+                      message="We couldn't find any transactions matching your current search or date filters." 
+                    />
+                  </td>
+                </tr>
+              ) : (
+                processedTransactions.map(t => {
+                  const isRowSelected = selectedToDelete.has(t.id);
+                  const isRowEditing = edits[t.id] ? true : false;
+                  
+                  return (
+                    <tr key={t.id} className={`saas-tr ${isRowSelected ? 'selected' : ''} ${isRowEditing ? 'editing' : ''}`}>
+                      <td className="saas-td" style={{ textAlign: 'center', borderRight: '1px solid #f1f5f9', padding: '14px 12px' }}>
+                        <input 
+                          type="checkbox" 
+                          className="biz-checkbox"
+                          checked={isRowSelected} 
+                          onChange={() => toggleSelect(t.id)} 
+                        />
+                      </td>
 
-                      const isParentFieldOnChild = (t.source === 'Walk-in Wholesale' || t.source === 'Non-Walk-in Wholesale') && ['customer_name', 'owner'].includes(col);
-                      const isUneditable = ['created_at', 'invoice_id', 'transaction_id'].includes(col) || isParentFieldOnChild;
+                      {activeColumns.map(col => {
+                        const isEditing = editingCell?.id === t.id && editingCell?.col === col;
+                        const val = edits[t.id]?.[col] ?? t[col] ?? '';
 
-                      return (
-                        <td 
-                          key={col} 
-                          className={`biz-td ${isEditing ? 'cell-editing' : ''}`}
-                          onClick={() => { if (!isUneditable) setEditingCell({ id: t.id, col: col }) }}
-                        >
-                          {isEditing ? (
-                            ['price_per_bag', 'cogs_price', 'total_sales', 'total_cogs', 'total_profit', 'amount'].includes(col) ? (
-                              <CurrencyInput 
-                                autoFocus 
-                                value={val} 
-                                onChange={(v: any) => setEdits(prev => ({ ...prev, [t.id]: { ...(prev[t.id] || {}), [col]: v } }))} 
-                                onEnter={() => handleSaveRecord(t.id)}
-                              />
-                            ) : col === 'created_at' ? (
-                              <input 
-                                autoFocus
-                                type="datetime-local"
-                                className="cell-input"
-                                value={toLocalDatetimeString(val)}
-                                onChange={(e) => {
-                                  const dateObj = new Date(e.target.value);
-                                  if (!isNaN(dateObj.getTime())) {
-                                    setEdits(prev => ({ ...prev, [t.id]: { ...(prev[t.id] || {}), [col]: dateObj.toISOString() } }));
-                                  }
-                                }}
-                                onBlur={() => handleSaveRecord(t.id)}
-                                onKeyDown={(e) => { 
-                                  if (e.key === 'Enter') { e.currentTarget.blur(); handleSaveRecord(t.id); } 
-                                  if (e.key === 'Escape') { 
-                                    setEdits(prev => { const n = { ...prev }; delete n[t.id]; return n }); 
-                                    setEditingCell(null); 
-                                  } 
-                                }}
-                              />
+                        const isParentFieldOnChild = (t.source === 'Walk-in Wholesale' || t.source === 'Non-Walk-in Wholesale') && ['customer_name', 'owner'].includes(col);
+                        const isUneditable = ['created_at', 'invoice_id', 'transaction_id'].includes(col) || isParentFieldOnChild;
+
+                        return (
+                          <td 
+                            key={col} 
+                            className={`saas-td ${isEditing ? 'cell-editing' : ''}`}
+                            style={{ padding: 0, borderRight: '1px solid #f1f5f9', position: 'relative' }}
+                            onClick={() => { if (!isUneditable) setEditingCell({ id: t.id, col: col }) }}
+                          >
+                            {isEditing ? (
+                              ['price_per_bag', 'cogs_price', 'total_sales', 'total_cogs', 'total_profit', 'amount'].includes(col) ? (
+                                <CurrencyInput 
+                                  autoFocus 
+                                  value={val} 
+                                  onChange={(v: any) => setEdits(prev => ({ ...prev, [t.id]: { ...(prev[t.id] || {}), [col]: v } }))} 
+                                  onEnter={() => handleSaveRecord(t.id)}
+                                />
+                              ) : col === 'created_at' ? (
+                                <input 
+                                  autoFocus
+                                  type="datetime-local"
+                                  className="cell-input"
+                                  value={toLocalDatetimeString(val)}
+                                  onChange={(e) => {
+                                    const dateObj = new Date(e.target.value);
+                                    if (!isNaN(dateObj.getTime())) {
+                                      setEdits(prev => ({ ...prev, [t.id]: { ...(prev[t.id] || {}), [col]: dateObj.toISOString() } }));
+                                    }
+                                  }}
+                                  onBlur={() => handleSaveRecord(t.id)}
+                                  onKeyDown={(e) => { 
+                                    if (e.key === 'Enter') { e.currentTarget.blur(); handleSaveRecord(t.id); } 
+                                    if (e.key === 'Escape') { 
+                                      setEdits(prev => { const n = { ...prev }; delete n[t.id]; return n }); 
+                                      setEditingCell(null); 
+                                    } 
+                                  }}
+                                />
+                              ) : (
+                                <input 
+                                  autoFocus 
+                                  type={col === 'qty' ? 'number' : 'text'} 
+                                  className="cell-input no-spinners" 
+                                  value={val} 
+                                  onChange={(e) => {
+                                    const newVal = e.target.type === 'number' ? (e.target.value === '' ? '' : Number(e.target.value)) : e.target.value;
+                                    setEdits(prev => ({ ...prev, [t.id]: { ...(prev[t.id] || {}), [col]: newVal } }))
+                                  }} 
+                                  onBlur={() => handleSaveRecord(t.id)} 
+                                  onKeyDown={(e) => { 
+                                    if (e.key === 'Enter') { e.currentTarget.blur(); handleSaveRecord(t.id); } 
+                                    if (e.key === 'Escape') { 
+                                      setEdits(prev => { const n = { ...prev }; delete n[t.id]; return n }); 
+                                      setEditingCell(null); 
+                                    } 
+                                  }} 
+                                />
+                              )
                             ) : (
-                              <input 
-                                autoFocus 
-                                type={col === 'qty' ? 'number' : 'text'} 
-                                className="cell-input no-spinners" 
-                                value={val} 
-                                onChange={(e) => {
-                                  const newVal = e.target.type === 'number' ? (e.target.value === '' ? '' : Number(e.target.value)) : e.target.value;
-                                  setEdits(prev => ({ ...prev, [t.id]: { ...(prev[t.id] || {}), [col]: newVal } }))
-                                }} 
-                                onBlur={() => handleSaveRecord(t.id)} 
-                                onKeyDown={(e) => { 
-                                  if (e.key === 'Enter') { e.currentTarget.blur(); handleSaveRecord(t.id); } 
-                                  if (e.key === 'Escape') { 
-                                    setEdits(prev => { const n = { ...prev }; delete n[t.id]; return n }); 
-                                    setEditingCell(null); 
-                                  } 
-                                }} 
-                              />
-                            )
-                          ) : (
-                            <div className="cell-display" style={{ cursor: isUneditable ? 'default' : 'text' }}>
-                              {['invoice_id', 'transaction_id', 'customer_name', 'rice_types', 'rice_type', 'description'].includes(col) && (
-                                <span style={{ fontWeight: ['invoice_id', 'transaction_id'].includes(col) ? 'bold' : 'normal', color: ['invoice_id', 'transaction_id'].includes(col) ? '#1e293b' : 'inherit' }}>
-                                  {val || '-'}
-                                </span>
-                              )}
-                              
-                              {col === 'owner' && <span className="badge-owner">{val || '-'}</span>}
-                              {col === 'category' && <span className="badge-category">{val || '-'}</span>}
-                              {col === 'status' && <span className="badge-status">{val || '-'}</span>}
-                              
-                              {col === 'created_at' && formatDate(t.created_at)}
-                              {col === 'qty' && formatNumber(val || 0)}
+                              <div className="cell-display" style={{ cursor: isUneditable ? 'default' : 'text' }}>
+                                {['invoice_id', 'transaction_id', 'customer_name', 'rice_types', 'rice_type', 'description'].includes(col) && (
+                                  <span style={{ fontWeight: ['invoice_id', 'transaction_id'].includes(col) ? 'bold' : 'normal', color: ['invoice_id', 'transaction_id'].includes(col) ? '#1e293b' : 'inherit' }}>
+                                    {val || '-'}
+                                  </span>
+                                )}
+                                
+                                {col === 'owner' && <span className="badge-owner">{val || '-'}</span>}
+                                {col === 'category' && <span className="badge-category">{val || '-'}</span>}
+                                {col === 'status' && <span className="badge-status">{val || '-'}</span>}
+                                
+                                {col === 'created_at' && formatDate(t.created_at)}
+                                {col === 'qty' && formatNumber(val || 0)}
 
-                              {['price_per_bag', 'cogs_price', 'total_sales', 'total_cogs', 'total_profit', 'amount'].includes(col) && (
-                                <span style={{ 
-                                  fontWeight: 'bold', 
-                                  color: (col === 'total_profit' && val < 0) || col === 'total_cogs' || col === 'cogs_price' || col === 'amount' ? '#ef4444' : '#10b981' 
-                                }}>
-                                  {formatRiel(val || 0)}
-                                </span>
-                              )}
-                            </div>
-                          )}
-                        </td>
-                      )
-                    })}
-                  </tr>
-                )
-              })
-            )}
-          </tbody>
-        </table>
+                                {['price_per_bag', 'cogs_price', 'total_sales', 'total_cogs', 'total_profit', 'amount'].includes(col) && (
+                                  <span style={{ 
+                                    fontWeight: 'bold', 
+                                    color: (col === 'total_profit' && val < 0) || col === 'total_cogs' || col === 'cogs_price' || col === 'amount' ? '#ef4444' : '#10b981' 
+                                  }}>
+                                    {formatRiel(val || 0)}
+                                  </span>
+                                )}
+                              </div>
+                            )}
+                          </td>
+                        )
+                      })}
+                    </tr>
+                  )
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
 
-      {/* --- GLOBAL CSS EXCLUSIVELY DE-INLINED FROM ABOVE --- */}
+      {/* --- PRESERVED PAGE-SPECIFIC UTILITY STYLES --- */}
       <style jsx global>{`
-        /* DE-INLINED CORE STYLES */
-        .toolbar-bottom-row {
-          display: flex; width: 100%; gap: 12px; flex-wrap: wrap; align-items: center;
-        }
-        .time-filters-wrapper {
-          display: flex; background: #f1f5f9; padding: 4px; border-radius: 8px; gap: 4px;
-        }
-        .record-count-badge {
-          margin-bottom: 12px; color: #64748b; font-size: 13px; font-weight: bold;
-        }
-        .delete-btn {
-          background: #ef4444; color: #fff; padding: 10px 16px; border-radius: 6px; border: none; font-weight: bold; cursor: pointer; margin-right: 12px; transition: background 0.2s;
-        }
-        .delete-btn:hover { background: #dc2626; }
+        .toolbar-bottom-row { display: flex; width: 100%; gap: 12px; flex-wrap: wrap; align-items: center; }
+        .time-filters-wrapper { display: flex; background: #f1f5f9; padding: 4px; border-radius: 8px; gap: 4px; }
+        .record-count-badge { margin-bottom: 12px; color: #64748b; font-size: 13px; font-weight: bold; }
+        .time-btn { padding: 8px 12px; border-radius: 6px; border: none; background: transparent; font-weight: bold; font-size: 13px; color: #64748b; cursor: pointer; }
+        .time-btn.active { background: #fff; color: #b58a3d; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
         
-        .biz-table { border-collapse: collapse; table-layout: fixed; width: max-content; min-width: 100%; }
-        .biz-thead-tr { background: #f8fafc; border-bottom: 2px solid #e2e8f0; }
-        .biz-th-checkbox { width: 50px; padding: 14px 12px; text-align: center; border-right: 1px solid #f1f5f9; }
         .biz-checkbox { width: 18px; height: 18px; cursor: pointer; accent-color: #b58a3d; }
-        .biz-th {
-          position: relative; padding: 14px 12px; text-align: left; color: #475569; font-size: 13px; text-transform: uppercase; font-weight: bold; border-right: 1px solid #f1f5f9; cursor: pointer; user-select: none;
-        }
         .sort-icon { margin-left: 6px; font-size: 12px; }
-        .resizer-handle {
-          position: absolute; right: 0; top: 0; bottom: 0; width: 14px; cursor: col-resize; background: transparent; z-index: 10; transform: translateX(50%);
-        }
-        .empty-table-cell { padding: 40px; text-align: center; color: #94a3b8; }
+        .resizer-handle { position: absolute; right: 0; top: 0; bottom: 0; width: 14px; cursor: col-resize; background: transparent; z-index: 10; transform: translateX(50%); }
         
-        .biz-tr { border-bottom: 1px solid #f1f5f9; transition: background 0.2s; background: transparent; }
-        .biz-tr:hover { background-color: #f8fafc; }
-        .biz-tr.selected { background-color: #eff6ff !important; }
-        .biz-tr.editing { background-color: #fefcf3 !important; }
-        
-        .biz-td-checkbox { text-align: center; border-right: 1px solid #f1f5f9; padding: 14px 12px; }
-        .biz-td {
-          padding: 0; border-right: 1px solid #f1f5f9; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 14px; color: #334155; position: relative;
-        }
-
         .badge-owner { text-transform: capitalize; font-weight: bold; color: #64748b; }
         .badge-category { text-transform: capitalize; color: #475569; }
         .badge-status { color: #64748b; font-style: italic; }
 
-        /* ORIGINAL STYLES PRESERVED */
-        .main-wrapper { padding: max(20px, env(safe-area-inset-top, 20px)) 24px 24px 24px; background: #f8fafc; min-height: 100vh; font-family: Arial, sans-serif; color: #333; box-sizing: border-box; width: 100%; }
-        .header-container { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; margin-top: 0; margin-left: 60px; gap: 12px; height: 42px; width: calc(100% - 60px); max-width: 1600px; }
-        .header-left { display: flex; align-items: center; gap: 12px; }
-        .page-title { font-size: 24px !important; color: #4a3b1b !important; margin: 0 !important; font-weight: bold; letter-spacing: -0.5px; line-height: normal !important; display: flex; align-items: center; min-width: 0; white-space: nowrap !important; }
-        .header-actions { display: flex; align-items: center; }
-        .refresh-btn { padding: 10px 16px; background: #e2e8f0; color: #475569; border: none; border-radius: 6px; font-weight: bold; cursor: pointer; transition: background 0.2s; white-space: nowrap; margin: 0; }
-        .refresh-btn:hover { background: #cbd5e1; }
-        .toolbar-container { display: flex; flex-direction: column; gap: 12px; margin-bottom: 20px; background: #fff; padding: 16px 20px; border-radius: 12px; border: 1px solid #e2e8f0; box-shadow: 0 4px 6px rgba(0,0,0,0.02); }
-        .toolbar-tabs { display: flex; gap: 8px; flex-wrap: wrap; }
-        .tab { padding: 10px 16px; border-radius: 6px; border: none; background: transparent; font-weight: bold; font-size: 14px; color: #64748b; cursor: pointer; transition: all 0.2s; }
-        .tab.active { background: #10b981; color: #fff; }
-        .time-btn { padding: 8px 12px; border-radius: 6px; border: none; background: transparent; font-weight: bold; font-size: 13px; color: #64748b; cursor: pointer; }
-        .time-btn.active { background: #fff; color: #b58a3d; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
-        .toolbar-search { padding: 10px 14px; border: 1px solid #cbd5e1; border-radius: 6px; flex: 1; outline: none; min-width: 200px; font-size: 16px; color: #0f172a; background-color: #ffffff; }
-        .table-wrapper { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; overflow-x: auto; -webkit-overflow-scrolling: touch; box-shadow: 0 4px 6px rgba(0,0,0,0.02); }
         .cell-display { padding: 14px 12px; width: 100%; height: 100%; box-sizing: border-box; display: flex; align-items: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .cell-input { width: 100%; height: 100%; padding: 14px 12px; font-size: 14px; border: none; outline: 2px solid #b58a3d; box-shadow: 0 0 5px rgba(181, 138, 61, 0.3); background: #fff; position: absolute; top: 0; left: 0; z-index: 20; box-sizing: border-box; color: #0f172a; }
         .cell-editing { z-index: 20; position: relative; }
         input[type="number"].no-spinners::-webkit-inner-spin-button, input[type="number"].no-spinners::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
         input[type="number"].no-spinners { -moz-appearance: textfield; }
 
+        .header-container { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; margin-top: 0; margin-left: 60px; gap: 12px; height: 42px; width: calc(100% - 60px); max-width: 1600px; }
+        .header-left { display: flex; align-items: center; gap: 12px; }
+
         @media (max-width: 1023px) {
-          .main-wrapper { padding: max(20px, env(safe-area-inset-top, 20px)) 16px 16px 16px !important; }
           .header-container { margin-left: 54px !important; margin-right: 0 !important; margin-bottom: 24px !important; margin-top: 0 !important; display: flex !important; flex-direction: row !important; justify-content: space-between !important; align-items: center !important; height: 44px !important; width: calc(100% - 54px) !important; }
           .header-left { display: flex !important; flex-direction: row !important; align-items: center !important; gap: 12px !important; }
-          .page-title { font-size: 21px !important; line-height: normal !important; white-space: nowrap !important; }
-          .header-actions { display: flex; }
-          .refresh-btn { padding: 8px 12px !important; font-size: 13px !important; }
-          .toolbar-container { padding: 12px; }
-          .toolbar-tabs { gap: 4px; }
-          .tab { flex: 1 1 45%; padding: 12px; font-size: 13px; }
+          .toolbar-bottom-row { flex-direction: column; align-items: stretch; }
+          .time-filters-wrapper { display: flex; width: 100%; }
           .time-btn { flex: 1; padding: 10px 4px; font-size: 12px; text-align: center; }
-          .toolbar-search { width: 100%; box-sizing: border-box; }
         }
       `}</style>
     </div>

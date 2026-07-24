@@ -6,6 +6,8 @@ import { formatRiel, EXCHANGE_RATE } from '@/utils/formatters'
 import { CurrencyInput } from '@/components/Inputs'
 import { PaymentRow } from '@/types'
 import { useToast } from '@/components/ToastProvider'
+import TableSkeleton from '@/components/TableSkeleton'
+import EmptyState from '@/components/EmptyState'
 
 export default function DeliveryPage() {
   const { showToast } = useToast();
@@ -419,30 +421,36 @@ export default function DeliveryPage() {
   });
 
   function sidebarContent() {
-    if (loading && deliveries.length === 0) {
-      return <div style={{ textAlign: 'center', padding: '40px', color: '#94a3b8', fontSize: '14px' }}>Loading records...</div>;
-    }
-    
     if (activeTab === 'delivery') {
       return (
-        <div style={{ background: '#fff', borderRadius: '16px', border: '1px solid #f1f5f9', overflow: 'hidden', boxShadow: '0 4px 20px rgba(0,0,0,0.03)' }}>
-          <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '14px', minWidth: '1050px' }}>
-              <thead style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0' }}>
+        <div className="saas-table-wrapper">
+          <div className="saas-table-responsive">
+            <table className="saas-table" style={{ minWidth: '1050px' }}>
+              <thead>
                 <tr>
-                  <th style={{ padding: '16px 20px', textAlign: 'left', color: '#64748b', textTransform: 'uppercase', fontSize: '12px', letterSpacing: '0.5px' }}>Date & INV</th>
-                  <th style={{ padding: '16px 20px', textAlign: 'left', color: '#64748b', textTransform: 'uppercase', fontSize: '12px', letterSpacing: '0.5px' }}>Customer</th>
-                  <th style={{ padding: '16px 20px', textAlign: 'left', color: '#64748b', textTransform: 'uppercase', fontSize: '12px', letterSpacing: '0.5px', width: '25%' }}>Items Ordered</th>
-                  <th style={{ padding: '16px 20px', textAlign: 'right', color: '#64748b', textTransform: 'uppercase', fontSize: '12px', letterSpacing: '0.5px' }}>Total (៛)</th>
-                  <th style={{ padding: '16px 20px', textAlign: 'center', color: '#64748b', textTransform: 'uppercase', fontSize: '12px', letterSpacing: '0.5px' }}>Status</th>
-                  <th style={{ padding: '16px 20px', textAlign: 'center', color: '#64748b', textTransform: 'uppercase', fontSize: '12px', letterSpacing: '0.5px', width: '160px' }}>Payment Method</th>
-                  <th style={{ padding: '16px 20px', textAlign: 'right', color: '#64748b', textTransform: 'uppercase', fontSize: '12px', letterSpacing: '0.5px', width: '180px' }}>Pay Amount</th>
-                  <th style={{ padding: '16px 20px', textAlign: 'center', color: '#64748b', textTransform: 'uppercase', fontSize: '12px', letterSpacing: '0.5px', width: '120px' }}>Complete</th>
+                  <th className="saas-th">Date & INV</th>
+                  <th className="saas-th">Customer</th>
+                  <th className="saas-th" style={{ width: '25%' }}>Items Ordered</th>
+                  <th className="saas-th" style={{ textAlign: 'right' }}>Total (៛)</th>
+                  <th className="saas-th" style={{ textAlign: 'center' }}>Status</th>
+                  <th className="saas-th" style={{ textAlign: 'center', width: '160px' }}>Payment Method</th>
+                  <th className="saas-th" style={{ textAlign: 'right', width: '180px' }}>Pay Amount</th>
+                  <th className="saas-th" style={{ textAlign: 'center', width: '120px' }}>Complete</th>
                 </tr>
               </thead>
               <tbody>
-                {sortedDeliveries.length === 0 ? (
-                  <tr><td colSpan={8} style={{ textAlign: 'center', padding: '60px', color: '#94a3b8', fontSize: '15px' }}>No active wholesale deliveries.</td></tr>
+                {loading && sortedDeliveries.length === 0 ? (
+                  <TableSkeleton columns={8} rows={6} />
+                ) : sortedDeliveries.length === 0 ? (
+                  <tr>
+                    <td colSpan={8} style={{ padding: 0 }}>
+                      <EmptyState 
+                        icon="🚚" 
+                        title="No active deliveries" 
+                        message="All wholesale deliveries are perfectly cleared!" 
+                      />
+                    </td>
+                  </tr>
                 ) : (
                   sortedDeliveries.map((d: any) => {
                     const isDoneVisual = isDeliveredVisual(d);
@@ -451,27 +459,27 @@ export default function DeliveryPage() {
                     const paymentState = getInlinePaymentState(d.invoice_id, balanceDue);
                     
                     return (
-                      <tr key={d.invoice_id} style={{ borderBottom: '1px solid #f1f5f9', background: isDoneVisual ? '#f8fafc' : '#ffffff', opacity: isDoneVisual ? 0.6 : 1, transition: 'all 0.3s ease' }}>
-                        <td style={{ padding: '16px 20px', color: '#475569', fontSize: '14px', verticalAlign: 'top' }}>
-                          <div style={{ color: '#3b82f6', marginBottom: '4px' }}>{d.invoice_id}</div>
-                          <div style={{ fontSize: '12px' }}>{new Date(d.created_at).toLocaleDateString('en-GB')}</div>
+                      <tr key={d.invoice_id} className="saas-tr" style={{ opacity: isDoneVisual ? 0.6 : 1, transition: 'all 0.3s ease' }}>
+                        <td className="saas-td" style={{ verticalAlign: 'top' }}>
+                          <div style={{ color: '#3b82f6', marginBottom: '4px', fontWeight: 'bold' }}>{d.invoice_id}</div>
+                          <div style={{ fontSize: '12px', color: '#64748b' }}>{new Date(d.created_at).toLocaleDateString('en-GB')}</div>
                         </td>
-                        <td style={{ padding: '16px 20px', verticalAlign: 'top' }}>
-                          <div style={{ color: '#334155', fontSize: '15px', marginBottom: '4px' }}>{d.customer_name}</div>
+                        <td className="saas-td" style={{ verticalAlign: 'top' }}>
+                          <div style={{ color: '#334155', fontSize: '15px', marginBottom: '4px', fontWeight: 'bold' }}>{d.customer_name}</div>
                           <div style={{ color: '#64748b', fontSize: '12px' }}>📍 {d.customer_location || 'No location'}</div>
                         </td>
-                        <td style={{ padding: '16px 20px', color: '#475569', lineHeight: '1.6', fontSize: '13px', verticalAlign: 'top' }}>{d.rice_types}</td>
+                        <td className="saas-td" style={{ lineHeight: '1.6', fontSize: '13px', verticalAlign: 'top' }}>{d.rice_types}</td>
                         
-                        <td style={{ padding: '16px 20px', textAlign: 'right', color: '#334155', fontSize: '15px', verticalAlign: 'top' }}>{formatRiel(totalSale)}</td>
+                        <td className="saas-td" style={{ textAlign: 'right', color: '#334155', fontSize: '15px', verticalAlign: 'top', fontWeight: 'bold' }}>{formatRiel(totalSale)}</td>
                         
-                        <td style={{ padding: '16px 20px', textAlign: 'center', verticalAlign: 'top' }}>
+                        <td className="saas-td" style={{ textAlign: 'center', verticalAlign: 'top' }}>
                           <button 
                             onClick={() => updateInvoiceField(d.invoice_id, 'delivery_status', d.delivery_status === 'Pending' ? 'Delivered' : 'Pending')}
                             style={{
-                              padding: '6px 12px', borderRadius: '20px', border: 'none', fontSize: '13px', cursor: 'pointer',
+                              padding: '6px 12px', borderRadius: '20px', border: 'none', fontSize: '12px', cursor: 'pointer',
                               background: d.delivery_status === 'Pending' ? '#fef3c7' : '#dcfce7',
                               color: d.delivery_status === 'Pending' ? '#d97706' : '#15803d',
-                              transition: 'all 0.2s', display: 'flex', alignItems: 'center', gap: '6px', width: '100px', justifyContent: 'center', margin: '0 auto'
+                              fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '6px', width: '100px', justifyContent: 'center', margin: '0 auto'
                             }}
                           >
                             {d.delivery_status === 'Pending' ? '🟡 Pending' : '🟢 Delivered'}
@@ -479,7 +487,7 @@ export default function DeliveryPage() {
                         </td>
 
                         {/* PAYMENT METHOD COLUMN */}
-                        <td style={{ padding: '16px 20px', textAlign: 'center', verticalAlign: 'top' }}>
+                        <td className="saas-td" style={{ textAlign: 'center', verticalAlign: 'top' }}>
                           {balanceDue > 0 && !isDoneVisual ? (
                              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                                {paymentState.map((row) => (
@@ -487,7 +495,8 @@ export default function DeliveryPage() {
                                    key={row.id}
                                    value={row.method}
                                    onChange={(e) => updateInlineRow(d.invoice_id, row.id, 'method', e.target.value, balanceDue)}
-                                   style={{ padding: '10px 12px', borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '14px', outline: 'none', backgroundColor: '#fff', color: '#334155', cursor: 'pointer', width: '100%', height: '40px', boxSizing: 'border-box' }}
+                                   className="saas-input"
+                                   style={{ padding: '8px', cursor: 'pointer', height: '40px' }}
                                  >
                                     <option value="Cash ៛">💵 Cash ៛</option>
                                     <option value="Cash $">💵 Cash $</option>
@@ -505,7 +514,7 @@ export default function DeliveryPage() {
                         </td>
 
                         {/* PAY AMOUNT COLUMN */}
-                        <td style={{ padding: '16px 20px', textAlign: 'right', verticalAlign: 'top' }}>
+                        <td className="saas-td" style={{ textAlign: 'right', verticalAlign: 'top' }}>
                           {balanceDue > 0 && !isDoneVisual ? (
                             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                               {paymentState.map((row) => (
@@ -515,10 +524,11 @@ export default function DeliveryPage() {
                                     value={row.amount}
                                     onChange={(v: any) => updateInlineRow(d.invoice_id, row.id, 'amount', v, balanceDue)}
                                     onEnter={() => handleInlineProcess(d, paymentState)}
-                                    style={{ padding: '10px 12px', borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '14px', textAlign: 'right', outline: 'none', width: '100%', backgroundColor: '#fff', color: '#334155', height: '100%', boxSizing: 'border-box' }}
+                                    className="saas-input"
+                                    style={{ padding: '8px', textAlign: 'right', height: '100%' }}
                                   />
                                   {paymentState.length > 1 && (
-                                    <button onClick={() => removeInlineSplit(d.invoice_id, row.id, balanceDue)} style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', fontSize: '16px', padding: '0 4px' }}>✕</button>
+                                    <button onClick={() => removeInlineSplit(d.invoice_id, row.id, balanceDue)} style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', fontSize: '16px', padding: '0 4px', fontWeight: 'bold' }}>✕</button>
                                   )}
                                 </div>
                               ))}
@@ -526,7 +536,7 @@ export default function DeliveryPage() {
                           ) : null}
                         </td>
 
-                        <td style={{ padding: '16px 20px', textAlign: 'center', verticalAlign: 'top' }}>
+                        <td className="saas-td" style={{ textAlign: 'center', verticalAlign: 'top' }}>
                           <button 
                             onClick={() => {
                               if (isDoneVisual) {
@@ -536,12 +546,8 @@ export default function DeliveryPage() {
                               }
                             }}
                             disabled={isProcessing}
-                            style={{
-                              padding: '8px 12px', width: '100%', borderRadius: '6px', border: 'none', cursor: isProcessing ? 'not-allowed' : 'pointer', fontSize: '13px',
-                              background: isDoneVisual ? '#e2e8f0' : '#10b981',
-                              color: isDoneVisual ? '#475569' : '#ffffff',
-                              transition: 'all 0.2s', height: '40px'
-                            }}
+                            className={`saas-btn ${isDoneVisual ? 'saas-btn-secondary' : 'saas-btn-primary'}`}
+                            style={{ width: '100%', height: '40px' }}
                           >
                             {isProcessing ? '...' : isDoneVisual ? 'Undo' : '✔ Done'}
                           </button>
@@ -560,11 +566,8 @@ export default function DeliveryPage() {
             <div style={{ textAlign: 'center', padding: '20px', backgroundColor: '#f8fafc', borderTop: '1px solid #e2e8f0' }}>
               <button 
                 onClick={() => setLoadLimit(prev => prev + 100)}
-                style={{
-                  padding: '10px 24px', backgroundColor: '#ffffff', border: '1px solid #cbd5e1', 
-                  borderRadius: '20px', color: '#475569', fontWeight: 'bold', fontSize: '13px', 
-                  cursor: 'pointer', boxShadow: '0 2px 4px rgba(0,0,0,0.02)'
-                }}
+                className="saas-btn saas-btn-secondary"
+                style={{ borderRadius: '20px', boxShadow: '0 2px 4px rgba(0,0,0,0.02)' }}
               >
                 ⬇️ Load More Completed Invoices
               </button>
@@ -575,54 +578,69 @@ export default function DeliveryPage() {
     }
 
     return (
-      <div style={{ background: '#fff', borderRadius: '16px', border: '1px solid #e2e8f0', overflow: 'hidden', boxShadow: '0 4px 6px rgba(0,0,0,0.02)' }}>
-        <div style={{ overflowX: 'auto' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '14px', minWidth: '950px' }}>
-            <thead style={{ background: '#fff1f2', borderBottom: '1px solid #ffe4e6' }}>
+      <div className="saas-table-wrapper">
+        <div className="saas-table-responsive">
+          <table className="saas-table" style={{ minWidth: '950px' }}>
+            <thead style={{ background: '#fff1f2' }}>
               <tr>
-                <th style={{ padding: '16px 20px', textAlign: 'left', color: '#be123c', textTransform: 'uppercase', fontSize: '12px', letterSpacing: '0.5px' }}>Date</th>
-                <th style={{ padding: '16px 20px', textAlign: 'left', color: '#be123c', textTransform: 'uppercase', fontSize: '12px', letterSpacing: '0.5px' }}>Owner</th>
-                <th style={{ padding: '16px 20px', textAlign: 'left', color: '#be123c', textTransform: 'uppercase', fontSize: '12px', letterSpacing: '0.5px' }}>Customer & Invoices</th>
-                <th style={{ padding: '16px 20px', textAlign: 'right', color: '#be123c', textTransform: 'uppercase', fontSize: '12px', letterSpacing: '0.5px' }}>Total Debt (៛)</th>
-                <th style={{ padding: '16px 20px', textAlign: 'center', color: '#be123c', textTransform: 'uppercase', fontSize: '12px', letterSpacing: '0.5px', width: '160px' }}>Method</th>
-                <th style={{ padding: '16px 20px', textAlign: 'right', color: '#be123c', textTransform: 'uppercase', fontSize: '12px', letterSpacing: '0.5px', width: '180px' }}>Pay Amount (៛)</th>
-                <th style={{ padding: '16px 20px', textAlign: 'center', color: '#be123c', textTransform: 'uppercase', fontSize: '12px', letterSpacing: '0.5px', width: '120px' }}>Complete</th>
+                <th className="saas-th" style={{ color: '#be123c', borderBottom: '1px solid #ffe4e6' }}>Date</th>
+                <th className="saas-th" style={{ color: '#be123c', borderBottom: '1px solid #ffe4e6' }}>Owner</th>
+                <th className="saas-th" style={{ color: '#be123c', borderBottom: '1px solid #ffe4e6' }}>Customer & Invoices</th>
+                <th className="saas-th" style={{ color: '#be123c', borderBottom: '1px solid #ffe4e6', textAlign: 'right' }}>Total Debt (៛)</th>
+                <th className="saas-th" style={{ color: '#be123c', borderBottom: '1px solid #ffe4e6', textAlign: 'center', width: '160px' }}>Method</th>
+                <th className="saas-th" style={{ color: '#be123c', borderBottom: '1px solid #ffe4e6', textAlign: 'right', width: '180px' }}>Pay Amount (៛)</th>
+                <th className="saas-th" style={{ color: '#be123c', borderBottom: '1px solid #ffe4e6', textAlign: 'center', width: '120px' }}>Complete</th>
               </tr>
             </thead>
-            {activeOwners.length === 0 ? (
-              <tbody><tr><td colSpan={7} style={{ textAlign: 'center', padding: '60px', color: '#10b981', fontSize: '15px' }}>🎉 All customers are fully paid up!</td></tr></tbody>
+            
+            {loading && activeOwners.length === 0 ? (
+              <tbody>
+                 <TableSkeleton columns={7} rows={6} />
+              </tbody>
+            ) : activeOwners.length === 0 ? (
+              <tbody>
+                <tr>
+                  <td colSpan={7} style={{ padding: 0 }}>
+                    <EmptyState 
+                      icon="💰" 
+                      title="All caught up!" 
+                      message="All customers are fully paid up on their delivered orders!" 
+                    />
+                  </td>
+                </tr>
+              </tbody>
             ) : (
               activeOwners.map(ownerName => {
                 const list = groupedDebtors[ownerName];
                 const ownerTotalOwed = list.reduce((sum: number, d: any) => sum + d.totalOwed, 0);
                 return (
                   <tbody key={ownerName}>
-                    <tr style={{ background: '#f1f5f9' }}>
-                      <td colSpan={3} style={{ padding: '14px 20px', color: '#334155', fontSize: '14px', borderBottom: '1px solid #e2e8f0' }}>
+                    <tr className="saas-tr" style={{ background: '#f1f5f9' }}>
+                      <td className="saas-td" colSpan={3} style={{ fontWeight: 'bold' }}>
                         👤 Owner: {ownerName}
                       </td>
-                      <td style={{ padding: '14px 20px', textAlign: 'right', color: '#334155', fontSize: '15px', borderBottom: '1px solid #e2e8f0' }}>
+                      <td className="saas-td" style={{ textAlign: 'right', color: '#334155', fontSize: '15px', fontWeight: 'bold' }}>
                         {formatRiel(ownerTotalOwed)}
                       </td>
-                      <td colSpan={3} style={{ borderBottom: '1px solid #e2e8f0' }}></td>
+                      <td className="saas-td" colSpan={3}></td>
                     </tr>
                     {list.map((debtor: any) => {
                       const uniqueKey = `${debtor.owner}_${debtor.name}`;
                       const paymentState = getCreditPaymentState(uniqueKey, debtor.totalOwed);
                       
                       return (
-                        <tr key={uniqueKey} style={{ borderBottom: '1px solid #f1f5f9', background: '#ffffff', transition: 'background 0.2s ease' }}>
-                          <td style={{ padding: '20px', color: '#64748b', fontSize: '14px', verticalAlign: 'top' }}>
-                            {new Date(debtor.oldestDate).toLocaleDateString('en-GB')}
-                            <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '4px', textTransform: 'uppercase' }}>Oldest Date</div>
+                        <tr key={uniqueKey} className="saas-tr" style={{ transition: 'background 0.2s ease' }}>
+                          <td className="saas-td" style={{ verticalAlign: 'top' }}>
+                            <div style={{ fontWeight: 'bold', color: '#334155' }}>{new Date(debtor.oldestDate).toLocaleDateString('en-GB')}</div>
+                            <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '4px', textTransform: 'uppercase', fontWeight: 'bold' }}>Oldest Date</div>
                           </td>
-                          <td style={{ padding: '20px', color: '#475569', fontSize: '15px', verticalAlign: 'top' }}>
+                          <td className="saas-td" style={{ fontWeight: 'bold', verticalAlign: 'top' }}>
                             {debtor.owner}
                           </td>
 
                           {/* BEAUTIFUL NESTED INVOICE LIST */}
-                          <td style={{ padding: '20px', verticalAlign: 'top' }}>
-                            <div style={{ color: '#334155', fontSize: '15px', marginBottom: '10px' }}>
+                          <td className="saas-td" style={{ verticalAlign: 'top' }}>
+                            <div style={{ color: '#334155', fontSize: '15px', marginBottom: '10px', fontWeight: 'bold' }}>
                               {debtor.name}
                             </div>
                             <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
@@ -630,7 +648,7 @@ export default function DeliveryPage() {
                                 <div key={inv.invoice_id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '12px', background: '#f8fafc', padding: '8px 12px', borderRadius: '6px', border: '1px solid #e2e8f0' }}>
                                   <span style={{ color: '#3b82f6', fontWeight: 'bold' }}>#{inv.invoice_id.replace('INV-', '')}</span>
                                   <div style={{ display: 'flex', gap: '16px', alignItems: 'center' }}>
-                                    <span style={{ color: '#64748b', fontSize: '11px' }}>Orig: {formatRiel(inv.total_sales)}</span>
+                                    <span style={{ color: '#64748b', fontSize: '11px', fontWeight: 'bold' }}>Orig: {formatRiel(inv.total_sales)}</span>
                                     <span style={{ color: '#ef4444', fontWeight: 'bold' }}>Debt: {formatRiel(inv.balance_due)}</span>
                                   </div>
                                 </div>
@@ -638,18 +656,19 @@ export default function DeliveryPage() {
                             </div>
                           </td>
 
-                          <td style={{ padding: '20px', textAlign: 'right', color: '#ef4444', fontSize: '16px', verticalAlign: 'top', fontWeight: 'bold' }}>
+                          <td className="saas-td" style={{ textAlign: 'right', color: '#ef4444', fontSize: '16px', verticalAlign: 'top', fontWeight: 'bold' }}>
                             {formatRiel(debtor.totalOwed)}
                           </td>
                           
-                          <td style={{ padding: '20px', textAlign: 'center', verticalAlign: 'top' }}>
+                          <td className="saas-td" style={{ textAlign: 'center', verticalAlign: 'top' }}>
                             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                               {paymentState.map(row => (
                                 <select 
                                   key={row.id}
                                   value={row.method}
                                   onChange={(e) => updateCreditRow(uniqueKey, row.id, 'method', e.target.value, debtor.totalOwed)}
-                                  style={{ padding: '8px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '13px', outline: 'none', backgroundColor: '#fff', color: '#334155', cursor: 'pointer', width: '100%', height: '40px', boxSizing: 'border-box' }}
+                                  className="saas-input"
+                                  style={{ padding: '8px 12px', cursor: 'pointer', height: '40px' }}
                                 >
                                    <option value="Cash ៛">💵 Cash ៛</option>
                                    <option value="Cash $">💵 Cash $</option>
@@ -663,7 +682,7 @@ export default function DeliveryPage() {
                             </div>
                           </td>
 
-                          <td style={{ padding: '20px', textAlign: 'right', verticalAlign: 'top' }}>
+                          <td className="saas-td" style={{ textAlign: 'right', verticalAlign: 'top' }}>
                             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                               {paymentState.map(row => (
                                 <div key={row.id} style={{ display: 'flex', alignItems: 'center', gap: '6px', height: '40px' }}>
@@ -672,24 +691,23 @@ export default function DeliveryPage() {
                                     value={row.amount}
                                     onChange={(v: any) => updateCreditRow(uniqueKey, row.id, 'amount', v, debtor.totalOwed)}
                                     onEnter={() => handleProcessCreditPayment(debtor, paymentState)}
-                                    style={{ padding: '8px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '14px', textAlign: 'right', outline: 'none', width: '100%', backgroundColor: '#fff', color: '#334155', height: '100%', boxSizing: 'border-box' }}
+                                    className="saas-input"
+                                    style={{ padding: '8px 12px', textAlign: 'right', height: '100%' }}
                                   />
                                   {paymentState.length > 1 && (
-                                    <button onClick={() => removeCreditSplit(uniqueKey, row.id, debtor.totalOwed)} style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', fontSize: '16px', padding: '0 4px' }}>✕</button>
+                                    <button onClick={() => removeCreditSplit(uniqueKey, row.id, debtor.totalOwed)} style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', fontSize: '16px', padding: '0 4px', fontWeight: 'bold' }}>✕</button>
                                   )}
                                 </div>
                               ))}
                             </div>
                           </td>
 
-                          <td style={{ padding: '20px', textAlign: 'center', verticalAlign: 'top' }}>
+                          <td className="saas-td" style={{ textAlign: 'center', verticalAlign: 'top' }}>
                             <button 
                               onClick={() => handleProcessCreditPayment(debtor, paymentState)}
                               disabled={isProcessing}
-                              style={{
-                                padding: '8px 12px', width: '100%', borderRadius: '8px', border: 'none', cursor: isProcessing ? 'not-allowed' : 'pointer', fontSize: '13px',
-                                background: '#10b981', color: '#ffffff', transition: 'all 0.2s', height: '40px'
-                              }}
+                              className="saas-btn saas-btn-primary"
+                              style={{ width: '100%', height: '40px' }}
                             >
                               {isProcessing ? '...' : '✔ Done'}
                             </button>
@@ -712,13 +730,13 @@ export default function DeliveryPage() {
       <div className="main-wrapper">
         <div className="header-container">
           <div className="header-left">
-            <h1 className="page-title">🚚 Delivery & Credit Hub</h1>
+            <h1 className="saas-page-title">🚚 Delivery & Credit Hub</h1>
           </div>
         </div>
 
-        <div className="tabs-container">
-          <button onClick={() => setActiveTab('delivery')} className={`tab-toggle-button ${activeTab === 'delivery' ? 'active-tab' : ''}`}>📦 Delivery Queue</button>
-          <button onClick={() => setActiveTab('credit')} className={`tab-toggle-button ${activeTab === 'credit' ? 'active-tab' : ''}`}>💰 Accounts Credit ({debtorsList.length})</button>
+        <div className="saas-tab-container" style={{ width: 'fit-content' }}>
+          <button onClick={() => setActiveTab('delivery')} className={`saas-tab ${activeTab === 'delivery' ? 'active' : ''}`}>📦 Delivery Queue</button>
+          <button onClick={() => setActiveTab('credit')} className={`saas-tab ${activeTab === 'credit' ? 'active' : ''}`}>💰 Accounts Credit ({debtorsList.length})</button>
         </div>
 
         {sidebarContent()}
@@ -734,26 +752,13 @@ export default function DeliveryPage() {
           font-variant-numeric: tabular-nums lining-nums;
         }
 
-        /* 🔥 DESKTOP LAYOUT FIXES (Perfect Alignment + Scrolling) */
-        .main-wrapper { 
-          padding: max(20px, env(safe-area-inset-top, 20px)) 24px 24px 24px; 
-          background: #f8fafc; 
-          font-family: Arial, sans-serif; 
-          box-sizing: border-box; 
-          color: #333;
-          width: 100%;
-          height: 100dvh; 
-          overflow-y: auto; 
-          -webkit-overflow-scrolling: touch;
-        }
-
         .header-container { 
           display: flex;
           justify-content: flex-start;
           align-items: center; 
           margin-bottom: 24px; 
           margin-top: 0;
-          margin-left: 60px; /* 🔥 Clears the burger menu icon */
+          margin-left: 60px; /* Clears the burger menu icon */
           gap: 12px;
           min-height: 42px; 
           width: calc(100% - 60px); 
@@ -766,71 +771,14 @@ export default function DeliveryPage() {
           gap: 12px;
         }
 
-        .page-title { 
-          font-size: 24px !important; 
-          color: #4a3b1b !important; 
-          margin: 0 !important; 
-          font-weight: bold;
-          letter-spacing: -0.5px;
-          line-height: normal !important; 
-          display: flex;
-          align-items: center;
-          min-width: 0;
-          white-space: nowrap !important; 
-        }
-
-        .tabs-container {
-          display: flex; 
-          gap: 8px; 
-          margin-bottom: 24px; 
-          background: #fff; 
-          padding: 6px; 
-          border-radius: 12px; 
-          border: 1px solid #f1f5f9;
-          box-shadow: 0 2px 10px rgba(0,0,0,0.02);
-          flex-wrap: wrap;
-          max-width: 500px;
-        }
-
-        .tab-toggle-button {
-          flex: 1; 
-          padding: 12px; 
-          border-radius: 8px; 
-          border: none; 
-          cursor: pointer; 
-          font-size: 14px;
-          background: transparent;
-          color: #64748b;
-          transition: all 0.2s ease;
-          white-space: nowrap;
-          min-width: 120px;
-        }
-
-        .active-tab {
-          background: #b58a3d !important;
-          color: #ffffff !important;
-          box-shadow: 0 4px 10px rgba(181, 138, 61, 0.2);
-        }
-
         input[type="text"].no-spinners::-webkit-inner-spin-button,
         input[type="text"].no-spinners::-webkit-outer-spin-button {
           -webkit-appearance: none;
           margin: 0;
         }
 
-        .mobile-input-field:focus, .mobile-select-menu:focus {
-          border-color: #b58a3d !important;
-          box-shadow: 0 0 0 2px rgba(181, 138, 61, 0.2) !important;
-        }
-
         /* 🔥 MOBILE LAYOUT FIXES */
         @media (max-width: 1023px) { 
-          .main-wrapper { 
-            padding: max(20px, env(safe-area-inset-top, 20px)) 16px 16px 16px !important; 
-            height: 100dvh !important;
-            overflow-y: auto !important;
-            -webkit-overflow-scrolling: touch !important;
-          }
           .header-container { 
             margin-left: 54px !important; /* Clears mobile hamburger button safely */
             margin-right: 0 !important;
@@ -849,25 +797,6 @@ export default function DeliveryPage() {
             flex-direction: row !important;
             align-items: center !important;
             gap: 12px !important;
-          }
-
-          .page-title {
-            font-size: 21px !important; 
-            line-height: normal !important; 
-            white-space: nowrap !important; 
-          }
-
-          .tabs-container {
-            padding: 4px !important;
-            margin-bottom: 20px !important;
-            max-width: 100%;
-          }
-          .tab-toggle-button {
-            padding: 10px !important;
-            font-size: 13px !important;
-          }
-          .mobile-select-menu, .mobile-input-field {
-            font-size: 16px !important; 
           }
         }
       `}</style>

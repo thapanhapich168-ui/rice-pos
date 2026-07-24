@@ -5,12 +5,15 @@ import { supabase } from '@/lib/supabaseClient'
 import { formatRiel, formatUSD, formatNumber, parseOwner, EXCHANGE_RATE } from '@/utils/formatters'
 import { CurrencyInput } from '@/components/Inputs'
 import { useToast } from '@/components/ToastProvider'
+import TableSkeleton from '@/components/TableSkeleton'
+import EmptyState from '@/components/EmptyState'
 
 const formatUSDEquiv = (vRiel: number) => formatUSD(vRiel / EXCHANGE_RATE);
 
 export default function DashboardPage() {
   const { showToast } = useToast();
 
+  const [isLoading, setIsLoading] = useState(true)
   const [wholesaleSales, setWholesaleSales] = useState<any[]>([])
   const [retailSales, setRetailSales] = useState<any[]>([])
   const [invoiceSummaries, setInvoiceSummaries] = useState<any[]>([])
@@ -43,6 +46,7 @@ export default function DashboardPage() {
 
   useEffect(() => {
     async function loadData() {
+      setIsLoading(true);
       // 🚀 100K LOAD PROBLEM FIX: Smart Data Filtering!
       
       // Calculate exactly the first day of last month to fetch only relevant metric data
@@ -93,6 +97,7 @@ export default function DashboardPage() {
           if (s.setting_key === 'family_owe_usd') setFamilyOweUsd(Number(s.setting_value) || 0)
         })
       }
+      setIsLoading(false);
     }
 
     loadData();
@@ -706,33 +711,34 @@ export default function DashboardPage() {
       {/* HEADER */}
       <div className="header-container">
         <div className="header-left">
-          <h1 className="page-title">📊 Business Dashboard</h1>
+          <h1 className="saas-page-title">📊 Business Dashboard</h1>
         </div>
       </div>
 
-      <div style={{ display: 'flex', gap: '8px', marginBottom: '24px', background: '#ffffff', padding: '6px', borderRadius: '8px', border: '1px solid #e2e8f0', width: 'fit-content', flexWrap: 'wrap' }}>
-        <button onClick={() => setActiveTab('summary')} style={{ padding: '10px 20px', borderRadius: '6px', border: 'none', cursor: 'pointer', fontSize: '14px', fontWeight: 'bold', background: activeTab === 'summary' ? '#b58a3d' : 'transparent', color: activeTab === 'summary' ? '#fff' : '#64748b', transition: 'all 0.2s' }}>📈 Business Summary</button>
-        <button onClick={() => setActiveTab('wholesale')} style={{ padding: '10px 20px', borderRadius: '6px', border: 'none', cursor: 'pointer', fontSize: '14px', fontWeight: 'bold', background: activeTab === 'wholesale' ? '#b58a3d' : 'transparent', color: activeTab === 'wholesale' ? '#fff' : '#64748b', transition: 'all 0.2s' }}>🌾 Wholesale Data</button>
-        <button onClick={() => setActiveTab('retail')} style={{ padding: '10px 20px', borderRadius: '6px', border: 'none', cursor: 'pointer', fontSize: '14px', fontWeight: 'bold', background: activeTab === 'retail' ? '#b58a3d' : 'transparent', color: activeTab === 'retail' ? '#fff' : '#64748b', transition: 'all 0.2s' }}>🛍️ Retail Data</button>
-        <button onClick={() => setActiveTab('asset')} style={{ padding: '10px 20px', borderRadius: '6px', border: 'none', cursor: 'pointer', fontSize: '14px', fontWeight: 'bold', background: activeTab === 'asset' ? '#10b981' : 'transparent', color: activeTab === 'asset' ? '#fff' : '#64748b', transition: 'all 0.2s' }}>💰 Business Asset</button>
+      <div className="saas-tab-container" style={{ width: 'fit-content' }}>
+        <button onClick={() => setActiveTab('summary')} className={`saas-tab ${activeTab === 'summary' ? 'active' : ''}`}>📈 Business Summary</button>
+        <button onClick={() => setActiveTab('wholesale')} className={`saas-tab ${activeTab === 'wholesale' ? 'active' : ''}`}>🌾 Wholesale Data</button>
+        <button onClick={() => setActiveTab('retail')} className={`saas-tab ${activeTab === 'retail' ? 'active' : ''}`}>🛍️ Retail Data</button>
+        <button onClick={() => setActiveTab('asset')} className={`saas-tab ${activeTab === 'asset' ? 'active' : ''}`} style={activeTab === 'asset' ? { background: '#10b981', color: '#fff' } : {}}>💰 Business Asset</button>
       </div>
 
       <div>
         
         {activeTab === 'asset' && (
           <div className="fade-in">
-            <div style={{ display: 'flex', gap: '8px', marginBottom: '24px', flexWrap: 'wrap' }}>
+            <div className="saas-tab-container" style={{ margin: '0 0 24px 0', padding: '4px', border: 'none', boxShadow: 'none', background: '#f1f5f9', flexWrap: 'wrap' }}>
               {['today', 'yesterday', 'week', 'month', 'all'].map((f: any) => (
                 <button 
                   key={f} onClick={() => setAssetFilter(f)} 
-                  style={{ padding: '8px 16px', borderRadius: '20px', border: assetFilter === f ? 'none' : '1px solid #cbd5e1', background: assetFilter === f ? '#0f172a' : '#fff', color: assetFilter === f ? '#fff' : '#475569', cursor: 'pointer', fontSize: '13px', fontWeight: 'bold', textTransform: 'capitalize' }}
+                  className={`saas-tab ${assetFilter === f ? 'active' : ''}`}
+                  style={assetFilter === f ? { background: '#0f172a', color: '#fff', padding: '8px 16px' } : { padding: '8px 16px' }}
                 >
                   {f === 'week' ? 'This Week' : f === 'month' ? 'This Month' : f === 'all' ? 'All Time' : f}
                 </button>
               ))}
             </div>
 
-            <div style={{ marginBottom: '24px', background: '#fff', border: '1px solid #e2e8f0', borderRadius: '12px', overflow: 'hidden', boxShadow: '0 2px 4px rgba(0,0,0,0.02)' }}>
+            <div className="saas-card" style={{ padding: 0, marginBottom: '24px', overflow: 'hidden' }}>
               <button 
                 onClick={() => setShowStartingBalance(!showStartingBalance)}
                 style={{ width: '100%', padding: '16px 24px', background: '#f8fafc', border: 'none', textAlign: 'left', fontWeight: 'bold', color: '#475569', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '14px' }}
@@ -747,39 +753,39 @@ export default function DashboardPage() {
                 <div style={{ padding: '24px', borderTop: '1px solid #e2e8f0', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '16px', background: '#ffffff' }}>
                   <div>
                     <label style={{ display: 'block', fontSize: '12px', color: '#475569', marginBottom: '6px', fontWeight: 'bold' }}>Base Capital (៛)</label>
-                    <CurrencyInput value={baseCapital} onChange={(v: any) => setBaseCapital(Number(v) || 0)} onBlur={() => updateSetting('base_capital', baseCapital)} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', outline: 'none', color: '#334155', boxSizing: 'border-box', fontSize: '14px' }} />
+                    <CurrencyInput value={baseCapital} onChange={(v: any) => setBaseCapital(Number(v) || 0)} onBlur={() => updateSetting('base_capital', baseCapital)} className="saas-input" style={{ width: '100%', textAlign: 'left' }} />
                   </div>
                   <div>
                     <label style={{ display: 'block', fontSize: '12px', color: '#475569', marginBottom: '6px', fontWeight: 'bold' }}>Initial Cash (៛)</label>
-                    <CurrencyInput value={initCashRiel} onChange={(v: any) => setInitCashRiel(Number(v) || 0)} onBlur={() => updateSetting('initial_cash_riel', initCashRiel)} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', outline: 'none', color: '#334155', boxSizing: 'border-box', fontSize: '14px' }} />
+                    <CurrencyInput value={initCashRiel} onChange={(v: any) => setInitCashRiel(Number(v) || 0)} onBlur={() => updateSetting('initial_cash_riel', initCashRiel)} className="saas-input" style={{ width: '100%', textAlign: 'left' }} />
                   </div>
                   <div>
                     <label style={{ display: 'block', fontSize: '12px', color: '#475569', marginBottom: '6px', fontWeight: 'bold' }}>Initial Cash ($)</label>
-                    <CurrencyInput value={initCashUsd} onChange={(v: any) => setInitCashUsd(Number(v) || 0)} onBlur={() => updateSetting('initial_cash_usd', initCashUsd)} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', outline: 'none', color: '#334155', boxSizing: 'border-box', fontSize: '14px' }} />
+                    <CurrencyInput value={initCashUsd} onChange={(v: any) => setInitCashUsd(Number(v) || 0)} onBlur={() => updateSetting('initial_cash_usd', initCashUsd)} className="saas-input" style={{ width: '100%', textAlign: 'left' }} />
                   </div>
                   <div>
                     <label style={{ display: 'block', fontSize: '12px', color: '#475569', marginBottom: '6px', fontWeight: 'bold' }}>Initial QR (៛)</label>
-                    <CurrencyInput value={initQrRiel} onChange={(v: any) => setInitQrRiel(Number(v) || 0)} onBlur={() => updateSetting('initial_qr_riel', initQrRiel)} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', outline: 'none', color: '#334155', boxSizing: 'border-box', fontSize: '14px' }} />
+                    <CurrencyInput value={initQrRiel} onChange={(v: any) => setInitQrRiel(Number(v) || 0)} onBlur={() => updateSetting('initial_qr_riel', initQrRiel)} className="saas-input" style={{ width: '100%', textAlign: 'left' }} />
                   </div>
                   <div>
                     <label style={{ display: 'block', fontSize: '12px', color: '#475569', marginBottom: '6px', fontWeight: 'bold' }}>Initial QR ($)</label>
-                    <CurrencyInput value={initQrUsd} onChange={(v: any) => setInitQrUsd(Number(v) || 0)} onBlur={() => updateSetting('initial_qr_usd', initQrUsd)} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', outline: 'none', color: '#334155', boxSizing: 'border-box', fontSize: '14px' }} />
+                    <CurrencyInput value={initQrUsd} onChange={(v: any) => setInitQrUsd(Number(v) || 0)} onBlur={() => updateSetting('initial_qr_usd', initQrUsd)} className="saas-input" style={{ width: '100%', textAlign: 'left' }} />
                   </div>
                   <div>
                     <label style={{ display: 'block', fontSize: '12px', color: '#475569', marginBottom: '6px', fontWeight: 'bold' }}>Family Owes Me (៛)</label>
-                    <CurrencyInput value={familyOweRiel} onChange={(v: any) => setFamilyOweRiel(Number(v) || 0)} onBlur={() => updateSetting('family_owe_riel', familyOweRiel)} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', outline: 'none', color: '#334155', boxSizing: 'border-box', fontSize: '14px' }} />
+                    <CurrencyInput value={familyOweRiel} onChange={(v: any) => setFamilyOweRiel(Number(v) || 0)} onBlur={() => updateSetting('family_owe_riel', familyOweRiel)} className="saas-input" style={{ width: '100%', textAlign: 'left' }} />
                   </div>
                   <div>
                     <label style={{ display: 'block', fontSize: '12px', color: '#475569', marginBottom: '6px', fontWeight: 'bold' }}>Family Owes Me ($)</label>
-                    <CurrencyInput value={familyOweUsd} onChange={(v: any) => setFamilyOweUsd(Number(v) || 0)} onBlur={() => updateSetting('family_owe_usd', familyOweUsd)} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', outline: 'none', color: '#334155', boxSizing: 'border-box', fontSize: '14px' }} />
+                    <CurrencyInput value={familyOweUsd} onChange={(v: any) => setFamilyOweUsd(Number(v) || 0)} onBlur={() => updateSetting('family_owe_usd', familyOweUsd)} className="saas-input" style={{ width: '100%', textAlign: 'left' }} />
                   </div>
                   <div>
                     <label style={{ display: 'block', fontSize: '12px', color: '#475569', marginBottom: '6px', fontWeight: 'bold' }}>Mom Starting Owe (៛)</label>
-                    <CurrencyInput value={persOweRiel} onChange={(v: any) => setPersOweRiel(Number(v) || 0)} onBlur={() => updateSetting('personal_owe_riel', persOweRiel)} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', outline: 'none', color: '#334155', boxSizing: 'border-box', fontSize: '14px' }} />
+                    <CurrencyInput value={persOweRiel} onChange={(v: any) => setPersOweRiel(Number(v) || 0)} onBlur={() => updateSetting('personal_owe_riel', persOweRiel)} className="saas-input" style={{ width: '100%', textAlign: 'left' }} />
                   </div>
                   <div>
                     <label style={{ display: 'block', fontSize: '12px', color: '#475569', marginBottom: '6px', fontWeight: 'bold' }}>Mom Starting Owe ($)</label>
-                    <CurrencyInput value={persOweUsd} onChange={(v: any) => setPersOweUsd(Number(v) || 0)} onBlur={() => updateSetting('personal_owe_usd', persOweUsd)} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', outline: 'none', color: '#334155', boxSizing: 'border-box', fontSize: '14px' }} />
+                    <CurrencyInput value={persOweUsd} onChange={(v: any) => setPersOweUsd(Number(v) || 0)} onBlur={() => updateSetting('personal_owe_usd', persOweUsd)} className="saas-input" style={{ width: '100%', textAlign: 'left' }} />
                   </div>
                 </div>
               )}
@@ -787,20 +793,21 @@ export default function DashboardPage() {
 
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '16px', marginBottom: '16px' }}>
               
-              <div style={{ background: '#ecfdf5', padding: '24px', borderRadius: '16px', border: '1px solid #a7f3d0', boxShadow: '0 8px 16px -4px rgba(16, 185, 129, 0.08)' }}>
-                <div style={{ fontSize: '13px', fontWeight: 'bold', color: '#047857', textTransform: 'uppercase', letterSpacing: '0.5px' }}>💵 Total Net Worth</div>
+              <div className="saas-card mint">
+                <div className="saas-card-title">💵 Total Net Worth</div>
                 <div style={{ display: 'flex', gap: '16px', alignItems: 'baseline', margin: '12px 0 0 0' }}>
                   <div style={{ fontSize: '28px', fontWeight: 'bold', color: '#10b981' }}>{formatRiel(assetData.netWorthRiel)}</div>
                   <div style={{ fontSize: '18px', fontWeight: 'bold', color: '#34d399' }}>{formatUSD(assetData.netWorthUsd)}</div>
                 </div>
               </div>
 
-              <div style={{ background: '#ecfdf5', padding: '24px', borderRadius: '16px', border: '1px solid #a7f3d0', boxShadow: '0 8px 16px -4px rgba(16, 185, 129, 0.08)' }}>
-                <div style={{ fontSize: '13px', fontWeight: 'bold', color: '#047857', textTransform: 'uppercase', letterSpacing: '0.5px' }}>📦 Total Rice Stock Asset</div>
+              <div className="saas-card mint">
+                <div className="saas-card-title">📦 Total Rice Stock Asset</div>
                 <div style={{ fontSize: '28px', margin: '12px 0 0 0', fontWeight: 'bold', color: '#10b981' }}>{formatRiel(assetData.riceStockValue)}</div>
               </div>
-              <div style={{ background: '#fff', padding: '24px', borderRadius: '16px', border: '1px solid #e2e8f0', boxShadow: '0 4px 6px rgba(0,0,0,0.02)' }}>
-                <div style={{ fontSize: '13px', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 'bold' }}>💵 Cash on Hand</div>
+
+              <div className="saas-card">
+                <div className="saas-card-title">💵 Cash on Hand</div>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginTop: '16px' }}>
                   <div>
                     <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 'bold', textTransform: 'uppercase' }}>Riel (៛)</span>
@@ -812,8 +819,9 @@ export default function DashboardPage() {
                   </div>
                 </div>
               </div>
-              <div style={{ background: '#fff', padding: '24px', borderRadius: '16px', border: '1px solid #e2e8f0', boxShadow: '0 4px 6px rgba(0,0,0,0.02)' }}>
-                <div style={{ fontSize: '13px', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 'bold' }}>📱 Bank (QR Payments)</div>
+
+              <div className="saas-card">
+                <div className="saas-card-title">📱 Bank (QR Payments)</div>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginTop: '16px' }}>
                   <div>
                     <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 'bold', textTransform: 'uppercase' }}>Riel (៛)</span>
@@ -828,8 +836,8 @@ export default function DashboardPage() {
             </div>
 
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '16px', marginBottom: '32px' }}>
-              <div style={{ background: '#fff', padding: '24px', borderRadius: '16px', border: '1px solid #e2e8f0', boxShadow: '0 4px 6px rgba(0,0,0,0.02)' }}>
-                <div style={{ fontSize: '13px', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 'bold' }}>📒 Accounts Receivable (AR)</div>
+              <div className="saas-card">
+                <div className="saas-card-title">📒 Accounts Receivable (AR)</div>
                 <div style={{ display: 'flex', gap: '16px', margin: '12px 0' }}>
                   <div>
                     <div style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 'bold', textTransform: 'uppercase', marginBottom: '2px' }}>Total ៛</div>
@@ -859,8 +867,8 @@ export default function DashboardPage() {
                 </div>
               </div>
 
-              <div style={{ background: '#fff', padding: '24px', borderRadius: '16px', border: '1px solid #bbf7d0', boxShadow: '0 4px 6px rgba(0,0,0,0.02)' }}>
-                <div style={{ fontSize: '13px', color: '#047857', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 'bold' }}>👩 Mom Receivables</div>
+              <div className="saas-card" style={{ border: '1px solid #bbf7d0' }}>
+                <div className="saas-card-title" style={{ color: '#047857' }}>👩 Mom Receivables</div>
                 
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginTop: '16px' }}>
                   <div>
@@ -874,20 +882,20 @@ export default function DashboardPage() {
                 </div>
               </div>
               
-              <div style={{ background: '#fff', padding: '24px', borderRadius: '16px', border: '1px solid #fecaca', boxShadow: '0 4px 6px rgba(0,0,0,0.02)' }}>
-                <div style={{ fontSize: '13px', color: '#be123c', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 'bold' }}>📉 Accounts Payable (Suppliers)</div>
+              <div className="saas-card red">
+                <div className="saas-card-title">📉 Accounts Payable (Suppliers)</div>
                 <div style={{ fontSize: '24px', margin: '8px 0 4px 0', color: '#e11d48', fontWeight: 'bold' }}>{formatRiel(assetData.totalSupplierAPRiel)}</div>
                 <div style={{ fontSize: '20px', color: '#e11d48', fontWeight: 'bold' }}>{formatUSD(assetData.totalSupplierAPUsd)}</div>
               </div>
 
-              <div style={{ background: '#fff', padding: '24px', borderRadius: '16px', border: '1px solid #fecaca', boxShadow: '0 4px 6px rgba(0,0,0,0.02)' }}>
-                <div style={{ fontSize: '13px', color: '#be123c', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 'bold' }}>📉 Personal Liability (Owe Mom)</div>
+              <div className="saas-card red">
+                <div className="saas-card-title">📉 Personal Liability (Owe Mom)</div>
                 <div style={{ fontSize: '24px', margin: '8px 0 4px 0', color: '#e11d48', fontWeight: 'bold' }}>{formatRiel(assetData.liveMomLiabilityRiel)}</div>
                 <div style={{ fontSize: '20px', color: '#e11d48', fontWeight: 'bold' }}>{formatUSD(assetData.liveMomLiabilityUsd)}</div>
               </div>
 
-              <div style={{ background: '#fff', padding: '24px', borderRadius: '16px', border: '1px solid #e2e8f0', boxShadow: '0 4px 6px rgba(0,0,0,0.02)', gridColumn: '1 / -1' }}>
-                <div style={{ fontSize: '13px', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 'bold', marginBottom: '16px' }}>📉 Operating & Capital Expenses</div>
+              <div className="saas-card" style={{ gridColumn: '1 / -1' }}>
+                <div className="saas-card-title" style={{ marginBottom: '16px' }}>📉 Operating & Capital Expenses</div>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px' }}>
                   
                   <div style={{ padding: '16px', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
@@ -920,7 +928,7 @@ export default function DashboardPage() {
 
             <h3 style={{ margin: '0 0 16px 0', fontSize: '14px', color: '#1e293b', textTransform: 'uppercase' }}>🌾 Detailed Inventory Valuation</h3>
             
-            <div style={{ display: 'flex', gap: '8px', marginBottom: '16px', overflowX: 'auto', paddingBottom: '4px' }}>
+            <div className="saas-tab-container hide-scrollbar" style={{ border: 'none', padding: 0, boxShadow: 'none', margin: '0 0 16px 0', flexWrap: 'nowrap', overflowX: 'auto' }}>
               {invTabOrder.map(tab => {
                 const labels: any = {
                   wholesale_active: '🌾 Active Wholesale',
@@ -944,13 +952,8 @@ export default function DashboardPage() {
                       });
                     }}
                     onClick={() => setInvTab(tab as any)}
-                    style={{
-                      padding: '8px 16px', borderRadius: '20px', cursor: 'grab', fontSize: '13px', fontWeight: 'bold', whiteSpace: 'nowrap',
-                      border: invTab === tab ? 'none' : '1px solid #cbd5e1',
-                      background: invTab === tab ? '#b58a3d' : '#fff',
-                      color: invTab === tab ? '#fff' : '#475569',
-                      boxShadow: invTab === tab ? '0 2px 4px rgba(181,138,61,0.3)' : 'none'
-                    }}
+                    className={`saas-tab ${invTab === tab ? 'active' : ''}`}
+                    style={{ cursor: 'grab' }}
                   >
                     {labels[tab]}
                   </button>
@@ -958,10 +961,10 @@ export default function DashboardPage() {
               })}
             </div>
 
-            <div style={{ background: '#fff', borderRadius: '12px', border: '1px solid #e2e8f0', overflow: 'hidden', boxShadow: '0 2px 4px rgba(0,0,0,0.02)', marginBottom: '32px' }}>
-              <div style={{ overflowX: 'auto' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '14px', minWidth: '600px' }}>
-                  <thead style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0' }}>
+            <div className="saas-table-wrapper" style={{ marginBottom: '32px' }}>
+              <div className="saas-table-responsive">
+                <table className="saas-table">
+                  <thead>
                     <tr>
                       {[
                         { key: 'name', label: 'Product & Batches', align: 'left' },
@@ -971,12 +974,13 @@ export default function DashboardPage() {
                       ].map(col => (
                         <th 
                           key={col.key}
+                          className="saas-th"
                           onClick={() => {
                             let direction: 'asc' | 'desc' = 'asc';
                             if (invSortConfig && invSortConfig.key === col.key && invSortConfig.direction === 'asc') direction = 'desc';
                             setInvSortConfig({ key: col.key, direction });
                           }}
-                          style={{ padding: '14px 20px', textAlign: col.align as any, color: '#64748b', fontWeight: 'bold', cursor: 'pointer', userSelect: 'none' }}
+                          style={{ textAlign: col.align as any, cursor: 'pointer', userSelect: 'none' }}
                         >
                           {col.label}
                           <span style={{ marginLeft: '6px', fontSize: '12px', opacity: invSortConfig?.key === col.key ? 1 : 0.3 }}>
@@ -987,8 +991,18 @@ export default function DashboardPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {filteredAndSortedInventory.length === 0 ? (
-                      <tr><td colSpan={4} style={{ padding: '40px', textAlign: 'center', color: '#94a3b8' }}>No products found in this tab.</td></tr>
+                    {isLoading ? (
+                      <TableSkeleton columns={4} rows={6} />
+                    ) : filteredAndSortedInventory.length === 0 ? (
+                      <tr>
+                        <td colSpan={4} style={{ padding: 0 }}>
+                          <EmptyState 
+                            icon="📦" 
+                            title="No products found" 
+                            message="There are no inventory items matching this tab." 
+                          />
+                        </td>
+                      </tr>
                     ) : (
                       filteredAndSortedInventory.map((item: any) => {
                         const valData = assetData.productValuations[item.id];
@@ -1034,17 +1048,17 @@ export default function DashboardPage() {
                             {displayRows.map((row: any, rIdx: number) => {
                                const isLast = rIdx === displayRows.length - 1;
                                return (
-                                 <tr key={row.id} style={{ borderBottom: isLast ? '1px solid #f1f5f9' : 'none', background: row.isMain ? '#ffffff' : '#f8fafc' }}>
-                                   <td style={{ padding: row.isMain ? '14px 20px' : '8px 20px 8px 40px', color: row.isMain ? '#1e293b' : '#64748b', fontWeight: row.isMain ? 'bold' : 'normal', fontSize: row.isMain ? '14px' : '12px' }}>
+                                 <tr key={row.id} className="saas-tr" style={{ borderBottom: isLast ? '1px solid #f1f5f9' : 'none', background: row.isMain ? '#ffffff' : '#f8fafc' }}>
+                                   <td className="saas-td" style={{ padding: row.isMain ? '14px 20px' : '8px 20px 8px 40px', color: row.isMain ? '#1e293b' : '#64748b', fontWeight: row.isMain ? 'bold' : 'normal', fontSize: row.isMain ? '14px' : '12px' }}>
                                      {row.label}
                                    </td>
-                                   <td style={{ padding: row.isMain ? '14px 20px' : '8px 20px', textAlign: 'center', color: (row.qty < 10 && row.isMain) ? '#ef4444' : '#475569', fontWeight: row.isMain ? 'bold' : 'normal', fontSize: row.isMain ? '14px' : '13px' }}>
+                                   <td className="saas-td" style={{ padding: row.isMain ? '14px 20px' : '8px 20px', textAlign: 'center', color: (row.qty < 10 && row.isMain) ? '#ef4444' : '#475569', fontWeight: row.isMain ? 'bold' : 'normal', fontSize: row.isMain ? '14px' : '13px' }}>
                                      {formatNumber(row.qty)}
                                    </td>
-                                   <td style={{ padding: row.isMain ? '14px 20px' : '8px 20px', textAlign: 'right', color: '#64748b', fontWeight: 'bold', fontSize: row.isMain ? '14px' : '13px' }}>
+                                   <td className="saas-td" style={{ padding: row.isMain ? '14px 20px' : '8px 20px', textAlign: 'right', color: '#64748b', fontWeight: 'bold', fontSize: row.isMain ? '14px' : '13px' }}>
                                      {formatRiel(row.cost)}
                                    </td>
-                                   <td style={{ padding: row.isMain ? '14px 20px' : '8px 20px', textAlign: 'right', color: '#10b981', fontWeight: row.isMain ? 'bold' : 'normal', fontSize: row.isMain ? '14px' : '13px' }}>
+                                   <td className="saas-td" style={{ padding: row.isMain ? '14px 20px' : '8px 20px', textAlign: 'right', color: '#10b981', fontWeight: row.isMain ? 'bold' : 'normal', fontSize: row.isMain ? '14px' : '13px' }}>
                                      {formatRiel(row.total)}
                                    </td>
                                  </tr>
@@ -1118,7 +1132,7 @@ export default function DashboardPage() {
             )}
 
             <h2 className="section-divider" style={{ fontWeight: 'bold' }}>⚖️ COMPARE MTD VS LAST MONTH</h2>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '20px', background: '#fff', padding: '24px', borderRadius: '12px', border: '1px solid #e2e8f0', marginBottom: '32px' }}>
+            <div className="saas-card" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '20px', marginBottom: '32px' }}>
               <HealthBar title="Sales" current={mtdM.totalSales} target={lastMonthM.totalSales} color="#2563eb" />
               <HealthBar title="Profit" current={mtdM.totalProfit} target={lastMonthM.totalProfit} color="#10b981" />
               {activeTab === 'summary' && (
@@ -1140,31 +1154,6 @@ export default function DashboardPage() {
       </div>
 
       <style jsx global>{`
-        input, select, button, textarea {
-          font-family: inherit;
-          font-variant-numeric: tabular-nums lining-nums;
-        }
-        body { 
-          font-variant-numeric: tabular-nums lining-nums; 
-          overflow-x: hidden !important;
-          width: 100vw;
-          margin: 0;
-        }
-        
-        .main-wrapper { 
-          padding: max(20px, env(safe-area-inset-top, 20px)) 24px 24px 24px; 
-          background: #f8fafc; 
-          font-family: Arial, sans-serif; 
-          box-sizing: border-box; 
-          color: #333;
-          height: 100dvh;
-          overflow-y: auto;
-          overflow-x: hidden !important;
-          -webkit-overflow-scrolling: touch;
-          width: 100vw;
-          max-width: 100%;
-        }
-        
         .header-container { 
           display: flex;
           justify-content: flex-start;
@@ -1185,34 +1174,16 @@ export default function DashboardPage() {
           gap: 12px;
         }
 
-        .page-title { 
-          font-size: 24px !important; 
-          color: #4a3b1b !important; 
-          margin: 0 !important; 
-          font-weight: bold;
-          letter-spacing: -0.5px;
-          line-height: normal !important; 
-          display: flex;
-          align-items: center;
-          min-width: 0;
-          white-space: nowrap !important; 
-        }
-
         .section-divider { font-size: 15px; color: #475569; margin-bottom: 16px; border-bottom: 1px solid #e2e8f0; padding-bottom: 6px; }
         .fade-in { animation: fadeIn 0.3s ease-in-out; }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
         input[type="text"].no-spinners::-webkit-inner-spin-button, input[type="text"].no-spinners::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
         
+        .hide-scrollbar::-webkit-scrollbar { display: none; }
+        .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+        
         /* 🔥 MOBILE LAYOUT FIXES */
         @media (max-width: 1023px) { 
-          .main-wrapper { 
-            padding: max(20px, env(safe-area-inset-top, 20px)) 16px 16px 16px !important; 
-            height: 100dvh !important;
-            overflow-y: auto !important;
-            overflow-x: hidden !important;
-            -webkit-overflow-scrolling: touch !important;
-            width: 100vw !important;
-          }
           .header-container { 
             margin-left: 54px !important;
             margin-right: 0 !important;
@@ -1231,11 +1202,6 @@ export default function DashboardPage() {
             align-items: center !important;
             gap: 12px !important;
           }
-          .page-title {
-            font-size: 21px !important; 
-            line-height: normal !important; 
-            white-space: nowrap !important; 
-          }
         }
       `}</style>
     </div>
@@ -1244,8 +1210,8 @@ export default function DashboardPage() {
 
 function TopPerformersCard({ title, data, type }: any) {
   return (
-    <div style={{ background: '#ffffff', padding: '20px', borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: '0 4px 6px rgba(0,0,0,0.02)' }}>
-      <h3 style={{ margin: 0, fontSize: '13px', color: '#64748b', textTransform: 'uppercase', fontWeight: 'bold', marginBottom: '16px' }}>{title}</h3>
+    <div className="saas-card">
+      <h3 className="saas-card-title">{title}</h3>
       {data.length === 0 ? <div style={{ fontSize: '13px', color: '#94a3b8' }}>No data available.</div> : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
           {data.map((item: any, idx: number) => (
@@ -1268,8 +1234,8 @@ function TopPerformersCard({ title, data, type }: any) {
 
 function ComplexCard({ title, total, pich = 0, jing = 0, both = 0, mom = 0, hideSubboxes = false, hideUsdEquiv = false, color = '#1e293b' }: any) {
   return (
-    <div style={{ background: '#ffffff', padding: '20px', borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: '0 4px 6px rgba(0,0,0,0.02)' }}>
-      <h3 style={{ margin: 0, fontSize: '13px', color: '#64748b', textTransform: 'uppercase', fontWeight: 'bold' }}>{title}</h3>
+    <div className="saas-card">
+      <h3 className="saas-card-title">{title}</h3>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px' }}>
         <h2 style={{ margin: '8px 0 4px 0', fontSize: '22px', color: color, fontWeight: 'bold' }}>{formatRiel(total)}</h2>
       </div>
@@ -1307,8 +1273,8 @@ function ExpenseBreakdownCard({ title, cR = 0, cU = 0, qR = 0, qU = 0, color = '
   const totalUsd = cU + qU;
   
   return (
-    <div style={{ background: '#ffffff', padding: '20px', borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: '0 4px 6px rgba(0,0,0,0.02)' }}>
-      <h3 style={{ margin: 0, fontSize: '13px', color: '#64748b', textTransform: 'uppercase', fontWeight: 'bold' }}>{title}</h3>
+    <div className="saas-card">
+      <h3 className="saas-card-title">{title}</h3>
       
       <div style={{ display: 'flex', gap: '16px', margin: '12px 0 16px 0' }}>
         <div style={{ fontSize: '22px', color: color, fontWeight: 'bold' }}>{formatRiel(totalRiel)}</div>
@@ -1370,7 +1336,7 @@ function LineChartCard({ title, dataCurrent, dataLast, color }: any) {
   }
   const currentPoints = formatPoints(dataCurrent); const lastPoints = formatPoints(dataLast);
   return (
-    <div style={{ background: '#ffffff', padding: '24px', borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: '0 4px 6px rgba(0,0,0,0.02)' }}>
+    <div className="saas-card">
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '12px' }}>
         <h3 style={{ margin: 0, fontSize: '14px', color: '#475569', fontWeight: 'bold' }}>{title}</h3>
         <div style={{ display: 'flex', gap: '16px', fontSize: '12px', fontWeight: 'bold' }}>

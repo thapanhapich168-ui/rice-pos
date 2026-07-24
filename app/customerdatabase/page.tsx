@@ -5,6 +5,10 @@ import { supabase } from '@/lib/supabaseClient'
 import { useFocusRefresh } from '@/lib/useFocusRefresh'
 import { Customer } from '@/types'
 import { useToast } from '@/components/ToastProvider'
+import { useDebounce } from '@/lib/useDebounce'
+import TableSkeleton from '@/components/TableSkeleton'
+import EmptyState from '@/components/EmptyState'
+import Modal from '@/components/Modal'
 
 type SortConfig = {
   key: keyof Customer;
@@ -26,7 +30,9 @@ export default function CustomerDatabasePage() {
 
   // --- CORE STATE ---
   const [customers, setCustomers] = useState<Customer[]>([])
+  const [isLoading, setIsLoading] = useState(true)
   const [searchQuery, setSearchQuery] = useState('')
+  const debouncedSearch = useDebounce(searchQuery, 300) // 🚀 Lightning fast mobile search
   const [edits, setEdits] = useState<Record<string, Partial<Customer>>>({})
   const [selectedToDelete, setSelectedToDelete] = useState<Set<string>>(new Set())
   const [hoveredId, setHoveredId] = useState<string | null>(null)
@@ -80,6 +86,7 @@ export default function CustomerDatabasePage() {
   }
 
   async function loadCustomers() {
+    setIsLoading(true)
     const { data, error } = await supabase
       .from('customers')
       .select('*')
@@ -90,6 +97,7 @@ export default function CustomerDatabasePage() {
       setCustomers(data as Customer[])
       setEdits({})
     }
+    setIsLoading(false)
   }
 
   // --- RECORD OPERATIONS ---
@@ -230,8 +238,9 @@ export default function CustomerDatabasePage() {
       if (customerTypeFilter !== 'All' && c.type !== customerTypeFilter) return false;
       if (ownerFilter !== 'All' && c.owner !== ownerFilter) return false;
 
-      if (searchQuery) {
-        const q = searchQuery.toLowerCase();
+      // 🚀 Now uses debouncedSearch for huge performance boost on mobile
+      if (debouncedSearch) {
+        const q = debouncedSearch.toLowerCase();
         return (
           c.name?.toLowerCase().includes(q) ||
           c.phone?.toLowerCase().includes(q) ||
@@ -310,12 +319,12 @@ export default function CustomerDatabasePage() {
       {/* HEADER */}
       <div className="header-container">
         <div className="header-left">
-          <h1 className="page-title">🧑‍🌾 Customer Database</h1>
+          <h1 className="saas-page-title">🧑‍🌾 Customer Database</h1>
         </div>
 
         <div className="header-actions">
           {selectedToDelete.size > 0 && (
-            <button className="delete-btn" onClick={handleDelete}>
+            <button className="saas-btn saas-btn-danger" onClick={handleDelete}>
               Delete ({selectedToDelete.size})
             </button>
           )}
@@ -323,417 +332,309 @@ export default function CustomerDatabasePage() {
       </div>
 
       {/* TOOLBAR */}
-      <div className="toolbar-container">
-        <input 
-          className="toolbar-search" 
-          placeholder="🔍 Search by name, phone, or location..." 
-          value={searchQuery} 
-          onChange={(e) => setSearchQuery(e.target.value)} 
-          onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
-        />
-        <button className="add-btn-inline" onClick={() => setShowAddModal(true)}>
-          <span style={{ color: '#10b981', fontSize: '16px', marginRight: '4px', fontWeight: 'bold' }}>+</span>
-          Add Customer
-        </button>
-      </div>
+      <div className="saas-card" style={{ padding: '16px', marginBottom: '24px' }}>
+        
+        {/* Top Row: Search & Add Button */}
+        <div style={{ display: 'flex', gap: '12px', marginBottom: '16px', flexWrap: 'wrap' }}>
+          <input 
+            className="saas-input" 
+            placeholder="🔍 Search by name, phone, or location..." 
+            value={searchQuery} 
+            onChange={(e) => setSearchQuery(e.target.value)} 
+            onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
+            style={{ flex: 1, minWidth: '200px' }}
+          />
+          <button className="saas-btn saas-btn-primary" onClick={() => setShowAddModal(true)}>
+            <span style={{ fontSize: '16px', marginRight: '4px', fontWeight: 'bold' }}>+</span>
+            Add Customer
+          </button>
+        </div>
 
-      {/* OWNER PRE-FILTERS */}
-      <div className="hide-scrollbar" style={{ display: 'flex', overflowX: 'auto', gap: '8px', paddingBottom: '12px', marginBottom: '8px' }}>
-        <button 
-          onClick={() => setOwnerFilter('All')} 
-          style={{ padding: '8px 16px', borderRadius: '20px', border: ownerFilter === 'All' ? 'none' : '1px solid #cbd5e1', backgroundColor: ownerFilter === 'All' ? '#3b82f6' : '#ffffff', color: ownerFilter === 'All' ? '#fff' : '#475569', fontWeight: 'bold', cursor: 'pointer', fontSize: '13px', whiteSpace: 'nowrap' }}
-        >
-          All Owners
-        </button>
-        {(['Pich', 'Jing', 'Both', 'Mom'] as const).map(ownerItem => {
-          const filteredByType = customerTypeFilter === 'All' ? customers : customers.filter(c => c.type === customerTypeFilter);
-          const count = filteredByType.filter(c => c.owner === ownerItem).length;
-          return (
-            <button 
-              key={ownerItem} 
-              onClick={() => setOwnerFilter(ownerItem)} 
-              style={{ padding: '8px 16px', borderRadius: '20px', border: ownerFilter === ownerItem ? 'none' : '1px solid #cbd5e1', backgroundColor: ownerFilter === ownerItem ? '#3b82f6' : '#ffffff', color: ownerFilter === ownerItem ? '#fff' : '#475569', fontWeight: 'bold', cursor: 'pointer', fontSize: '13px', whiteSpace: 'nowrap' }}
-            >
-              👤 {ownerItem} ({count})
-            </button>
-          )
-        })}
-      </div>
+        {/* OWNER PRE-FILTERS */}
+        <div className="saas-tab-container hide-scrollbar" style={{ border: 'none', padding: 0, boxShadow: 'none', margin: '0 0 12px 0', flexWrap: 'nowrap', overflowX: 'auto' }}>
+          <button 
+            onClick={() => setOwnerFilter('All')} 
+            className={`saas-tab ${ownerFilter === 'All' ? 'active' : ''}`}
+          >
+            All Owners
+          </button>
+          {(['Pich', 'Jing', 'Both', 'Mom'] as const).map(ownerItem => {
+            const filteredByType = customerTypeFilter === 'All' ? customers : customers.filter(c => c.type === customerTypeFilter);
+            const count = filteredByType.filter(c => c.owner === ownerItem).length;
+            return (
+              <button 
+                key={ownerItem} 
+                onClick={() => setOwnerFilter(ownerItem)} 
+                className={`saas-tab ${ownerFilter === ownerItem ? 'active' : ''}`}
+              >
+                👤 {ownerItem} ({count})
+              </button>
+            )
+          })}
+        </div>
 
-      {/* CUSTOMER TYPE FILTERS */}
-      <div className="hide-scrollbar" style={{ display: 'flex', overflowX: 'auto', gap: '8px', paddingBottom: '16px', marginBottom: '8px' }}>
-        <button 
-          onClick={() => setCustomerTypeFilter('All')} 
-          style={{ padding: '8px 16px', borderRadius: '20px', border: customerTypeFilter === 'All' ? 'none' : '1px solid #cbd5e1', backgroundColor: customerTypeFilter === 'All' ? '#b58a3d' : '#ffffff', color: customerTypeFilter === 'All' ? '#fff' : '#475569', fontWeight: 'bold', cursor: 'pointer', fontSize: '13px', whiteSpace: 'nowrap' }}
-        >
-          All Types ({ownerFilter === 'All' ? customers.length : customers.filter(c => c.owner === ownerFilter).length})
-        </button>
-        {(['ហូប', 'លក់បាយ', 'លក់ត', 'ធ្វើនំ', 'អំណោយ'] as const).map(typeItem => {
-          const filteredByOwner = ownerFilter === 'All' ? customers : customers.filter(c => c.owner === ownerFilter);
-          const count = filteredByOwner.filter(c => c.type === typeItem).length;
-          return (
-            <button 
-              key={typeItem} 
-              onClick={() => setCustomerTypeFilter(typeItem)} 
-              style={{ padding: '8px 16px', borderRadius: '20px', border: customerTypeFilter === typeItem ? 'none' : '1px solid #cbd5e1', backgroundColor: customerTypeFilter === typeItem ? '#b58a3d' : '#ffffff', color: customerTypeFilter === typeItem ? '#fff' : '#475569', fontWeight: 'bold', cursor: 'pointer', fontSize: '13px', whiteSpace: 'nowrap' }}
-            >
-              🏷️ {typeItem} ({count})
-            </button>
-          )
-        })}
+        {/* CUSTOMER TYPE FILTERS */}
+        <div className="saas-tab-container hide-scrollbar" style={{ border: 'none', padding: 0, boxShadow: 'none', margin: 0, flexWrap: 'nowrap', overflowX: 'auto' }}>
+          <button 
+            onClick={() => setCustomerTypeFilter('All')} 
+            className={`saas-tab ${customerTypeFilter === 'All' ? 'active' : ''}`}
+          >
+            All Types ({ownerFilter === 'All' ? customers.length : customers.filter(c => c.owner === ownerFilter).length})
+          </button>
+          {(['ហូប', 'លក់បាយ', 'លក់ត', 'ធ្វើនំ', 'អំណោយ'] as const).map(typeItem => {
+            const filteredByOwner = ownerFilter === 'All' ? customers : customers.filter(c => c.owner === ownerFilter);
+            const count = filteredByOwner.filter(c => c.type === typeItem).length;
+            return (
+              <button 
+                key={typeItem} 
+                onClick={() => setCustomerTypeFilter(typeItem)} 
+                className={`saas-tab ${customerTypeFilter === typeItem ? 'active' : ''}`}
+              >
+                🏷️ {typeItem} ({count})
+              </button>
+            )
+          })}
+        </div>
       </div>
 
       {/* SPREADSHEET TABLE */}
-      <div className="table-wrapper">
-        <table style={{ borderCollapse: 'collapse', tableLayout: 'fixed', width: 'max-content', minWidth: '100%' }}>
-          <thead>
-            <tr style={{ background: '#f8fafc', borderBottom: '2px solid #e2e8f0' }}>
-              
-              {/* Checkbox Header Column */}
-              <th style={{ width: '46px', minWidth: '46px', maxWidth: '46px', padding: '16px 8px', textAlign: 'center', borderRight: '1px solid #f1f5f9' }}>
-                 <input 
-                   type="checkbox" 
-                   checked={selectedToDelete.size === processedCustomers.length && processedCustomers.length > 0}
-                   onChange={(e) => {
-                     if (e.target.checked) setSelectedToDelete(new Set(processedCustomers.map(c => String(c.id))));
-                     else setSelectedToDelete(new Set());
-                   }}
-                   style={{ cursor: 'pointer', accentColor: '#b58a3d', width: '16px', height: '16px' }}
-                 />
-              </th>
-
-              {/* 🔥 FIXED NUMBER COLUMN HEADER */}
-              <th style={{ width: '50px', minWidth: '50px', maxWidth: '50px', padding: '16px 8px', textAlign: 'center', borderRight: '1px solid #f1f5f9', color: '#475569', fontSize: '13px', fontWeight: 'bold' }}>
-                #
-              </th>
-
-              {columnOrder.map(key => (
-                <th 
-                  key={key} 
-                  draggable 
-                  onDragStart={(e) => handleDragStart(e, key as string)}
-                  onDragOver={handleDragOver}
-                  onDrop={(e) => handleDrop(e, key as string)}
-                  onClick={() => handleSort(key)}
-                  style={{ 
-                    width: columnWidths[key as string] || 150, 
-                    position: 'relative', 
-                    padding: '16px 12px', 
-                    textAlign: 'left', 
-                    color: '#475569', 
-                    fontSize: '13px', 
-                    textTransform: 'uppercase', 
-                    fontWeight: 'bold', 
-                    borderRight: '1px solid #f1f5f9', 
-                    cursor: 'pointer', 
-                    whiteSpace: 'nowrap' 
-                  }}
-                  title="Click to Sort, Drag to Reorder"
-                >
-                  {formatHeader(key as string)}
-                  <span style={{ marginLeft: '6px', fontSize: '12px', opacity: sortConfig?.key === key ? 1 : 0.3 }}>
-                    {sortConfig?.key === key ? (sortConfig.direction === 'asc' ? '↑' : '↓') : '↕'}
-                  </span>
-                  <Resizer columnKey={key as string} />
+      <div className="saas-table-wrapper">
+        <div className="saas-table-responsive">
+          <table className="saas-table" style={{ width: 'max-content', tableLayout: 'fixed' }}>
+            <thead>
+              <tr>
+                {/* Checkbox Header Column */}
+                <th className="saas-th" style={{ width: '46px', minWidth: '46px', maxWidth: '46px', padding: '16px 8px', textAlign: 'center', borderRight: '1px solid #f1f5f9' }}>
+                   <input 
+                     type="checkbox" 
+                     checked={selectedToDelete.size === processedCustomers.length && processedCustomers.length > 0}
+                     onChange={(e) => {
+                       if (e.target.checked) setSelectedToDelete(new Set(processedCustomers.map(c => String(c.id))));
+                       else setSelectedToDelete(new Set());
+                     }}
+                     style={{ cursor: 'pointer', accentColor: '#b58a3d', width: '16px', height: '16px' }}
+                   />
                 </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {processedCustomers.length === 0 ? (
-              <tr><td colSpan={columnOrder.length + 2} style={{ padding: '40px', textAlign: 'center', color: '#94a3b8' }}>No customers found.</td></tr>
-            ) : (
-              processedCustomers.map((c, index) => {
-                const cid = String(c.id);
-                return (
-                  <tr key={cid} onMouseEnter={() => setHoveredId(cid)} onMouseLeave={() => setHoveredId(null)} style={{ borderBottom: '1px solid #f1f5f9', background: edits[cid] ? '#fefcf3' : 'transparent', transition: 'background 0.2s' }}>
-                    
-                    {/* Checkbox Row Column */}
-                    <td style={{ width: '46px', padding: '8px', textAlign: 'center', borderRight: '1px solid #f1f5f9', background: edits[cid] ? '#fefcf3' : 'transparent' }}>
-                      <input 
-                        type="checkbox" 
-                        checked={selectedToDelete.has(cid)}
-                        onChange={() => {
-                          const next = new Set(selectedToDelete)
-                          next.has(cid) ? next.delete(cid) : next.add(cid)
-                          setSelectedToDelete(next)
-                        }} 
-                        style={{ cursor: 'pointer', width: '16px', height: '16px', margin: 0, accentColor: '#b58a3d' }} 
-                      />
-                    </td>
 
-                    {/* 🔥 FIXED NUMBER COLUMN ROW */}
-                    <td style={{ width: '50px', padding: '8px', textAlign: 'center', borderRight: '1px solid #f1f5f9', color: '#64748b', fontSize: '13px', fontWeight: 'bold', background: edits[cid] ? '#fefcf3' : 'transparent' }}>
-                      {index + 1}
-                    </td>
+                {/* 🔥 FIXED NUMBER COLUMN HEADER */}
+                <th className="saas-th" style={{ width: '50px', minWidth: '50px', maxWidth: '50px', padding: '16px 8px', textAlign: 'center', borderRight: '1px solid #f1f5f9' }}>
+                  #
+                </th>
 
-                    {columnOrder.map(col => {
-                      const isNameCol = col === 'name';
-                      const editing = editingCell?.id === cid && editingCell?.col === col;
-                      const val = edits[cid]?.[col as keyof Customer] ?? (c as any)[col] ?? '';
-                      const readOnly = isReadOnly(col as string);
+                {columnOrder.map(key => (
+                  <th 
+                    key={key} 
+                    className="saas-th"
+                    draggable 
+                    onDragStart={(e) => handleDragStart(e, key as string)}
+                    onDragOver={handleDragOver}
+                    onDrop={(e) => handleDrop(e, key as string)}
+                    onClick={() => handleSort(key)}
+                    style={{ 
+                      width: columnWidths[key as string] || 150, 
+                      position: 'relative', 
+                      borderRight: '1px solid #f1f5f9', 
+                      cursor: 'pointer', 
+                    }}
+                    title="Click to Sort, Drag to Reorder"
+                  >
+                    {formatHeader(key as string)}
+                    <span style={{ marginLeft: '6px', fontSize: '12px', opacity: sortConfig?.key === key ? 1 : 0.3 }}>
+                      {sortConfig?.key === key ? (sortConfig.direction === 'asc' ? '↑' : '↓') : '↕'}
+                    </span>
+                    <Resizer columnKey={key as string} />
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {isLoading ? (
+                <TableSkeleton columns={columnOrder.length + 2} rows={8} />
+              ) : processedCustomers.length === 0 ? (
+                <tr>
+                  <td colSpan={columnOrder.length + 2} style={{ padding: 0 }}>
+                    <EmptyState 
+                      icon="🔍" 
+                      title="No customers found" 
+                      message="Try adjusting your search or owner filters." 
+                    />
+                  </td>
+                </tr>
+              ) : (
+                processedCustomers.map((c, index) => {
+                  const cid = String(c.id);
+                  return (
+                    <tr key={cid} onMouseEnter={() => setHoveredId(cid)} onMouseLeave={() => setHoveredId(null)} className={`saas-tr ${selectedToDelete.has(cid) ? 'selected' : ''} ${edits[cid] ? 'editing' : ''}`}>
+                      
+                      {/* Checkbox Row Column */}
+                      <td className="saas-td" style={{ width: '46px', padding: '8px', textAlign: 'center', borderRight: '1px solid #f1f5f9' }}>
+                        <input 
+                          type="checkbox" 
+                          checked={selectedToDelete.has(cid)}
+                          onChange={() => {
+                            const next = new Set(selectedToDelete)
+                            next.has(cid) ? next.delete(cid) : next.add(cid)
+                            setSelectedToDelete(next)
+                          }} 
+                          style={{ cursor: 'pointer', width: '16px', height: '16px', margin: 0, accentColor: '#b58a3d' }} 
+                        />
+                      </td>
 
-                      return (
-                        <td key={col as string} className={editing ? 'cell-editing' : ''} style={{ borderRight: '1px solid #f1f5f9', overflow: 'hidden', position: 'relative', padding: 0 }}>
-                          
-                          {/* Input Transform */}
-                          {editing && !readOnly ? (
-                            col === 'owner' ? (
-                              <select 
-                                autoFocus 
-                                className="cell-input" 
-                                value={val} 
-                                onChange={(e) => setEdits(prev => ({ ...prev, [cid]: { ...(prev[cid] || {}), [col]: e.target.value } }))}
-                                onBlur={() => handleSaveRecord(cid)}
-                                onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); if (e.key === 'Escape') setEditingCell(null); }}
-                              >
-                                <option value="Both">Both</option>
-                                <option value="Jing">Jing</option>
-                                <option value="Pich">Pich</option>
-                                <option value="Mom">Mom</option>
-                              </select>
-                            ) : col === 'type' ? (
-                              <select 
-                                autoFocus 
-                                className="cell-input" 
-                                value={val} 
-                                onChange={(e) => setEdits(prev => ({ ...prev, [cid]: { ...(prev[cid] || {}), [col]: e.target.value } }))}
-                                onBlur={() => handleSaveRecord(cid)}
-                                onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); if (e.key === 'Escape') setEditingCell(null); }}
-                              >
-                                <option value="ហូប">ហូប</option>
-                                <option value="លក់បាយ">លក់បាយ</option>
-                                <option value="លក់ត">លក់ត</option>
-                                <option value="ធ្វើនំ">ធ្វើនំ</option>
-                                <option value="អំណោយ">អំណោយ</option>
-                              </select>
+                      {/* 🔥 FIXED NUMBER COLUMN ROW */}
+                      <td className="saas-td" style={{ width: '50px', padding: '8px', textAlign: 'center', borderRight: '1px solid #f1f5f9', color: '#64748b', fontWeight: 'bold' }}>
+                        {index + 1}
+                      </td>
+
+                      {columnOrder.map(col => {
+                        const isNameCol = col === 'name';
+                        const editing = editingCell?.id === cid && editingCell?.col === col;
+                        const val = edits[cid]?.[col as keyof Customer] ?? (c as any)[col] ?? '';
+                        const readOnly = isReadOnly(col as string);
+
+                        return (
+                          <td key={col as string} className={`saas-td ${editing ? 'cell-editing' : ''}`} style={{ borderRight: '1px solid #f1f5f9', overflow: 'hidden', position: 'relative', padding: 0 }}>
+                            
+                            {/* Input Transform */}
+                            {editing && !readOnly ? (
+                              col === 'owner' ? (
+                                <select 
+                                  autoFocus 
+                                  className="cell-input" 
+                                  value={val} 
+                                  onChange={(e) => setEdits(prev => ({ ...prev, [cid]: { ...(prev[cid] || {}), [col]: e.target.value } }))}
+                                  onBlur={() => handleSaveRecord(cid)}
+                                  onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); if (e.key === 'Escape') setEditingCell(null); }}
+                                >
+                                  <option value="Both">Both</option>
+                                  <option value="Jing">Jing</option>
+                                  <option value="Pich">Pich</option>
+                                  <option value="Mom">Mom</option>
+                                </select>
+                              ) : col === 'type' ? (
+                                <select 
+                                  autoFocus 
+                                  className="cell-input" 
+                                  value={val} 
+                                  onChange={(e) => setEdits(prev => ({ ...prev, [cid]: { ...(prev[cid] || {}), [col]: e.target.value } }))}
+                                  onBlur={() => handleSaveRecord(cid)}
+                                  onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); if (e.key === 'Escape') setEditingCell(null); }}
+                                >
+                                  <option value="ហូប">ហូប</option>
+                                  <option value="លក់បាយ">លក់បាយ</option>
+                                  <option value="លក់ត">លក់ត</option>
+                                  <option value="ធ្វើនំ">ធ្វើនំ</option>
+                                  <option value="អំណោយ">អំណោយ</option>
+                                </select>
+                              ) : (
+                                <input 
+                                  autoFocus
+                                  type="text"
+                                  className="cell-input"
+                                  style={{ paddingLeft: '12px' }}
+                                  value={val}
+                                  onChange={(e) => setEdits(prev => ({ ...prev, [cid]: { ...(prev[cid] || {}), [col]: e.target.value } }))}
+                                  onBlur={() => handleSaveRecord(cid)}
+                                  onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); if (e.key === 'Escape') { setEdits(prev => { const n = { ...prev }; delete n[cid]; return n }); setEditingCell(null); } }}
+                                />
+                              )
                             ) : (
-                              <input 
-                                autoFocus
-                                type="text"
-                                className="cell-input"
-                                style={{ paddingLeft: '12px' }}
-                                value={val}
-                                onChange={(e) => setEdits(prev => ({ ...prev, [cid]: { ...(prev[cid] || {}), [col]: e.target.value } }))}
-                                onBlur={() => handleSaveRecord(cid)}
-                                onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); if (e.key === 'Escape') { setEdits(prev => { const n = { ...prev }; delete n[cid]; return n }); setEditingCell(null); } }}
-                              />
-                            )
-                          ) : (
-                            <div 
-                              className="cell-display"
-                              style={{ 
-                                paddingLeft: '12px', 
-                                fontWeight: isNameCol || col === 'days_since_last_purchase' ? 'bold' : 'normal', 
-                                color: isNameCol ? '#1e293b' : col === 'days_since_last_purchase' ? '#b58a3d' : readOnly ? '#94a3b8' : '#334155',
-                                cursor: readOnly ? 'default' : 'text',
-                                fontFamily: col === 'id' ? 'monospace' : 'inherit',
-                                display: 'flex',
-                                justifyContent: 'space-between',
-                                alignItems: 'center',
-                                width: '100%',
-                                boxSizing: 'border-box'
-                              }}
-                              onClick={() => !readOnly && setEditingCell({ id: cid, col: col as string })}
-                            >
-                              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                {col === 'google_map' && val ? (
-                                  <a href={val} target="_blank" rel="noreferrer" style={{ color: '#2563eb', textDecoration: 'none', fontWeight: 'bold' }} onClick={e => e.stopPropagation()}>🗺️ Open Map</a>
-                                ) : (
-                                  formatDisplayValue(col as string, val)
-                                )}
-                              </span>
-                            </div>
-                          )}
+                              <div 
+                                className="cell-display"
+                                style={{ 
+                                  paddingLeft: '12px', 
+                                  fontWeight: isNameCol || col === 'days_since_last_purchase' ? 'bold' : 'normal', 
+                                  color: isNameCol ? '#1e293b' : col === 'days_since_last_purchase' ? '#b58a3d' : readOnly ? '#94a3b8' : '#334155',
+                                  cursor: readOnly ? 'default' : 'text',
+                                  fontFamily: col === 'id' ? 'monospace' : 'inherit',
+                                  display: 'flex',
+                                  justifyContent: 'space-between',
+                                  alignItems: 'center',
+                                  width: '100%',
+                                  boxSizing: 'border-box'
+                                }}
+                                onClick={() => !readOnly && setEditingCell({ id: cid, col: col as string })}
+                              >
+                                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                  {col === 'google_map' && val ? (
+                                    <a href={val} target="_blank" rel="noreferrer" style={{ color: '#2563eb', textDecoration: 'none', fontWeight: 'bold' }} onClick={e => e.stopPropagation()}>🗺️ Open Map</a>
+                                  ) : (
+                                    formatDisplayValue(col as string, val)
+                                  )}
+                                </span>
+                              </div>
+                            )}
 
-                        </td>
-                      )
-                    })}
-                  </tr>
-                )
-              })
-            )}
-          </tbody>
-        </table>
+                          </td>
+                        )
+                      })}
+                    </tr>
+                  )
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
 
       {/* --- ADD CUSTOMER MODAL --- */}
-      {showAddModal && (
-        <div className="modal-overlay" onMouseDown={() => setShowAddModal(false)}>
-          <form onSubmit={handleAddCustomer} className="modal-content" style={{ maxWidth: '460px' }} onMouseDown={e => e.stopPropagation()}>
-            <h2 style={{ marginTop: 0, marginBottom: '20px', color: '#1e293b' }}>👤 Add New Customer</h2>
-            
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-              <div>
-                <label style={{ display: 'block', fontSize: '13px', color: '#0f172a', fontWeight: 'bold', marginBottom: '6px' }}>Customer Full Name *</label>
-                <input type="text" value={newCustomer.name} onChange={(e) => setNewCustomer({ ...newCustomer, name: e.target.value })} style={{ width: '100%', padding: '10px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', fontSize: '16px', color: '#0f172a', backgroundColor: '#ffffff' }} required />
-              </div>
+      <Modal isOpen={showAddModal} onClose={() => setShowAddModal(false)} title="Add New Customer" icon="👤" maxWidth="460px">
+        <form onSubmit={handleAddCustomer}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+            <div>
+              <label style={{ display: 'block', fontSize: '12px', color: '#64748b', fontWeight: 'bold', marginBottom: '6px', textTransform: 'uppercase' }}>Customer Full Name *</label>
+              <input type="text" value={newCustomer.name} onChange={(e) => setNewCustomer({ ...newCustomer, name: e.target.value })} className="saas-input" required />
+            </div>
 
-              <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
-                <div style={{ flex: '1 1 130px' }}>
-                  <label style={{ display: 'block', fontSize: '13px', color: '#0f172a', fontWeight: 'bold', marginBottom: '6px' }}>Account Owner</label>
-                  <select value={newCustomer.owner} onChange={(e) => setNewCustomer({ ...newCustomer, owner: e.target.value })} style={{ width: '100%', padding: '10px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', fontSize: '16px', color: '#0f172a', backgroundColor: '#ffffff' }}>
-                    <option value="Both">Both</option>
-                    <option value="Jing">Jing</option>
-                    <option value="Pich">Pich</option>
-                    <option value="Mom">Mom</option>
-                  </select>
-                </div>
-                <div style={{ flex: '1 1 130px' }}>
-                  <label style={{ display: 'block', fontSize: '13px', color: '#0f172a', fontWeight: 'bold', marginBottom: '6px' }}>Customer Type</label>
-                  <select value={newCustomer.type} onChange={(e) => setNewCustomer({ ...newCustomer, type: e.target.value })} style={{ width: '100%', padding: '10px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', fontSize: '16px', color: '#0f172a', backgroundColor: '#ffffff' }}>
-                    <option value="ហូប">ហូប</option>
-                    <option value="លក់បាយ">លក់បាយ</option>
-                    <option value="លក់ត">លក់ត</option>
-                    <option value="ធ្វើនំ">ធ្វើនំ</option>
-                    <option value="អំណោយ">អំណោយ</option>
-                  </select>
-                </div>
+            <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
+              <div style={{ flex: '1 1 130px' }}>
+                <label style={{ display: 'block', fontSize: '12px', color: '#64748b', fontWeight: 'bold', marginBottom: '6px', textTransform: 'uppercase' }}>Account Owner</label>
+                <select value={newCustomer.owner} onChange={(e) => setNewCustomer({ ...newCustomer, owner: e.target.value })} className="saas-input" style={{ cursor: 'pointer' }}>
+                  <option value="Both">Both</option>
+                  <option value="Jing">Jing</option>
+                  <option value="Pich">Pich</option>
+                  <option value="Mom">Mom</option>
+                </select>
               </div>
-
-              <div>
-                <label style={{ display: 'block', fontSize: '13px', color: '#0f172a', fontWeight: 'bold', marginBottom: '6px' }}>Phone Number</label>
-                <input type="text" value={newCustomer.phone} onChange={(e) => setNewCustomer({ ...newCustomer, phone: e.target.value })} placeholder="e.g. 012 345 678" style={{ width: '100%', padding: '10px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', fontSize: '16px', color: '#0f172a', backgroundColor: '#ffffff' }} />
-              </div>
-
-              <div>
-                <label style={{ display: 'block', fontSize: '13px', color: '#0f172a', fontWeight: 'bold', marginBottom: '6px' }}>Location</label>
-                <input type="text" value={newCustomer.location} onChange={(e) => setNewCustomer({ ...newCustomer, location: e.target.value })} placeholder="Phnom Penh" style={{ width: '100%', padding: '10px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', fontSize: '16px', color: '#0f172a', backgroundColor: '#ffffff' }} />
-              </div>
-
-              <div>
-                <label style={{ display: 'block', fontSize: '13px', color: '#0f172a', fontWeight: 'bold', marginBottom: '6px' }}>Google Map URL Link</label>
-                <input type="url" value={newCustomer.google_map} onChange={(e) => setNewCustomer({ ...newCustomer, google_map: e.target.value })} placeholder="https://maps.google.com/..." style={{ width: '100%', padding: '10px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', fontSize: '16px', color: '#0f172a', backgroundColor: '#ffffff' }} />
+              <div style={{ flex: '1 1 130px' }}>
+                <label style={{ display: 'block', fontSize: '12px', color: '#64748b', fontWeight: 'bold', marginBottom: '6px', textTransform: 'uppercase' }}>Customer Type</label>
+                <select value={newCustomer.type} onChange={(e) => setNewCustomer({ ...newCustomer, type: e.target.value })} className="saas-input" style={{ cursor: 'pointer' }}>
+                  <option value="ហូប">ហូប</option>
+                  <option value="លក់បាយ">លក់បាយ</option>
+                  <option value="លក់ត">លក់ត</option>
+                  <option value="ធ្វើនំ">ធ្វើនំ</option>
+                  <option value="អំណោយ">អំណោយ</option>
+                </select>
               </div>
             </div>
 
-            <div style={{ marginTop: '24px', display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
-              <button type="button" onClick={() => setShowAddModal(false)} style={{ padding: '10px 16px', background: '#f1f5f9', color: '#475569', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', fontSize: '14px' }}>Cancel</button>
-              <button type="submit" style={{ padding: '10px 16px', background: '#10b981', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', fontSize: '14px' }}>Save Customer</button>
+            <div>
+              <label style={{ display: 'block', fontSize: '12px', color: '#64748b', fontWeight: 'bold', marginBottom: '6px', textTransform: 'uppercase' }}>Phone Number</label>
+              <input type="text" value={newCustomer.phone} onChange={(e) => setNewCustomer({ ...newCustomer, phone: e.target.value })} placeholder="e.g. 012 345 678" className="saas-input" />
             </div>
-          </form>
-        </div>
-      )}
 
-      {/* --- GLOBAL CSS --- */}
+            <div>
+              <label style={{ display: 'block', fontSize: '12px', color: '#64748b', fontWeight: 'bold', marginBottom: '6px', textTransform: 'uppercase' }}>Location</label>
+              <input type="text" value={newCustomer.location} onChange={(e) => setNewCustomer({ ...newCustomer, location: e.target.value })} placeholder="Phnom Penh" className="saas-input" />
+            </div>
+
+            <div>
+              <label style={{ display: 'block', fontSize: '12px', color: '#64748b', fontWeight: 'bold', marginBottom: '6px', textTransform: 'uppercase' }}>Google Map URL Link</label>
+              <input type="url" value={newCustomer.google_map} onChange={(e) => setNewCustomer({ ...newCustomer, google_map: e.target.value })} placeholder="https://maps.google.com/..." className="saas-input" />
+            </div>
+          </div>
+
+          <div style={{ marginTop: '24px', display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
+            <button type="button" onClick={() => setShowAddModal(false)} className="saas-btn saas-btn-secondary">Cancel</button>
+            <button type="submit" className="saas-btn saas-btn-primary">Save Customer</button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* --- PAGE-SPECIFIC CSS --- */}
       <style jsx global>{`
-        /* 🔥 DESKTOP LAYOUT FIXES (EXACT DASHBOARD CSS) */
-        .main-wrapper {
-          padding: max(20px, env(safe-area-inset-top, 20px)) 24px 24px 24px; 
-          background: #f8fafc; 
-          font-family: Arial, sans-serif; 
-          box-sizing: border-box; 
-          color: #333;
-          width: 100%;
-          height: 100dvh; 
-          overflow-y: auto; 
-          -webkit-overflow-scrolling: touch;
-        }
-
-        .header-container { 
-          display: flex;
-          justify-content: flex-start;
-          align-items: center; 
-          margin-bottom: 24px; 
-          margin-top: 0;
-          margin-left: 60px; /* 🔥 Clears the burger menu icon for horizontal alignment */
-          gap: 12px;
-          min-height: 42px; 
-          width: 100%;
-          max-width: 1600px;
-        }
-        
-        .header-left {
-          display: flex;
-          align-items: center;
-          gap: 12px;
-        }
-
-        .page-title { 
-          font-size: 24px !important; 
-          color: #4a3b1b !important; 
-          margin: 0 !important; 
-          font-weight: bold;
-          letter-spacing: -0.5px;
-          line-height: normal !important; 
-          display: flex;
-          align-items: center;
-          min-width: 0;
-          white-space: nowrap !important; 
-        }
-
-        /* 🔥 FIX: Wraps the button securely inside the screen width WITHOUT touching .header-container */
-        .header-actions {
-          display: flex;
-          gap: 10px;
-          margin-left: auto;
-          padding-right: 60px; 
-        }
-
-        .delete-btn {
-          padding: 10px 20px;
-          background: #ef4444;
-          color: #fff;
-          border: none;
-          border-radius: 6px;
-          font-weight: bold;
-          cursor: pointer;
-        }
-        
-        .toolbar-container {
-          display: flex;
-          gap: 12px;
-          margin-bottom: 16px;
-          background: #fff;
-          padding: 16px 20px;
-          border-radius: 12px;
-          border: 1px solid #e2e8f0;
-          align-items: center;
-          flex-wrap: nowrap; 
-          box-shadow: 0 4px 6px rgba(0,0,0,0.02);
-        }
-        
-        .toolbar-search {
-          padding: 10px 14px;
-          border: 1px solid #cbd5e1;
-          border-radius: 6px;
-          flex: 1;
-          min-width: 0; 
-          outline: none;
-          font-size: 16px;
-          color: #0f172a;
-          background-color: #ffffff;
-        }
-        
-        .add-btn-inline {
-          display: flex;
-          align-items: center;
-          padding: 8px 14px;
-          background: #f0fdf4;
-          color: #166534;
-          border: 1px solid #bbf7d0;
-          border-radius: 6px;
-          font-weight: bold;
-          cursor: pointer;
-          font-size: 13px; 
-          white-space: nowrap;
-          transition: background 0.2s;
-        }
-        .add-btn-inline:hover {
-          background: #dcfce7;
-        }
-
         .hide-scrollbar::-webkit-scrollbar { display: none; }
         .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
 
-        .table-wrapper {
-          background: #fff;
-          border: 1px solid #e2e8f0;
-          border-radius: 12px;
-          overflow-x: auto;
-          box-shadow: 0 4px 6px rgba(0,0,0,0.02);
-          -webkit-overflow-scrolling: touch;
-        }
         .cell-display {
           padding: 16px 12px;
           font-size: 14px;
@@ -766,41 +667,35 @@ export default function CustomerDatabasePage() {
           position: relative;
         }
 
-        .modal-overlay {
-          position: fixed;
-          top: 0;
-          left: 0;
-          width: 100vw;
-          height: 100vh;
-          background: rgba(0,0,0,0.5);
+        .header-container { 
           display: flex;
-          justify-content: center;
-          align-items: center;
-          z-index: 1000;
-          padding: 16px;
-          box-sizing: border-box;
-        }
-        .modal-content {
-          background: #fff;
-          padding: 30px;
-          border-radius: 16px;
+          justify-content: flex-start;
+          align-items: center; 
+          margin-bottom: 24px; 
+          margin-top: 0;
+          margin-left: 60px; /* Clears the burger menu icon for horizontal alignment */
+          gap: 12px;
+          min-height: 42px; 
           width: 100%;
-          max-height: 90vh;
-          overflow-y: auto;
-          box-shadow: 0 10px 25px rgba(0,0,0,0.2);
+          max-width: 1600px;
+        }
+        
+        .header-left {
+          display: flex;
+          align-items: center;
+          gap: 12px;
         }
 
-        /* 🔥 MOBILE LAYOUT FIXES (EXACT DASHBOARD CSS) */
-        @media (max-width: 1023px) {
-          .main-wrapper {
-            padding: max(20px, env(safe-area-inset-top, 20px)) 16px 16px 16px !important; 
-            height: 100dvh !important;
-            overflow-y: auto !important;
-            -webkit-overflow-scrolling: touch !important;
-          }
+        .header-actions {
+          display: flex;
+          gap: 10px;
+          margin-left: auto;
+          padding-right: 60px; 
+        }
 
+        @media (max-width: 1023px) {
           .header-container { 
-            margin-left: 54px !important; /* Clears mobile hamburger button safely */
+            margin-left: 54px !important; 
             margin-right: 0 !important;
             margin-bottom: 24px !important; 
             margin-top: 0 !important;
@@ -819,34 +714,9 @@ export default function CustomerDatabasePage() {
             gap: 12px !important;
           }
 
-          .page-title {
-            font-size: 21px !important; 
-            line-height: normal !important; 
-            white-space: nowrap !important; 
-          }
-
           .header-actions {
             margin-left: auto;
-            padding-right: 0px; /* Reset on mobile because calc() handles the width perfectly */
-          }
-          
-          .delete-btn {
-            padding: 8px 12px;
-            font-size: 13px;
-          }
-
-          .toolbar-container {
-            flex-direction: row; 
-            align-items: center;
-            padding: 12px 16px;
-          }
-          .toolbar-search {
-            width: 100%;
-            box-sizing: border-box;
-          }
-          .add-btn-inline {
-            padding: 10px 12px;
-            font-size: 13px;
+            padding-right: 0px; 
           }
         }
       `}</style>

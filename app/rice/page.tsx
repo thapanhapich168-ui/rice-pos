@@ -7,6 +7,10 @@ import { formatRiel, formatUSD, formatNumber, EXCHANGE_RATE } from '@/utils/form
 import { CurrencyInput } from '@/components/Inputs'
 import { Product, InventoryBatch, PaymentRow } from '@/types'
 import { useToast } from '@/components/ToastProvider'
+import { useDebounce } from '@/lib/useDebounce'
+import TableSkeleton from '@/components/TableSkeleton'
+import EmptyState from '@/components/EmptyState'
+import Modal from '@/components/Modal'
 
 // --- CATEGORIES ---
 const RICE_CATEGORIES = ['All', 'មិញ', 'ខុន', 'ខ្ញី', 'ម្លិះ', 'រំដួល', 'បីកំណាត់', 'ដំណើប', 'សម្រូប', 'ផ្សេងៗ', '❌ Out of Stock'];
@@ -45,7 +49,11 @@ export default function RiceControl() {
   const [products, setProducts] = useState<Product[]>([])
   const [suppliers, setSuppliers] = useState<any[]>([])
   const [imports, setImports] = useState<any[]>([])
+  const [isLoading, setIsLoading] = useState(true)
+
   const [searchQuery, setSearchQuery] = useState('')
+  const debouncedSearch = useDebounce(searchQuery, 300)
+
   const [edits, setEdits] = useState<Record<number, Partial<Product>>>({})
   const [selectedToDelete, setSelectedToDelete] = useState<Set<number>>(new Set())
   const [selectedSuppliersToDelete, setSelectedSuppliersToDelete] = useState<Set<number>>(new Set())
@@ -84,7 +92,6 @@ export default function RiceControl() {
   const [payPendingModal, setPayPendingModal] = useState<{isOpen: boolean, record: any, totalDue: number}>({ isOpen: false, record: null, totalDue: 0 })
   const [pendingPaymentRows, setPendingPaymentRows] = useState<PaymentRow[]>([{ id: Date.now(), method: 'Cash ៛', amount: '' }]);
 
-  // --- REPACK MODAL ---
   const [repackModal, setRepackModal] = useState<{ isOpen: boolean, product: Product | null }>({ isOpen: false, product: null });
 
   // --- MAIN PRODUCTS TABLE STATE ---
@@ -159,11 +166,18 @@ export default function RiceControl() {
   };
 
   useEffect(() => { 
-    fetchProducts()
-    fetchSettings()
-    fetchSuppliers()
-    fetchImports()
-    fetchBatches()
+    async function init() {
+      setIsLoading(true);
+      await Promise.all([
+        fetchProducts(),
+        fetchSettings(),
+        fetchSuppliers(),
+        fetchImports(),
+        fetchBatches()
+      ]);
+      setIsLoading(false);
+    }
+    init();
 
     const productsSub = supabase.channel('products-channel')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'products' }, fetchProducts)
@@ -212,7 +226,6 @@ export default function RiceControl() {
     }
   }
 
-  // --- REPACK CONFIRMATION LOGIC ---
   const handleConfirmRepack = async () => {
     if (!repackModal.product || !repackModal.product.linked_wholesale_id) return;
     setIsProcessing(true);
@@ -221,7 +234,6 @@ export default function RiceControl() {
         const retailId = repackModal.product.id;
         const wholesaleId = repackModal.product.linked_wholesale_id;
         
-        // Fetch the current cost price to assign to the batch
         const { data: freshWholesale, error: fetchErr } = await supabase
            .from('products')
            .select('cost_price')
@@ -230,7 +242,6 @@ export default function RiceControl() {
            
         if (fetchErr || !freshWholesale) throw new Error("Linked wholesale product not found.");
 
-        // 🔥 CALL THE ACID RPC TRANSACTION
         const { error } = await supabase.rpc('execute_repack', {
            p_retail_id: retailId,
            p_wholesale_id: wholesaleId,
@@ -239,7 +250,6 @@ export default function RiceControl() {
 
         if (error) throw new Error(error.message);
 
-        // Clear local edit buffers
         setEdits(prev => {
             const next = { ...prev };
             delete next[retailId];
@@ -247,11 +257,9 @@ export default function RiceControl() {
             return next;
         });
 
-        // Success!
         showToast('success', 'Repack Successful', 'Converted 50kg loose rice into 1 sealed bag.');
         setRepackModal({ isOpen: false, product: null });
         
-        // Tell React to grab the fresh, perfectly synced numbers from the database
         fetchProducts();
         fetchBatches();
 
@@ -968,7 +976,7 @@ export default function RiceControl() {
     .map(p => ({ ...p, ...edits[p.id] }))
     .filter(p => {
       const isEditingThisRow = editingCell?.id === p.id;
-      if (searchQuery && !p.name?.toLowerCase().includes(searchQuery.toLowerCase())) return false;
+      if (debouncedSearch && !p.name?.toLowerCase().includes(debouncedSearch.toLowerCase())) return false;
       if (activeView === 'retail' && p.weight >= 50) return false;
       if (activeView === 'wholesale' && p.weight < 50) return false;
       if (activeView === 'wholesale') {
@@ -1055,26 +1063,26 @@ export default function RiceControl() {
       {/* HEADER */}
       <div className="header-container">
         <div className="header-left">
-          <h1 className="page-title">🌾 Rice Inventory & Suppliers</h1>
+          <h1 className="saas-page-title">🌾 Rice Inventory & Suppliers</h1>
         </div>
         <div className="header-actions">
           {selectedToDelete.size > 0 && (activeView === 'retail' || activeView === 'wholesale') && (
-            <button className="delete-btn" onClick={handleDelete}>
+            <button className="saas-btn saas-btn-danger" onClick={handleDelete}>
               Delete ({selectedToDelete.size})
             </button>
           )}
           {selectedSuppliersToDelete.size > 0 && activeView === 'suppliers' && (
-            <button className="delete-btn" onClick={handleDeleteSuppliers}>
+            <button className="saas-btn saas-btn-danger" onClick={handleDeleteSuppliers}>
               Delete ({selectedSuppliersToDelete.size})
             </button>
           )}
           {(activeView === 'retail' || activeView === 'wholesale') && (
-            <button className="add-btn desktop-only-btn" onClick={handleOpenAddProduct}>
+            <button className="saas-btn saas-btn-primary desktop-only-btn" onClick={handleOpenAddProduct}>
               + Add Product
             </button>
           )}
           {activeView === 'suppliers' && (
-            <button className="add-btn desktop-only-btn" onClick={() => setIsAddSupplierOpen(true)}>
+            <button className="saas-btn saas-btn-primary desktop-only-btn" onClick={() => setIsAddSupplierOpen(true)}>
               + Add Supplier
             </button>
           )}
@@ -1082,30 +1090,31 @@ export default function RiceControl() {
       </div>
 
       {/* TOOLBAR & TABS */}
-      <div className="toolbar-container">
-        <div className="toolbar-tabs" style={{ display: 'flex', overflowX: 'auto', whiteSpace: 'nowrap' }}>
-          <button className={activeView === 'retail' ? 'tab active' : 'tab'} onClick={() => { setActiveView('retail'); setActiveCategory('All'); }}>🛍️ Retail</button>
-          <button className={activeView === 'wholesale' ? 'tab active' : 'tab'} onClick={() => setActiveView('wholesale')}>🌾 Wholesale</button>
-          <button className={activeView === 'import' ? 'tab active' : 'tab'} onClick={() => setActiveView('import')}>🚚 Receive Stock</button>
-          <button className={activeView === 'pending' ? 'tab active' : 'tab'} onClick={() => setActiveView('pending')}>⏳ Pending Payments {processedPending.length > 0 && `(${processedPending.length})`}</button>
-          <button className={activeView === 'suppliers' ? 'tab active' : 'tab'} onClick={() => setActiveView('suppliers')}>🏢 Suppliers</button>
+      <div className="saas-card" style={{ marginBottom: '24px', padding: '16px 20px', display: 'flex', gap: '16px', flexWrap: 'wrap', alignItems: 'center' }}>
+        <div className="saas-tab-container hide-scrollbar" style={{ margin: 0, padding: 0, border: 'none', boxShadow: 'none', background: 'transparent' }}>
+          <button className={`saas-tab ${activeView === 'retail' ? 'active' : ''}`} onClick={() => { setActiveView('retail'); setActiveCategory('All'); }}>🛍️ Retail</button>
+          <button className={`saas-tab ${activeView === 'wholesale' ? 'active' : ''}`} onClick={() => setActiveView('wholesale')}>🌾 Wholesale</button>
+          <button className={`saas-tab ${activeView === 'import' ? 'active' : ''}`} onClick={() => setActiveView('import')}>🚚 Receive Stock</button>
+          <button className={`saas-tab ${activeView === 'pending' ? 'active' : ''}`} onClick={() => setActiveView('pending')}>⏳ Pending Payments {processedPending.length > 0 && `(${processedPending.length})`}</button>
+          <button className={`saas-tab ${activeView === 'suppliers' ? 'active' : ''}`} onClick={() => setActiveView('suppliers')}>🏢 Suppliers</button>
         </div>
         
         {(activeView === 'retail' || activeView === 'wholesale') && (
-          <div className="mobile-action-row">
+          <div className="mobile-action-row" style={{ flex: 1 }}>
             <input 
-              className="toolbar-search" 
+              className="saas-input" 
               placeholder="🔍 Quick search..." 
               value={searchQuery} 
               onChange={(e) => setSearchQuery(e.target.value)} 
               onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
+              style={{ minWidth: '200px' }}
             />
             
-            <div className="toolbar-filters">
-              <button className="add-btn-inline mobile-only-btn" onClick={handleOpenAddProduct}>
+            <div className="toolbar-filters" style={{ display: 'flex', gap: '10px' }}>
+              <button className="saas-btn saas-btn-primary mobile-only-btn" onClick={handleOpenAddProduct}>
                 + Add Product
               </button>
-              <button className="filter-btn" onClick={() => setIsFilterOpen(true)} style={{ color: filterRules.length > 0 ? '#3b82f6' : '#0f172a' }}>
+              <button className="saas-btn saas-btn-secondary" onClick={() => setIsFilterOpen(true)} style={{ color: filterRules.length > 0 ? '#3b82f6' : '#0f172a' }}>
                 Y Filter {filterRules.length > 0 && `(${filterRules.length})`}
               </button>
             </div>
@@ -1113,8 +1122,8 @@ export default function RiceControl() {
         )}
 
         {activeView === 'suppliers' && (
-          <div className="mobile-action-row mobile-only-flex" style={{ justifyContent: 'flex-end' }}>
-             <button className="add-btn-inline" onClick={() => setIsAddSupplierOpen(true)}>
+          <div className="mobile-action-row mobile-only-flex" style={{ justifyContent: 'flex-end', flex: 1 }}>
+             <button className="saas-btn saas-btn-primary" onClick={() => setIsAddSupplierOpen(true)}>
                + Add Supplier
              </button>
           </div>
@@ -1124,8 +1133,8 @@ export default function RiceControl() {
       {/* RICE CATEGORIES (ONLY WHOLESALE) */}
       {activeView === 'wholesale' && (
         <div 
-          className="hide-scrollbar" 
-          style={{ display: 'flex', overflowX: 'auto', gap: '8px', paddingBottom: '16px', marginBottom: '8px', WebkitOverflowScrolling: 'touch', userSelect: 'none' }}
+          className="saas-tab-container hide-scrollbar" 
+          style={{ paddingBottom: '16px', marginBottom: '8px', WebkitOverflowScrolling: 'touch', userSelect: 'none', background: 'transparent', border: 'none', boxShadow: 'none' }}
         >
           {categoryOrder.map(cat => (
             <button 
@@ -1135,7 +1144,8 @@ export default function RiceControl() {
               onDragOver={onDragOverCol}
               onDrop={(e) => handleCategoryDrop(e, cat)}
               onClick={() => setActiveCategory(cat)} 
-              style={{ flexShrink: 0, padding: '8px 16px', borderRadius: '20px', border: activeCategory === cat ? 'none' : '1px solid #cbd5e1', backgroundColor: activeCategory === cat ? '#b58a3d' : '#ffffff', color: activeCategory === cat ? '#fff' : '#475569', fontWeight: 'bold', cursor: 'grab', fontSize: '13px', whiteSpace: 'nowrap', boxShadow: activeCategory === cat ? '0 2px 4px rgba(181, 138, 61, 0.3)' : 'none' }}
+              className={`saas-tab ${activeCategory === cat ? 'active' : ''}`}
+              style={{ flexShrink: 0, borderRadius: '20px', cursor: 'grab' }}
             >
               {cat}
             </button>
@@ -1145,307 +1155,318 @@ export default function RiceControl() {
 
       {/* SPREADSHEET VIEWS: RETAIL & WHOLESALE */}
       {(activeView === 'retail' || activeView === 'wholesale') && (
-        <div className="table-wrapper fade-in">
-          <table style={{ borderCollapse: 'collapse', tableLayout: 'fixed', width: 'max-content', minWidth: '100%' }}>
-            <thead>
-              <tr style={{ background: '#f8fafc', borderBottom: '2px solid #e2e8f0' }}>
-                {columnOrder.map(key => {
-                  if (key === 'expand' && activeView !== 'wholesale') return null;
-                  if ((key === 'linked_wholesale' || key === 'mtd_kg_used' || key === 'mtd_bags_used') && activeView !== 'retail') return null;
-                  if (key === 'actions' && activeView !== 'wholesale') return null; 
-                  
-                  const isDraggable = key !== 'actions' && key !== 'linked_wholesale' && key !== 'expand';
+        <div className="saas-table-wrapper fade-in">
+          <div className="saas-table-responsive">
+            <table className="saas-table" style={{ minWidth: '100%', tableLayout: 'fixed', width: 'max-content' }}>
+              <thead>
+                <tr>
+                  {columnOrder.map(key => {
+                    if (key === 'expand' && activeView !== 'wholesale') return null;
+                    if ((key === 'linked_wholesale' || key === 'mtd_kg_used' || key === 'mtd_bags_used') && activeView !== 'retail') return null;
+                    if (key === 'actions' && activeView !== 'wholesale') return null; 
+                    
+                    const isDraggable = key !== 'actions' && key !== 'linked_wholesale' && key !== 'expand';
 
-                  if (key === 'expand') {
-                    return <th key={key} style={{ width: '40px', minWidth: '40px', maxWidth: '40px', padding: '16px 8px', borderRight: '1px solid #f1f5f9' }}></th>;
-                  }
+                    if (key === 'expand') {
+                      return <th key={key} className="saas-th" style={{ width: '40px', minWidth: '40px', maxWidth: '40px', padding: '16px 8px', borderRight: '1px solid #f1f5f9' }}></th>;
+                    }
 
-                  return (
-                    <th 
-                      key={key} 
-                      draggable={isDraggable}
-                      onDragStart={(e) => onDragStartCol(e, key as string, ['actions', 'linked_wholesale', 'expand'])}
-                      onDragOver={onDragOverCol}
-                      onDrop={(e) => handleProductDrop(e, key as string)}
-                      onClick={() => handleProductSort(key)}
-                      style={{ width: columnWidths[key as string] || 150, position: 'relative', padding: '16px 12px', textAlign: key === 'actions' ? 'center' : 'left', color: '#475569', fontSize: '13px', textTransform: 'uppercase', fontWeight: 'bold', borderRight: '1px solid #f1f5f9', cursor: isDraggable ? 'pointer' : 'default', whiteSpace: 'nowrap', userSelect: 'none' }}
-                    >
-                      {key === 'linked_wholesale' ? 'Linked Wholesale Bag' : key === 'mtd_kg_used' ? 'MTD Used (Kg)' : key === 'mtd_bags_used' ? 'MTD Used (Bags)' : key === 'min_stock_level' ? 'Min Stock' : (key as string).replace('_', ' ')}
-                      {isDraggable && (<span style={{ marginLeft: '6px', fontSize: '12px', opacity: sortConfig?.key === key ? 1 : 0.3 }}>{sortConfig?.key === key ? (sortConfig.direction === 'asc' ? '↑' : '↓') : '↕'}</span>)}
-                      {isDraggable && <div onMouseDown={(e) => handleResizeStartProduct(e, key as string)} onTouchStart={(e) => handleResizeStartProduct(e, key as string)} style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: '14px', cursor: 'col-resize', background: 'transparent', zIndex: 10, transform: 'translateX(50%)' }} />}
-                    </th>
-                  )
-                })}
-              </tr>
-            </thead>
-            <tbody>
-              {processedProducts.length === 0 ? (
-                <tr><td colSpan={columnOrder.length} style={{ padding: '40px', textAlign: 'center', color: '#94a3b8' }}>No products found.</td></tr>
-              ) : (
-                processedProducts.map(p => {
-                  const pBatches = activeBatchesMap[p.id] || [];
-                  pBatches.sort((a,b) => a.id - b.id); 
-                  const currentBatch = pBatches.length > 0 ? pBatches[0] : null;
-                  const isExpanded = expandedProductId === p.id;
-                  const totalActiveBatchStock = pBatches.reduce((sum, b) => sum + Number(b.remaining_qty), 0);
-                  const linkedRetail = products.find(r => r.linked_wholesale_id === p.id);
+                    return (
+                      <th 
+                        key={key} 
+                        className="saas-th"
+                        draggable={isDraggable}
+                        onDragStart={(e) => onDragStartCol(e, key as string, ['actions', 'linked_wholesale', 'expand'])}
+                        onDragOver={onDragOverCol}
+                        onDrop={(e) => handleProductDrop(e, key as string)}
+                        onClick={() => handleProductSort(key)}
+                        style={{ width: columnWidths[key as string] || 150, position: 'relative', textAlign: key === 'actions' ? 'center' : 'left', borderRight: '1px solid #f1f5f9', cursor: isDraggable ? 'pointer' : 'default', whiteSpace: 'nowrap', userSelect: 'none' }}
+                      >
+                        {key === 'linked_wholesale' ? 'Linked Wholesale Bag' : key === 'mtd_kg_used' ? 'MTD Used (Kg)' : key === 'mtd_bags_used' ? 'MTD Used (Bags)' : key === 'min_stock_level' ? 'Min Stock' : (key as string).replace('_', ' ')}
+                        {isDraggable && (<span style={{ marginLeft: '6px', fontSize: '12px', opacity: sortConfig?.key === key ? 1 : 0.3 }}>{sortConfig?.key === key ? (sortConfig.direction === 'asc' ? '↑' : '↓') : '↕'}</span>)}
+                        {isDraggable && <div onMouseDown={(e) => handleResizeStartProduct(e, key as string)} onTouchStart={(e) => handleResizeStartProduct(e, key as string)} style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: '14px', cursor: 'col-resize', background: 'transparent', zIndex: 10, transform: 'translateX(50%)' }} />}
+                      </th>
+                    )
+                  })}
+                </tr>
+              </thead>
+              <tbody>
+                {isLoading ? (
+                  <TableSkeleton columns={columnOrder.length} rows={8} />
+                ) : processedProducts.length === 0 ? (
+                  <tr>
+                    <td colSpan={columnOrder.length} style={{ padding: 0 }}>
+                      <EmptyState icon="📦" title="No products found." message="Try adjusting your filters or search query." />
+                    </td>
+                  </tr>
+                ) : (
+                  processedProducts.map(p => {
+                    const pBatches = activeBatchesMap[p.id] || [];
+                    pBatches.sort((a,b) => a.id - b.id); 
+                    const currentBatch = pBatches.length > 0 ? pBatches[0] : null;
+                    const isExpanded = expandedProductId === p.id;
+                    const totalActiveBatchStock = pBatches.reduce((sum, b) => sum + Number(b.remaining_qty), 0);
+                    const linkedRetail = products.find(r => r.linked_wholesale_id === p.id);
 
-                  return (
-                    <React.Fragment key={p.id}>
-                      <tr onMouseEnter={() => setHoveredId(p.id)} onMouseLeave={() => setHoveredId(null)} style={{ borderBottom: '1px solid #f1f5f9', background: edits[p.id] ? '#fefcf3' : 'transparent', transition: 'background 0.2s' }}>
-                        {columnOrder.map(col => {
-                          if (col === 'expand' && activeView !== 'wholesale') return null;
-                          if ((col === 'linked_wholesale' || col === 'mtd_kg_used' || col === 'mtd_bags_used') && activeView !== 'retail') return null;
-                          
-                          if (col === 'expand') {
-                             return (
-                               <td key={col} style={{ width: '40px', minWidth: '40px', maxWidth: '40px', borderRight: '1px solid #f1f5f9', padding: '8px 4px', textAlign: 'center', verticalAlign: 'middle' }}>
-                                 {pBatches.length > 1 && (
-                                   <button 
-                                     onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); setExpandedProductId(isExpanded ? null : p.id); }} 
-                                     style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '12px', color: '#64748b', display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%', height: '100%' }}
-                                   >
-                                     {isExpanded ? '▼' : '▶'}
-                                   </button>
-                                 )}
-                               </td>
-                             )
-                          }
-
-                          if (col === 'actions') {
-                            if (activeView === 'retail') {
+                    return (
+                      <React.Fragment key={p.id}>
+                        <tr className="saas-tr" onMouseEnter={() => setHoveredId(p.id)} onMouseLeave={() => setHoveredId(null)} style={{ background: edits[p.id] ? '#fefcf3' : 'transparent' }}>
+                          {columnOrder.map(col => {
+                            if (col === 'expand' && activeView !== 'wholesale') return null;
+                            if ((col === 'linked_wholesale' || col === 'mtd_kg_used' || col === 'mtd_bags_used') && activeView !== 'retail') return null;
+                            
+                            if (col === 'expand') {
                                return (
-                                 <td key={col} style={{ borderRight: '1px solid #f1f5f9', padding: '8px', overflow: 'hidden', textAlign: 'center' }}>
-                                   {p.linked_wholesale_id ? (() => {
-                                     const wholesaleProd = products.find(wp => wp.id === p.linked_wholesale_id);
-                                     const isOutOfStock = wholesaleProd ? Number(wholesaleProd.stock) < 1 : true;
-                                     return (
-                                       <button 
-                                         onClick={() => handleManualPull(p.id, p.linked_wholesale_id!)}
-                                         disabled={isProcessing || isOutOfStock}
-                                         style={{ background: isOutOfStock ? '#cbd5e1' : '#10b981', color: '#fff', border: 'none', padding: '6px 12px', borderRadius: '6px', fontSize: '12px', fontWeight: 'bold', cursor: (isProcessing || isOutOfStock) ? 'not-allowed' : 'pointer' }}
-                                       >
-                                         {isOutOfStock ? '❌ No Stock' : '♻️ Pull 1 Bag'}
-                                       </button>
-                                     )
-                                   })() : (
-                                      <span style={{ fontSize: '12px', color: '#94a3b8' }}>No Link</span>
+                                 <td className="saas-td" key={col} style={{ width: '40px', minWidth: '40px', maxWidth: '40px', borderRight: '1px solid #f1f5f9', padding: '8px 4px', textAlign: 'center', verticalAlign: 'middle' }}>
+                                   {pBatches.length > 1 && (
+                                     <button 
+                                       onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); setExpandedProductId(isExpanded ? null : p.id); }} 
+                                       style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '12px', color: '#64748b', display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%', height: '100%' }}
+                                     >
+                                       {isExpanded ? '▼' : '▶'}
+                                     </button>
                                    )}
                                  </td>
                                )
                             }
+
+                            if (col === 'actions') {
+                              if (activeView === 'retail') {
+                                 return (
+                                   <td className="saas-td" key={col} style={{ borderRight: '1px solid #f1f5f9', padding: '8px', overflow: 'hidden', textAlign: 'center' }}>
+                                     {p.linked_wholesale_id ? (() => {
+                                       const wholesaleProd = products.find(wp => wp.id === p.linked_wholesale_id);
+                                       const isOutOfStock = wholesaleProd ? Number(wholesaleProd.stock) < 1 : true;
+                                       return (
+                                         <button 
+                                           onClick={() => handleManualPull(p.id, p.linked_wholesale_id!)}
+                                           disabled={isProcessing || isOutOfStock}
+                                           className="saas-btn"
+                                           style={{ background: isOutOfStock ? '#cbd5e1' : '#10b981', color: '#fff', border: 'none', padding: '6px 12px', fontSize: '12px', cursor: (isProcessing || isOutOfStock) ? 'not-allowed' : 'pointer' }}
+                                         >
+                                           {isOutOfStock ? '❌ No Stock' : '♻️ Pull 1 Bag'}
+                                         </button>
+                                       )
+                                     })() : (
+                                        <span style={{ fontSize: '12px', color: '#94a3b8' }}>No Link</span>
+                                     )}
+                                   </td>
+                                 )
+                              }
+                              
+                              return (
+                                <td className="saas-td" key={col} style={{ borderRight: '1px solid #f1f5f9', padding: '8px', overflow: 'hidden' }}>
+                                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center', justifyContent: 'center' }}>
+                                    {edits[p.id] ? (
+                                      <>
+                                        <button onMouseDown={(e) => { e.stopPropagation(); handleSaveRecord(p.id); }} className="saas-btn saas-btn-primary" style={{ padding: '6px 12px', fontSize: '12px' }}>Save</button>
+                                        <button onMouseDown={(e) => { e.stopPropagation(); setEdits(prev => { const n = { ...prev }; delete n[p.id]; return n }) }} className="saas-btn" style={{ background: '#fee2e2', color: '#ef4444', padding: '6px 12px', fontSize: '12px' }}>Undo</button>
+                                      </>
+                                    ) : (
+                                      <>
+                                        <button onClick={(e) => { e.stopPropagation(); openImportModal(p); }} className="saas-btn" style={{ background: '#3b82f6', color: '#fff', padding: '6px 12px', fontSize: '12px' }}>📦 Import</button>
+                                        <button onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); fetchHistory(p); }} title="View Import Log" style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '20px', padding: 0 }}>🕒</button>
+                                      </>
+                                    )}
+                                  </div>
+                                </td>
+                              )
+                            }
+
+                            const isIdCol = col === 'id';
+                            const isEditing = editingCell?.id === p.id && editingCell?.col === col;
                             
+                            let val = edits[p.id]?.[col as keyof Product] ?? p[col as keyof Product] ?? '';
+                            if (activeView === 'wholesale' && currentBatch) {
+                               if (col === 'cost_price') val = edits[p.id]?.cost_price ?? currentBatch.cost_price;
+                            }
+
+                            if (!isEditing && !edits[p.id] && activeView === 'retail' && col === 'cost_price' && p.linked_wholesale_id) {
+                              const parentWholesale = products.find(wp => wp.id === p.linked_wholesale_id);
+                              if (parentWholesale) {
+                                const parentBatches = (activeBatchesMap[parentWholesale.id] || []);
+                                parentBatches.sort((a,b) => a.id - b.id);
+                                const liveParentCogs = parentBatches.length > 0 ? parentBatches[0].cost_price : (parentWholesale.cost_price || 0);
+                                const parentWeight = parentWholesale.weight || 50;
+                                val = Math.round(liveParentCogs / parentWeight);
+                              }
+                            }
+
+                            if (col === 'linked_wholesale') {
+                              if (activeView === 'retail') {
+                                  const linkedProduct = products.find(wp => wp.id === p.linked_wholesale_id);
+                                  const isDropdownOpen = activeDropdownId === p.id;
+                                  return (
+                                    <td className="saas-td" key={col} style={{ borderRight: '1px solid #f1f5f9', position: 'relative', padding: '6px 12px', overflow: 'visible' }}>
+                                      {isDropdownOpen ? (
+                                        <div style={{ position: 'relative', zIndex: 100 }}>
+                                          <input autoFocus className="saas-input" placeholder="Search 50kg bag..." value={dropdownSearch} onChange={e => setDropdownSearch(e.target.value)} onBlur={() => setTimeout(() => setActiveDropdownId(null), 200)} onKeyDown={e => e.key === 'Escape' && setActiveDropdownId(null)} />
+                                          <div className="dropdown-results-tray">
+                                            <div className="dropdown-row clear-option" onMouseDown={(e) => { e.stopPropagation(); handleLinkWholesaleBag(p.id, null); }}>❌ Clear Linked Bag</div>
+                                            {products.filter(wp => wp.weight >= 50 && wp.name.toLowerCase().includes(dropdownSearch.toLowerCase())).map(wp => (
+                                              <div key={wp.id} className="dropdown-row" onMouseDown={(e) => { e.stopPropagation(); handleLinkWholesaleBag(p.id, wp); }}>
+                                                <span style={{ fontWeight: 'normal', color: '#334155' }}>{wp.name}</span>
+                                                <span style={{ fontSize: '11px', color: '#64748b' }}> ({formatRiel(wp.cost_price)})</span>
+                                              </div>
+                                            ))}
+                                          </div>
+                                        </div>
+                                      ) : (
+                                        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                                          <div className="interactive-select-trigger" onClick={(e) => { e.stopPropagation(); setActiveDropdownId(p.id); setDropdownSearch(''); }} style={{ flex: 1 }}>
+                                            {linkedProduct ? `🌾 ${linkedProduct.name}` : '🔍 Click to link 50kg Bag...'}
+                                          </div>
+                                        </div>
+                                      )}
+                                    </td>
+                                  )
+                              }
+                              return null;
+                            }
+
                             return (
-                              <td key={col} style={{ borderRight: '1px solid #f1f5f9', padding: '8px', overflow: 'hidden' }}>
-                                <div style={{ display: 'flex', gap: '8px', alignItems: 'center', justifyContent: 'center' }}>
-                                  {edits[p.id] ? (
-                                    <>
-                                      <button onMouseDown={(e) => { e.stopPropagation(); handleSaveRecord(p.id); }} style={{ color: '#fff', background: '#10b981', border: 'none', padding: '8px 12px', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', fontSize: '12px' }}>Save</button>
-                                      <button onMouseDown={(e) => { e.stopPropagation(); setEdits(prev => { const n = { ...prev }; delete n[p.id]; return n }) }} style={{ color: '#ef4444', background: '#fee2e2', border: 'none', padding: '8px 12px', borderRadius: '6px', cursor: 'pointer', fontSize: '12px', fontWeight: 'bold' }}>Undo</button>
-                                    </>
-                                  ) : (
-                                    <>
-                                      <button onClick={(e) => { e.stopPropagation(); openImportModal(p); }} style={{ color: '#fff', background: '#3b82f6', border: 'none', padding: '6px 12px', borderRadius: '6px', cursor: 'pointer', fontSize: '12px', fontWeight: 'bold' }}>📦 Import</button>
-                                      <button onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); fetchHistory(p); }} title="View Import Log" style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '20px', padding: 0 }}>🕒</button>
-                                    </>
-                                  )}
-                                </div>
+                              <td key={col} className={`saas-td ${isEditing ? 'cell-editing' : ''}`} style={{ borderRight: '1px solid #f1f5f9', overflow: 'hidden', position: 'relative', padding: 0 }}>
+                                {isIdCol && (hoveredId === p.id || selectedToDelete.has(p.id)) && (
+                                  <div style={{ position: 'absolute', left: '8px', top: '50%', transform: 'translateY(-50%)', zIndex: 25, background: edits[p.id] ? '#fefcf3' : '#fff', paddingRight: '4px' }}>
+                                    <input type="checkbox" checked={selectedToDelete.has(p.id)} onChange={() => { const next = new Set(selectedToDelete); next.has(p.id) ? next.delete(p.id) : next.add(p.id); setSelectedToDelete(next); }} style={{ cursor: 'pointer', width: '18px', height: '18px', margin: 0, accentColor: '#b58a3d' }} />
+                                  </div>
+                                )}
+                                
+                                {isEditing ? (
+                                  <input 
+                                    autoFocus 
+                                    enterKeyHint="done"
+                                    type={['name'].includes(col as string) ? 'text' : 'number'} 
+                                    className="cell-input no-spinners" 
+                                    style={{ paddingLeft: isIdCol ? '36px' : '12px' }} 
+                                    value={val as any} 
+                                    onChange={(e) => { const newVal = e.target.type === 'number' ? (e.target.value === '' ? '' : Number(e.target.value)) : e.target.value; setEdits(prev => ({ ...prev, [p.id]: { ...(prev[p.id] || {}), [col]: newVal } })) }} 
+                                    onBlur={() => {
+                                      const originalVal = p[col as keyof Product];
+                                      const editVal = edits[p.id]?.[col as keyof Product];
+                                      if (editVal === undefined || editVal === originalVal || editVal === '') {
+                                        setEdits(prev => { const n = { ...prev }; delete n[p.id]; return n });
+                                        setEditingCell(null);
+                                      } else {
+                                        setEditingCell(null);
+                                      }
+                                    }} 
+                                    onKeyDown={(e) => { 
+                                      if (e.key === 'Enter' || e.keyCode === 13) { 
+                                        e.preventDefault();
+                                        handleSaveRecord(p.id);
+                                      } 
+                                      if (e.key === 'Escape') { 
+                                        setEdits(prev => { const n = { ...prev }; delete n[p.id]; return n }); 
+                                        setEditingCell(null); 
+                                      } 
+                                    }} 
+                                  />
+                                ) : (
+                                  <div className="cell-display" style={{ paddingLeft: isIdCol ? '36px' : '12px', fontWeight: 'normal', color: ['mtd_kg_used', 'mtd_bags_used'].includes(col as string) ? '#b58a3d' : '#334155', cursor: 'text' }} onClick={() => { setEditingCell({ id: p.id, col: col as string }) }}>
+                                    
+                                    {col === 'name' ? (
+                                      <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                        {activeView === 'wholesale' && (
+                                          <span style={{ fontSize: '11px', background: '#fef3c7', color: '#b45309', padding: '2px 6px', borderRadius: '4px', display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                                            <span style={{ fontWeight: 'bold' }}>📦 {totalActiveBatchStock} Total</span>
+                                            {linkedRetail && (
+                                              <>
+                                                <span style={{ width: '1px', height: '10px', background: '#d97706', opacity: 0.5 }}></span>
+                                                <span style={{ fontWeight: 'normal' }}>⚖️ {linkedRetail.stock} kg Loose</span>
+                                              </>
+                                            )}
+                                          </span>
+                                        )}
+                                        {formatDisplayValue(col as string, val)}
+                                        
+                                        {activeView === 'retail' && p.stock >= 50 && p.linked_wholesale_id && (
+                                          <button 
+                                            onClick={(e) => { 
+                                              e.preventDefault(); 
+                                              e.stopPropagation(); 
+                                              setRepackModal({ isOpen: true, product: p }); 
+                                            }}
+                                            onMouseDown={(e) => e.stopPropagation()} 
+                                            className="saas-btn"
+                                            style={{ marginLeft: '12px', padding: '4px 8px', background: '#f0fdf4', color: '#166534', border: '1px solid #bbf7d0', fontSize: '11px' }}
+                                          >
+                                            📦 Repack 50kg
+                                          </button>
+                                        )}
+                                      </span>
+                                    ) : (
+                                      formatDisplayValue(col as string, val)
+                                    )}
+
+                                  </div>
+                                )}
                               </td>
                             )
-                          }
+                          })}
+                        </tr>
 
-                          const isIdCol = col === 'id';
-                          const isEditing = editingCell?.id === p.id && editingCell?.col === col;
-                          
-                          let val = edits[p.id]?.[col as keyof Product] ?? p[col as keyof Product] ?? '';
-                          if (activeView === 'wholesale' && currentBatch) {
-                             if (col === 'cost_price') val = edits[p.id]?.cost_price ?? currentBatch.cost_price;
-                          }
-
-                          if (!isEditing && !edits[p.id] && activeView === 'retail' && col === 'cost_price' && p.linked_wholesale_id) {
-                            const parentWholesale = products.find(wp => wp.id === p.linked_wholesale_id);
-                            if (parentWholesale) {
-                              const parentBatches = (activeBatchesMap[parentWholesale.id] || []);
-                              parentBatches.sort((a,b) => a.id - b.id);
-                              const liveParentCogs = parentBatches.length > 0 ? parentBatches[0].cost_price : (parentWholesale.cost_price || 0);
-                              const parentWeight = parentWholesale.weight || 50;
-                              val = Math.round(liveParentCogs / parentWeight);
-                            }
-                          }
-
-                          if (col === 'linked_wholesale') {
-                            if (activeView === 'retail') {
-                                const linkedProduct = products.find(wp => wp.id === p.linked_wholesale_id);
-                                const isDropdownOpen = activeDropdownId === p.id;
-                                return (
-                                  <td key={col} style={{ borderRight: '1px solid #f1f5f9', position: 'relative', padding: '6px 12px', overflow: 'visible' }}>
-                                    {isDropdownOpen ? (
-                                      <div style={{ position: 'relative', zIndex: 100 }}>
-                                        <input autoFocus className="dropdown-search-input" placeholder="Search 50kg bag..." value={dropdownSearch} onChange={e => setDropdownSearch(e.target.value)} onBlur={() => setTimeout(() => setActiveDropdownId(null), 200)} onKeyDown={e => e.key === 'Escape' && setActiveDropdownId(null)} />
-                                        <div className="dropdown-results-tray">
-                                          <div className="dropdown-row clear-option" onMouseDown={(e) => { e.stopPropagation(); handleLinkWholesaleBag(p.id, null); }}>❌ Clear Linked Bag</div>
-                                          {products.filter(wp => wp.weight >= 50 && wp.name.toLowerCase().includes(dropdownSearch.toLowerCase())).map(wp => (
-                                            <div key={wp.id} className="dropdown-row" onMouseDown={(e) => { e.stopPropagation(); handleLinkWholesaleBag(p.id, wp); }}>
-                                              <span style={{ fontWeight: 'normal', color: '#334155' }}>{wp.name}</span>
-                                              <span style={{ fontSize: '11px', color: '#64748b' }}> ({formatRiel(wp.cost_price)})</span>
-                                            </div>
-                                          ))}
-                                        </div>
-                                      </div>
-                                    ) : (
-                                      <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                                        <div className="interactive-select-trigger" onClick={(e) => { e.stopPropagation(); setActiveDropdownId(p.id); setDropdownSearch(''); }} style={{ flex: 1 }}>
-                                          {linkedProduct ? `🌾 ${linkedProduct.name}` : '🔍 Click to link 50kg Bag...'}
-                                        </div>
-                                      </div>
-                                    )}
-                                  </td>
-                                )
-                            }
-                            return null;
-                          }
-
-                          return (
-                            <td key={col} className={isEditing ? 'cell-editing' : ''} style={{ borderRight: '1px solid #f1f5f9', overflow: 'hidden', position: 'relative', padding: 0 }}>
-                              {isIdCol && (hoveredId === p.id || selectedToDelete.has(p.id)) && (
-                                <div style={{ position: 'absolute', left: '8px', top: '50%', transform: 'translateY(-50%)', zIndex: 25, background: edits[p.id] ? '#fefcf3' : '#fff', paddingRight: '4px' }}>
-                                  <input type="checkbox" checked={selectedToDelete.has(p.id)} onChange={() => { const next = new Set(selectedToDelete); next.has(p.id) ? next.delete(p.id) : next.add(p.id); setSelectedToDelete(next); }} style={{ cursor: 'pointer', width: '18px', height: '18px', margin: 0, accentColor: '#b58a3d' }} />
-                                </div>
-                              )}
-                              
-                              {isEditing ? (
-                                <input 
-                                  autoFocus 
-                                  enterKeyHint="done"
-                                  type={['name'].includes(col as string) ? 'text' : 'number'} 
-                                  className="cell-input no-spinners" 
-                                  style={{ paddingLeft: isIdCol ? '36px' : '12px' }} 
-                                  value={val as any} 
-                                  onChange={(e) => { const newVal = e.target.type === 'number' ? (e.target.value === '' ? '' : Number(e.target.value)) : e.target.value; setEdits(prev => ({ ...prev, [p.id]: { ...(prev[p.id] || {}), [col]: newVal } })) }} 
-                                  onBlur={() => {
-                                    const originalVal = p[col as keyof Product];
-                                    const editVal = edits[p.id]?.[col as keyof Product];
-                                    if (editVal === undefined || editVal === originalVal || editVal === '') {
-                                      setEdits(prev => { const n = { ...prev }; delete n[p.id]; return n });
-                                      setEditingCell(null);
-                                    } else {
-                                      setEditingCell(null);
-                                    }
-                                  }} 
-                                  onKeyDown={(e) => { 
-                                    if (e.key === 'Enter' || e.keyCode === 13) { 
-                                      e.preventDefault();
-                                      handleSaveRecord(p.id);
-                                    } 
-                                    if (e.key === 'Escape') { 
-                                      setEdits(prev => { const n = { ...prev }; delete n[p.id]; return n }); 
-                                      setEditingCell(null); 
-                                    } 
-                                  }} 
-                                />
-                              ) : (
-                                <div className="cell-display" style={{ paddingLeft: isIdCol ? '36px' : '12px', fontWeight: 'normal', color: ['mtd_kg_used', 'mtd_bags_used'].includes(col as string) ? '#b58a3d' : '#334155', cursor: 'text' }} onClick={() => { setEditingCell({ id: p.id, col: col as string }) }}>
+                        {/* Expandable Child Row Batch List (View Only) */}
+                        {isExpanded && activeView === 'wholesale' && pBatches.length > 1 && pBatches.slice(1).map((batch, index) => {
+                           let batchLabel = index === 0 ? '2nd Batch' : index === 1 ? '3rd Batch' : `${index + 2}th Batch`;
+                           
+                           return (
+                             <tr className="saas-tr" key={`batch-${batch.id}`} style={{ background: '#f8fafc' }}>
+                                {columnOrder.map(col => {
+                                  if (col === 'expand') return <td className="saas-td" key={col} style={{ borderRight: '1px solid #f1f5f9' }}></td>;
+                                  if (col === 'linked_wholesale' || col === 'mtd_kg_used' || col === 'mtd_bags_used') return null;
+                                  if (col === 'id') return <td className="saas-td" key={col} style={{ borderRight: '1px solid #f1f5f9' }}></td>;
                                   
-                                  {col === 'name' ? (
-                                    <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                      {activeView === 'wholesale' && (
-                                        <span style={{ fontSize: '11px', background: '#fef3c7', color: '#b45309', padding: '2px 6px', borderRadius: '4px', display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
-                                          <span style={{ fontWeight: 'bold' }}>📦 {totalActiveBatchStock} Total</span>
-                                          {linkedRetail && (
-                                            <>
-                                              <span style={{ width: '1px', height: '10px', background: '#d97706', opacity: 0.5 }}></span>
-                                              <span style={{ fontWeight: 'normal' }}>⚖️ {linkedRetail.stock} kg Loose</span>
-                                            </>
-                                          )}
-                                        </span>
-                                      )}
-                                      {formatDisplayValue(col as string, val)}
-                                      
-                                      {activeView === 'retail' && p.stock >= 50 && p.linked_wholesale_id && (
-                                        <button 
-                                          onClick={(e) => { 
-                                            e.preventDefault(); 
-                                            e.stopPropagation(); 
-                                            setRepackModal({ isOpen: true, product: p }); 
-                                          }}
-                                          onMouseDown={(e) => e.stopPropagation()} 
-                                          style={{ marginLeft: '12px', padding: '4px 8px', background: '#f0fdf4', color: '#166534', border: '1px solid #bbf7d0', borderRadius: '6px', fontSize: '11px', fontWeight: 'bold', cursor: 'pointer', position: 'relative', zIndex: 10 }}
-                                        >
-                                          📦 Repack 50kg
-                                        </button>
-                                      )}
-                                    </span>
-                                  ) : (
-                                    formatDisplayValue(col as string, val)
-                                  )}
-
-                                </div>
-                              )}
-                            </td>
-                          )
+                                  if (col === 'name') return (
+                                    <td className="saas-td" key={col} style={{ padding: '12px 12px 12px 48px', borderRight: '1px solid #f1f5f9', color: '#475569', fontSize: '14px' }}>
+                                      ↳ {batchLabel}
+                                    </td>
+                                  );
+                                  
+                                  if (col === 'price') return <td className="saas-td" key={col} style={{ padding: '12px', borderRight: '1px solid #f1f5f9', color: '#475569', fontSize: '14px' }}>-</td>;
+                                  
+                                  if (col === 'cost_price') return <td className="saas-td" key={col} style={{ padding: '12px', borderRight: '1px solid #f1f5f9', color: '#475569', fontSize: '14px' }}>{formatRiel(batch.cost_price)}</td>;
+                                  
+                                  if (col === 'stock') return <td className="saas-td" key={col} style={{ padding: '12px', borderRight: '1px solid #f1f5f9', color: '#b58a3d', fontWeight: 'normal', fontSize: '14px' }}>{batch.remaining_qty}</td>;
+                                  
+                                  if (col === 'actions') {
+                                    return <td className="saas-td" key={col} style={{ borderRight: '1px solid #f1f5f9' }}></td>;
+                                  }
+                                  
+                                  return <td className="saas-td" key={col} style={{ padding: '12px', borderRight: '1px solid #f1f5f9', color: '#94a3b8', fontSize: '14px', textAlign: 'center' }}>-</td>;
+                                })}
+                             </tr>
+                           )
                         })}
-                      </tr>
-
-                      {/* Expandable Child Row Batch List (View Only) */}
-                      {isExpanded && activeView === 'wholesale' && pBatches.length > 1 && pBatches.slice(1).map((batch, index) => {
-                         let batchLabel = index === 0 ? '2nd Batch' : index === 1 ? '3rd Batch' : `${index + 2}th Batch`;
-                         
-                         return (
-                           <tr key={`batch-${batch.id}`} style={{ background: '#f8fafc', borderBottom: index === pBatches.length - 2 ? '2px solid #cbd5e1' : '1px dashed #e2e8f0' }}>
-                              {columnOrder.map(col => {
-                                if (col === 'expand') return <td key={col} style={{ borderRight: '1px solid #f1f5f9' }}></td>;
-                                if (col === 'linked_wholesale' || col === 'mtd_kg_used' || col === 'mtd_bags_used') return null;
-                                if (col === 'id') return <td key={col} style={{ borderRight: '1px solid #f1f5f9' }}></td>;
-                                
-                                if (col === 'name') return (
-                                  <td key={col} style={{ padding: '12px 12px 12px 48px', borderRight: '1px solid #f1f5f9', color: '#475569', fontSize: '14px' }}>
-                                    ↳ {batchLabel}
-                                  </td>
-                                );
-                                
-                                if (col === 'price') return <td key={col} style={{ padding: '12px', borderRight: '1px solid #f1f5f9', color: '#475569', fontSize: '14px' }}>-</td>;
-                                
-                                if (col === 'cost_price') return <td key={col} style={{ padding: '12px', borderRight: '1px solid #f1f5f9', color: '#475569', fontSize: '14px' }}>{formatRiel(batch.cost_price)}</td>;
-                                
-                                if (col === 'stock') return <td key={col} style={{ padding: '12px', borderRight: '1px solid #f1f5f9', color: '#b58a3d', fontWeight: 'normal', fontSize: '14px' }}>{batch.remaining_qty}</td>;
-                                
-                                if (col === 'actions') {
-                                  return <td key={col} style={{ borderRight: '1px solid #f1f5f9' }}></td>;
-                                }
-                                
-                                return <td key={col} style={{ padding: '12px', borderRight: '1px solid #f1f5f9', color: '#94a3b8', fontSize: '14px', textAlign: 'center' }}>-</td>;
-                              })}
-                           </tr>
-                         )
-                      })}
-                    </React.Fragment>
-                  )
-                })
-              )}
-            </tbody>
-          </table>
+                      </React.Fragment>
+                    )
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 
       {/* IMPORT FORM TAB */}
       {activeView === 'import' && (
         <div className="fade-in" style={{ display: 'flex', justifyContent: 'center' }}>
-          <div style={{ background: '#fff', padding: '32px', borderRadius: '16px', border: '1px solid #e2e8f0', boxShadow: '0 10px 25px rgba(0,0,0,0.05)', width: '100%', maxWidth: '600px' }}>
-            <h2 style={{ marginTop: 0, color: '#1e293b', marginBottom: '24px', borderBottom: '2px solid #f1f5f9', paddingBottom: '12px' }}>🚚 Receive New Stock</h2>
+          <div className="saas-card" style={{ width: '100%', maxWidth: '600px' }}>
+            <h2 className="saas-card-title" style={{ fontSize: '18px', borderBottom: '1px solid #f1f5f9', paddingBottom: '12px' }}>🚚 Receive New Stock</h2>
             
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', marginTop: '20px' }}>
               
               {/* SUPPLIER SEARCHABLE DROPDOWN */}
               <div style={{ position: 'relative', zIndex: isSupplierDropdownOpen ? 100 : 2 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: '6px' }}>
-                  <label style={{ fontSize: '13px', color: '#0f172a', fontWeight: 'bold' }}>Select Supplier</label>
-                  <button onClick={() => setIsAddSupplierOpen(true)} style={{ background: 'none', border: 'none', color: '#3b82f6', fontWeight: 'bold', fontSize: '12px', cursor: 'pointer' }}>+ Add New Supplier</button>
+                  <label className="saas-card-title" style={{ fontSize: '11px', margin: 0 }}>Select Supplier</label>
+                  <button onClick={() => setIsAddSupplierOpen(true)} className="saas-btn" style={{ background: 'none', border: 'none', color: '#3b82f6', fontSize: '12px', padding: 0 }}>+ Add New Supplier</button>
                 </div>
                 {isSupplierDropdownOpen ? (
                   <div style={{ position: 'relative' }}>
                     <input 
                       autoFocus 
-                      className="dropdown-search-input" 
+                      className="saas-input" 
                       placeholder="Search..." 
                       value={supplierSearch} 
                       onChange={e => setSupplierSearch(e.target.value)} 
@@ -1470,14 +1491,14 @@ export default function RiceControl() {
               {/* PRODUCT SEARCHABLE DROPDOWN */}
               <div style={{ position: 'relative', zIndex: isProductDropdownOpen ? 90 : 1 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: '6px' }}>
-                  <label style={{ fontSize: '13px', color: '#0f172a', fontWeight: 'bold' }}>Select Product (Rice)</label>
-                  <button onClick={handleOpenAddProduct} style={{ background: 'none', border: 'none', color: '#3b82f6', fontWeight: 'bold', fontSize: '12px', cursor: 'pointer' }}>+ Create New Product</button>
+                  <label className="saas-card-title" style={{ fontSize: '11px', margin: 0 }}>Select Product (Rice)</label>
+                  <button onClick={handleOpenAddProduct} className="saas-btn" style={{ background: 'none', border: 'none', color: '#3b82f6', fontSize: '12px', padding: 0 }}>+ Create New Product</button>
                 </div>
                 {isProductDropdownOpen ? (
                   <div style={{ position: 'relative' }}>
                     <input 
                       autoFocus 
-                      className="dropdown-search-input" 
+                      className="saas-input" 
                       placeholder="Search..." 
                       value={productSearch} 
                       onChange={e => setProductSearch(e.target.value)} 
@@ -1485,7 +1506,6 @@ export default function RiceControl() {
                       onKeyDown={e => e.key === 'Escape' && setIsProductDropdownOpen(false)} 
                     />
                     <div className="dropdown-results-tray">
-                      {/* 🔥 Filter forces only >= 50kg bags to be shown */}
                       {products.filter(p => p.weight >= 50 && p.name.toLowerCase().includes(productSearch.toLowerCase())).map(p => (
                         <div key={p.id} className="dropdown-row" onMouseDown={(e) => { e.stopPropagation(); setImportForm({...importForm, product_id: String(p.id)}); setIsProductDropdownOpen(false); }}>
                           <span style={{ fontWeight: 'normal', color: '#334155' }}>{p.name}</span>
@@ -1503,12 +1523,12 @@ export default function RiceControl() {
 
               <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap' }}>
                 <div style={{ flex: 1, minWidth: '150px' }}>
-                  <label style={{ display: 'block', fontSize: '13px', color: '#0f172a', fontWeight: 'bold', marginBottom: '6px' }}>Quantity Imported</label>
-                  <input type="number" className="no-spinners" placeholder="" value={importForm.qty} onChange={e => setImportForm({...importForm, qty: e.target.value})} style={{ width: '100%', padding: '12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '16px', boxSizing: 'border-box' }} />
+                  <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '6px' }}>Quantity Imported</label>
+                  <input type="number" className="saas-input no-spinners" value={importForm.qty} onChange={e => setImportForm({...importForm, qty: e.target.value})} />
                 </div>
                 <div style={{ flex: 1, minWidth: '150px' }}>
-                  <label style={{ display: 'block', fontSize: '13px', color: '#0f172a', fontWeight: 'bold', marginBottom: '6px' }}>Unit Cost (៛)</label>
-                  <input type="number" className="no-spinners" placeholder="" value={importForm.unit_cost} onChange={e => setImportForm({...importForm, unit_cost: e.target.value})} style={{ width: '100%', padding: '12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '16px', boxSizing: 'border-box' }} />
+                  <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '6px' }}>Unit Cost (៛)</label>
+                  <input type="number" className="saas-input no-spinners" value={importForm.unit_cost} onChange={e => setImportForm({...importForm, unit_cost: e.target.value})} />
                 </div>
               </div>
 
@@ -1521,12 +1541,12 @@ export default function RiceControl() {
                 <h4 style={{ margin: '0 0 16px 0', fontSize: '14px', color: '#1e293b' }}>Payment Details</h4>
                 <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap' }}>
                   <div style={{ flex: 2, minWidth: '150px' }}>
-                    <label style={{ display: 'block', fontSize: '12px', color: '#64748b', fontWeight: 'bold', marginBottom: '6px' }}>Amount Paying Now (៛)</label>
-                    <input type="number" className="no-spinners" placeholder="" value={importForm.paid_amount} onChange={e => setImportForm({...importForm, paid_amount: e.target.value})} style={{ width: '100%', padding: '12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '16px', boxSizing: 'border-box' }} />
+                    <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '6px' }}>Amount Paying Now (៛)</label>
+                    <input type="number" className="saas-input no-spinners" value={importForm.paid_amount} onChange={e => setImportForm({...importForm, paid_amount: e.target.value})} />
                   </div>
                   <div style={{ flex: 1, minWidth: '120px' }}>
-                    <label style={{ display: 'block', fontSize: '12px', color: '#64748b', fontWeight: 'bold', marginBottom: '6px' }}>Payment Method</label>
-                    <select value={importForm.payment_method} onChange={e => setImportForm({...importForm, payment_method: e.target.value})} style={{ width: '100%', padding: '12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '16px', outline: 'none', backgroundColor: '#fff' }}>
+                    <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '6px' }}>Payment Method</label>
+                    <select value={importForm.payment_method} onChange={e => setImportForm({...importForm, payment_method: e.target.value})} className="saas-input" style={{ cursor: 'pointer' }}>
                       <option value="Cash ៛">💵 Cash ៛</option>
                       <option value="Cash $">💵 Cash $</option>
                       <option value="QR ៛">📱 QR ៛</option>
@@ -1542,14 +1562,16 @@ export default function RiceControl() {
                 <button 
                   onClick={() => handleProcessImport(true)} 
                   disabled={isProcessing}
-                  style={{ flex: 1, padding: '14px', background: '#f59e0b', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 'bold', fontSize: '15px', cursor: isProcessing ? 'not-allowed' : 'pointer' }}
+                  className="saas-btn"
+                  style={{ flex: 1, padding: '14px', background: '#f59e0b', color: '#fff', fontSize: '15px' }}
                 >
                   ⏳ Save as Pending/Partial
                 </button>
                 <button 
                   onClick={() => handleProcessImport(false)} 
                   disabled={isProcessing}
-                  style={{ flex: 1, padding: '14px', background: '#10b981', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 'bold', fontSize: '15px', cursor: isProcessing ? 'not-allowed' : 'pointer' }}
+                  className="saas-btn saas-btn-primary"
+                  style={{ flex: 1, padding: '14px', fontSize: '15px' }}
                 >
                   ✅ Paid Full & Import
                 </button>
@@ -1562,412 +1584,409 @@ export default function RiceControl() {
 
       {/* PENDING PAYMENTS TAB */}
       {activeView === 'pending' && (
-        <div className="table-wrapper fade-in">
-          <table style={{ borderCollapse: 'collapse', tableLayout: 'fixed', width: 'max-content', minWidth: '100%' }}>
-            <thead>
-              <tr style={{ background: '#fff1f2', borderBottom: '2px solid #fecaca' }}>
-                {pendingColOrder.map(col => {
-                  const isDraggable = col !== 'actions';
-                  let label = col;
-                  if (col === 'date') label = 'Date';
-                  if (col === 'supplier') label = 'Supplier';
-                  if (col === 'product') label = 'Product';
-                  if (col === 'total_cost') label = 'Total Cost (៛)';
-                  if (col === 'paid_so_far') label = 'Paid So Far';
-                  if (col === 'remaining_debt') label = 'Remaining Debt';
-                  if (col === 'actions') label = 'Action';
+        <div className="saas-table-wrapper fade-in">
+          <div className="saas-table-responsive">
+            <table className="saas-table" style={{ minWidth: '100%', tableLayout: 'fixed', width: 'max-content' }}>
+              <thead style={{ background: '#fff1f2' }}>
+                <tr>
+                  {pendingColOrder.map(col => {
+                    const isDraggable = col !== 'actions';
+                    let label = col;
+                    if (col === 'date') label = 'Date';
+                    if (col === 'supplier') label = 'Supplier';
+                    if (col === 'product') label = 'Product';
+                    if (col === 'total_cost') label = 'Total Cost (៛)';
+                    if (col === 'paid_so_far') label = 'Paid So Far';
+                    if (col === 'remaining_debt') label = 'Remaining Debt';
+                    if (col === 'actions') label = 'Action';
 
-                  return (
-                    <th 
-                      key={col}
-                      draggable={isDraggable}
-                      onDragStart={(e) => onDragStartCol(e, col, ['actions'])}
-                      onDragOver={onDragOverCol}
-                      onDrop={(e) => handlePendingDrop(e, col)}
-                      onClick={() => handlePendingSort(col)}
-                      style={{ 
-                        width: pendingColWidths[col] || 150, 
-                        position: 'relative', 
-                        padding: '16px 12px', 
-                        textAlign: col === 'actions' ? 'center' : (['total_cost', 'paid_so_far', 'remaining_debt'].includes(col) ? 'right' : 'left'), 
-                        color: '#991b1b', 
-                        fontSize: '13px', 
-                        textTransform: 'uppercase', 
-                        fontWeight: 'bold', 
-                        borderRight: '1px solid #fee2e2', 
-                        cursor: isDraggable ? 'pointer' : 'default', 
-                        whiteSpace: 'nowrap', 
-                        userSelect: 'none' 
-                      }}
-                    >
-                      {label}
-                      {isDraggable && (<span style={{ marginLeft: '6px', fontSize: '12px', opacity: pendingSort?.key === col ? 1 : 0.3 }}>{pendingSort?.key === col ? (pendingSort.direction === 'asc' ? '↑' : '↓') : '↕'}</span>)}
-                      {isDraggable && <div onMouseDown={(e) => handleResizeStartPending(e, col)} onTouchStart={(e) => handleResizeStartPending(e, col)} style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: '14px', cursor: 'col-resize', background: 'transparent', zIndex: 10, transform: 'translateX(50%)' }} />}
-                    </th>
-                  );
-                })}
-              </tr>
-            </thead>
-            <tbody>
-              {processedPending.length === 0 ? (
-                <tr><td colSpan={pendingColOrder.length} style={{ padding: '40px', textAlign: 'center', color: '#10b981', fontWeight: 'bold', fontSize: '16px' }}>🎉 No pending payments to suppliers!</td></tr>
-              ) : (
-                processedPending.map((imp: any) => {
-                  const remaining = Number(imp.total_cost) - Number(imp.paid_amount);
-                  return (
-                    <tr key={imp.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                      {pendingColOrder.map(col => {
-                        if (col === 'date') return <td key={col} style={{ padding: '14px 12px', color: '#64748b', fontSize: '14px', borderRight: '1px solid #f1f5f9', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{new Date(imp.created_at).toLocaleDateString()}</td>;
-                        if (col === 'supplier') return <td key={col} style={{ padding: '14px 12px', fontWeight: 'normal', color: '#334155', fontSize: '14px', borderRight: '1px solid #f1f5f9', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{imp.suppliers?.name}</td>;
-                        if (col === 'product') return <td key={col} style={{ padding: '14px 12px', color: '#475569', fontSize: '14px', borderRight: '1px solid #f1f5f9', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{imp.products?.name} <span style={{color:'#94a3b8'}}>(x{imp.qty})</span></td>;
-                        if (col === 'total_cost') return <td key={col} style={{ padding: '14px 12px', textAlign: 'right', color: '#475569', fontSize: '14px', borderRight: '1px solid #f1f5f9', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{formatRiel(imp.total_cost)}</td>;
-                        if (col === 'paid_so_far') return <td key={col} style={{ padding: '14px 12px', textAlign: 'right', color: '#10b981', fontSize: '14px', borderRight: '1px solid #f1f5f9', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{formatRiel(imp.paid_amount)}</td>;
-                        if (col === 'remaining_debt') return <td key={col} style={{ padding: '14px 12px', textAlign: 'right', fontWeight: 'normal', color: '#ef4444', fontSize: '14px', borderRight: '1px solid #f1f5f9', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{formatRiel(remaining)}</td>;
-                        if (col === 'actions') return (
-                          <td key={col} style={{ padding: '14px 12px', textAlign: 'center', borderRight: '1px solid #f1f5f9' }}>
-                            <div style={{ display: 'flex', gap: '8px', justifyContent: 'center' }}>
-                              <button 
-                                onClick={() => {
-                                  setPayPendingModal({ isOpen: true, record: imp, totalDue: remaining });
-                                  setPendingPaymentRows([{ id: Date.now(), method: 'Cash ៛', amount: '' }]);
-                                }}
-                                style={{ padding: '6px 12px', background: '#3b82f6', color: '#fff', border: 'none', borderRadius: '6px', fontWeight: 'bold', cursor: 'pointer', fontSize: '12px' }}
-                              >
-                                💸 Pay Now
-                              </button>
-                              <button 
-                                onClick={() => handleVoidImport(imp.id)}
-                                disabled={isProcessing}
-                                style={{ padding: '6px 12px', background: '#fee2e2', color: '#dc2626', border: 'none', borderRadius: '6px', fontWeight: 'bold', cursor: isProcessing ? 'not-allowed' : 'pointer', fontSize: '12px' }}
-                              >
-                                ❌ Void
-                              </button>
-                            </div>
-                          </td>
-                        );
-                        return null;
-                      })}
-                    </tr>
-                  )
-                })
-              )}
-            </tbody>
-          </table>
+                    return (
+                      <th 
+                        key={col}
+                        className="saas-th"
+                        draggable={isDraggable}
+                        onDragStart={(e) => onDragStartCol(e, col, ['actions'])}
+                        onDragOver={onDragOverCol}
+                        onDrop={(e) => handlePendingDrop(e, col)}
+                        onClick={() => handlePendingSort(col)}
+                        style={{ 
+                          width: pendingColWidths[col] || 150, 
+                          position: 'relative', 
+                          textAlign: col === 'actions' ? 'center' : (['total_cost', 'paid_so_far', 'remaining_debt'].includes(col) ? 'right' : 'left'), 
+                          color: '#991b1b', 
+                          borderRight: '1px solid #ffe4e6', 
+                          cursor: isDraggable ? 'pointer' : 'default', 
+                          whiteSpace: 'nowrap', 
+                          userSelect: 'none' 
+                        }}
+                      >
+                        {label}
+                        {isDraggable && (<span style={{ marginLeft: '6px', fontSize: '12px', opacity: pendingSort?.key === col ? 1 : 0.3 }}>{pendingSort?.key === col ? (pendingSort.direction === 'asc' ? '↑' : '↓') : '↕'}</span>)}
+                        {isDraggable && <div onMouseDown={(e) => handleResizeStartPending(e, col)} onTouchStart={(e) => handleResizeStartPending(e, col)} style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: '14px', cursor: 'col-resize', background: 'transparent', zIndex: 10, transform: 'translateX(50%)' }} />}
+                      </th>
+                    );
+                  })}
+                </tr>
+              </thead>
+              <tbody>
+                {isLoading ? (
+                  <TableSkeleton columns={pendingColOrder.length} rows={5} />
+                ) : processedPending.length === 0 ? (
+                  <tr>
+                    <td colSpan={pendingColOrder.length} style={{ padding: 0 }}>
+                      <EmptyState icon="🎉" title="No pending payments!" message="All your supplier debts are fully settled." />
+                    </td>
+                  </tr>
+                ) : (
+                  processedPending.map((imp: any) => {
+                    const remaining = Number(imp.total_cost) - Number(imp.paid_amount);
+                    return (
+                      <tr key={imp.id} className="saas-tr">
+                        {pendingColOrder.map(col => {
+                          if (col === 'date') return <td className="saas-td" key={col}>{new Date(imp.created_at).toLocaleDateString()}</td>;
+                          if (col === 'supplier') return <td className="saas-td" key={col} style={{ fontWeight: 'bold' }}>{imp.suppliers?.name}</td>;
+                          if (col === 'product') return <td className="saas-td" key={col}>{imp.products?.name} <span style={{color:'#94a3b8'}}>(x{imp.qty})</span></td>;
+                          if (col === 'total_cost') return <td className="saas-td" key={col} style={{ textAlign: 'right' }}>{formatRiel(imp.total_cost)}</td>;
+                          if (col === 'paid_so_far') return <td className="saas-td" key={col} style={{ textAlign: 'right', color: '#10b981', fontWeight: 'bold' }}>{formatRiel(imp.paid_amount)}</td>;
+                          if (col === 'remaining_debt') return <td className="saas-td" key={col} style={{ textAlign: 'right', color: '#ef4444', fontWeight: 'bold' }}>{formatRiel(remaining)}</td>;
+                          if (col === 'actions') return (
+                            <td className="saas-td" key={col} style={{ textAlign: 'center' }}>
+                              <div style={{ display: 'flex', gap: '8px', justifyContent: 'center' }}>
+                                <button 
+                                  onClick={() => {
+                                    setPayPendingModal({ isOpen: true, record: imp, totalDue: remaining });
+                                    setPendingPaymentRows([{ id: Date.now(), method: 'Cash ៛', amount: '' }]);
+                                  }}
+                                  className="saas-btn saas-btn-primary"
+                                  style={{ padding: '6px 12px', fontSize: '12px' }}
+                                >
+                                  💸 Pay Now
+                                </button>
+                                <button 
+                                  onClick={() => handleVoidImport(imp.id)}
+                                  disabled={isProcessing}
+                                  className="saas-btn saas-btn-danger"
+                                  style={{ padding: '6px 12px', fontSize: '12px' }}
+                                >
+                                  ❌ Void
+                                </button>
+                              </div>
+                            </td>
+                          );
+                          return null;
+                        })}
+                      </tr>
+                    )
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 
       {/* SUPPLIERS DATABASE TAB */}
       {activeView === 'suppliers' && (
-        <div className="table-wrapper fade-in">
-          <table style={{ borderCollapse: 'collapse', tableLayout: 'fixed', width: 'max-content', minWidth: '100%' }}>
-            <thead>
-              <tr style={{ background: '#f8fafc', borderBottom: '2px solid #e2e8f0' }}>
-                {supplierColOrder.map(col => {
-                  const isDraggable = col !== 'select';
-                  let label = col;
-                  if (col === 'name') label = 'Supplier Name';
-                  if (col === 'phone') label = 'Phone';
-                  if (col === 'location') label = 'Location';
-                  if (col === 'total_owed') label = 'Total Current Debt (៛)';
+        <div className="saas-table-wrapper fade-in">
+          <div className="saas-table-responsive">
+            <table className="saas-table" style={{ minWidth: '100%', tableLayout: 'fixed', width: 'max-content' }}>
+              <thead>
+                <tr>
+                  {supplierColOrder.map(col => {
+                    const isDraggable = col !== 'select';
+                    let label = col;
+                    if (col === 'name') label = 'Supplier Name';
+                    if (col === 'phone') label = 'Phone';
+                    if (col === 'location') label = 'Location';
+                    if (col === 'total_owed') label = 'Total Current Debt (៛)';
 
-                  if (col === 'select') {
-                    return (
-                      <th key={col} style={{ width: '50px', minWidth: '50px', maxWidth: '50px', padding: '16px 8px', textAlign: 'center', borderRight: '1px solid #f1f5f9' }}>
-                        <input 
-                          type="checkbox" 
-                          checked={selectedSuppliersToDelete.size === suppliers.length && suppliers.length > 0}
-                          onChange={(e) => {
-                            if (e.target.checked) setSelectedSuppliersToDelete(new Set(suppliers.map(s => s.id)));
-                            else setSelectedSuppliersToDelete(new Set());
-                          }}
-                          style={{ cursor: 'pointer', accentColor: '#b58a3d', width: '16px', height: '16px' }}
-                        />
-                      </th>
-                    );
-                  }
-
-                  return (
-                    <th 
-                      key={col}
-                      draggable={isDraggable}
-                      onDragStart={(e) => onDragStartCol(e, col, ['select'])}
-                      onDragOver={onDragOverCol}
-                      onDrop={(e) => handleSupplierDrop(e, col)}
-                      onClick={() => handleSupplierSort(col)}
-                      style={{ 
-                        width: supplierColWidths[col] || 150, 
-                        position: 'relative', 
-                        padding: '16px 12px', 
-                        textAlign: col === 'total_owed' ? 'right' : 'left', 
-                        color: '#475569', 
-                        fontSize: '13px', 
-                        textTransform: 'uppercase', 
-                        fontWeight: 'bold', 
-                        borderRight: '1px solid #f1f5f9', 
-                        cursor: isDraggable ? 'pointer' : 'default', 
-                        whiteSpace: 'nowrap', 
-                        userSelect: 'none' 
-                      }}
-                    >
-                      {label}
-                      {isDraggable && (<span style={{ marginLeft: '6px', fontSize: '12px', opacity: supplierSort?.key === col ? 1 : 0.3 }}>{supplierSort?.key === col ? (supplierSort.direction === 'asc' ? '↑' : '↓') : '↕'}</span>)}
-                      {isDraggable && <div onMouseDown={(e) => handleResizeStartSupplier(e, col)} onTouchStart={(e) => handleResizeStartSupplier(e, col)} style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: '14px', cursor: 'col-resize', background: 'transparent', zIndex: 10, transform: 'translateX(50%)' }} />}
-                    </th>
-                  );
-                })}
-              </tr>
-            </thead>
-            <tbody>
-              {processedSuppliers.length === 0 ? (
-                <tr><td colSpan={supplierColOrder.length} style={{ padding: '40px', textAlign: 'center', color: '#94a3b8' }}>No suppliers recorded.</td></tr>
-              ) : (
-                processedSuppliers.map((s: any) => (
-                  <tr key={s.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                    {supplierColOrder.map(col => {
-                      if (col === 'select') return (
-                        <td key={col} style={{ padding: '14px 12px', textAlign: 'center', borderRight: '1px solid #f1f5f9' }}>
+                    if (col === 'select') {
+                      return (
+                        <th key={col} className="saas-th" style={{ width: '50px', minWidth: '50px', maxWidth: '50px', padding: '16px 8px', textAlign: 'center' }}>
                           <input 
                             type="checkbox" 
-                            checked={selectedSuppliersToDelete.has(s.id)}
-                            onChange={() => {
-                              const next = new Set(selectedSuppliersToDelete)
-                              next.has(s.id) ? next.delete(s.id) : next.add(s.id)
-                              setSelectedSuppliersToDelete(next)
-                            }} 
-                            style={{ cursor: 'pointer', accentColor: '#b58a3d', width: '16px', height: '16px' }} 
+                            checked={selectedSuppliersToDelete.size === suppliers.length && suppliers.length > 0}
+                            onChange={(e) => {
+                              if (e.target.checked) setSelectedSuppliersToDelete(new Set(suppliers.map(s => s.id)));
+                              else setSelectedSuppliersToDelete(new Set());
+                            }}
+                            style={{ cursor: 'pointer', accentColor: '#b58a3d', width: '16px', height: '16px' }}
                           />
-                        </td>
+                        </th>
                       );
-                      if (col === 'name') return <td key={col} style={{ padding: '14px 12px', fontWeight: 'normal', color: '#334155', fontSize: '14px', borderRight: '1px solid #f1f5f9', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{s.name}</td>;
-                      if (col === 'phone') return <td key={col} style={{ padding: '14px 12px', color: '#475569', fontSize: '14px', borderRight: '1px solid #f1f5f9', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{s.phone || '-'}</td>;
-                      if (col === 'location') return <td key={col} style={{ padding: '14px 12px', color: '#475569', fontSize: '14px', borderRight: '1px solid #f1f5f9', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{s.location || '-'}</td>;
-                      if (col === 'total_owed') return (
-                        <td key={col} style={{ padding: '14px 12px', textAlign: 'right', fontWeight: 'normal', color: Number(s.total_owed_riel) > 0 ? '#ef4444' : '#10b981', fontSize: '14px', borderRight: '1px solid #f1f5f9', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                          {formatRiel(s.total_owed_riel || 0)}
-                          {Number(s.total_owed_usd) > 0 && <div style={{ fontSize: '12px', marginTop: '4px' }}>{formatUSD(s.total_owed_usd)}</div>}
-                        </td>
-                      );
-                      return null;
-                    })}
+                    }
+
+                    return (
+                      <th 
+                        key={col}
+                        className="saas-th"
+                        draggable={isDraggable}
+                        onDragStart={(e) => onDragStartCol(e, col, ['select'])}
+                        onDragOver={onDragOverCol}
+                        onDrop={(e) => handleSupplierDrop(e, col)}
+                        onClick={() => handleSupplierSort(col)}
+                        style={{ 
+                          width: supplierColWidths[col] || 150, 
+                          position: 'relative', 
+                          textAlign: col === 'total_owed' ? 'right' : 'left', 
+                          cursor: isDraggable ? 'pointer' : 'default', 
+                          whiteSpace: 'nowrap', 
+                          userSelect: 'none' 
+                        }}
+                      >
+                        {label}
+                        {isDraggable && (<span style={{ marginLeft: '6px', fontSize: '12px', opacity: supplierSort?.key === col ? 1 : 0.3 }}>{supplierSort?.key === col ? (supplierSort.direction === 'asc' ? '↑' : '↓') : '↕'}</span>)}
+                        {isDraggable && <div onMouseDown={(e) => handleResizeStartSupplier(e, col)} onTouchStart={(e) => handleResizeStartSupplier(e, col)} style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: '14px', cursor: 'col-resize', background: 'transparent', zIndex: 10, transform: 'translateX(50%)' }} />}
+                      </th>
+                    );
+                  })}
+                </tr>
+              </thead>
+              <tbody>
+                {isLoading ? (
+                  <TableSkeleton columns={supplierColOrder.length} rows={5} />
+                ) : processedSuppliers.length === 0 ? (
+                  <tr>
+                    <td colSpan={supplierColOrder.length} style={{ padding: 0 }}>
+                      <EmptyState icon="🏢" title="No suppliers recorded" message="Add a supplier to get started." />
+                    </td>
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
+                ) : (
+                  processedSuppliers.map((s: any) => (
+                    <tr key={s.id} className="saas-tr">
+                      {supplierColOrder.map(col => {
+                        if (col === 'select') return (
+                          <td className="saas-td" key={col} style={{ textAlign: 'center' }}>
+                            <input 
+                              type="checkbox" 
+                              checked={selectedSuppliersToDelete.has(s.id)}
+                              onChange={() => {
+                                const next = new Set(selectedSuppliersToDelete)
+                                next.has(s.id) ? next.delete(s.id) : next.add(s.id)
+                                setSelectedSuppliersToDelete(next)
+                              }} 
+                              style={{ cursor: 'pointer', accentColor: '#b58a3d', width: '16px', height: '16px' }} 
+                            />
+                          </td>
+                        );
+                        if (col === 'name') return <td className="saas-td" key={col} style={{ fontWeight: 'bold' }}>{s.name}</td>;
+                        if (col === 'phone') return <td className="saas-td" key={col}>{s.phone || '-'}</td>;
+                        if (col === 'location') return <td className="saas-td" key={col}>{s.location || '-'}</td>;
+                        if (col === 'total_owed') return (
+                          <td className="saas-td" key={col} style={{ textAlign: 'right', fontWeight: 'bold', color: Number(s.total_owed_riel) > 0 ? '#ef4444' : '#10b981' }}>
+                            {formatRiel(s.total_owed_riel || 0)}
+                            {Number(s.total_owed_usd) > 0 && <div style={{ fontSize: '12px', marginTop: '4px' }}>{formatUSD(s.total_owed_usd)}</div>}
+                          </td>
+                        );
+                        return null;
+                      })}
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 
       {/* === GLOBAL MODALS === */}
 
       {/* SETTLE SUPPLIER BILL MODAL */}
-      {payPendingModal.isOpen && payPendingModal.record && (
-        <div className="modal-overlay" onMouseDown={() => setPayPendingModal({ isOpen: false, record: null, totalDue: 0 })}>
-          <div className="modal-content" style={{ maxWidth: '450px' }} onMouseDown={e => e.stopPropagation()}>
-            <h3 style={{ marginTop: 0, color: '#1e293b', borderBottom: '1px solid #e2e8f0', paddingBottom: '10px' }}>💸 Settle Supplier Bill</h3>
-            <p style={{ margin: '0 0 16px 0', color: '#475569', fontSize: '14px' }}>Paying: <b>{payPendingModal.record.suppliers?.name}</b></p>
-            
-            <div style={{ background: '#fef2f2', padding: '16px', borderRadius: '8px', border: '1px solid #fecaca', marginBottom: '20px', textAlign: 'center' }}>
-              <div style={{ fontSize: '12px', color: '#991b1b', fontWeight: 'bold', textTransform: 'uppercase' }}>Remaining Debt</div>
-              <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#dc2626' }}>
-                {formatRiel(payPendingModal.totalDue)}
+      <Modal isOpen={payPendingModal.isOpen && !!payPendingModal.record} onClose={() => setPayPendingModal({ isOpen: false, record: null, totalDue: 0 })} title="💸 Settle Supplier Bill" maxWidth="450px">
+        <p style={{ margin: '0 0 16px 0', color: '#475569', fontSize: '14px' }}>Paying: <b>{payPendingModal.record?.suppliers?.name}</b></p>
+        
+        <div style={{ background: '#fef2f2', padding: '16px', borderRadius: '8px', border: '1px solid #fecaca', marginBottom: '20px', textAlign: 'center' }}>
+          <div style={{ fontSize: '12px', color: '#991b1b', fontWeight: 'bold', textTransform: 'uppercase' }}>Remaining Debt</div>
+          <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#dc2626' }}>
+            {formatRiel(payPendingModal.totalDue)}
+          </div>
+        </div>
+
+        <div style={{ marginBottom: '24px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+            <label className="saas-card-title" style={{ margin: 0 }}>Payment Method(s)</label>
+            <button onClick={() => setPendingPaymentRows([...pendingPaymentRows, { id: Date.now(), method: 'Cash ៛', amount: '' }])} className="saas-btn" style={{ background: '#e0f2fe', color: '#0284c7', padding: '6px 10px', fontSize: '12px' }}>+ Split</button>
+          </div>
+
+          {pendingPaymentRows.map((row, index) => (
+            <div key={row.id} style={{ display: 'flex', gap: '8px', marginBottom: '12px', alignItems: 'center' }}>
+              <select 
+                value={row.method} 
+                onChange={e => {
+                  const newRows = [...pendingPaymentRows];
+                  newRows[index].method = e.target.value;
+                  setPendingPaymentRows(newRows);
+                }}
+                className="saas-input"
+                style={{ width: '45%', cursor: 'pointer' }}
+              >
+                <option value="Cash ៛">💵 Cash ៛</option>
+                <option value="Cash $">💵 Cash $</option>
+                <option value="QR ៛">📱 QR ៛</option>
+                <option value="QR $">📱 QR $</option>
+                <option value="Mom QR ៛">👩 Mom QR ៛</option>
+                <option value="Mom QR $">👩 Mom QR $</option>
+              </select>
+              
+              <div style={{ flex: 1 }}>
+                <CurrencyInput 
+                  placeholder="" 
+                  value={row.amount} 
+                  onChange={(val: any) => {
+                    const newRows = [...pendingPaymentRows];
+                    newRows[index].amount = val;
+                    setPendingPaymentRows(newRows);
+                  }}
+                  onEnter={handlePayPendingSubmit}
+                  className="saas-input"
+                  style={{ textAlign: 'right' }}
+                />
               </div>
+              
+              {pendingPaymentRows.length > 1 && (
+                <button onClick={() => setPendingPaymentRows(pendingPaymentRows.filter(r => r.id !== row.id))} style={{ background: 'none', border: 'none', color: '#ef4444', fontSize: '18px', cursor: 'pointer', padding: '0 4px', fontWeight: 'bold' }}>✕</button>
+              )}
             </div>
+          ))}
+        </div>
 
-            <div style={{ marginBottom: '24px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-                <label style={{ fontSize: '13px', color: '#0f172a', fontWeight: 'bold' }}>Payment Method(s)</label>
-                <button onClick={() => setPendingPaymentRows([...pendingPaymentRows, { id: Date.now(), method: 'Cash ៛', amount: '' }])} style={{ background: '#e0f2fe', color: '#0284c7', border: 'none', borderRadius: '4px', fontSize: '12px', padding: '6px 10px', cursor: 'pointer', fontWeight: 'bold' }}>+ Split</button>
+        {pendingPaymentRows.some(r => Number(r.amount) > 0) && (
+          <div style={{ marginBottom: '24px', paddingTop: '16px', borderTop: '1px dashed #cbd5e1', fontSize: '14px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
+              <span style={{ color: '#64748b' }}>Total Processed:</span>
+              <span style={{ color: '#334155', fontWeight: 'bold' }}>{formatRiel(liveTotalPendingReceived)}</span>
+            </div>
+            {livePendingRemaining < 0 ? (
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ color: '#ef4444' }}>Overpaid By:</span>
+                <span style={{ color: '#dc2626', fontWeight: 'bold' }}>{formatRiel(Math.abs(livePendingRemaining))}</span>
               </div>
+            ) : livePendingRemaining > 0 ? (
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ color: '#d97706' }}>Still Owes:</span>
+                <span style={{ color: '#b45309', fontWeight: 'bold' }}>{formatRiel(livePendingRemaining)}</span>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ color: '#166534' }}>Balance:</span>
+                <span style={{ color: '#15803d', fontWeight: 'bold' }}>Perfectly Cleared ✅</span>
+              </div>
+            )}
+          </div>
+        )}
 
-              {pendingPaymentRows.map((row, index) => (
-                <div key={row.id} style={{ display: 'flex', gap: '8px', marginBottom: '12px', alignItems: 'center' }}>
-                  <select 
-                    value={row.method} 
-                    onChange={e => {
-                      const newRows = [...pendingPaymentRows];
-                      newRows[index].method = e.target.value;
-                      setPendingPaymentRows(newRows);
-                    }}
-                    style={{ width: '45%', padding: '12px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '14px', outline: 'none', backgroundColor: '#fff', cursor: 'pointer', color: '#334155' }}
-                  >
-                    <option value="Cash ៛">💵 Cash ៛</option>
-                    <option value="Cash $">💵 Cash $</option>
-                    <option value="QR ៛">📱 QR ៛</option>
-                    <option value="QR $">📱 QR $</option>
-                    <option value="Mom QR ៛">👩 Mom QR ៛</option>
-                    <option value="Mom QR $">👩 Mom QR $</option>
-                  </select>
-                  
-                  <div style={{ flex: 1 }}>
-                    <CurrencyInput 
-                      placeholder="" 
-                      value={row.amount} 
-                      onChange={(val: any) => {
-                        const newRows = [...pendingPaymentRows];
-                        newRows[index].amount = val;
-                        setPendingPaymentRows(newRows);
-                      }}
-                      onEnter={handlePayPendingSubmit}
-                      style={{ width: '100%', padding: '12px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', outline: 'none', textAlign: 'right' }}
-                    />
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
+          <button onClick={() => setPayPendingModal({ isOpen: false, record: null, totalDue: 0 })} className="saas-btn saas-btn-secondary">Cancel</button>
+          <button onClick={handlePayPendingSubmit} disabled={isProcessing} className="saas-btn saas-btn-primary">
+            {isProcessing ? 'Processing...' : 'Confirm Payment'}
+          </button>
+        </div>
+      </Modal>
+
+      {/* DUAL-VIEW HISTORY MODAL WITH AUTOMATED VOID FEATURE */}
+      <Modal isOpen={historyModal.isOpen && !!historyModal.product} onClose={() => setHistoryModal({ isOpen: false, product: null, data: [], activeBatches: [] })} title="📦 Batch & Import History" maxWidth="600px">
+        <p style={{ margin: '0 0 16px 0', color: '#64748b', fontSize: '14px' }}>Tracking: <b style={{ color: '#0f172a' }}>{historyModal.product?.name}</b></p>
+        
+        <div style={{ overflowY: 'auto', flex: 1, paddingRight: '8px', maxHeight: '50vh' }}>
+          
+          {/* SECTION 1: Active Shelved Batches (These decrease) */}
+          <h3 className="saas-card-title" style={{ marginBottom: '12px' }}>🟢 Active Batches on Shelf</h3>
+          {historyModal.activeBatches.length === 0 ? (
+            <p style={{ color: '#ef4444', fontSize: '14px', marginBottom: '24px' }}>No active batches remaining. Stock is empty.</p>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '24px' }}>
+              {historyModal.activeBatches.map((b, index) => {
+                const isEditing = editingHistoryId === b.id;
+                const editData = historyEdits[b.id] || { remaining_qty: b.remaining_qty, cost_price: b.cost_price };
+                let batchLabel = index === 0 ? '1st Batch (Current)' : index === 1 ? '2nd Batch' : `${index + 1}th Batch`;
+
+                return (
+                  <div key={b.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '12px', background: index === 0 ? '#f0fdf4' : '#f8fafc', border: isEditing ? '1px solid #b58a3d' : (index === 0 ? '1px solid #bbf7d0' : '1px solid #e2e8f0'), borderRadius: '8px', transition: 'all 0.2s' }}>
+                    {isEditing ? (
+                      <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', flex: 1 }}>
+                        <div style={{ flex: '1 1 80px' }}>
+                          <label className="saas-card-title" style={{ fontSize: '11px', margin: '0 0 4px 0' }}>Remaining Qty</label>
+                          <input autoFocus type="number" className="saas-input no-spinners" value={editData.remaining_qty} onChange={e => setHistoryEdits({...historyEdits, [b.id]: {...editData, remaining_qty: Number(e.target.value)}})} onKeyDown={e => e.key === 'Enter' && handleSaveHistory(b.id)} style={{ padding: '6px' }} />
+                        </div>
+                        <div style={{ flex: '1 1 100px' }}>
+                          <label className="saas-card-title" style={{ fontSize: '11px', margin: '0 0 4px 0' }}>Cost (៛)</label>
+                          <input type="number" className="saas-input no-spinners" value={editData.cost_price} onChange={e => setHistoryEdits({...historyEdits, [b.id]: {...editData, cost_price: Number(e.target.value)}})} onKeyDown={e => e.key === 'Enter' && handleSaveHistory(b.id)} style={{ padding: '6px' }} />
+                        </div>
+                      </div>
+                    ) : (
+                      <div>
+                        <div style={{ fontWeight: 'bold', color: index === 0 ? '#15803d' : '#0f172a' }}>{batchLabel}</div>
+                        <div style={{ fontSize: '12px', color: '#64748b', marginTop: '4px' }}>Arrived: {new Date((b as any).created_at).toLocaleDateString()}</div>
+                      </div>
+                    )}
+
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', justifyContent: 'space-between' }}>
+                      {!isEditing && (
+                        <div style={{ textAlign: 'right' }}>
+                          <div style={{ fontWeight: 'bold', color: '#b58a3d', fontSize: '16px' }}>{b.remaining_qty} Bags Left</div>
+                          <div style={{ fontSize: '12px', color: '#64748b', marginTop: '2px' }}>Cost: {formatRiel(b.cost_price)}</div>
+                        </div>
+                      )}
+                      <div style={{ display: 'flex', gap: '8px', marginTop: isEditing ? '20px' : '8px' }}>
+                        {isEditing ? (
+                          <>
+                            <button onClick={() => handleSaveHistory(b.id)} className="saas-btn saas-btn-primary" style={{ padding: '6px 12px', fontSize: '12px' }}>Save</button>
+                            <button onClick={() => setEditingHistoryId(null)} className="saas-btn saas-btn-secondary" style={{ padding: '6px 12px', fontSize: '12px' }}>Cancel</button>
+                          </>
+                        ) : (
+                          <>
+                            <button onClick={() => { setEditingHistoryId(b.id); setHistoryEdits({ [b.id]: { remaining_qty: b.remaining_qty, cost_price: b.cost_price } }); }} className="saas-btn" style={{ padding: '4px 8px', background: '#e0f2fe', color: '#0284c7', fontSize: '12px' }}>✏️ Edit</button>
+                            <button onClick={() => handleDeleteHistory(b.id)} className="saas-btn" style={{ padding: '4px 8px', background: '#fee2e2', color: '#dc2626', fontSize: '12px' }}>🗑️ Del</button>
+                          </>
+                        )}
+                      </div>
+                    </div>
                   </div>
-                  
-                  {pendingPaymentRows.length > 1 && (
-                    <button onClick={() => setPendingPaymentRows(pendingPaymentRows.filter(r => r.id !== row.id))} style={{ background: 'none', border: 'none', color: '#ef4444', fontSize: '18px', cursor: 'pointer', padding: '0 4px' }}>✕</button>
-                  )}
+                );
+              })}
+            </div>
+          )}
+
+          {/* SECTION 2: Permanent Import Log (These never decrease) */}
+          <h3 className="saas-card-title" style={{ marginBottom: '12px', paddingTop: '16px', borderTop: '2px dashed #e2e8f0' }}>📦 Permanent Invoice Log</h3>
+          {historyModal.data.length === 0 ? (
+            <p style={{ color: '#64748b', fontSize: '14px' }}>No import records found.</p>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              {historyModal.data.map((h) => (
+                <div key={h.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px', border: '1px solid #e2e8f0', borderRadius: '8px', background: '#fff' }}>
+                   <div>
+                     <div style={{ fontWeight: 'bold', color: '#0f172a', marginBottom: '4px', fontSize: '13px' }}>{new Date(h.created_at).toLocaleDateString()} at {new Date(h.created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</div>
+                     <div style={{ color: '#64748b', fontSize: '12px' }}>Supplier: <span style={{ color: '#334155', fontWeight: 'bold' }}>{h.suppliers?.name || 'Unknown'}</span></div>
+                   </div>
+                   <div style={{ textAlign: 'right', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '6px' }}>
+                     <div>
+                       <div style={{ fontWeight: 'bold', color: '#10b981', fontSize: '14px' }}>+{h.qty} Bags Imported</div>
+                       <div style={{ color: '#64748b', fontSize: '12px', marginTop: '2px' }}>Paid: {formatRiel(h.unit_cost)} / bag</div>
+                     </div>
+                     <button 
+                       onClick={() => handleVoidImport(h.id)}
+                       disabled={isProcessing}
+                       className="saas-btn saas-btn-danger"
+                       style={{ padding: '4px 8px', fontSize: '11px' }}
+                     >
+                       ❌ Void
+                     </button>
+                   </div>
                 </div>
               ))}
             </div>
+          )}
 
-            {pendingPaymentRows.some(r => Number(r.amount) > 0) && (
-              <div style={{ marginBottom: '24px', paddingTop: '16px', borderTop: '1px dashed #cbd5e1', fontSize: '14px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
-                  <span style={{ color: '#64748b' }}>Total Processed:</span>
-                  <span style={{ color: '#334155', fontWeight: 'bold' }}>{formatRiel(liveTotalPendingReceived)}</span>
-                </div>
-                {livePendingRemaining < 0 ? (
-                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <span style={{ color: '#ef4444' }}>Overpaid By:</span>
-                    <span style={{ color: '#dc2626', fontWeight: 'bold' }}>{formatRiel(Math.abs(livePendingRemaining))}</span>
-                  </div>
-                ) : livePendingRemaining > 0 ? (
-                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <span style={{ color: '#d97706' }}>Still Owes:</span>
-                    <span style={{ color: '#b45309', fontWeight: 'bold' }}>{formatRiel(livePendingRemaining)}</span>
-                  </div>
-                ) : (
-                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <span style={{ color: '#166534' }}>Balance:</span>
-                    <span style={{ color: '#15803d', fontWeight: 'bold' }}>Perfectly Cleared ✅</span>
-                  </div>
-                )}
-              </div>
-            )}
-
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
-              <button onClick={() => setPayPendingModal({ isOpen: false, record: null, totalDue: 0 })} style={{ padding: '12px 16px', background: '#f1f5f9', color: '#475569', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', fontSize: '14px' }}>Cancel</button>
-              <button onClick={handlePayPendingSubmit} disabled={isProcessing} style={{ padding: '12px 16px', background: '#10b981', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', fontSize: '14px' }}>
-                {isProcessing ? 'Processing...' : 'Confirm Payment'}
-              </button>
-            </div>
-          </div>
         </div>
-      )}
-
-      {/* DUAL-VIEW HISTORY MODAL WITH AUTOMATED VOID FEATURE */}
-      {historyModal.isOpen && historyModal.product && (
-        <div className="modal-overlay" onMouseDown={() => setHistoryModal({ isOpen: false, product: null, data: [], activeBatches: [] })}>
-          <div className="modal-content" style={{ maxWidth: '600px' }} onMouseDown={e => e.stopPropagation()}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #e2e8f0', paddingBottom: '16px', marginBottom: '16px' }}>
-              <div>
-                <h2 style={{ margin: 0, color: '#1e293b', fontSize: '20px' }}>📦 Batch & Import History</h2>
-                <p style={{ margin: '4px 0 0 0', color: '#64748b', fontSize: '14px' }}>Tracking: <b style={{ color: '#0f172a' }}>{historyModal.product.name}</b></p>
-              </div>
-              <button onClick={() => setHistoryModal({ isOpen: false, product: null, data: [], activeBatches: [] })} style={{ background: 'none', border: 'none', fontSize: '24px', cursor: 'pointer', color: '#94a3b8' }}>✕</button>
-            </div>
-            
-            <div style={{ overflowY: 'auto', flex: 1, paddingRight: '8px', maxHeight: '50vh' }}>
-              
-              {/* SECTION 1: Active Shelved Batches (These decrease) */}
-              <h3 style={{ fontSize: '13px', color: '#475569', textTransform: 'uppercase', marginBottom: '12px' }}>🟢 Active Batches on Shelf</h3>
-              {historyModal.activeBatches.length === 0 ? (
-                <p style={{ color: '#ef4444', fontSize: '14px', marginBottom: '24px' }}>No active batches remaining. Stock is empty.</p>
-              ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '24px' }}>
-                  {historyModal.activeBatches.map((b, index) => {
-                    const isEditing = editingHistoryId === b.id;
-                    const editData = historyEdits[b.id] || { remaining_qty: b.remaining_qty, cost_price: b.cost_price };
-                    let batchLabel = index === 0 ? '1st Batch (Current)' : index === 1 ? '2nd Batch' : `${index + 1}th Batch`;
-
-                    return (
-                      <div key={b.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '12px', background: index === 0 ? '#f0fdf4' : '#f8fafc', border: isEditing ? '1px solid #b58a3d' : (index === 0 ? '1px solid #bbf7d0' : '1px solid #e2e8f0'), borderRadius: '8px', transition: 'all 0.2s' }}>
-                        {isEditing ? (
-                          <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', flex: 1 }}>
-                            <div style={{ flex: '1 1 80px' }}>
-                              <label style={{ fontSize: '11px', fontWeight: 'bold', color: '#64748b' }}>Remaining Qty</label>
-                              <input autoFocus type="number" className="no-spinners" value={editData.remaining_qty} onChange={e => setHistoryEdits({...historyEdits, [b.id]: {...editData, remaining_qty: Number(e.target.value)}})} onKeyDown={e => e.key === 'Enter' && handleSaveHistory(b.id)} style={{ width: '100%', padding: '6px', border: '1px solid #b58a3d', borderRadius: '4px', fontSize: '14px', color: '#0f172a', backgroundColor: '#fff' }} />
-                            </div>
-                            <div style={{ flex: '1 1 100px' }}>
-                              <label style={{ fontSize: '11px', fontWeight: 'bold', color: '#64748b' }}>Cost (៛)</label>
-                              <input type="number" className="no-spinners" value={editData.cost_price} onChange={e => setHistoryEdits({...historyEdits, [b.id]: {...editData, cost_price: Number(e.target.value)}})} onKeyDown={e => e.key === 'Enter' && handleSaveHistory(b.id)} style={{ width: '100%', padding: '6px', border: '1px solid #b58a3d', borderRadius: '4px', fontSize: '14px', color: '#0f172a', backgroundColor: '#fff' }} />
-                            </div>
-                          </div>
-                        ) : (
-                          <div>
-                            <div style={{ fontWeight: 'bold', color: index === 0 ? '#15803d' : '#0f172a' }}>{batchLabel}</div>
-                            <div style={{ fontSize: '12px', color: '#64748b', marginTop: '4px' }}>Arrived: {new Date((b as any).created_at).toLocaleDateString()}</div>
-                          </div>
-                        )}
-
-                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', justifyContent: 'space-between' }}>
-                          {!isEditing && (
-                            <div style={{ textAlign: 'right' }}>
-                              <div style={{ fontWeight: 'bold', color: '#b58a3d', fontSize: '16px' }}>{b.remaining_qty} Bags Left</div>
-                              <div style={{ fontSize: '12px', color: '#64748b', marginTop: '2px' }}>Cost: {formatRiel(b.cost_price)}</div>
-                            </div>
-                          )}
-                          <div style={{ display: 'flex', gap: '8px', marginTop: isEditing ? '20px' : '8px' }}>
-                            {isEditing ? (
-                              <>
-                                <button onClick={() => handleSaveHistory(b.id)} style={{ padding: '6px 12px', background: '#10b981', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', fontSize: '12px' }}>Save</button>
-                                <button onClick={() => setEditingHistoryId(null)} style={{ padding: '6px 12px', background: '#f1f5f9', color: '#64748b', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', fontSize: '12px' }}>Cancel</button>
-                              </>
-                            ) : (
-                              <>
-                                <button onClick={() => { setEditingHistoryId(b.id); setHistoryEdits({ [b.id]: { remaining_qty: b.remaining_qty, cost_price: b.cost_price } }); }} style={{ padding: '4px 8px', background: '#e0f2fe', color: '#0284c7', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', fontSize: '12px' }}>✏️ Edit</button>
-                                <button onClick={() => handleDeleteHistory(b.id)} style={{ padding: '4px 8px', background: '#fee2e2', color: '#dc2626', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', fontSize: '12px' }}>🗑️ Del</button>
-                              </>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-
-              {/* SECTION 2: Permanent Import Log (These never decrease) */}
-              <h3 style={{ fontSize: '13px', color: '#475569', textTransform: 'uppercase', marginBottom: '12px', paddingTop: '16px', borderTop: '2px dashed #e2e8f0' }}>📦 Permanent Invoice Log</h3>
-              {historyModal.data.length === 0 ? (
-                <p style={{ color: '#64748b', fontSize: '14px' }}>No import records found.</p>
-              ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                  {historyModal.data.map((h) => (
-                    <div key={h.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px', border: '1px solid #e2e8f0', borderRadius: '8px', background: '#fff' }}>
-                       <div>
-                         <div style={{ fontWeight: 'bold', color: '#0f172a', marginBottom: '4px', fontSize: '13px' }}>{new Date(h.created_at).toLocaleDateString()} at {new Date(h.created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</div>
-                         <div style={{ color: '#64748b', fontSize: '12px' }}>Supplier: <span style={{ color: '#334155', fontWeight: 'bold' }}>{h.suppliers?.name || 'Unknown'}</span></div>
-                       </div>
-                       <div style={{ textAlign: 'right', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '6px' }}>
-                         <div>
-                           <div style={{ fontWeight: 'bold', color: '#10b981', fontSize: '14px' }}>+{h.qty} Bags Imported</div>
-                           <div style={{ color: '#64748b', fontSize: '12px', marginTop: '2px' }}>Paid: {formatRiel(h.unit_cost)} / bag</div>
-                         </div>
-                         <button 
-                           onClick={() => handleVoidImport(h.id)}
-                           disabled={isProcessing}
-                           style={{ padding: '4px 8px', background: '#fee2e2', color: '#dc2626', border: 'none', borderRadius: '4px', cursor: isProcessing ? 'not-allowed' : 'pointer', fontWeight: 'bold', fontSize: '11px' }}
-                         >
-                           ❌ Void
-                         </button>
-                       </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-            </div>
-          </div>
-        </div>
-      )}
+      </Modal>
 
       {/* CONFIRM REPACK MODAL */}
-      {repackModal.isOpen && repackModal.product && (() => {
-          const wholesaleProd = products.find(wp => wp.id === repackModal.product?.linked_wholesale_id);
-          return (
-            <div className="modal-overlay" onMouseDown={() => setRepackModal({ isOpen: false, product: null })}>
-              <div className="modal-content" style={{ maxWidth: '400px' }} onMouseDown={e => e.stopPropagation()}>
-                <h3 style={{ marginTop: 0, color: '#1e293b' }}>📦 Confirm Repack</h3>
+      <Modal isOpen={repackModal.isOpen && !!repackModal.product} onClose={() => setRepackModal({ isOpen: false, product: null })} title="📦 Confirm Repack" maxWidth="400px">
+        {repackModal.product && (() => {
+            const wholesaleProd = products.find(wp => wp.id === repackModal.product?.linked_wholesale_id);
+            return (
+              <>
                 <p style={{ color: '#475569', fontSize: '14px', lineHeight: '1.5' }}>
                   Are you sure you want to convert <b>50kg</b> of loose <span style={{ color: '#b58a3d', fontWeight: 'bold' }}>{repackModal.product.name}</span> into 1 sealed wholesale bag of <span style={{ color: '#10b981', fontWeight: 'bold' }}>{wholesaleProd?.name}</span>?
                 </p>
@@ -1980,129 +1999,106 @@ export default function RiceControl() {
                   </ul>
                 </div>
                 <div style={{ marginTop: '24px', display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
-                  <button onClick={() => setRepackModal({ isOpen: false, product: null })} style={{ padding: '10px 16px', background: '#f1f5f9', color: '#475569', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', fontSize: '14px' }}>Cancel</button>
-                  <button onClick={handleConfirmRepack} disabled={isProcessing} style={{ padding: '10px 16px', background: '#10b981', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', fontSize: '14px' }}>{isProcessing ? 'Packing...' : 'Confirm Repack'}</button>
+                  <button onClick={() => setRepackModal({ isOpen: false, product: null })} className="saas-btn saas-btn-secondary">Cancel</button>
+                  <button onClick={handleConfirmRepack} disabled={isProcessing} className="saas-btn saas-btn-primary">{isProcessing ? 'Packing...' : 'Confirm Repack'}</button>
                 </div>
-              </div>
-            </div>
-          );
-      })()}
+              </>
+            );
+        })()}
+      </Modal>
 
       {/* ADD SUPPLIER MODAL */}
-      {isAddSupplierOpen && (
-        <div className="modal-overlay" onMouseDown={() => setIsAddSupplierOpen(false)}>
-          <div className="modal-content" style={{ maxWidth: '400px' }} onMouseDown={e => e.stopPropagation()}>
-            <h2 style={{ marginTop: 0, marginBottom: '20px', color: '#1e293b' }}>🏢 Add New Supplier</h2>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-              <div>
-                <label style={{ display: 'block', fontSize: '13px', color: '#0f172a', fontWeight: 'bold', marginBottom: '6px' }}>Supplier Name</label>
-                <input autoFocus placeholder="" value={newSupplier.name} onChange={e => setNewSupplier({...newSupplier, name: e.target.value})} style={{ width: '100%', padding: '10px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', fontSize: '16px' }} />
-              </div>
-              <div>
-                <label style={{ display: 'block', fontSize: '13px', color: '#0f172a', fontWeight: 'bold', marginBottom: '6px' }}>Phone Number (Optional)</label>
-                <input value={newSupplier.phone} onChange={e => setNewSupplier({...newSupplier, phone: e.target.value})} style={{ width: '100%', padding: '10px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', fontSize: '16px' }} />
-              </div>
-              <div>
-                <label style={{ display: 'block', fontSize: '13px', color: '#0f172a', fontWeight: 'bold', marginBottom: '6px' }}>Location / Address (Optional)</label>
-                <input value={newSupplier.location} onChange={e => setNewSupplier({...newSupplier, location: e.target.value})} style={{ width: '100%', padding: '10px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', fontSize: '16px' }} />
-              </div>
-            </div>
-            <div style={{ marginTop: '24px', display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
-              <button onClick={() => setIsAddSupplierOpen(false)} style={{ padding: '10px 16px', background: '#f1f5f9', color: '#475569', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', fontSize: '14px' }}>Cancel</button>
-              <button onClick={handleAddSupplier} disabled={isProcessing} style={{ padding: '10px 16px', background: '#10b981', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', fontSize: '14px' }}>Save Supplier</button>
-            </div>
+      <Modal isOpen={isAddSupplierOpen} onClose={() => setIsAddSupplierOpen(false)} title="🏢 Add New Supplier" maxWidth="400px">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          <div>
+            <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', margin: '0 0 6px 0' }}>Supplier Name</label>
+            <input autoFocus placeholder="" value={newSupplier.name} onChange={e => setNewSupplier({...newSupplier, name: e.target.value})} className="saas-input" />
+          </div>
+          <div>
+            <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', margin: '0 0 6px 0' }}>Phone Number (Optional)</label>
+            <input value={newSupplier.phone} onChange={e => setNewSupplier({...newSupplier, phone: e.target.value})} className="saas-input" />
+          </div>
+          <div>
+            <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', margin: '0 0 6px 0' }}>Location / Address (Optional)</label>
+            <input value={newSupplier.location} onChange={e => setNewSupplier({...newSupplier, location: e.target.value})} className="saas-input" />
           </div>
         </div>
-      )}
+        <div style={{ marginTop: '24px', display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
+          <button onClick={() => setIsAddSupplierOpen(false)} className="saas-btn saas-btn-secondary">Cancel</button>
+          <button onClick={handleAddSupplier} disabled={isProcessing} className="saas-btn saas-btn-primary">Save Supplier</button>
+        </div>
+      </Modal>
 
       {/* FILTER MODAL */}
-      {isFilterOpen && (
-        <div className="modal-overlay" onMouseDown={() => setIsFilterOpen(false)}>
-          <div className="modal-content" onMouseDown={e => e.stopPropagation()}>
-            <h3 style={{ marginTop: 0, borderBottom: '1px solid #e2e8f0', paddingBottom: '12px', color: '#1e293b' }}>Filter Records</h3>
-            
-            {filterRules.map((rule, index) => (
-              <div key={rule.id} style={{ display: 'flex', gap: '8px', marginBottom: '12px', alignItems: 'center', flexWrap: 'wrap', background: '#f8fafc', padding: '12px', borderRadius: '8px' }}>
-                <span style={{ fontSize: '13px', color: '#475569', width: '40px', fontWeight: 'bold' }}>{index === 0 ? 'Where' : 'And'}</span>
-                <select value={rule.column} onChange={e => setFilterRules(prev => prev.map(r => r.id === rule.id ? { ...r, column: e.target.value as keyof Product } : r))} style={{ flex: '1 1 100px', padding: '8px', border: '1px solid #cbd5e1', borderRadius: '6px', fontSize: '14px', backgroundColor: '#fff', color: '#0f172a' }}>
-                  {DEFAULT_ORDER.filter(o => o !== 'linked_wholesale' && o !== 'actions' && o !== 'expand').map(c => <option key={c} value={c as string}>{String(c).toUpperCase()}</option>)}
-                </select>
-                <select value={rule.operator} onChange={e => setFilterRules(prev => prev.map(r => r.id === rule.id ? { ...r, operator: e.target.value as FilterOperator } : r))} style={{ flex: '1 1 100px', padding: '8px', border: '1px solid #cbd5e1', borderRadius: '6px', fontSize: '14px', backgroundColor: '#fff', color: '#0f172a' }}>
-                  <option value="contains">Contains</option>
-                  <option value="equals">Equals (=)</option>
-                  <option value="gt">Greater Than (&gt;)</option>
-                  <option value="lt">Less Than (&lt;)</option>
-                </select>
-                <input placeholder="" value={rule.value} onChange={e => setFilterRules(prev => prev.map(r => r.id === rule.id ? { ...r, value: e.target.value } : r))} style={{ flex: '1 1 120px', padding: '8px 12px', border: '1px solid #cbd5e1', borderRadius: '6px', fontSize: '16px', backgroundColor: '#fff', color: '#0f172a' }} className="no-spinners" type={['price', 'cost_price', 'stock', 'weight'].includes(rule.column as string) ? 'number' : 'text'} />
-                <button onClick={() => setFilterRules(prev => prev.filter(r => r.id !== rule.id))} style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', fontSize: '18px', fontWeight: 'bold' }}>✕</button>
-              </div>
-            ))}
-            
-            <button onClick={() => setFilterRules(prev => [...prev, { id: Date.now(), column: 'name', operator: 'contains', value: '' }])} style={{ background: 'none', border: 'none', color: '#3b82f6', fontWeight: 'bold', cursor: 'pointer', marginTop: '10px', fontSize: '14px' }}>+ Add condition</button>
-
-            <div style={{ marginTop: '24px', display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
-              <button onClick={() => setFilterRules([])} style={{ padding: '10px 16px', background: '#f1f5f9', color: '#475569', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', fontSize: '14px' }}>Clear All</button>
-              <button onClick={() => setIsFilterOpen(false)} style={{ padding: '10px 16px', background: '#10b981', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', fontSize: '14px' }}>Apply Filters</button>
-            </div>
+      <Modal isOpen={isFilterOpen} onClose={() => setIsFilterOpen(false)} title="Filter Records" icon="🔍" maxWidth="500px">
+        {filterRules.map((rule, index) => (
+          <div key={rule.id} style={{ display: 'flex', gap: '8px', marginBottom: '12px', alignItems: 'center', flexWrap: 'wrap', background: '#f8fafc', padding: '12px', borderRadius: '8px' }}>
+            <span style={{ fontSize: '13px', color: '#475569', width: '40px', fontWeight: 'bold' }}>{index === 0 ? 'Where' : 'And'}</span>
+            <select value={rule.column} onChange={e => setFilterRules(prev => prev.map(r => r.id === rule.id ? { ...r, column: e.target.value as keyof Product } : r))} className="saas-input" style={{ flex: '1 1 100px', cursor: 'pointer', padding: '8px' }}>
+              {DEFAULT_ORDER.filter(o => o !== 'linked_wholesale' && o !== 'actions' && o !== 'expand').map(c => <option key={c as string} value={c as string}>{String(c).toUpperCase()}</option>)}
+            </select>
+            <select value={rule.operator} onChange={e => setFilterRules(prev => prev.map(r => r.id === rule.id ? { ...r, operator: e.target.value as FilterOperator } : r))} className="saas-input" style={{ flex: '1 1 100px', cursor: 'pointer', padding: '8px' }}>
+              <option value="contains">Contains</option>
+              <option value="equals">Equals (=)</option>
+              <option value="gt">Greater Than (&gt;)</option>
+              <option value="lt">Less Than (&lt;)</option>
+            </select>
+            <input placeholder="" value={rule.value} onChange={e => setFilterRules(prev => prev.map(r => r.id === rule.id ? { ...r, value: e.target.value } : r))} className="saas-input no-spinners" style={{ flex: '1 1 120px', padding: '8px 12px' }} type={['price', 'cost_price', 'stock', 'weight'].includes(rule.column as string) ? 'number' : 'text'} />
+            <button onClick={() => setFilterRules(prev => prev.filter(r => r.id !== rule.id))} style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', fontSize: '18px', fontWeight: 'bold' }}>✕</button>
           </div>
+        ))}
+        
+        <button onClick={() => setFilterRules(prev => [...prev, { id: Date.now(), column: 'name', operator: 'contains', value: '' }])} className="saas-btn" style={{ background: 'none', border: 'none', color: '#3b82f6', marginTop: '10px' }}>+ Add condition</button>
+
+        <div style={{ marginTop: '24px', display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
+          <button onClick={() => setFilterRules([])} className="saas-btn saas-btn-secondary">Clear All</button>
+          <button onClick={() => setIsFilterOpen(false)} className="saas-btn saas-btn-primary">Apply Filters</button>
         </div>
-      )}
+      </Modal>
 
       {/* NEW PRODUCT CREATION MODAL */}
-      {isAddModalOpen && (
-        <div className="modal-overlay" onMouseDown={() => setIsAddModalOpen(false)}>
-          <div className="modal-content" style={{ maxWidth: '500px' }} onMouseDown={e => e.stopPropagation()}>
-            <h2 style={{ marginTop: 0, color: '#1e293b', marginBottom: '20px' }}>📦 Add New Product</h2>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-              <div>
-                <label style={{ display: 'block', fontSize: '13px', color: '#0f172a', fontWeight: 'bold', marginBottom: '6px' }}>Product Name</label>
-                <input autoFocus placeholder="" value={newItem.name} onChange={e => setNewItem({...newItem, name: e.target.value})} style={{ width: '100%', padding: '10px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', fontSize: '16px' }} />
-              </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
-                <div>
-                  <label style={{ display: 'block', fontSize: '13px', color: '#0f172a', fontWeight: 'bold', marginBottom: '6px' }}>Selling Price (៛)</label>
-                  <CurrencyInput value={newItem.price} onChange={(v:any) => setNewItem({...newItem, price: v})} style={{ width: '100%', padding: '10px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', fontSize: '16px' }} />
-                </div>
-                <div>
-                  <label style={{ display: 'block', fontSize: '13px', color: '#0f172a', fontWeight: 'bold', marginBottom: '6px' }}>Cost Price (៛)</label>
-                  <CurrencyInput value={newItem.cost_price} onChange={(v:any) => setNewItem({...newItem, cost_price: v})} style={{ width: '100%', padding: '10px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', fontSize: '16px' }} />
-                </div>
-              </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '8px' }}>
-                <div>
-                  <label style={{ display: 'block', fontSize: '13px', color: '#0f172a', fontWeight: 'bold', marginBottom: '6px' }}>Weight (kg)</label>
-                  <input type="number" className="no-spinners" value={newItem.weight} onChange={e => setNewItem({...newItem, weight: e.target.value})} style={{ width: '100%', padding: '10px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', fontSize: '16px' }} />
-                </div>
-                <div>
-                  <label style={{ display: 'block', fontSize: '13px', color: '#0f172a', fontWeight: 'bold', marginBottom: '6px' }}>Initial Stock</label>
-                  <input type="number" className="no-spinners" value={newItem.stock} onChange={e => setNewItem({...newItem, stock: e.target.value})} style={{ width: '100%', padding: '10px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', fontSize: '16px' }} />
-                </div>
-              </div>
-              
-              <div style={{ background: '#fef2f2', padding: '16px', borderRadius: '8px', border: '1px solid #fecaca' }}>
-                <label style={{ display: 'block', fontSize: '13px', color: '#991b1b', fontWeight: 'bold', marginBottom: '6px' }}>🚨 Min Stock Alert Level</label>
-                <input type="number" className="no-spinners" value={newItem.min_stock_level} onChange={e => setNewItem({...newItem, min_stock_level: e.target.value})} style={{ width: '100%', padding: '10px 12px', borderRadius: '6px', border: '1px solid #fca5a5', boxSizing: 'border-box', background: '#fff', fontSize: '16px' }} />
-                <p style={{ fontSize: '11px', color: '#ef4444', marginTop: '6px', marginBottom: 0 }}>Triggers a Restock Alert if current stock falls below this amount.</p>
-              </div>
+      <Modal isOpen={isAddModalOpen} onClose={() => setIsAddModalOpen(false)} title="📦 Add New Product" maxWidth="500px">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          <div>
+            <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', margin: '0 0 6px 0' }}>Product Name</label>
+            <input autoFocus placeholder="" value={newItem.name} onChange={e => setNewItem({...newItem, name: e.target.value})} className="saas-input" />
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+            <div>
+              <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', margin: '0 0 6px 0' }}>Selling Price (៛)</label>
+              <CurrencyInput value={newItem.price} onChange={(v:any) => setNewItem({...newItem, price: v})} className="saas-input" />
             </div>
-
-            <div style={{ marginTop: '24px', display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
-              <button onClick={() => setIsAddModalOpen(false)} style={{ padding: '10px 16px', background: '#f1f5f9', color: '#475569', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', fontSize: '14px' }}>Cancel</button>
-              <button onClick={addProduct} style={{ padding: '10px 16px', background: '#10b981', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', fontSize: '14px' }}>Save Product</button>
+            <div>
+              <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', margin: '0 0 6px 0' }}>Cost Price (៛)</label>
+              <CurrencyInput value={newItem.cost_price} onChange={(v:any) => setNewItem({...newItem, cost_price: v})} className="saas-input" />
             </div>
           </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '8px' }}>
+            <div>
+              <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', margin: '0 0 6px 0' }}>Weight (kg)</label>
+              <input type="number" className="saas-input no-spinners" value={newItem.weight} onChange={e => setNewItem({...newItem, weight: e.target.value})} />
+            </div>
+            <div>
+              <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', margin: '0 0 6px 0' }}>Initial Stock</label>
+              <input type="number" className="saas-input no-spinners" value={newItem.stock} onChange={e => setNewItem({...newItem, stock: e.target.value})} />
+            </div>
+          </div>
+          
+          <div style={{ background: '#fef2f2', padding: '16px', borderRadius: '8px', border: '1px solid #fecaca' }}>
+            <label style={{ display: 'block', fontSize: '11px', color: '#991b1b', fontWeight: 'bold', marginBottom: '6px', textTransform: 'uppercase' }}>🚨 Min Stock Alert Level</label>
+            <input type="number" className="saas-input no-spinners" value={newItem.min_stock_level} onChange={e => setNewItem({...newItem, min_stock_level: e.target.value})} style={{ borderColor: '#fca5a5' }} />
+            <p style={{ fontSize: '11px', color: '#ef4444', marginTop: '6px', marginBottom: 0 }}>Triggers a Restock Alert if current stock falls below this amount.</p>
+          </div>
         </div>
-      )}
 
-      {/* --- GLOBAL CSS --- */}
+        <div style={{ marginTop: '24px', display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
+          <button onClick={() => setIsAddModalOpen(false)} className="saas-btn saas-btn-secondary">Cancel</button>
+          <button onClick={addProduct} className="saas-btn saas-btn-primary">Save Product</button>
+        </div>
+      </Modal>
+
+      {/* --- PAGE-SPECIFIC STYLES --- */}
       <style jsx global>{`
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
-
-        * {
-          font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-        }
-
-        /* 🚀 FIXED CSS: Hide spin buttons on number inputs to stop scroll-wheel changes */
         input[type="number"].no-spinners::-webkit-inner-spin-button,
         input[type="number"].no-spinners::-webkit-outer-spin-button {
           -webkit-appearance: none;
@@ -2123,6 +2119,7 @@ export default function RiceControl() {
         /* 📱 RESPONSIVE CLASSES */
         .desktop-only-btn { display: block; }
         .mobile-only-btn { display: none !important; }
+        .mobile-only-flex { display: none !important; }
 
         .mobile-action-row {
           display: flex;
@@ -2132,29 +2129,16 @@ export default function RiceControl() {
           min-width: 300px;
         }
 
-        /* 🔥 DESKTOP LAYOUT FIXES (Aligned with other pages) */
-        .main-wrapper { 
-          padding: max(20px, env(safe-area-inset-top, 20px)) 24px 24px 24px; 
-          background: #f8fafc; 
-          box-sizing: border-box; 
-          color: #333;
-          width: 100%;
-          
-          /* 👇 SCROLL FIX 👇 */
-          height: 100dvh; 
-          overflow-y: auto; 
-          -webkit-overflow-scrolling: touch;
-        }
-
         .header-container { 
           display: flex;
-          justify-content: space-between;
+          justify-content: flex-start;
           align-items: center; 
           margin-bottom: 24px; 
           margin-top: 0;
           margin-left: 60px; 
           gap: 12px;
           min-height: 48px; 
+          width: 100%;
         }
         
         .header-left {
@@ -2163,128 +2147,14 @@ export default function RiceControl() {
           gap: 12px;
         }
 
-        .page-title { 
-          font-size: 24px !important; 
-          color: #4a3b1b !important; 
-          margin: 0 !important; 
-          font-weight: bold;
-          letter-spacing: -0.5px;
-          line-height: normal !important; 
-          display: flex;
-          align-items: center;
-          min-width: 0;
-          white-space: nowrap !important; 
-        }
-
         .header-actions {
           display: flex;
           gap: 10px;
-        }
-        .delete-btn {
-          padding: 10px 20px;
-          background: #ef4444;
-          color: #fff;
-          border: none;
-          border-radius: 6px;
-          font-weight: bold;
-          cursor: pointer;
-        }
-        .add-btn {
-          padding: 10px 20px;
-          background: #b58a3d;
-          color: #fff;
-          border: none;
-          border-radius: 6px;
-          font-weight: bold;
-          cursor: pointer;
-        }
-        .toolbar-container {
-          display: flex;
-          gap: 12px;
-          margin-bottom: 16px;
-          background: #fff;
-          padding: 16px 20px;
-          border-radius: 12px;
-          border: 1px solid #e2e8f0;
-          align-items: center;
-          flex-wrap: wrap;
-          box-shadow: 0 4px 6px rgba(0,0,0,0.02);
-        }
-        .toolbar-tabs {
-          display: flex;
-          gap: 8px;
-          background: #f1f5f9;
-          padding: 4px;
-          border-radius: 8px;
-        }
-        .tab {
-          padding: 10px 16px;
-          border-radius: 6px;
-          border: none;
-          background: transparent;
-          font-size: 14px;
-          font-weight: bold;
-          color: #64748b;
-          cursor: pointer;
-          transition: all 0.2s;
-          white-space: nowrap;
-        }
-        .tab.active {
-          background: #10b981;
-          color: #fff;
-        }
-        .toolbar-search {
-          padding: 10px 14px;
-          border: 1px solid #cbd5e1;
-          border-radius: 6px;
-          flex: 1;
-          outline: none;
-          min-width: 150px;
-          font-size: 16px;
-          color: #0f172a;
-          background-color: #ffffff;
-        }
-        .toolbar-filters {
-          display: flex;
-          gap: 10px;
-          flex-shrink: 0;
-        }
-        .filter-btn {
-          padding: 10px 16px;
-          background: #f8fafc;
-          border: 1px solid #e2e8f0;
-          border-radius: 6px;
-          cursor: pointer;
-          font-weight: bold;
-          font-size: 14px;
-        }
-
-        .add-btn-inline {
-          display: flex;
-          align-items: center;
-          padding: 8px 14px;
-          background: #f0fdf4;
-          color: #166534;
-          border: 1px solid #bbf7d0;
-          border-radius: 6px;
-          font-weight: bold;
-          cursor: pointer;
-          font-size: 13px; 
-          white-space: nowrap;
-          transition: background 0.2s;
         }
 
         .hide-scrollbar::-webkit-scrollbar { display: none; }
         .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
 
-        .table-wrapper {
-          background: #fff;
-          border: 1px solid #e2e8f0;
-          border-radius: 12px;
-          overflow-x: auto;
-          box-shadow: 0 4px 6px rgba(0,0,0,0.02);
-          -webkit-overflow-scrolling: touch;
-        }
         .cell-display {
           padding: 16px 12px;
           font-size: 14px;
@@ -2377,55 +2247,12 @@ export default function RiceControl() {
           background: #fee2e2;
         }
 
-        .modal-overlay {
-          position: fixed;
-          top: 0;
-          left: 0;
-          width: 100vw;
-          height: 100vh;
-          background: rgba(0,0,0,0.5);
-          display: flex;
-          justify-content: center;
-          align-items: center;
-          z-index: 1000;
-          padding: 16px;
-          box-sizing: border-box;
-        }
-        .modal-content {
-          background: #fff;
-          padding: 30px;
-          border-radius: 16px;
-          width: 100%;
-          max-width: 600px;
-          max-height: 90vh;
-          overflow-y: auto;
-          box-shadow: 0 10px 25px rgba(0,0,0,0.2);
-        }
-
         /* 🔥 MOBILE OVERRIDES */
         @media (max-width: 1023px) { 
-          
-          /* 🛑 IOS SAFARI ANTI-ZOOM LOCK 🛑 */
-          input, select, textarea, 
-          .toolbar-search, 
-          .dropdown-search-input, 
-          .cell-input, 
-          .mobile-input-field, 
-          .mobile-select-menu {
-            font-size: 16px !important;
-          }
-          
           .desktop-only-btn { display: none !important; }
           .mobile-only-btn { display: flex !important; }
           .mobile-only-flex { display: flex !important; }
 
-          .main-wrapper { 
-            padding: max(20px, env(safe-area-inset-top, 20px)) 16px 16px 16px !important; 
-            height: 100dvh !important;
-            overflow-y: auto !important;
-            -webkit-overflow-scrolling: touch !important;
-          }
-          
           .header-container { 
             margin-left: 54px !important; 
             margin-right: 0 !important;
@@ -2445,45 +2272,12 @@ export default function RiceControl() {
             align-items: center !important;
             gap: 12px !important;
           }
-
-          .page-title {
-            font-size: 21px !important; 
-            line-height: normal !important; 
-            white-space: nowrap !important; 
-          }
-
-          .toolbar-container {
-            flex-direction: column !important;
-            align-items: stretch !important;
-            padding: 12px !important;
-            gap: 10px !important;
-          }
-          .toolbar-tabs {
-            width: 100%;
-          }
           
           .mobile-action-row {
             width: 100%;
             gap: 8px !important;
             min-width: 0 !important;
             justify-content: space-between;
-          }
-          .toolbar-search {
-            min-width: 0 !important;
-            width: 100%;
-            padding: 8px 10px !important;
-          }
-          .toolbar-filters {
-            gap: 6px !important;
-          }
-          .filter-btn, .add-btn-inline {
-            padding: 8px 10px !important;
-            font-size: 12px !important; 
-            white-space: nowrap !important;
-          }
-
-          .supplier-name-cell {
-            font-size: 14px !important;
           }
         }
       `}</style>

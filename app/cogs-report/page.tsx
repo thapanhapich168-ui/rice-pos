@@ -8,6 +8,8 @@ import { useToast } from '@/components/ToastProvider'
 import { formatRiel, parseOwner, EXCHANGE_RATE } from '@/utils/formatters'
 import { CurrencyInput } from '@/components/Inputs'
 import { PaymentRow } from '@/types'
+import TableSkeleton from '@/components/TableSkeleton'
+import EmptyState from '@/components/EmptyState'
 
 export default function CogsReportPage() {
   const { showToast } = useToast();
@@ -45,7 +47,7 @@ export default function CogsReportPage() {
   // Inline History States
   const [inlinePayments, setInlinePayments] = useState<Record<string, PaymentRow[]>>({})
 
-  // 🚀 100K LOAD PROBLEM FIX: Pagination state to prevent browser freezing
+  // Pagination state to prevent browser freezing
   const [loadLimit, setLoadLimit] = useState(3000);
 
   useEffect(() => {
@@ -60,15 +62,13 @@ export default function CogsReportPage() {
 
   useEffect(() => {
     fetchReportData();
-  }, [loadLimit]) // Re-runs when you click "Load Older Records"
+  }, [loadLimit]) 
 
-  // 🚀 Window Focus Auto-Refresh
   useFocusRefresh(fetchReportData);
 
   async function fetchReportData() {
     setLoading(true)
     
-    // 🚀 100K LOAD PROBLEM FIX: Applied ordering and limit to prevent massive downloads
     const [{data: sData}, {data: rData}, {data: cData}, {data: aData}, {data: invData}, {data: expData}, {data: payData}] = await Promise.all([
         supabase.from('sales').select('*').order('created_at', { ascending: false }).limit(loadLimit),
         supabase.from('retail_sales').select('*').order('created_at', { ascending: false }).limit(loadLimit),
@@ -91,7 +91,6 @@ export default function CogsReportPage() {
 
     let momCollectedRiel = 0;
     
-    // 1. Retail Sales collected by Business
     (rData || []).forEach((r: any) => {
       const owner = parseOwner(r.owner);
       const methodStr = r.payment_method || 'Cash ៛';
@@ -111,7 +110,6 @@ export default function CogsReportPage() {
       }
     });
 
-    // 2. Wholesale Invoices paid to Business
     (payData || []).forEach((p: any) => {
        const amtUsd = Number(p.amount_paid_usd || 0);
        const amtRiel = Number(p.amount_paid_riel || 0);
@@ -171,7 +169,6 @@ export default function CogsReportPage() {
       });
     }
 
-    // PERFECT SYNC WITH DASHBOARD LIABILITY
     const liveLiabilityRiel = Math.max(0, baseOweRiel + (baseOweUsd * EXCHANGE_RATE) + momCollectedRiel - momPaidOutRiel - momCogsSettledRiel);
     setLiveMomLiability(liveLiabilityRiel);
     
@@ -219,8 +216,6 @@ export default function CogsReportPage() {
       setIsCapturing(false);
     }
   }
-
-  const handleNativePrint = () => { window.print(); }
 
   const now = new Date()
   const isWithinTimeFilter = (dateStr: string, filter: string) => {
@@ -418,7 +413,6 @@ export default function CogsReportPage() {
       return;
     }
     
-    // 🔥 STRICT LIABILITY GUARDRAIL
     const liabilityUsedRielEqSum = liabilityUsedRiel + (liabilityUsedUsd * EXCHANGE_RATE);
     if (liabilityUsedRielEqSum > liveMomLiability + 0.1) {
         showToast('error', 'Insufficient Liability', `Not enough Mom Liability available! You only have ${formatRiel(liveMomLiability)}`);
@@ -519,21 +513,21 @@ export default function CogsReportPage() {
   return (
     <div className="main-wrapper">
       
-      {/* 🔥 STANDARDIZED HEADER CONTAINER */}
+      {/* HEADER CONTAINER */}
       <div className="header-container">
         <div className="header-left">
-          <h1 className="page-title">🌾 COGS Accounting</h1>
+          <h1 className="saas-page-title">🌾 COGS Accounting</h1>
         </div>
         
         <div style={{ display: 'flex', gap: '10px' }}>
           {activeMainTab === 'report' && (
             <>
               {isDeviceMobile ? (
-                <button onClick={handleMobileShare} disabled={isCapturing} className="action-btn share-btn">
+                <button onClick={handleMobileShare} disabled={isCapturing} className="saas-btn" style={{ background: '#3b82f6', color: '#fff' }}>
                   {isCapturing ? '⏳...' : '📤 Share'}
                 </button>
               ) : (
-                <button onClick={handleDownload} disabled={isCapturing} className="action-btn download-btn">
+                <button onClick={handleDownload} disabled={isCapturing} className="saas-btn" style={{ background: '#b58a3d', color: '#fff' }}>
                   {isCapturing ? '⏳ Saving...' : '⬇️ Download A4'}
                 </button>
               )}
@@ -542,46 +536,52 @@ export default function CogsReportPage() {
         </div>
       </div>
 
-      <div style={{ display: 'flex', gap: '10px', marginBottom: '20px', background: '#fff', padding: '10px', borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: '0 2px 4px rgba(0,0,0,0.02)', flexWrap: 'wrap' }}>
+      {/* MAIN SAAS TABS */}
+      <div className="saas-tab-container" style={{ padding: '8px', border: '1px solid #e2e8f0', background: '#fff' }}>
         <button 
           onClick={() => setActiveMainTab('report')} 
-          style={{ flex: 1, minWidth: '150px', padding: '12px', borderRadius: '8px', border: 'none', fontWeight: 'bold', cursor: 'pointer', background: activeMainTab === 'report' ? '#b58a3d' : 'transparent', color: activeMainTab === 'report' ? '#fff' : '#64748b', transition: 'all 0.2s', fontSize: '14px' }}
+          className={`saas-tab ${activeMainTab === 'report' ? 'active' : ''}`}
+          style={{ flex: 1, textAlign: 'center' }}
         >
           📊 COGS Report
         </button>
         <button 
           onClick={() => setActiveMainTab('pending')} 
-          style={{ flex: 1, minWidth: '150px', padding: '12px', borderRadius: '8px', border: 'none', fontWeight: 'bold', cursor: 'pointer', background: activeMainTab === 'pending' ? '#ef4444' : 'transparent', color: activeMainTab === 'pending' ? '#fff' : '#64748b', transition: 'all 0.2s', fontSize: '14px' }}
+          className={`saas-tab ${activeMainTab === 'pending' ? 'active' : ''}`}
+          style={activeMainTab === 'pending' ? { background: '#ef4444', color: '#fff', flex: 1, textAlign: 'center' } : { flex: 1, textAlign: 'center' }}
         >
           ⏳ Pending Settlements
         </button>
         <button 
           onClick={() => setActiveMainTab('history')} 
-          style={{ flex: 1, minWidth: '150px', padding: '12px', borderRadius: '8px', border: 'none', fontWeight: 'bold', cursor: 'pointer', background: activeMainTab === 'history' ? '#10b981' : 'transparent', color: activeMainTab === 'history' ? '#fff' : '#64748b', transition: 'all 0.2s', fontSize: '14px' }}
+          className={`saas-tab ${activeMainTab === 'history' ? 'active' : ''}`}
+          style={activeMainTab === 'history' ? { background: '#10b981', color: '#fff', flex: 1, textAlign: 'center' } : { flex: 1, textAlign: 'center' }}
         >
           📚 Settlement History
         </button>
       </div>
 
-      <div style={{ background: '#fff', padding: '16px 20px', borderRadius: '12px', border: '1px solid #e2e8f0', marginBottom: '24px', display: 'flex', gap: '15px', alignItems: 'center', flexWrap: 'wrap', boxShadow: '0 4px 6px rgba(0,0,0,0.02)' }}>
+      {/* FILTERS CARD */}
+      <div className="saas-card" style={{ padding: '16px 20px', marginBottom: '24px', display: 'flex', gap: '15px', alignItems: 'center', flexWrap: 'wrap' }}>
         
         {activeMainTab === 'report' ? (
           <>
             <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
               <label style={{ fontWeight: 'bold', fontSize: '13px', color: '#64748b' }}>From:</label>
-              <input type="date" value={fromDate} onChange={e => setFromDate(e.target.value)} style={{ padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', outline: 'none', color: '#0f172a', fontSize: '13px' }} />
+              <input type="date" value={fromDate} onChange={e => setFromDate(e.target.value)} className="saas-input" style={{ width: 'auto', padding: '8px' }} />
             </div>
             <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
               <label style={{ fontWeight: 'bold', fontSize: '13px', color: '#64748b' }}>To:</label>
-              <input type="date" value={toDate} onChange={e => setToDate(e.target.value)} style={{ padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', outline: 'none', color: '#0f172a', fontSize: '13px' }} />
+              <input type="date" value={toDate} onChange={e => setToDate(e.target.value)} className="saas-input" style={{ width: 'auto', padding: '8px' }} />
             </div>
           </>
         ) : (
-          <div style={{ display: 'flex', gap: '4px', background: '#f1f5f9', padding: '4px', borderRadius: '8px' }}>
+          <div className="saas-tab-container" style={{ margin: 0, padding: '4px', border: 'none', boxShadow: 'none', background: '#f1f5f9' }}>
             {['today', 'week', 'month', 'all'].map(f => (
               <button 
                 key={f} onClick={() => setTimeFilter(f as any)} 
-                style={{ padding: '8px 16px', borderRadius: '6px', border: 'none', cursor: 'pointer', fontSize: '13px', fontWeight: 'bold', textTransform: 'capitalize', background: timeFilter === f ? '#0f172a' : 'transparent', color: timeFilter === f ? '#fff' : '#475569' }}
+                className={`saas-tab ${timeFilter === f ? 'active' : ''}`}
+                style={timeFilter === f ? { background: '#0f172a', color: '#fff', padding: '8px 16px' } : { padding: '8px 16px' }}
               >
                 {f === 'week' ? 'This Week' : f === 'month' ? 'This Month' : f === 'all' ? 'All Time' : f}
               </button>
@@ -590,16 +590,26 @@ export default function CogsReportPage() {
         )}
         
         <div style={{ borderLeft: '1px solid #e2e8f0', height: '24px', margin: '0 5px' }} />
-        <div style={{ display: 'flex', gap: '5px', background: '#f1f5f9', padding: '4px', borderRadius: '8px' }}>
-          <button onClick={() => setActiveOwnerTab('mom')} style={{ padding: '8px 16px', borderRadius: '6px', border: 'none', fontWeight: 'bold', cursor: 'pointer', fontSize: '13px', background: activeOwnerTab === 'mom' ? '#b58a3d' : 'transparent', color: activeOwnerTab === 'mom' ? '#fff' : '#64748b', transition: 'all 0.2s' }}>
+        
+        <div className="saas-tab-container" style={{ margin: 0, padding: '4px', border: 'none', boxShadow: 'none', background: '#f1f5f9' }}>
+          <button 
+            onClick={() => setActiveOwnerTab('mom')} 
+            className={`saas-tab ${activeOwnerTab === 'mom' ? 'active' : ''}`}
+            style={{ padding: '8px 16px' }}
+          >
             Mom COGS
           </button>
-          <button onClick={() => setActiveOwnerTab('others')} style={{ padding: '8px 16px', borderRadius: '6px', border: 'none', fontWeight: 'bold', cursor: 'pointer', fontSize: '13px', background: activeOwnerTab === 'others' ? '#b58a3d' : 'transparent', color: activeOwnerTab === 'others' ? '#fff' : '#64748b', transition: 'all 0.2s' }}>
+          <button 
+            onClick={() => setActiveOwnerTab('others')} 
+            className={`saas-tab ${activeOwnerTab === 'others' ? 'active' : ''}`}
+            style={{ padding: '8px 16px' }}
+          >
             Pich / Jing / Both
           </button>
         </div>
       </div>
 
+      {/* A4 REPORT TAB (Inner Table Intentionally Untouched for Print Quality) */}
       {activeMainTab === 'report' && (
         <div className="a4-paper-container" ref={reportRef}>
           <img className="center-logo" src="https://i.imgur.com/s0hg3MQ.png" alt="Logo" crossOrigin="anonymous" />
@@ -697,39 +707,49 @@ export default function CogsReportPage() {
 
       {/* PENDING SETTLEMENTS TAB */}
       {activeMainTab === 'pending' && (
-        <div style={{ background: '#fff', borderRadius: '12px', border: '1px solid #e2e8f0', overflow: 'hidden', boxShadow: '0 4px 6px rgba(0,0,0,0.02)', paddingBottom: '80px' }}>
-          <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '14px', minWidth: '800px' }}>
-              <thead style={{ background: '#fef2f2', borderBottom: '1px solid #fecaca' }}>
+        <div className="saas-table-wrapper" style={{ paddingBottom: selectedDays.length > 0 ? '80px' : '0' }}>
+          <div className="saas-table-responsive">
+            <table className="saas-table" style={{ minWidth: '100%', tableLayout: 'auto' }}>
+              <thead style={{ background: '#fef2f2' }}>
                 <tr>
-                  <th style={{ padding: '16px', textAlign: 'center', width: '50px' }}>
+                  <th className="saas-th" style={{ textAlign: 'center', width: '50px', color: '#991b1b', borderBottom: '1px solid #fecaca' }}>
                     <input type="checkbox" onChange={handleSelectAll} checked={selectedDays.length > 0 && selectedDays.length === pendingDays.length} style={{ width: '18px', height: '18px', cursor: 'pointer' }} />
                   </th>
-                  <th style={{ padding: '16px', textAlign: 'left', color: '#991b1b', fontWeight: 'bold', textTransform: 'uppercase', fontSize: '12px' }}>COGS Date</th>
-                  <th style={{ padding: '16px', textAlign: 'left', color: '#991b1b', fontWeight: 'bold', textTransform: 'uppercase', fontSize: '12px' }}>Owner</th>
-                  <th style={{ padding: '16px', textAlign: 'right', color: '#991b1b', fontWeight: 'bold', textTransform: 'uppercase', fontSize: '12px' }}>Total COGS (៛)</th>
-                  <th style={{ padding: '16px', textAlign: 'right', color: '#991b1b', fontWeight: 'bold', textTransform: 'uppercase', fontSize: '12px' }}>Remaining Debt (៛)</th>
+                  <th className="saas-th" style={{ color: '#991b1b', borderBottom: '1px solid #fecaca' }}>COGS Date</th>
+                  <th className="saas-th" style={{ color: '#991b1b', borderBottom: '1px solid #fecaca' }}>Owner</th>
+                  <th className="saas-th" style={{ textAlign: 'right', color: '#991b1b', borderBottom: '1px solid #fecaca' }}>Total COGS (៛)</th>
+                  <th className="saas-th" style={{ textAlign: 'right', color: '#991b1b', borderBottom: '1px solid #fecaca' }}>Remaining Debt (៛)</th>
                 </tr>
               </thead>
               <tbody>
-                {pendingDays.length === 0 ? (
-                  <tr><td colSpan={5} style={{ textAlign: 'center', padding: '40px', color: '#10b981', fontSize: '15px' }}>🎉 No pending COGS! You are all settled up!</td></tr>
+                {loading ? (
+                   <TableSkeleton columns={5} rows={5} />
+                ) : pendingDays.length === 0 ? (
+                  <tr>
+                    <td colSpan={5} style={{ padding: 0 }}>
+                      <EmptyState 
+                        icon="🎉" 
+                        title="All caught up!" 
+                        message="No pending COGS! You are all settled up!" 
+                      />
+                    </td>
+                  </tr>
                 ) : (
                   pendingDays.map((d: any) => {
                     const remaining = d.totalCogs - d.totalPaid;
                     const isSelected = selectedDays.includes(d.key);
                     
                     return (
-                      <tr key={d.key} onClick={() => handleSelectDay(d.key)} style={{ borderBottom: '1px solid #f1f5f9', background: isSelected ? '#fff1f2' : '#ffffff', cursor: 'pointer', transition: 'all 0.2s ease' }}>
-                        <td style={{ padding: '16px', textAlign: 'center' }}>
+                      <tr key={d.key} className={`saas-tr ${isSelected ? 'selected' : ''}`} onClick={() => handleSelectDay(d.key)} style={{ cursor: 'pointer' }}>
+                        <td className="saas-td" style={{ textAlign: 'center' }}>
                           <input type="checkbox" checked={isSelected} readOnly style={{ width: '18px', height: '18px', cursor: 'pointer' }} />
                         </td>
-                        <td style={{ padding: '16px', color: '#334155', fontWeight: 'bold' }}>
+                        <td className="saas-td" style={{ fontWeight: 'bold' }}>
                           {new Date(d.date).toLocaleDateString('en-GB')}
                         </td>
-                        <td style={{ padding: '16px', color: '#475569', fontWeight: 'bold' }}>{d.owner}</td>
-                        <td style={{ padding: '16px', textAlign: 'right', color: '#475569', fontWeight: 'bold' }}>{formatRiel(d.totalCogs)}</td>
-                        <td style={{ padding: '16px', textAlign: 'right', color: '#ef4444', fontWeight: 'bold', fontSize: '16px' }}>{formatRiel(remaining)}</td>
+                        <td className="saas-td" style={{ fontWeight: 'bold' }}>{d.owner}</td>
+                        <td className="saas-td" style={{ textAlign: 'right', fontWeight: 'bold' }}>{formatRiel(d.totalCogs)}</td>
+                        <td className="saas-td" style={{ textAlign: 'right', color: '#ef4444', fontWeight: 'bold', fontSize: '16px' }}>{formatRiel(remaining)}</td>
                       </tr>
                     )
                   })
@@ -751,7 +771,8 @@ export default function CogsReportPage() {
               </div>
               <button 
                 onClick={() => setBulkModalOpen(true)}
-                style={{ background: '#10b981', color: '#fff', border: 'none', padding: '12px 24px', borderRadius: '30px', fontWeight: 'bold', cursor: 'pointer', fontSize: '15px', boxShadow: '0 4px 10px rgba(16,185,129,0.3)' }}
+                className="saas-btn saas-btn-primary"
+                style={{ borderRadius: '30px', boxShadow: '0 4px 10px rgba(16,185,129,0.3)', padding: '12px 24px', fontSize: '15px' }}
               >
                 Settle Selected
               </button>
@@ -760,24 +781,35 @@ export default function CogsReportPage() {
         </div>
       )}
 
+      {/* HISTORY TAB */}
       {activeMainTab === 'history' && (
-        <div style={{ background: '#fff', borderRadius: '12px', border: '1px solid #e2e8f0', overflow: 'hidden', boxShadow: '0 4px 6px rgba(0,0,0,0.02)' }}>
-          <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '14px', minWidth: '1050px' }}>
-              <thead style={{ background: '#f8fafc', borderBottom: '1px solid #cbd5e1' }}>
+        <div className="saas-table-wrapper">
+          <div className="saas-table-responsive">
+            <table className="saas-table" style={{ minWidth: '1050px', tableLayout: 'auto' }}>
+              <thead>
                 <tr>
-                  <th style={{ padding: '16px 20px', textAlign: 'left', color: '#64748b', fontWeight: 'bold', textTransform: 'uppercase', fontSize: '12px' }}>COGS Date & Owner</th>
-                  <th style={{ padding: '16px 20px', textAlign: 'right', color: '#64748b', fontWeight: 'bold', textTransform: 'uppercase', fontSize: '12px' }}>Total COGS (៛)</th>
-                  <th style={{ padding: '16px 20px', textAlign: 'center', color: '#64748b', fontWeight: 'bold', textTransform: 'uppercase', fontSize: '12px' }}>Methods Applied</th>
-                  <th style={{ padding: '16px 20px', textAlign: 'right', color: '#64748b', fontWeight: 'bold', textTransform: 'uppercase', fontSize: '12px' }}>Paid Amount (៛)</th>
-                  <th style={{ padding: '16px 20px', textAlign: 'right', color: '#64748b', fontWeight: 'bold', textTransform: 'uppercase', fontSize: '12px' }}>Remaining Debt (៛)</th>
-                  <th style={{ padding: '16px 20px', textAlign: 'center', color: '#64748b', fontWeight: 'bold', textTransform: 'uppercase', fontSize: '12px', width: '200px' }}>Settle Remaining</th>
-                  <th style={{ padding: '16px 20px', textAlign: 'center', color: '#64748b', fontWeight: 'bold', textTransform: 'uppercase', fontSize: '12px', width: '120px' }}>Complete</th>
+                  <th className="saas-th">COGS Date & Owner</th>
+                  <th className="saas-th" style={{ textAlign: 'right' }}>Total COGS (៛)</th>
+                  <th className="saas-th" style={{ textAlign: 'center' }}>Methods Applied</th>
+                  <th className="saas-th" style={{ textAlign: 'right' }}>Paid Amount (៛)</th>
+                  <th className="saas-th" style={{ textAlign: 'right' }}>Remaining Debt (៛)</th>
+                  <th className="saas-th" style={{ textAlign: 'center', width: '200px' }}>Settle Remaining</th>
+                  <th className="saas-th" style={{ textAlign: 'center', width: '120px' }}>Complete</th>
                 </tr>
               </thead>
               <tbody>
-                {historyDays.length === 0 ? (
-                  <tr><td colSpan={7} style={{ textAlign: 'center', padding: '40px', color: '#94a3b8' }}>No settled records found.</td></tr>
+                {loading ? (
+                   <TableSkeleton columns={7} rows={5} />
+                ) : historyDays.length === 0 ? (
+                  <tr>
+                    <td colSpan={7} style={{ padding: 0 }}>
+                      <EmptyState 
+                        icon="📚" 
+                        title="No history found" 
+                        message="No settled records found for this view." 
+                      />
+                    </td>
+                  </tr>
                 ) : (
                   historyDays.map((d: any) => {
                     const remaining = d.totalCogs - d.totalPaid;
@@ -785,22 +817,22 @@ export default function CogsReportPage() {
                     const paymentState = getInlinePaymentState(d.key, remaining);
                     
                     return (
-                      <tr key={d.key} style={{ borderBottom: '1px solid #f1f5f9', background: isDone ? '#f8fafc' : '#ffffff', opacity: isDone ? 0.7 : 1, transition: 'all 0.3s ease' }}>
-                        <td style={{ padding: '16px 20px', color: '#334155', verticalAlign: 'top' }}>
+                      <tr key={d.key} className="saas-tr" style={{ opacity: isDone ? 0.7 : 1 }}>
+                        <td className="saas-td">
                           <div style={{ fontWeight: 'bold', marginBottom: '4px' }}>{new Date(d.date).toLocaleDateString('en-GB')}</div>
                           <div style={{ fontSize: '12px', color: '#64748b' }}>Owner: <span style={{color: '#0f172a'}}>{d.owner}</span></div>
                         </td>
-                        <td style={{ padding: '16px 20px', textAlign: 'right', color: '#475569', fontWeight: 'bold', verticalAlign: 'top' }}>{formatRiel(d.totalCogs)}</td>
-                        <td style={{ padding: '16px 20px', textAlign: 'center', color: '#3b82f6', fontWeight: 'bold', verticalAlign: 'top', fontSize: '12px' }}>
+                        <td className="saas-td" style={{ textAlign: 'right', fontWeight: 'bold' }}>{formatRiel(d.totalCogs)}</td>
+                        <td className="saas-td" style={{ textAlign: 'center', color: '#3b82f6', fontWeight: 'bold', fontSize: '12px' }}>
                           {Array.from(d.methods).join(', ') || '-'}
                         </td>
-                        <td style={{ padding: '16px 20px', textAlign: 'right', color: '#10b981', fontWeight: 'bold', verticalAlign: 'top' }}>{formatRiel(d.totalPaid)}</td>
+                        <td className="saas-td" style={{ textAlign: 'right', color: '#10b981', fontWeight: 'bold' }}>{formatRiel(d.totalPaid)}</td>
                         
-                        <td style={{ padding: '16px 20px', textAlign: 'right', color: '#ef4444', fontWeight: 'bold', fontSize: '15px', verticalAlign: 'top' }}>
+                        <td className="saas-td" style={{ textAlign: 'right', color: '#ef4444', fontWeight: 'bold', fontSize: '15px' }}>
                           {remaining > 0 ? formatRiel(remaining) : ''}
                         </td>
 
-                        <td style={{ padding: '16px 20px', textAlign: 'right', verticalAlign: 'top' }}>
+                        <td className="saas-td" style={{ textAlign: 'right' }}>
                           {remaining > 0 ? (
                             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                               {paymentState.map(row => (
@@ -809,7 +841,8 @@ export default function CogsReportPage() {
                                     <select 
                                       value={row.method}
                                       onChange={(e) => updateInlineRow(d.key, row.id, 'method', e.target.value, remaining)}
-                                      style={{ padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px', outline: 'none', background: '#fff', color: '#475569', cursor: 'pointer', flex: 1, fontWeight: 'bold' }}
+                                      className="saas-input"
+                                      style={{ padding: '8px', flex: 1, fontWeight: 'bold', cursor: 'pointer' }}
                                     >
                                       <option value="Mom Liability ៛">📉 Mom Liability ៛</option>
                                       <option value="Mom Liability $">📉 Mom Liability $</option>
@@ -827,7 +860,8 @@ export default function CogsReportPage() {
                                     value={row.amount}
                                     onChange={(v: any) => updateInlineRow(d.key, row.id, 'amount', v, remaining)}
                                     onEnter={() => handleProcessCreditPayment(d, paymentState)}
-                                    style={{ padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '14px', textAlign: 'right', outline: 'none', width: '100%', background: '#fff', color: '#000000', boxSizing: 'border-box' }}
+                                    className="saas-input"
+                                    style={{ padding: '8px', textAlign: 'right' }}
                                   />
                                 </div>
                               ))}
@@ -838,11 +872,12 @@ export default function CogsReportPage() {
                           )}
                         </td>
 
-                        <td style={{ padding: '16px 20px', textAlign: 'center', verticalAlign: 'top' }}>
+                        <td className="saas-td" style={{ textAlign: 'center' }}>
                           {!isDone && (
                             <button 
                               onClick={() => handleProcessCreditPayment(d, paymentState)}
-                              style={{ padding: '8px 12px', width: '100%', borderRadius: '6px', border: 'none', cursor: 'pointer', fontSize: '13px', background: '#10b981', color: '#ffffff', transition: 'all 0.2s', fontWeight: 'bold' }}
+                              className="saas-btn saas-btn-primary"
+                              style={{ width: '100%', padding: '8px 12px' }}
                             >
                               ✔ Done
                             </button>
@@ -858,6 +893,7 @@ export default function CogsReportPage() {
         </div>
       )}
 
+      {/* BULK SETTLE MODAL */}
       {bulkModalOpen && (
         <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 10000, display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '20px', boxSizing: 'border-box' }} onMouseDown={() => setBulkModalOpen(false)}>
           <div style={{ backgroundColor: '#ffffff', width: '100%', maxWidth: '450px', borderRadius: '16px', padding: '24px', boxShadow: '0 10px 25px rgba(0,0,0,0.15)', maxHeight: '90vh', overflowY: 'auto' }} onMouseDown={e => e.stopPropagation()}>
@@ -890,7 +926,8 @@ export default function CogsReportPage() {
                       newRows[index].method = e.target.value;
                       setBulkPaymentRows(newRows);
                     }}
-                    style={{ width: '50%', padding: '12px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '14px', outline: 'none', backgroundColor: '#fff', cursor: 'pointer', color: '#334155', fontWeight: 'bold' }}
+                    className="saas-input"
+                    style={{ width: '50%', cursor: 'pointer', fontWeight: 'bold' }}
                   >
                     <option value="Mom Liability ៛">📉 Mom Liability ៛</option>
                     <option value="Mom Liability $">📉 Mom Liability $</option>
@@ -909,7 +946,8 @@ export default function CogsReportPage() {
                         newRows[index].amount = val;
                         setBulkPaymentRows(newRows);
                       }}
-                      style={{ width: '100%', padding: '12px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', outline: 'none', textAlign: 'right' }}
+                      className="saas-input"
+                      style={{ textAlign: 'right' }}
                     />
                   </div>
                   
@@ -954,8 +992,8 @@ export default function CogsReportPage() {
             )}
 
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
-              <button onClick={() => setBulkModalOpen(false)} style={{ padding: '12px 16px', backgroundColor: '#f1f5f9', border: 'none', borderRadius: '6px', cursor: 'pointer', color: '#475569', fontSize: '15px', fontWeight: 'bold' }}>Cancel</button>
-              <button onClick={() => processPayments(bulkPaymentRows, selectedDays.map(k => dailyMap[k]), true)} disabled={isProcessing} style={{ padding: '12px 16px', backgroundColor: '#10b981', border: 'none', borderRadius: '6px', cursor: 'pointer', color: '#fff', fontSize: '15px', fontWeight: 'bold' }}>
+              <button onClick={() => setBulkModalOpen(false)} className="saas-btn saas-btn-secondary" style={{ padding: '12px 16px', fontSize: '15px' }}>Cancel</button>
+              <button onClick={() => processPayments(bulkPaymentRows, selectedDays.map(k => dailyMap[k]), true)} disabled={isProcessing} className="saas-btn saas-btn-primary" style={{ padding: '12px 16px', fontSize: '15px' }}>
                 {isProcessing ? 'Processing...' : 'Confirm Bulk Settle'}
               </button>
             </div>
@@ -967,43 +1005,15 @@ export default function CogsReportPage() {
       <div style={{ textAlign: 'center', padding: '20px', marginTop: '20px' }}>
         <button 
           onClick={() => setLoadLimit(prev => prev + 2000)}
-          style={{ padding: '10px 24px', backgroundColor: '#ffffff', border: '1px solid #cbd5e1', borderRadius: '20px', color: '#475569', fontWeight: 'bold', fontSize: '13px', cursor: 'pointer', boxShadow: '0 2px 4px rgba(0,0,0,0.02)' }}
+          className="saas-btn saas-btn-secondary"
+          style={{ borderRadius: '20px', boxShadow: '0 2px 4px rgba(0,0,0,0.02)' }}
         >
           ⬇️ Load Older Records (Current Limit: {loadLimit})
         </button>
       </div>
 
+      {/* --- PAGE-SPECIFIC CSS (A4 REPORT) --- */}
       <style jsx global>{`
-        /* ORIGINAL STYLES PRESERVED */
-        input[type="text"].no-spinners::-webkit-inner-spin-button,
-        input[type="text"].no-spinners::-webkit-outer-spin-button {
-          -webkit-appearance: none;
-          margin: 0;
-        }
-        
-        .main-wrapper {
-          padding: max(20px, env(safe-area-inset-top, 20px)) 24px 24px 24px;
-          background: #f8fafc; min-height: 100vh; font-family: Arial, sans-serif; color: #333; box-sizing: border-box; width: 100%;
-        }
-
-        .header-container {
-          display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; margin-top: 0; margin-left: 60px; gap: 12px; min-height: 42px; width: calc(100% - 60px); max-width: 1600px;
-        }
-        
-        .header-left {
-          display: flex; align-items: center; gap: 12px;
-        }
-
-        .page-title {
-          font-size: 24px !important; font-weight: bold; color: #4a3b1b !important; margin: 0 !important; letter-spacing: -0.5px; line-height: normal !important; display: flex; align-items: center; min-width: 0; white-space: nowrap !important;
-        }
-
-        .action-btn {
-          padding: 10px 16px; border-radius: 8px; font-weight: bold; font-size: 13px; cursor: pointer; transition: background 0.2s; color: #fff; border: none;
-        }
-        .download-btn { background: #b58a3d; }
-        .share-btn { background: #3b82f6; }
-
         .a4-paper-container {
           width: 100%;
           max-width: 794px; 
@@ -1046,29 +1056,28 @@ export default function CogsReportPage() {
           text-align: center;
         }
 
+        .header-container {
+          display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; margin-top: 0; margin-left: 60px; gap: 12px; min-height: 42px; width: calc(100% - 60px); max-width: 1600px;
+        }
+        .header-left {
+          display: flex; align-items: center; gap: 12px;
+        }
+
+        input[type="text"].no-spinners::-webkit-inner-spin-button,
+        input[type="text"].no-spinners::-webkit-outer-spin-button {
+          -webkit-appearance: none; margin: 0;
+        }
+
         @media print {
           body * { visibility: hidden; }
           .a4-paper-container, .a4-paper-container * { visibility: visible; }
           .a4-paper-container {
-            position: absolute;
-            left: 0;
-            top: 0;
-            margin: 0;
-            padding: 20px;
-            box-shadow: none;
-            width: 100%;
+            position: absolute; left: 0; top: 0; margin: 0; padding: 20px; box-shadow: none; width: 100%;
           }
           @page { size: A4 portrait; margin: 10mm; }
         }
 
-        /* 🔥 MOBILE LAYOUT FIXES (EXACT DASHBOARD CSS) */
         @media (max-width: 1023px) { 
-          .main-wrapper { 
-            padding: max(20px, env(safe-area-inset-top, 20px)) 16px 16px 16px !important; 
-            height: 100dvh !important;
-            overflow-y: auto !important;
-            -webkit-overflow-scrolling: touch !important;
-          }
           .header-container {
             margin-left: 54px !important; 
             margin-right: 0 !important;
@@ -1087,14 +1096,8 @@ export default function CogsReportPage() {
             align-items: center !important;
             gap: 12px !important;
           }
-          .page-title {
-            font-size: 21px !important;
-            line-height: normal !important;
-            white-space: nowrap !important; 
-          }
           .a4-paper-container {
-            padding: 16px;
-            min-height: auto;
+            padding: 16px; min-height: auto;
           }
         }
       `}</style>

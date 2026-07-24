@@ -6,6 +6,7 @@ import { Product } from '@/types'
 import { formatRiel } from '@/utils/formatters'
 import { CurrencyInput } from '@/components/Inputs'
 import { useToast } from '@/components/ToastProvider'
+import EmptyState from '@/components/EmptyState'
 
 // --- LOCAL TYPES ---
 interface MixHistory {
@@ -250,23 +251,25 @@ export default function RiceMixCalculator() {
     }
   }
 
-  // 🟢 REUSABLE DROPDOWN COMPONENT (Search bar removed from here)
+  // 🟢 REUSABLE DROPDOWN COMPONENT
   const renderDropdownMenu = (target: string) => {
     if (activeDropdown !== target) return null;
     return (
       <div className="dropdown-menu-container">
         
-        {/* Category Tabs */}
-        <div className="dropdown-tab-container">
+        {/* Category Tabs using Global SaaS Classes */}
+        <div className="saas-tab-container" style={{ margin: '8px', marginBottom: 0, padding: '4px', border: 'none', boxShadow: 'none', background: '#f1f5f9' }}>
           <button 
             onClick={(e) => { e.stopPropagation(); setDropdownTab('wholesale'); }} 
-            className={`dropdown-tab-btn ${dropdownTab === 'wholesale' ? 'active' : 'inactive'}`}
+            className={`saas-tab ${dropdownTab === 'wholesale' ? 'active' : ''}`}
+            style={{ flex: 1, textAlign: 'center', padding: '8px' }}
           >
             🌾 Wholesale
           </button>
           <button 
             onClick={(e) => { e.stopPropagation(); setDropdownTab('retail'); }} 
-            className={`dropdown-tab-btn ${dropdownTab === 'retail' ? 'active' : 'inactive'}`}
+            className={`saas-tab ${dropdownTab === 'retail' ? 'active' : ''}`}
+            style={{ flex: 1, textAlign: 'center', padding: '8px' }}
           >
             🛍️ Retail
           </button>
@@ -302,10 +305,10 @@ export default function RiceMixCalculator() {
     const unitLabel = isWholesale ? 'Bags' : 'Kg';
 
     return (
-      <div className="calc-card fade-in">
-        <h2 className="card-header">{label}</h2>
+      <div className="saas-card fade-in" style={{ flex: 1, minWidth: '250px' }}>
+        <h2 className="saas-card-title">{label}</h2>
         <div className="input-group" style={{ position: 'relative' }}>
-          <label>Select Rice Ingredient</label>
+          <label className="saas-card-title" style={{ fontSize: '11px', marginBottom: '6px', display: 'block' }}>Select Rice Ingredient</label>
           
           {/* Invisible Overlay to catch outside clicks and close the dropdown */}
           {activeDropdown === target && (
@@ -329,8 +332,12 @@ export default function RiceMixCalculator() {
                 setActiveDropdown(target);
                 setDropdownSearch(e.target.value);
               }}
-              className={`rice-card-trigger ${activeDropdown === target ? 'active' : 'inactive'} mobile-input-field`}
-              style={{ paddingRight: '30px' }}
+              className="saas-input"
+              style={{ 
+                paddingRight: '30px', 
+                borderColor: activeDropdown === target ? '#b58a3d' : undefined,
+                boxShadow: activeDropdown === target ? '0 0 0 2px rgba(181, 138, 61, 0.2)' : undefined 
+              }}
             />
             <span style={{ position: 'absolute', right: '14px', top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: '#94a3b8', fontSize: '12px' }}>▼</span>
           </div>
@@ -350,12 +357,12 @@ export default function RiceMixCalculator() {
         )}
 
         <div className="input-group" style={{ marginTop: '16px' }}>
-          <label>Portion / Quantity ({unitLabel})</label>
+          <label className="saas-card-title" style={{ fontSize: '11px', marginBottom: '6px', display: 'block' }}>Portion / Quantity ({unitLabel})</label>
           <CurrencyInput 
             placeholder="0" 
             value={qty} 
             onChange={(v: any) => setQty(v)} 
-            style={{ width: '100%', padding: '12px', borderRadius: '8px', border: '1px solid #cbd5e1', boxSizing: 'border-box' }}
+            className="saas-input"
           />
         </div>
       </div>
@@ -367,9 +374,9 @@ export default function RiceMixCalculator() {
       {/* HEADER */}
       <div className="header-container">
         <div className="header-left">
-          <h1 className="page-title">🧮 Rice Mix Calculator</h1>
+          <h1 className="saas-page-title">🧮 Rice Mix Calculator</h1>
         </div>
-        <button className="action-btn" onClick={handleReset} style={{ background: '#f1f5f9', color: '#475569', border: '1px solid #cbd5e1' }}>↺ Reset</button>
+        <button className="saas-btn saas-btn-secondary" onClick={handleReset}>↺ Reset</button>
       </div>
 
       {/* CALCULATOR WORKSPACE */}
@@ -389,11 +396,11 @@ export default function RiceMixCalculator() {
       {/* TOGGLE 3RD RICE BUTTON */}
       <div style={{ display: 'flex', justifyContent: 'center', marginTop: '24px' }}>
         {!showThirdRice ? (
-           <button onClick={() => setShowThirdRice(true)} style={{ background: '#f8fafc', border: '1px dashed #cbd5e1', padding: '12px 24px', borderRadius: '8px', color: '#64748b', fontWeight: 'bold', cursor: 'pointer', transition: 'all 0.2s' }}>
+           <button onClick={() => setShowThirdRice(true)} className="saas-btn saas-btn-secondary" style={{ border: '1px dashed #cbd5e1' }}>
              ➕ Add 3rd Rice to Mix
            </button>
         ) : (
-           <button onClick={() => { setShowThirdRice(false); setRice3Id(''); setRice3Qty(''); }} style={{ background: '#fef2f2', border: '1px dashed #fca5a5', padding: '12px 24px', borderRadius: '8px', color: '#ef4444', fontWeight: 'bold', cursor: 'pointer', transition: 'all 0.2s' }}>
+           <button onClick={() => { setShowThirdRice(false); setRice3Id(''); setRice3Qty(''); }} className="saas-btn saas-btn-danger" style={{ background: '#fef2f2', color: '#ef4444', border: '1px dashed #fca5a5' }}>
              ➖ Remove 3rd Rice
            </button>
         )}
@@ -401,14 +408,21 @@ export default function RiceMixCalculator() {
 
       {/* AUTO-CALCULATED RESULT PANEL */}
       {calcResult && (
-        <div className="result-panel fade-in" style={{ marginTop: '30px' }}>
+        <div className="saas-card mint fade-in" style={{ marginTop: '30px', border: '2px solid #bbf7d0' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px', flexWrap: 'wrap', gap: '12px' }}>
-            <h2 className="card-header" style={{ margin: 0 }}>Auto-Calculated Yield</h2>
+            <h2 className="saas-card-title" style={{ margin: 0, color: '#047857', fontSize: '16px' }}>Auto-Calculated Yield</h2>
             <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-              <button onClick={() => setSyncMode('existing')} style={{ padding: '10px 16px', borderRadius: '8px', border: syncMode === 'existing' ? '2px solid #3b82f6' : '1px solid #cbd5e1', background: syncMode === 'existing' ? '#eff6ff' : '#fff', color: syncMode === 'existing' ? '#1e40af' : '#475569', fontWeight: 'bold', cursor: 'pointer', transition: 'all 0.2s', fontSize: '14px' }}>
+              <button 
+                onClick={() => setSyncMode('existing')} 
+                className={`saas-btn ${syncMode === 'existing' ? 'saas-btn-primary' : 'saas-btn-secondary'}`}
+                style={syncMode === 'existing' ? { background: '#3b82f6' } : {}}
+              >
                 📦 Add to Existing
               </button>
-              <button onClick={() => setSyncMode('new')} style={{ padding: '10px 16px', borderRadius: '8px', border: syncMode === 'new' ? '2px solid #10b981' : '1px solid #cbd5e1', background: syncMode === 'new' ? '#f0fdf4' : '#fff', color: syncMode === 'new' ? '#166534' : '#475569', fontWeight: 'bold', cursor: 'pointer', transition: 'all 0.2s', fontSize: '14px' }}>
+              <button 
+                onClick={() => setSyncMode('new')} 
+                className={`saas-btn ${syncMode === 'new' ? 'saas-btn-primary' : 'saas-btn-secondary'}`}
+              >
                 ✨ Create New
               </button>
             </div>
@@ -416,17 +430,17 @@ export default function RiceMixCalculator() {
           
           <div className="result-stats" style={{ marginBottom: syncMode !== 'none' ? '24px' : '0' }}>
             <div className="stat-box" style={{ flex: 1.5 }}>
-              <span className="label">Total Raw Mix Weight</span>
-              <span className="value" style={{ color: '#3b82f6' }}>
+              <span className="saas-card-title">Total Raw Mix Weight</span>
+              <span className="saas-card-metric" style={{ color: '#3b82f6' }}>
                 {calcResult.totalYieldKg.toLocaleString('en-US', { maximumFractionDigits: 2 })} <span style={{ fontSize: '16px', fontWeight: 'normal' }}>Kg</span>
               </span>
             </div>
             
             {/* Dynamic View showing exactly what this makes */}
             <div className="stat-box highlight" style={{ flex: 2 }}>
-              <span className="label">Will Generate Output of:</span>
-              <span className="value text-gold" style={{ display: 'flex', alignItems: 'baseline', gap: '8px' }}>
-                 {finalYield.toLocaleString('en-US', { maximumFractionDigits: 2 })} <span style={{ fontSize: '16px', fontWeight: 'bold', color: '#8a7650' }}>{outputUnit}</span>
+              <span className="saas-card-title" style={{ color: '#8a7650' }}>Will Generate Output of:</span>
+              <span className="saas-card-metric" style={{ display: 'flex', alignItems: 'baseline', gap: '8px', color: '#b58a3d' }}>
+                 {finalYield.toLocaleString('en-US', { maximumFractionDigits: 2 })} <span style={{ fontSize: '16px', fontWeight: 'bold' }}>{outputUnit}</span>
               </span>
               <div style={{ fontSize: '12px', color: '#64748b', marginTop: '6px', fontWeight: 'bold' }}>
                 At new COGS: <span style={{ color: '#0f172a' }}>{formatRiel(finalCogs)} per {outputUnit.slice(0,-1)}</span>
@@ -436,7 +450,7 @@ export default function RiceMixCalculator() {
 
           {/* INLINE INVENTORY SYNC FORM */}
           {syncMode !== 'none' && (
-            <div className="sync-form-container fade-in">
+            <div className="saas-card fade-in" style={{ background: '#f8fafc', padding: '20px', border: '1px solid #e2e8f0', boxShadow: 'none' }}>
               <div style={{ fontSize: '14px', fontWeight: 'bold', color: '#1e293b', marginBottom: '16px' }}>
                 {syncMode === 'new' ? 'Create & Sync New Product' : 'Select Target to Sync & Overwrite'}
               </div>
@@ -444,19 +458,19 @@ export default function RiceMixCalculator() {
               {syncMode === 'new' ? (
                 <div style={{ display: 'flex', gap: '16px', marginBottom: '20px', flexWrap: 'wrap' }}>
                   <div style={{ flex: 1, minWidth: '200px' }}>
-                    <label className="sync-input-label">New Product Name</label>
-                    <input type="text" placeholder={`e.g. Mix ${rice1?.name.split(' ')[0]}-${rice2?.name.split(' ')[0]}`} value={newMixName} onChange={e => setNewMixName(e.target.value)} className="sync-input-field" />
+                    <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '6px' }}>New Product Name</label>
+                    <input type="text" placeholder={`e.g. Mix ${rice1?.name.split(' ')[0]}-${rice2?.name.split(' ')[0]}`} value={newMixName} onChange={e => setNewMixName(e.target.value)} className="saas-input" />
                   </div>
                   <div style={{ flex: 1, minWidth: '150px' }}>
-                    <label className="sync-input-label">Size Type</label>
-                    <select value={newMixType} onChange={(e: any) => setNewMixType(e.target.value)} className="sync-input-field" style={{ cursor: 'pointer' }}>
+                    <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '6px' }}>Size Type</label>
+                    <select value={newMixType} onChange={(e: any) => setNewMixType(e.target.value)} className="saas-input" style={{ cursor: 'pointer' }}>
                       <option value="wholesale">Wholesale (50kg Bag)</option>
                       <option value="retail">Retail (1kg)</option>
                     </select>
                   </div>
                   <div style={{ flex: 1, minWidth: '150px' }}>
-                    <label className="sync-input-label">Selling Price (៛)</label>
-                    <CurrencyInput value={newMixPrice} onChange={(v: any) => setNewMixPrice(v)} style={{ width: '100%', padding: '12px', borderRadius: '8px', border: '1px solid #cbd5e1', boxSizing: 'border-box', color: '#0f172a' }} />
+                    <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '6px' }}>Selling Price (៛)</label>
+                    <CurrencyInput value={newMixPrice} onChange={(v: any) => setNewMixPrice(v)} className="saas-input" />
                   </div>
                 </div>
               ) : (
@@ -481,8 +495,14 @@ export default function RiceMixCalculator() {
                         setActiveDropdown('target');
                         setDropdownSearch(e.target.value);
                       }}
-                      className={`rice-card-trigger ${activeDropdown === 'target' ? 'active-target' : 'inactive-target'} mobile-input-field`}
-                      style={{ color: targetProd ? '#1e293b' : '#3b82f6', fontWeight: 'bold', paddingRight: '30px' }}
+                      className="saas-input"
+                      style={{ 
+                        color: targetProd ? '#1e293b' : '#3b82f6', 
+                        fontWeight: 'bold', 
+                        paddingRight: '30px',
+                        borderColor: activeDropdown === 'target' ? '#3b82f6' : undefined,
+                        boxShadow: activeDropdown === 'target' ? '0 0 0 2px rgba(59, 130, 246, 0.2)' : undefined 
+                      }}
                     />
                     <span style={{ position: 'absolute', right: '14px', top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: '#3b82f6', fontSize: '12px' }}>▼</span>
                   </div>
@@ -492,7 +512,7 @@ export default function RiceMixCalculator() {
               )}
 
               <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '24px' }}>
-                <button onClick={handleExecuteInventorySync} disabled={isProcessing} className="sync-submit-btn">
+                <button onClick={handleExecuteInventorySync} disabled={isProcessing} className="saas-btn saas-btn-primary" style={{ padding: '14px 24px', fontSize: '15px' }}>
                   {isProcessing ? 'Processing...' : `✅ Sync and Inject ${finalYield.toLocaleString('en-US', { maximumFractionDigits: 2 })} ${outputUnit}`}
                 </button>
               </div>
@@ -503,136 +523,82 @@ export default function RiceMixCalculator() {
       )}
 
       {/* HISTORY LOG */}
-      <div className="history-section">
+      <div style={{ marginTop: '40px' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
           <h3 style={{ color: '#1e293b', margin: 0, fontSize: '16px' }}>Calculation History</h3>
           {history.length > 0 && (
-             <button onClick={clearHistory} style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', fontSize: '13px', fontWeight: 'bold' }}>Clear History</button>
+             <button onClick={clearHistory} className="saas-btn saas-btn-danger" style={{ padding: '6px 12px', fontSize: '12px' }}>Clear History</button>
           )}
         </div>
         
-        <div style={{ background: '#fff', borderRadius: '12px', border: '1px solid #e2e8f0', overflowX: 'auto', boxShadow: '0 2px 4px rgba(0,0,0,0.02)' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', minWidth: '600px' }}>
-            <thead>
-              <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0' }}>
-                <th style={{ padding: '14px 16px', color: '#475569', fontSize: '12px', textTransform: 'uppercase', fontWeight: 'bold' }}>Time</th>
-                <th style={{ padding: '14px 16px', color: '#475569', fontSize: '12px', textTransform: 'uppercase', fontWeight: 'bold' }}>Recipe Formula</th>
-                <th style={{ padding: '14px 16px', color: '#475569', fontSize: '12px', textTransform: 'uppercase', fontWeight: 'bold' }}>Final Yield</th>
-                <th style={{ padding: '14px 16px', color: '#475569', fontSize: '12px', textTransform: 'uppercase', fontWeight: 'bold' }}>Mixed COGS</th>
-              </tr>
-            </thead>
-            <tbody>
-              {history.length === 0 ? (
-                <tr><td colSpan={4} style={{ padding: '30px', textAlign: 'center', color: '#94a3b8' }}>No calculations logged yet.</td></tr>
-              ) : (
-                history.map(h => (
-                  <tr key={h.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                    <td style={{ padding: '14px 16px', color: '#64748b', fontSize: '13px' }}>{h.time}</td>
-                    <td style={{ padding: '14px 16px', color: '#334155', fontSize: '14px' }}>
-                      ({h.rice1Ratio} × <span style={{ fontWeight: 'bold', color: '#1e293b' }}>{h.rice1Name}</span>) 
-                      + ({h.rice2Ratio} × <span style={{ fontWeight: 'bold', color: '#1e293b' }}>{h.rice2Name}</span>)
-                      {h.rice3Name && h.rice3Ratio ? (
-                        <> + ({h.rice3Ratio} × <span style={{ fontWeight: 'bold', color: '#1e293b' }}>{h.rice3Name}</span>)</>
-                      ) : null}
+        <div className="saas-table-wrapper">
+          <div className="saas-table-responsive">
+            <table className="saas-table">
+              <thead>
+                <tr>
+                  <th className="saas-th">Time</th>
+                  <th className="saas-th">Recipe Formula</th>
+                  <th className="saas-th">Final Yield</th>
+                  <th className="saas-th">Mixed COGS</th>
+                </tr>
+              </thead>
+              <tbody>
+                {history.length === 0 ? (
+                  <tr>
+                    <td colSpan={4} style={{ padding: 0 }}>
+                      <EmptyState 
+                        icon="🕒" 
+                        title="No history yet" 
+                        message="Calculations and inventory syncs will appear here." 
+                      />
                     </td>
-                    <td style={{ padding: '14px 16px', color: '#10b981', fontWeight: 'bold', fontSize: '13px' }}>{h.yieldStr || '-'}</td>
-                    <td style={{ padding: '14px 16px', color: '#b58a3d', fontWeight: 'bold', fontSize: '14px' }}>{formatRiel(h.mixedCogs)}</td>
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
+                ) : (
+                  history.map(h => (
+                    <tr key={h.id} className="saas-tr">
+                      <td className="saas-td" style={{ color: '#64748b', fontSize: '13px' }}>{h.time}</td>
+                      <td className="saas-td" style={{ color: '#334155', fontSize: '14px' }}>
+                        ({h.rice1Ratio} × <span style={{ fontWeight: 'bold', color: '#1e293b' }}>{h.rice1Name}</span>) 
+                        + ({h.rice2Ratio} × <span style={{ fontWeight: 'bold', color: '#1e293b' }}>{h.rice2Name}</span>)
+                        {h.rice3Name && h.rice3Ratio ? (
+                          <> + ({h.rice3Ratio} × <span style={{ fontWeight: 'bold', color: '#1e293b' }}>{h.rice3Name}</span>)</>
+                        ) : null}
+                      </td>
+                      <td className="saas-td" style={{ color: '#10b981', fontWeight: 'bold', fontSize: '13px' }}>{h.yieldStr || '-'}</td>
+                      <td className="saas-td" style={{ color: '#b58a3d', fontWeight: 'bold', fontSize: '14px' }}>{formatRiel(h.mixedCogs)}</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
       </div>
 
-      {/* --- GLOBAL CSS --- */}
+      {/* --- PAGE-SPECIFIC CSS --- */}
       <style jsx global>{`
-        /* DE-INLINED CORE STYLES */
         .dropdown-menu-container {
           position: absolute; top: calc(100% + 4px); left: 0; right: 0; background-color: #fff;
-          border: 1px solid #cbd5e1; border-radius: 8px; box-shadow: 0 10px 25px rgba(0,0,0,0.15);
+          border: 1px solid #cbd5e1; border-radius: 12px; box-shadow: 0 10px 25px rgba(0,0,0,0.15);
           z-index: 101; overflow: hidden; display: flex; flex-direction: column;
-        }
-        .dropdown-tab-container {
-          display: flex; border-bottom: 1px solid #e2e8f0; background: #f8fafc;
-        }
-        .dropdown-tab-btn {
-          flex: 1; padding: 10px; font-weight: bold; border: none; background: transparent; 
-          cursor: pointer; font-size: 13px; transition: all 0.2s;
-        }
-        .dropdown-tab-btn.active {
-          background: #fff; color: #b58a3d; border-bottom: 2px solid #b58a3d;
-        }
-        .dropdown-tab-btn.inactive {
-          color: #64748b; border-bottom: none;
         }
         .dropdown-results-container {
           max-height: 220px; overflow-y: auto; padding: 8px; display: flex; flex-direction: column; gap: 4px;
         }
         .dropdown-result-item {
-          padding: 12px; border-bottom: 1px solid #f1f5f9; cursor: pointer; border-radius: 6px; transition: background 0.2s;
+          padding: 12px; border-bottom: 1px solid #f1f5f9; cursor: pointer; border-radius: 8px; transition: background 0.2s;
         }
         .dropdown-result-item:hover {
           background-color: #f8fafc;
-        }
-        
-        .rice-card-trigger {
-          width: 100%; padding: 12px 14px; border-radius: 8px; cursor: text; background-color: #fff; 
-          font-size: 15px; box-sizing: border-box; outline: none; color: #1e293b;
-        }
-        .rice-card-trigger.active { border: 2px solid #b58a3d; }
-        .rice-card-trigger.inactive { border: 1px solid #cbd5e1; }
-        .rice-card-trigger.active-target { border: 2px solid #3b82f6; }
-        .rice-card-trigger.inactive-target { border: 1px solid #3b82f6; }
-        
-        .sync-form-container {
-          background: #f8fafc; padding: 20px; border-radius: 12px; border: 1px solid #e2e8f0;
-        }
-        .sync-input-label {
-          display: block; font-size: 12px; font-weight: bold; color: #475569; margin-bottom: 6px; text-transform: uppercase;
-        }
-        .sync-input-field {
-          width: 100%; padding: 12px; border-radius: 8px; border: 1px solid #cbd5e1; box-sizing: border-box; 
-          font-size: 16px; color: #0f172a; outline: none; background-color: #fff;
-        }
-        .sync-submit-btn {
-          padding: 14px 24px; background: #10b981; color: #fff; border: none; border-radius: 8px; 
-          font-weight: bold; font-size: 15px; box-shadow: 0 4px 6px rgba(16, 185, 129, 0.2); transition: filter 0.2s;
-        }
-        .sync-submit-btn:disabled {
-          cursor: not-allowed; opacity: 0.7;
-        }
-        .sync-submit-btn:not(:disabled):hover {
-          cursor: pointer; filter: brightness(1.05);
-        }
-
-        /* ORIGINAL STYLES PRESERVED */
-        input[type="text"].no-spinners::-webkit-inner-spin-button,
-        input[type="text"].no-spinners::-webkit-outer-spin-button {
-          -webkit-appearance: none;
-          margin: 0;
-        }
-        
-        .main-wrapper {
-          padding: max(20px, env(safe-area-inset-top, 20px)) 24px 24px 24px;
-          background: #f8fafc; min-height: 100vh; font-family: Arial, sans-serif; color: #333; box-sizing: border-box; width: 100%;
         }
 
         .header-container {
           display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; margin-top: 0; margin-left: 60px; gap: 12px; min-height: 42px; width: calc(100% - 60px); max-width: 1600px;
         }
-        
         .header-left {
           display: flex; align-items: center; gap: 12px;
         }
 
-        .page-title {
-          font-size: 24px !important; font-weight: bold; color: #4a3b1b !important; margin: 0 !important; letter-spacing: -0.5px; line-height: normal !important; display: flex; align-items: center; min-width: 0; white-space: nowrap !important;
-        }
-
-        .action-btn {
-          padding: 10px 16px; border-radius: 8px; font-weight: bold; font-size: 13px; cursor: pointer; transition: background 0.2s;
-        }
         .fade-in {
           animation: fadeIn 0.3s ease-in-out;
         }
@@ -643,33 +609,26 @@ export default function RiceMixCalculator() {
 
         .calculator-grid { display: flex; align-items: flex-start; gap: 20px; flex-wrap: wrap; }
         .math-symbol { font-size: 32px; font-weight: bold; color: #cbd5e1; margin-top: 40px; }
-        .calc-card { flex: 1; min-width: 250px; background: #fff; padding: 24px; border-radius: 12px; border: 1px solid #e2e8f0; box-shadow: 0 4px 6px rgba(0,0,0,0.02); }
-        .card-header { margin: 0 0 16px 0; font-size: 16px; color: #475569; text-transform: uppercase; font-weight: bold; }
-        .input-group label { display: block; font-size: 12px; font-weight: bold; color: #64748b; margin-bottom: 6px; text-transform: uppercase; }
         
         .price-display { margin-top: 16px; padding: 16px; background: #fefcf3; border: 1px solid #eadeca; border-radius: 8px; }
         .price-display .label { display: block; font-size: 11px; color: #8a7650; text-transform: uppercase; font-weight: bold; margin-bottom: 4px; }
         .price-display .value { font-size: 18px; color: #b58a3d; font-weight: bold; }
 
-        .result-panel { background: #fff; padding: 24px; border-radius: 12px; border: 2px solid #bbf7d0; margin-bottom: 30px; box-shadow: 0 4px 6px rgba(0,0,0,0.02); }
         .result-stats { display: flex; gap: 20px; flex-wrap: wrap; }
         .stat-box { flex: 1; min-width: 200px; padding: 16px 24px; background: #f8fafc; border-radius: 8px; border: 1px solid #e2e8f0; }
         .stat-box.highlight { background: #fefcf3; border-color: #fde047; }
-        .stat-box .label { display: block; font-size: 12px; color: #64748b; margin-bottom: 6px; text-transform: uppercase; font-weight: bold; }
-        .stat-box .value { display: block; font-size: 24px; color: #1e293b; font-weight: bold; }
-        .text-gold { color: #b58a3d !important; }
-        .history-section { margin-top: 40px; }
 
         .hide-scrollbar::-webkit-scrollbar { display: none; }
         .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
 
+        input[type="text"].no-spinners::-webkit-inner-spin-button,
+        input[type="text"].no-spinners::-webkit-outer-spin-button {
+          -webkit-appearance: none;
+          margin: 0;
+        }
+
         @media (max-width: 1023px) {
-          .main-wrapper {
-            /* Pulls the page up */
-            padding: max(20px, env(safe-area-inset-top, 20px)) 16px 24px 16px !important;
-          }
           .header-container {
-            /* Pushes title to the right of the hamburger icon */
             margin-left: 54px !important;
             margin-bottom: 24px !important;
             display: flex !important;
@@ -685,12 +644,6 @@ export default function RiceMixCalculator() {
             flex-direction: row !important;
             align-items: center !important;
             gap: 12px !important;
-          }
-          .page-title {
-            font-size: 22px !important;
-            line-height: normal !important; 
-            white-space: nowrap !important;
-            margin: 0 !important;
           }
           .calculator-grid {
             flex-direction: column;

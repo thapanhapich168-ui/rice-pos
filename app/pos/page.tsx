@@ -7,6 +7,8 @@ import { formatRiel, formatUSD, EXCHANGE_RATE } from '@/utils/formatters'
 import { CurrencyInput } from '@/components/Inputs'
 import { Product, InventoryBatch, Customer, PaymentRow } from '@/types'
 import { useToast } from '@/components/ToastProvider'
+import Modal from '@/components/Modal'
+import EmptyState from '@/components/EmptyState'
 
 // --- LOCAL TYPES ---
 interface CartItem extends Product {
@@ -123,7 +125,7 @@ export default function POSPage() {
   
   const [isMobileCartOpen, setIsMobileCartOpen] = useState(false)
   const [isProcessing, setIsProcessing] = useState(false)
-  const [, setIsDeviceMobile] = useState(false)
+  const [isDeviceMobile, setIsDeviceMobile] = useState(false)
 
   const [selectedCustomerId, setSelectedCustomerId] = useState('')
   const [customerSearchTerm, setCustomerSearchTerm] = useState('')
@@ -421,7 +423,6 @@ export default function POSPage() {
   const formatRielSymbol = (amountInRiel: number) => `${new Intl.NumberFormat('en-US').format(Math.round(amountInRiel))} ៛`;
   const formatRielFromNative = (rielAmount: number) => `${new Intl.NumberFormat('en-US').format(Math.round(rielAmount))} ៛`;
 
-  // 🟢 Move Retail Rice Cards between Active and Non-Active Tabs
   const toggleProductActiveStatus = async (productId: number, targetStatus: 'active' | 'inactive') => {
     let newHidden: number[];
     if (targetStatus === 'inactive') {
@@ -486,7 +487,6 @@ export default function POSPage() {
     setSelectedMobileProduct(null);
   }
 
-  // 🔥 CORE FIX: Reverted to 2-Row UI (ដូរ and បានប្រើ) but keeps the Retail Restock Magic!
   async function handleConfirmExchange() {
     if (!exchangeModal.product) return;
     const prod = exchangeModal.product;
@@ -502,7 +502,6 @@ export default function POSPage() {
 
     try {
       if (consumedKg > 0 && !linkedRetail) {
-         // Auto-Create Missing Retail 1kg Rice for this Wholesale Bag!
          const newRetailName = prod.name; 
          const perKgPrice = Math.round(Number(prod.price || 0) / 50);
          const perKgCogs = Math.round(Number(prod.cost_price || 0) / 50);
@@ -523,7 +522,6 @@ export default function POSPage() {
          linkedRetail = newProd as Product;
          setProducts(prev => [...prev, newProd as Product]);
 
-         // Auto-drop the new 1kg retail product into Non-Active tab so it doesn't clutter main screen!
          const newHidden = Array.from(new Set([...hiddenRetailIds, newProd.id]));
          setHiddenRetailIds(newHidden);
          await supabase.from('app_settings').upsert(
@@ -535,18 +533,15 @@ export default function POSPage() {
       const newItems: any[] = [];
 
       if (consumedKg === 0) {
-        // 100% Bag returned (0kg consumed) - Returns 1 Wholesale Bag
         newItems.push({
           ...prod, product_id: prod.id, id: Math.random(), custom_name: `ដូរ ${prod.name}`, custom_price_riel: prod.price,
           cost_price: Number(prod.cost_price || 0), quantity: 1, isSpecial: true, isReturnFullBag: true, bypass_stock: false, sortOrder: 1
         });
       } else {
-        // Partial Return 
         const returnedKg = 50 - consumedKg;
         const perKgPrice = Math.round(Number(prod.price || 0) / 50);
         const perKgCogs = Math.round(Number(prod.cost_price || 0) / 50);
 
-        // Row 1: Full Bag Refund (UI Shows full bag returned. Backend adds remainder to retail bin)
         newItems.push({
           ...prod, 
           id: Math.random(), 
@@ -556,13 +551,12 @@ export default function POSPage() {
           cost_price: Number(prod.cost_price || 0), 
           quantity: 1, 
           isSpecial: true, 
-          bypass_stock: true, // Skips wholesale stock math so it doesn't give a full bag back!
-          add_loose_kg: returnedKg, // Tells checkout to add the leftovers (+40kg) to Retail stock!
+          bypass_stock: true, 
+          add_loose_kg: returnedKg, 
           loose_retail_id: linkedRetail?.id, 
           sortOrder: 1
         });
 
-        // Row 2: Charge for consumed Kg
         newItems.push({
           ...(linkedRetail || prod), 
           id: Math.random(), 
@@ -597,8 +591,6 @@ export default function POSPage() {
         const newPerKgPrice = Math.round(Number(value) / 50) || 0;
 
         updatedCart = updatedCart.map(item => {
-          // 🔥 FIX: Removed product_id matching because the consumed item uses the Retail ID, 
-          // while the returned bag uses the Wholesale ID. Matching perfectly by name instead!
           if (item.custom_name === consumedName) {
             return { ...item, custom_price_riel: newPerKgPrice };
           }
@@ -639,7 +631,8 @@ export default function POSPage() {
     await supabase.from('app_settings').upsert({ setting_key: 'pos_product_order', setting_value: currentOrder }, { onConflict: 'setting_key' });
   }
 
-  async function handleCreateCustomer() {
+  async function handleCreateCustomer(e: React.FormEvent) {
+    e.preventDefault();
     const finalName = newCustomerForm.name.trim() || 'Walk-in';
     const { data, error } = await supabase.from('customers').insert([{
       name: finalName, phone: newCustomerForm.phone.trim(), location: newCustomerForm.location.trim(),
@@ -688,7 +681,6 @@ export default function POSPage() {
     window.history.replaceState({}, document.title, window.location.pathname);
   }
 
-  // 🔥 CHECKOUT INTERCEPTOR: Warns if Retail Stock < 0 before finishing checkout
   async function initiateCheckout() {
     if (!isCartValid) {
       showToast('error', 'Invalid Cart', 'Please ensure all items have a valid quantity and price.');
@@ -721,7 +713,6 @@ export default function POSPage() {
 
     const itemsNeedingBags: (Product & { bags_needed: number })[] = [];
     for (const [prodId, finalStock] of Object.entries(simulatedStockUpdates)) {
-        // 🔥 FIX: Explicitly changed to <= -1 so it only triggers Auto-Restock on negatives
         if (finalStock <= -1) {
             const p = products.find(x => x.id === Number(prodId));
             if (p && p.weight < 50 && p.linked_wholesale_id) {
@@ -844,16 +835,17 @@ export default function POSPage() {
            let retailCogsPerKg = Number(item.cost_price || 0);
 
            if (dbProduct && dbProduct.linked_wholesale_id) {
-              const wholesaleProd = latestProducts.find(wp => wp.id === dbProduct.linked_wholesale_id);
-              if (wholesaleProd) {
-                 const wBatches = activeBatches[wholesaleProd.id] || [];
-                 const currentBatch = wBatches.length > 0 ? [...wBatches].sort((a,b) => a.id - b.id)[0] : null;
-                 const wholesaleBagCogs = currentBatch ? Number(currentBatch.cost_price) : Number(wholesaleProd.cost_price || 0);
-                 const wholesaleWeight = Number(wholesaleProd.weight) || 50;
-                 
-                 retailCogsPerKg = wholesaleBagCogs / wholesaleWeight;
-              }
-           }
+                const wholesaleProd = latestProducts.find(wp => wp.id === dbProduct.linked_wholesale_id);
+                if (wholesaleProd) {
+                   const wBatches = activeBatches[wholesaleProd.id] || [];
+                   const currentBatch = wBatches.length > 0 ? [...wBatches].sort((a,b) => a.id - b.id)[0] : null;
+                   const wholesaleBagCogs = currentBatch ? Number(currentBatch.cost_price) : Number(wholesaleProd.cost_price || 0);
+                   
+                   // Declare the weight before dividing!
+                   const wholesaleWeight = Number(wholesaleProd.weight) || 50;
+                   retailCogsPerKg = wholesaleBagCogs / wholesaleWeight;
+                }
+             }
 
            retailRows.push({
              transaction_id: activeTxId,
@@ -887,9 +879,7 @@ export default function POSPage() {
           const isBypass = item.bypass_stock || isCharge;
           const finalQty = isReturn ? -Math.abs(Number(item.quantity)) : Number(item.quantity);
 
-          // Full Wholesale Bag Refund (+1 active batch)
           if (item.isReturnFullBag && !editingInvoiceId) {
-             // Fetch all batches ordered by ID ascending (FIFO order)
              const { data: dbBatches } = await supabase.from('inventory_batches')
                 .select('*')
                 .eq('product_id', item.product_id)
@@ -897,10 +887,7 @@ export default function POSPage() {
 
              let targetBatch = null;
              if (dbBatches && dbBatches.length > 0) {
-                 // 1. Try to find the earliest batch that currently has stock (Active FIFO)
                  targetBatch = dbBatches.find(b => b.remaining_qty > 0);
-                 
-                 // 2. If all batches are empty (stock = 0), add to the most recent existing row
                  if (!targetBatch) {
                      targetBatch = dbBatches[dbBatches.length - 1];
                  }
@@ -909,7 +896,6 @@ export default function POSPage() {
              if (targetBatch) {
                  fifoUpdates[targetBatch.id] = (fifoUpdates[targetBatch.id] !== undefined ? fifoUpdates[targetBatch.id] : targetBatch.remaining_qty) + 1;
              } else {
-                 // 3. Only create a new row if absolutely no batches exist for this product
                  const returnedProd = latestProducts.find(p => p.id === item.product_id);
                  await supabase.from('inventory_batches').insert([{
                      product_id: item.product_id,
@@ -919,7 +905,6 @@ export default function POSPage() {
              }
           }
 
-          // Partial Return - Add to Loose Retail Bin (+40kg etc)
           if (item.add_loose_kg && item.loose_retail_id && !editingInvoiceId) {
              stockUpdates[item.loose_retail_id] = (stockUpdates[item.loose_retail_id] ?? latestProducts.find(p => p.id === item.loose_retail_id)?.stock ?? 0) + item.add_loose_kg;
           }
@@ -956,7 +941,6 @@ export default function POSPage() {
             }
           }
 
-          // Normal Sales Deduction
           if (!editingInvoiceId && !isBypass) {
             stockUpdates[item.product_id] = (stockUpdates[item.product_id] ?? latestProducts.find(p => p.id === item.product_id)?.stock ?? 0) - finalQty;
           }
@@ -1123,7 +1107,6 @@ export default function POSPage() {
     return idxA - idxB;
   });
 
-  // 🟢 Filter items for Active and Non-Active Retail tabs
   const filteredProducts = orderedProducts.filter(p => {
     if (searchQuery && !p.name?.toLowerCase().includes(searchQuery.toLowerCase())) return false;
     const weightVal = parseFloat(String(p.weight) || '0');
@@ -1196,8 +1179,8 @@ export default function POSPage() {
   const renderPaymentSection = (isMobileCart: boolean = false) => {
     if (!showPaymentSelector) return null;
     return (
-      <div style={{ marginBottom: '8px', background: '#f8fafc', padding: '10px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+      <div style={{ marginBottom: '8px', background: '#f8fafc', padding: '10px', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1 }}>
             <span style={{ fontSize: '11px', color: '#64748b', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Receive</span>
             <button onClick={() => setPaymentRows([...paymentRows, { id: Date.now(), method: 'Cash ៛', amount: '', isAuto: false }])} style={{ background: '#e0f2fe', color: '#0284c7', border: 'none', borderRadius: '4px', fontSize: '10px', fontWeight: 'bold', padding: '4px 8px', cursor: 'pointer' }}>+ Split</button>
@@ -1213,8 +1196,8 @@ export default function POSPage() {
                 newRows[index].method = e.target.value;
                 setPaymentRows(newRows);
               }}
-              style={{ width: '45%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: isMobileCart ? '16px' : '13px', fontWeight: 'normal', outline: 'none', backgroundColor: '#fff', cursor: 'pointer', color: '#0f172a' }}
-              className="mobile-select-menu"
+              className="saas-input"
+              style={{ width: '45%', cursor: 'pointer', padding: '8px' }}
             >
               <option value="Cash ៛">💵 Cash ៛</option>
               <option value="Cash $">💵 Cash $</option>
@@ -1242,13 +1225,13 @@ export default function POSPage() {
                   newRows[index].isAuto = false;
                   setPaymentRows(newRows);
                 }}
-                style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', outline: 'none', color: '#0f172a', fontWeight: 'normal', fontSize: isMobileCart ? '16px' : '14px', textAlign: 'right' }}
-                className="mobile-input-field"
+                className="saas-input"
+                style={{ width: '100%', textAlign: 'right', padding: '8px' }}
               />
             </div>
             
             {paymentRows.length > 1 && (
-              <button onClick={() => setPaymentRows(paymentRows.filter(r => r.id !== row.id))} style={{ background: 'none', border: 'none', color: '#ef4444', fontSize: '16px', cursor: 'pointer', padding: '0 4px' }}>✕</button>
+              <button onClick={() => setPaymentRows(paymentRows.filter(r => r.id !== row.id))} style={{ background: 'none', border: 'none', color: '#ef4444', fontSize: '16px', cursor: 'pointer', padding: '0 4px', fontWeight: 'bold' }}>✕</button>
             )}
           </div>
         ))}
@@ -1257,19 +1240,20 @@ export default function POSPage() {
   }
 
   return (
-    <div className="pos-layout-wrapper" style={{ display: 'flex', width: '100%', height: '100dvh', overflow: 'hidden', backgroundColor: '#ffffff', boxSizing: 'border-box' }}>
+    <div style={{ display: 'flex', width: '100%', height: '100dvh', overflow: 'hidden', backgroundColor: '#ffffff', boxSizing: 'border-box' }}>
       
       {/* SELECTION ENGINE VIEW GRID PANEL */}
-      <div className="pos-main-engine hide-scrollbar" style={{ flex: 1, height: '100%', overflowY: 'auto', backgroundColor: '#f8fafc', minWidth: 0, WebkitOverflowScrolling: 'touch' }}>
+      <div className="hide-scrollbar" style={{ flex: 1, height: '100%', overflowY: 'auto', backgroundColor: '#f8fafc', minWidth: 0, WebkitOverflowScrolling: 'touch' }}>
         
         <div className="main-wrapper">
           <div className="header-container">
             <div className="header-left">
-              <h1 className="page-title">{editingInvoiceId ? `✏️ Editing: ${editingInvoiceId}` : `🛒 ${currentT.title}`}</h1>
+              <h1 className="saas-page-title">{editingInvoiceId ? `✏️ Editing: ${editingInvoiceId}` : `🛒 ${currentT.title}`}</h1>
               {editingInvoiceId && (
                 <button 
                   onClick={cancelEditMode} 
-                  style={{ marginLeft: '16px', padding: '6px 12px', backgroundColor: '#fef2f2', color: '#dc2626', border: '1px solid #fecaca', borderRadius: '6px', fontSize: '13px', cursor: 'pointer', fontWeight: 'bold' }}
+                  className="saas-btn saas-btn-danger"
+                  style={{ marginLeft: '16px', padding: '6px 12px', fontSize: '13px' }}
                 >
                   ❌ Cancel
                 </button>
@@ -1277,15 +1261,17 @@ export default function POSPage() {
             </div>
           </div>
 
-          <div className="pos-tools-area" style={{ marginBottom: '24px' }}>
-            <div style={{ display: 'flex', gap: '12px', marginBottom: '16px', flexWrap: 'wrap', width: '100%' }}>
+          <div style={{ marginBottom: '24px' }}>
+            <div className="saas-tab-container hide-scrollbar" style={{ display: 'flex', flexWrap: 'nowrap', overflowX: 'auto', marginBottom: '16px', width: '100%' }}>
               <button onClick={() => { 
                 setActiveTab('retail'); 
                 setSelectedCustomerId(''); 
                 setCustomerSearchTerm(''); 
                 loadProductsAndSettings();
                 loadBatches();
-              }} style={{ flex: 1, padding: '12px', borderRadius: '8px', border: 'none', fontWeight: 'bold', cursor: 'pointer', backgroundColor: activeTab === 'retail' ? '#b58a3d' : '#fff', color: activeTab === 'retail' ? '#ffffff' : '#6b582f', borderBottom: activeTab === 'retail' ? 'none' : '1px solid #e2e8f0', minWidth: '120px' }}>{currentT.retail}</button>
+              }} className={`saas-tab ${activeTab === 'retail' ? 'active' : ''}`} style={{ flex: 1, minWidth: '120px', textAlign: 'center' }}>
+                {currentT.retail}
+              </button>
               
               <button onClick={() => { 
                 setActiveTab('wholesale');
@@ -1295,12 +1281,14 @@ export default function POSPage() {
                 }
                 loadProductsAndSettings();
                 loadBatches();
-              }} style={{ flex: 1, padding: '12px', borderRadius: '8px', border: 'none', fontWeight: 'bold', cursor: 'pointer', backgroundColor: activeTab === 'wholesale' ? '#b58a3d' : '#fff', color: activeTab === 'wholesale' ? '#ffffff' : '#6b582f', borderBottom: activeTab === 'wholesale' ? 'none' : '1px solid #e2e8f0', minWidth: '120px' }}>{currentT.wholesale}</button>
+              }} className={`saas-tab ${activeTab === 'wholesale' ? 'active' : ''}`} style={{ flex: 1, minWidth: '120px', textAlign: 'center' }}>
+                {currentT.wholesale}
+              </button>
             </div>
 
             {/* 🟢 Active vs Non-Active Drag-and-Drop Sub-tabs for Retail View */}
             {activeTab === 'retail' && (
-              <div style={{ display: 'flex', gap: '8px', marginBottom: '16px', alignItems: 'center', flexWrap: 'wrap' }}>
+              <div className="saas-tab-container hide-scrollbar" style={{ flexWrap: 'nowrap', overflowX: 'auto', marginBottom: '16px', background: '#f1f5f9', border: 'none', boxShadow: 'none' }}>
                 <button 
                   onClick={() => setRetailSubTab('active')} 
                   onDragOver={(e) => e.preventDefault()} 
@@ -1309,13 +1297,8 @@ export default function POSPage() {
                     const pid = Number(e.dataTransfer.getData('product_id'));
                     if (pid) toggleProductActiveStatus(pid, 'active');
                   }}
-                  style={{ 
-                    padding: '6px 16px', borderRadius: '20px', 
-                    border: retailSubTab === 'active' ? 'none' : '1px solid #cbd5e1', 
-                    backgroundColor: retailSubTab === 'active' ? '#10b981' : '#ffffff', 
-                    color: retailSubTab === 'active' ? '#fff' : '#475569', 
-                    fontWeight: 'bold', cursor: 'pointer', fontSize: '13px' 
-                  }}
+                  className={`saas-tab ${retailSubTab === 'active' ? 'active' : ''}`}
+                  style={{ minWidth: 'max-content' }}
                 >
                   Active ({products.filter(p => parseFloat(String(p.weight)) < 50 && !hiddenRetailIds.includes(p.id)).length})
                 </button>
@@ -1328,13 +1311,8 @@ export default function POSPage() {
                     const pid = Number(e.dataTransfer.getData('product_id'));
                     if (pid) toggleProductActiveStatus(pid, 'inactive');
                   }}
-                  style={{ 
-                    padding: '6px 16px', borderRadius: '20px', 
-                    border: retailSubTab === 'inactive' ? 'none' : '1px solid #cbd5e1', 
-                    backgroundColor: retailSubTab === 'inactive' ? '#ef4444' : '#ffffff', 
-                    color: retailSubTab === 'inactive' ? '#fff' : '#475569', 
-                    fontWeight: 'bold', cursor: 'pointer', fontSize: '13px' 
-                  }}
+                  className={`saas-tab ${retailSubTab === 'inactive' ? 'active' : ''}`}
+                  style={retailSubTab === 'inactive' ? { background: '#ef4444', color: '#fff', minWidth: 'max-content' } : { minWidth: 'max-content' }}
                 >
                   Non-Active ({products.filter(p => parseFloat(String(p.weight)) < 50 && hiddenRetailIds.includes(p.id)).length})
                 </button>
@@ -1351,8 +1329,8 @@ export default function POSPage() {
                   placeholder={currentT.searchPlaceholder.replace('🔍 ', '').replace('🔍', '').trim()} 
                   value={searchQuery} 
                   onChange={(e) => setSearchQuery(e.target.value)} 
-                  style={{ width: '100%', padding: '10px 14px 10px 38px', borderRadius: '6px', border: '1px solid #dcd7cc', outline: 'none', fontSize: '16px', color: '#334155', backgroundColor: '#ffffff', boxSizing: 'border-box' }} 
-                  className="mobile-input-field" 
+                  className="saas-input"
+                  style={{ paddingLeft: '38px', width: '100%' }} 
                 />
               </div>
               
@@ -1362,12 +1340,10 @@ export default function POSPage() {
                   {!selectedCustomer ? (
                     <div style={{ position: 'relative' }}>
                       
-                      {/* Invisible Overlay to catch outside clicks and close dropdown */}
                       {isCustomerModalOpen && (
                         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, zIndex: 99 }} onMouseDown={() => setIsCustomerModalOpen(false)}></div>
                       )}
                       
-                      {/* Customer Search Input (Typable Trigger) */}
                       <span style={{ position: 'absolute', left: '14px', top: '50%', transform: 'translateY(-50%)', color: '#94a3b8', fontSize: '16px', zIndex: isCustomerModalOpen ? 101 : 2 }}>🔍</span>
                       <input 
                         type="text"
@@ -1375,8 +1351,8 @@ export default function POSPage() {
                         value={customerSearchTerm}
                         onChange={e => setCustomerSearchTerm(e.target.value)}
                         onFocus={() => setIsCustomerModalOpen(true)}
-                        style={{ width: '100%', padding: '10px 14px 10px 38px', borderRadius: '6px', border: isCustomerModalOpen ? '1px solid #b58a3d' : '1px solid #dcd7cc', outline: 'none', fontSize: '16px', color: '#334155', backgroundColor: '#ffffff', boxSizing: 'border-box', position: 'relative', zIndex: isCustomerModalOpen ? 100 : 1 }}
-                        className="mobile-input-field"
+                        className="saas-input"
+                        style={{ paddingLeft: '38px', width: '100%', position: 'relative', zIndex: isCustomerModalOpen ? 100 : 1, borderColor: isCustomerModalOpen ? '#b58a3d' : undefined }}
                       />
 
                       {/* Inline Dropdown Menu */}
@@ -1384,7 +1360,7 @@ export default function POSPage() {
                         <div style={{ position: 'absolute', top: 'calc(100% + 6px)', left: 0, right: 0, backgroundColor: '#ffffff', borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: '0 10px 30px rgba(0,0,0,0.15)', zIndex: 101, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
                           <div className="hide-scrollbar" style={{ maxHeight: '350px', overflowY: 'auto', padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px', backgroundColor: '#fcfcfc' }}>
                             
-                            <button onMouseDown={(e) => { e.preventDefault(); setIsCreateCustomerModalOpen(true); setIsCustomerModalOpen(false); }} style={{ width: '100%', padding: '12px', backgroundColor: '#ffffff', color: '#0f172a', border: '1px dashed #cbd5e1', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold', fontSize: '15px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', flexShrink: 0 }}>
+                            <button onMouseDown={(e) => { e.preventDefault(); setIsCreateCustomerModalOpen(true); setIsCustomerModalOpen(false); }} className="saas-btn" style={{ width: '100%', padding: '12px', backgroundColor: '#ffffff', color: '#0f172a', border: '1px dashed #cbd5e1', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold', fontSize: '15px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', flexShrink: 0 }}>
                               <span style={{ fontSize: '18px' }}>+</span> Add New Customer
                             </button>
                             
@@ -1395,7 +1371,8 @@ export default function POSPage() {
                                 <div 
                                   key={c.id} 
                                   onMouseDown={(e) => { e.preventDefault(); setSelectedCustomerId(c.id.toString()); setCustomerSearchTerm(''); setIsCustomerModalOpen(false); }} 
-                                  style={{ border: '1px solid #e2e8f0', borderRadius: '8px', padding: '16px', cursor: 'pointer', backgroundColor: '#fff', display: 'flex', flexDirection: 'column', gap: '4px', transition: 'background 0.2s' }}
+                                  className="saas-card"
+                                  style={{ padding: '16px', cursor: 'pointer', transition: 'background 0.2s', marginBottom: 0 }}
                                 >
                                   <div style={{ fontWeight: 'normal', fontSize: '14px', color: '#1e293b', marginBottom: '4px' }}>{c.name}</div>
                                   <div style={{ fontSize: '13px', color: '#64748b' }}>Location: <span style={{ color: '#0f172a' }}>{c.location || '-'}</span></div>
@@ -1424,24 +1401,13 @@ export default function POSPage() {
 
             {/* SCROLLABLE CATEGORY TABS */}
             {activeTab !== 'retail' && (
-              <div className="hide-scrollbar" style={{ display: 'flex', overflowX: 'auto', gap: '8px', paddingBottom: '8px', marginTop: '16px', width: '100%', WebkitOverflowScrolling: 'touch', scrollSnapType: 'x mandatory' }}>
+              <div className="saas-tab-container hide-scrollbar" style={{ display: 'flex', flexWrap: 'nowrap', overflowX: 'auto', marginTop: '16px', width: '100%', border: 'none', boxShadow: 'none', padding: 0, background: 'transparent' }}>
                 {RICE_CATEGORIES.map(cat => (
                   <button 
                     key={cat} 
                     onClick={() => setActiveCategory(cat)} 
-                    style={{ 
-                      scrollSnapAlign: 'start',
-                      padding: '6px 14px', 
-                      borderRadius: '20px', 
-                      border: activeCategory === cat ? 'none' : '1px solid #cbd5e1', 
-                      backgroundColor: activeCategory === cat ? '#b58a3d' : '#ffffff', 
-                      color: activeCategory === cat ? '#fff' : '#475569', 
-                      cursor: 'pointer', 
-                      fontSize: '13px', 
-                      whiteSpace: 'nowrap',
-                      fontWeight: activeCategory === cat ? 'bold' : 'normal',
-                      boxShadow: activeCategory === cat ? '0 2px 4px rgba(181, 138, 61, 0.3)' : 'none'
-                    }}
+                    className={`saas-tab ${activeCategory === cat ? 'active' : ''}`}
+                    style={activeCategory === cat ? { borderRadius: '20px', minWidth: 'max-content' } : { borderRadius: '20px', minWidth: 'max-content', border: '1px solid #cbd5e1', background: '#fff' }}
                   >
                     {cat === 'All' ? (lang === 'kh' ? 'ទាំងអស់' : 'All') : cat}
                   </button>
@@ -1450,9 +1416,13 @@ export default function POSPage() {
             )}
           </div>
 
-          <div className="pos-grid-area">
+          <div>
             {filteredProducts.length === 0 ? (
-              <div style={{ textAlign: 'center', padding: '40px', color: '#64748b' }}>{currentT.noProducts}</div>
+              <EmptyState 
+                icon="📦" 
+                title={currentT.noProducts} 
+                message="Try adjusting your search or filters." 
+              />
             ) : (
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: '16px' }}>
                 {filteredProducts.map((p) => (
@@ -1463,7 +1433,8 @@ export default function POSPage() {
                     onDragOver={handleProductDragOver} 
                     onDrop={(e) => handleProductDrop(e, p.id)} 
                     onClick={() => handleProductClick(p)} 
-                    style={{ border: '1px solid #e2e8f0', borderRadius: '10px', padding: '14px', cursor: 'pointer', backgroundColor: '#ffffff', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', minHeight: '100px', transition: 'transform 0.1s', boxShadow: '0 2px 4px rgba(0,0,0,0.02)', position: 'relative' }} 
+                    className="saas-card"
+                    style={{ padding: '14px', cursor: 'pointer', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', minHeight: '100px', transition: 'transform 0.1s', position: 'relative' }} 
                     onMouseDown={e => { e.currentTarget.style.transform = 'scale(0.97)'; }} 
                     onMouseUp={e => e.currentTarget.style.transform = 'scale(1)'}
                   >
@@ -1516,7 +1487,7 @@ export default function POSPage() {
           
           {activeTab === 'wholesale' && selectedCustomerId && (
             <div style={{ background: '#f8fafc', padding: '10px', borderRadius: '8px', border: '1px solid #e2e8f0', marginBottom: '16px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
-              <input type="text" placeholder="Invoice Name Override..." value={cartCustomerNameOverride} onChange={e => setCartCustomerNameOverride(e.target.value)} style={{ width: '100%', padding: '8px 10px', fontSize: '14px', fontWeight: 'normal', borderRadius: '4px', border: '1px solid #cbd5e1', outline: 'none', color: '#334155' }} className="mobile-input-field" />
+              <input type="text" placeholder="Invoice Name Override..." value={cartCustomerNameOverride} onChange={e => setCartCustomerNameOverride(e.target.value)} className="saas-input" />
             </div>
           )}
 
@@ -1529,10 +1500,10 @@ export default function POSPage() {
               const isSpecial = isReturn || isCharge;
 
               return (
-                <div key={item.id} style={{ backgroundColor: isReturn ? '#fef2f2' : isCharge ? '#fffbeb' : '#ffffff', borderRadius: '8px', padding: '10px', marginBottom: '10px', border: `1px solid ${isReturn ? '#fecaca' : isCharge ? '#fde68a' : '#e2e8f0'}`, position: 'relative', boxShadow: '0 2px 4px rgba(0,0,0,0.02)' }}>
-                  <button onClick={() => removeFromCart(item.id)} style={{ position: 'absolute', top: '6px', right: '6px', background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', fontSize: '14px', zIndex: 5 }}>✕</button>
+                <div key={item.id} style={{ backgroundColor: isReturn ? '#fef2f2' : isCharge ? '#fffbeb' : '#ffffff', borderRadius: '12px', padding: '12px', marginBottom: '10px', border: `1px solid ${isReturn ? '#fecaca' : isCharge ? '#fde68a' : '#e2e8f0'}`, position: 'relative', boxShadow: '0 2px 4px rgba(0,0,0,0.02)' }}>
+                  <button onClick={() => removeFromCart(item.id)} style={{ position: 'absolute', top: '10px', right: '10px', background: '#fee2e2', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: '12px', width: '24px', height: '24px', borderRadius: '50%', zIndex: 5, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>✕</button>
 
-                  <div style={{ display: 'flex', alignItems: 'center', marginBottom: '8px', paddingRight: '20px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', marginBottom: '10px', paddingRight: '30px' }}>
                     <input 
                       type="text" 
                       value={item.custom_name} 
@@ -1540,10 +1511,9 @@ export default function POSPage() {
                       placeholder="Item Name"
                       readOnly={isSpecial}
                       style={{ 
-                        fontSize: '14px', color: isReturn ? '#dc2626' : isCharge ? '#b45309' : '#334155', 
-                        flex: 1, border: 'none', background: 'transparent', outline: 'none', padding: '2px 0'
+                        fontSize: '14px', color: isReturn ? '#dc2626' : isCharge ? '#b45309' : '#334155', fontWeight: 'bold',
+                        flex: 1, border: 'none', background: 'transparent', outline: 'none', padding: 0
                       }} 
-                      className="mobile-input-field"
                     />
                     
                     {!isSpecial && activeTab === 'wholesale' && (
@@ -1561,14 +1531,14 @@ export default function POSPage() {
                     )}
                   </div>
                   
-                  <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-end' }}>
+                  <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-end' }}>
                     <div style={{ flex: 1 }}>
                       <span style={{ display: 'block', fontSize: '10px', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '4px' }}>{currentT.quantity}</span>
-                      <CurrencyInput value={item.quantity} onChange={(v: any) => updateCartItem(item.id, 'quantity', v)} onFocus={() => updateCartItem(item.id, 'quantity', '')} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', fontSize: '14px', fontWeight: 'normal', color: '#334155', backgroundColor: '#ffffff', outline: 'none', textAlign: 'center' }} className="mobile-input-field" />
+                      <CurrencyInput value={item.quantity} onChange={(v: any) => updateCartItem(item.id, 'quantity', v)} onFocus={() => updateCartItem(item.id, 'quantity', '')} className="saas-input" style={{ textAlign: 'center' }} />
                     </div>
                     <div style={{ flex: 1 }}>
                       <span style={{ display: 'block', fontSize: '10px', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '4px' }}>{currentT.unitPrice} (៛)</span>
-                      <CurrencyInput value={item.custom_price_riel} onChange={(v: any) => updateCartItem(item.id, 'custom_price_riel', v)} onFocus={() => updateCartItem(item.id, 'custom_price_riel', '')} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', fontSize: '14px', fontWeight: 'normal', color: '#334155', backgroundColor: '#ffffff', outline: 'none', textAlign: 'center' }} className="mobile-input-field" />
+                      <CurrencyInput value={item.custom_price_riel} onChange={(v: any) => updateCartItem(item.id, 'custom_price_riel', v)} onFocus={() => updateCartItem(item.id, 'custom_price_riel', '')} className="saas-input" style={{ textAlign: 'center' }} />
                     </div>
                   </div>
                 </div>
@@ -1580,9 +1550,9 @@ export default function POSPage() {
         <div style={{ position: 'sticky', bottom: 0, paddingTop: '12px', paddingRight: '20px', paddingBottom: '16px', paddingLeft: '20px', borderTop: '1px solid #e2e8f0', backgroundColor: '#f8fafc', flexShrink: 0, zIndex: 10, boxShadow: '0 -4px 10px rgba(0,0,0,0.02)' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '4px' }}>
             <span style={{ fontSize: '13px', color: '#334155' }}>{currentT.totalKhmer}</span>
-            <span style={{ fontSize: '18px', fontWeight: 'bold', color: totalRiel < 0 ? '#ef4444' : '#b58a3d' }}>{formatRielFromNative(totalRiel)}</span>
+            <span style={{ fontSize: '20px', fontWeight: 'bold', color: totalRiel < 0 ? '#ef4444' : '#b58a3d' }}>{formatRielFromNative(totalRiel)}</span>
           </div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '10px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '12px' }}>
             <span style={{ fontSize: '11px', color: '#64748b' }}>{currentT.totalUsd}</span>
             <span style={{ fontSize: '13px', color: '#475569' }}>{formatUSD(totalUSD)}</span>
           </div>
@@ -1592,18 +1562,8 @@ export default function POSPage() {
           <button 
             onClick={initiateCheckout} 
             disabled={!isCartValid || !hasValidPayment || isProcessing} 
-            style={{ 
-              width: '100%', 
-              padding: '14px', 
-              backgroundColor: (!isCartValid || !hasValidPayment || isProcessing) ? '#e2e8f0' : '#10b981', 
-              color: (!isCartValid || !hasValidPayment || isProcessing) ? '#64748b' : '#ffffff', 
-              border: 'none', 
-              borderRadius: '8px', 
-              fontWeight: 'bold', 
-              fontSize: '15px',
-              cursor: (!isCartValid || !hasValidPayment || isProcessing) ? 'not-allowed' : 'pointer',
-              boxShadow: '0 4px 6px rgba(16, 185, 129, 0.2)'
-            }}
+            className={`saas-btn ${(!isCartValid || !hasValidPayment || isProcessing) ? 'saas-btn-secondary' : 'saas-btn-primary'}`}
+            style={{ width: '100%', padding: '16px', fontSize: '16px' }}
           >
             {isProcessing ? 'Processing...' : currentT.checkout}
           </button>
@@ -1640,8 +1600,7 @@ export default function POSPage() {
                     placeholder="Invoice Name Override..." 
                     value={cartCustomerNameOverride} 
                     onChange={e => setCartCustomerNameOverride(e.target.value)} 
-                    style={{ width: '100%', padding: '10px', fontSize: '14px', borderRadius: '6px', border: '1px solid #cbd5e1', outline: 'none', color: '#334155' }} 
-                    className="mobile-input-field"
+                    className="saas-input"
                   />
                 </div>
               )}
@@ -1663,21 +1622,20 @@ export default function POSPage() {
                         placeholder="Item Name"
                         readOnly={isSpecial}
                         style={{ 
-                          fontSize: '14px', color: isReturn ? '#dc2626' : isCharge ? '#b45309' : '#334155', 
+                          fontSize: '14px', color: isReturn ? '#dc2626' : isCharge ? '#b45309' : '#334155', fontWeight: 'bold',
                           flex: 1, border: 'none', background: 'transparent', outline: 'none', padding: 0
                         }} 
-                        className="mobile-input-field"
                       />
                     </div>
 
                     <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-end' }}>
                       <div style={{ flex: 1 }}>
                         <span style={{ display: 'block', fontSize: '10px', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '4px' }}>{currentT.quantity}</span>
-                        <CurrencyInput value={item.quantity} onChange={(v: any) => updateCartItem(item.id, 'quantity', v)} onFocus={() => updateCartItem(item.id, 'quantity', '')} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', fontSize: '16px', fontWeight: 'normal', color: '#334155', backgroundColor: '#ffffff', outline: 'none', textAlign: 'center' }} className="mobile-input-field" />
+                        <CurrencyInput value={item.quantity} onChange={(v: any) => updateCartItem(item.id, 'quantity', v)} onFocus={() => updateCartItem(item.id, 'quantity', '')} className="saas-input" style={{ textAlign: 'center' }} />
                       </div>
                       <div style={{ flex: 1 }}>
                         <span style={{ display: 'block', fontSize: '10px', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '4px' }}>{currentT.unitPrice}</span>
-                        <CurrencyInput value={item.custom_price_riel} onChange={(v: any) => updateCartItem(item.id, 'custom_price_riel', v)} onFocus={() => updateCartItem(item.id, 'custom_price_riel', '')} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', fontSize: '16px', fontWeight: 'normal', color: '#334155', backgroundColor: '#ffffff', outline: 'none', textAlign: 'center' }} className="mobile-input-field" />
+                        <CurrencyInput value={item.custom_price_riel} onChange={(v: any) => updateCartItem(item.id, 'custom_price_riel', v)} onFocus={() => updateCartItem(item.id, 'custom_price_riel', '')} className="saas-input" style={{ textAlign: 'center' }} />
                       </div>
                     </div>
                   </div>
@@ -1700,18 +1658,8 @@ export default function POSPage() {
               <button 
                 onClick={initiateCheckout} 
                 disabled={!isCartValid || !hasValidPayment || isProcessing} 
-                style={{ 
-                  width: '100%', 
-                  padding: '14px', 
-                  backgroundColor: (!isCartValid || !hasValidPayment || isProcessing) ? '#e2e8f0' : '#10b981', 
-                  color: (!isCartValid || !hasValidPayment || isProcessing) ? '#64748b' : '#ffffff', 
-                  border: 'none', 
-                  borderRadius: '10px', 
-                  fontWeight: 'bold', 
-                  fontSize: '16px', 
-                  cursor: (!isCartValid || !hasValidPayment || isProcessing) ? 'not-allowed' : 'pointer',
-                  boxShadow: '0 4px 12px rgba(16, 185, 129, 0.25)'
-                }}
+                className={`saas-btn ${(!isCartValid || !hasValidPayment || isProcessing) ? 'saas-btn-secondary' : 'saas-btn-primary'}`}
+                style={{ width: '100%', padding: '16px', fontSize: '16px' }}
               >
                 {isProcessing ? 'Processing...' : currentT.checkout}
               </button>
@@ -1721,184 +1669,151 @@ export default function POSPage() {
       )}
 
       {/* AUTO OPEN BAG MODAL */}
-      {autoOpenModal.isOpen && (
-        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 10000, display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '20px' }} onMouseDown={() => setAutoOpenModal({ isOpen: false, items: [] })}>
-          <div style={{ backgroundColor: '#ffffff', width: '100%', maxWidth: '400px', borderRadius: '12px', padding: '24px', boxShadow: '0 10px 25px rgba(0,0,0,0.2)' }} onMouseDown={e => e.stopPropagation()}>
-            <h3 style={{ marginTop: 0, marginBottom: '12px', color: '#1e293b', fontSize: '18px' }}>
-              ⚠️ Auto-Open Bag Required
-            </h3>
-            <p style={{ color: '#475569', fontSize: '14px', lineHeight: '1.5', margin: '0 0 16px 0' }}>
-              You do not have enough loose retail rice for this sale. Proceeding will automatically open a wholesale bag to restock the loose bin.
-            </p>
-            <div style={{ background: '#f8fafc', padding: '12px', borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '13px', color: '#64748b' }}>
-              Items needing restocking:
-              <ul style={{ paddingLeft: '20px', marginTop: '8px', marginBottom: 0 }}>
-                {autoOpenModal.items.map((p) => (
-                    <li key={p.id}>{p.name} (Needs {p.bags_needed} bag)</li>
-                ))}
-              </ul>
-            </div>
-            <div style={{ marginTop: '24px', display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
-              <button onClick={() => setAutoOpenModal({ isOpen: false, items: [] })} style={{ padding: '10px 16px', background: '#f1f5f9', color: '#475569', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', fontSize: '14px' }}>Cancel</button>
-              <button onClick={handleConfirmAutoOpen} disabled={isProcessing} style={{ padding: '10px 16px', background: '#10b981', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', fontSize: '14px' }}>{isProcessing ? 'Processing...' : 'Yes, Open Bag'}</button>
-            </div>
-          </div>
+      <Modal isOpen={autoOpenModal.isOpen} onClose={() => setAutoOpenModal({ isOpen: false, items: [] })} title="Auto-Open Bag Required" icon="⚠️" maxWidth="400px">
+        <p style={{ color: '#475569', fontSize: '14px', lineHeight: '1.5', margin: '0 0 16px 0' }}>
+          You do not have enough loose retail rice for this sale. Proceeding will automatically open a wholesale bag to restock the loose bin.
+        </p>
+        <div style={{ background: '#f8fafc', padding: '12px', borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '13px', color: '#64748b' }}>
+          Items needing restocking:
+          <ul style={{ paddingLeft: '20px', marginTop: '8px', marginBottom: 0 }}>
+            {autoOpenModal.items.map((p) => (
+                <li key={p.id}>{p.name} (Needs {p.bags_needed} bag)</li>
+            ))}
+          </ul>
         </div>
-      )}
+        <div style={{ marginTop: '24px', display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
+          <button onClick={() => setAutoOpenModal({ isOpen: false, items: [] })} className="saas-btn saas-btn-secondary">Cancel</button>
+          <button onClick={handleConfirmAutoOpen} disabled={isProcessing} className="saas-btn saas-btn-primary">{isProcessing ? 'Processing...' : 'Yes, Open Bag'}</button>
+        </div>
+      </Modal>
 
       {/* CREATE NEW CUSTOMER MODAL */}
-      {isCreateCustomerModalOpen && (
-        <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 9999, display: 'flex', justifyContent: 'center', alignItems: 'flex-start', paddingTop: '10vh', padding: '20px', boxSizing: 'border-box' }}>
-          <div style={{ backgroundColor: '#ffffff', width: '100%', maxWidth: '400px', borderRadius: '12px', padding: '24px', boxShadow: '0 10px 25px rgba(0,0,0,0.15)' }}>
-            <h3 style={{ margin: '0 0 16px 0', color: '#334155', borderBottom: '1px solid #f1f5f9', paddingBottom: '10px', fontSize: '18px' }}>Create New Customer</h3>
-            
-            <div style={{ marginBottom: '16px' }}>
-              <label style={{ display: 'block', fontSize: '12px', color: '#64748b', marginBottom: '4px' }}>Name</label>
-              <input type="text" value={newCustomerForm.name} onChange={(e) => setNewCustomerForm({...newCustomerForm, name: e.target.value})} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', color: '#334155', backgroundColor: '#ffffff' }} className="mobile-input-field" />
-            </div>
-
-            <div style={{ marginBottom: '16px' }}>
-              <label style={{ display: 'block', fontSize: '12px', color: '#64748b', marginBottom: '4px' }}>Account Owner</label>
-              <select value={newCustomerForm.owner} onChange={(e) => setNewCustomerForm({...newCustomerForm, owner: e.target.value})} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', color: '#334155', backgroundColor: '#ffffff', outline: 'none' }} className="mobile-select-menu">
-                <option value="">-- Select --</option>
-                <option value="Pich">Pich</option>
-                <option value="Jing">Jing</option>
-                <option value="Both">Both</option>
-                <option value="Mom">Mom</option>
-              </select>
-            </div>
-
-            <div style={{ marginBottom: '16px' }}>
-              <label style={{ display: 'block', fontSize: '12px', color: '#64748b', marginBottom: '4px' }}>Customer Type</label>
-              <select value={newCustomerForm.type} onChange={(e) => setNewCustomerForm({...newCustomerForm, type: e.target.value})} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', color: '#334155', backgroundColor: '#ffffff', outline: 'none' }} className="mobile-select-menu">
-                <option value="">-- Select --</option>
-                <option value="ហូប">ហូប</option>
-                <option value="លក់បាយ">លក់បាយ</option>
-                <option value="លក់ត">លក់ត</option>
-                <option value="អំណោយ">អំណោយ</option>
-              </select>
-            </div>
-
-            <div style={{ marginBottom: '16px' }}>
-              <label style={{ display: 'block', fontSize: '12px', color: '#64748b', marginBottom: '4px' }}>Location</label>
-              <input type="text" value={newCustomerForm.location} onChange={(e) => setNewCustomerForm({...newCustomerForm, location: e.target.value})} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', color: '#334155', backgroundColor: '#ffffff' }} className="mobile-input-field" />
-            </div>
-            
-            <div style={{ marginBottom: '24px' }}>
-              <label style={{ display: 'block', fontSize: '12px', color: '#64748b', marginBottom: '4px' }}>Phone Number</label>
-              <input type="text" value={newCustomerForm.phone} onChange={(e) => setNewCustomerForm({...newCustomerForm, phone: e.target.value})} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', color: '#334155', backgroundColor: '#ffffff' }} className="mobile-input-field" />
-            </div>
-            
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
-              <button onClick={() => setIsCreateCustomerModalOpen(false)} style={{ padding: '10px 16px', backgroundColor: '#f1f5f9', border: 'none', borderRadius: '6px', cursor: 'pointer', color: '#64748b', fontSize: '14px' }}>Cancel</button>
-              <button onClick={handleCreateCustomer} style={{ padding: '10px 16px', backgroundColor: '#10b981', border: 'none', borderRadius: '6px', cursor: 'pointer', color: '#fff', fontSize: '14px' }}>Save Customer</button>
-            </div>
-          </div>
+      <Modal isOpen={isCreateCustomerModalOpen} onClose={() => setIsCreateCustomerModalOpen(false)} title="Create New Customer" icon="👤" maxWidth="400px">
+        <div style={{ marginBottom: '16px' }}>
+          <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '8px' }}>Name</label>
+          <input type="text" value={newCustomerForm.name} onChange={(e) => setNewCustomerForm({...newCustomerForm, name: e.target.value})} className="saas-input" />
         </div>
-      )}
+
+        <div style={{ marginBottom: '16px' }}>
+          <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '8px' }}>Account Owner</label>
+          <select value={newCustomerForm.owner} onChange={(e) => setNewCustomerForm({...newCustomerForm, owner: e.target.value})} className="saas-input" style={{ cursor: 'pointer' }}>
+            <option value="">-- Select --</option>
+            <option value="Pich">Pich</option>
+            <option value="Jing">Jing</option>
+            <option value="Both">Both</option>
+            <option value="Mom">Mom</option>
+          </select>
+        </div>
+
+        <div style={{ marginBottom: '16px' }}>
+          <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '8px' }}>Customer Type</label>
+          <select value={newCustomerForm.type} onChange={(e) => setNewCustomerForm({...newCustomerForm, type: e.target.value})} className="saas-input" style={{ cursor: 'pointer' }}>
+            <option value="">-- Select --</option>
+            <option value="ហូប">ហូប</option>
+            <option value="លក់បាយ">លក់បាយ</option>
+            <option value="លក់ត">លក់ត</option>
+            <option value="អំណោយ">អំណោយ</option>
+          </select>
+        </div>
+
+        <div style={{ marginBottom: '16px' }}>
+          <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '8px' }}>Location</label>
+          <input type="text" value={newCustomerForm.location} onChange={(e) => setNewCustomerForm({...newCustomerForm, location: e.target.value})} className="saas-input" />
+        </div>
+        
+        <div style={{ marginBottom: '24px' }}>
+          <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '8px' }}>Phone Number</label>
+          <input type="text" value={newCustomerForm.phone} onChange={(e) => setNewCustomerForm({...newCustomerForm, phone: e.target.value})} className="saas-input" />
+        </div>
+        
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
+          <button onClick={() => setIsCreateCustomerModalOpen(false)} className="saas-btn saas-btn-secondary">Cancel</button>
+          <button onClick={handleCreateCustomer} className="saas-btn saas-btn-primary">Save Customer</button>
+        </div>
+      </Modal>
 
       {/* RETURN & EXCHANGE MODAL */}
-      {exchangeModal.isOpen && exchangeModal.product && (
-        <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 10000, display: 'flex', justifyContent: 'center', alignItems: 'flex-start', paddingTop: '15vh', paddingLeft: '20px', paddingRight: '20px', boxSizing: 'border-box' }} onMouseDown={() => setExchangeModal({ isOpen: false, product: null, consumedKg: '' })}>
-          <div style={{ backgroundColor: '#ffffff', width: '100%', maxWidth: '400px', borderRadius: '12px', padding: '24px', boxShadow: '0 10px 25px rgba(0,0,0,0.15)' }} onMouseDown={e => e.stopPropagation()}>
-            <h3 style={{ margin: '0 0 16px 0', color: '#334155', borderBottom: '1px solid #f1f5f9', paddingBottom: '10px', fontSize: '18px' }}>🔄 Exchange / Return Bag</h3>
-            
-            <div style={{ marginBottom: '16px' }}>
-              <label style={{ display: 'block', fontSize: '12px', color: '#64748b', marginBottom: '4px' }}>Product to Return</label>
-              <div style={{ padding: '10px', backgroundColor: '#f8fafc', border: '1px solid #cbd5e1', borderRadius: '6px', color: '#334155' }}>{exchangeModal.product.name}</div>
-            </div>
-
-            <div style={{ marginBottom: '24px' }}>
-              <label style={{ display: 'block', fontSize: '12px', color: '#64748b', marginBottom: '4px' }}>How many kg were consumed?</label>
-              <CurrencyInput
-                autoFocus
-                placeholder="e.g. 15"
-                value={exchangeModal.consumedKg}
-                onChange={(v: any) => setExchangeModal({ ...exchangeModal, consumedKg: v })}
-                style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', backgroundColor: '#ffffff' }}
-                className="mobile-input-field"
-              />
-              <p style={{ fontSize: '11px', color: '#94a3b8', marginTop: '6px', lineHeight: 1.4 }}>
-                * Enter 0 if the bag is fully intact and unopened.<br/>
-                * Partial returns add leftover rice to 1kg Retail pool automatically.
-              </p>
-            </div>
-
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
-              <button onClick={() => setExchangeModal({ isOpen: false, product: null, consumedKg: '' })} style={{ padding: '10px 16px', backgroundColor: '#f1f5f9', border: 'none', borderRadius: '6px', cursor: 'pointer', color: '#64748b', fontSize: '14px' }}>Cancel</button>
-              <button onClick={handleConfirmExchange} disabled={isProcessing} style={{ padding: '10px 16px', backgroundColor: '#ef4444', border: 'none', borderRadius: '6px', cursor: 'pointer', color: '#fff', fontSize: '14px' }}>{isProcessing ? 'Processing...' : 'Confirm Return'}</button>
-            </div>
-          </div>
+      <Modal isOpen={exchangeModal.isOpen && !!exchangeModal.product} onClose={() => setExchangeModal({ isOpen: false, product: null, consumedKg: '' })} title="Exchange / Return Bag" icon="🔄" maxWidth="400px">
+        <div style={{ marginBottom: '16px' }}>
+          <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '8px' }}>Product to Return</label>
+          <div style={{ padding: '10px', backgroundColor: '#f8fafc', border: '1px solid #cbd5e1', borderRadius: '6px', color: '#334155' }}>{exchangeModal.product?.name}</div>
         </div>
-      )}
+
+        <div style={{ marginBottom: '24px' }}>
+          <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '8px' }}>How many kg were consumed?</label>
+          <CurrencyInput
+            autoFocus
+            placeholder="e.g. 15"
+            value={exchangeModal.consumedKg}
+            onChange={(v: any) => setExchangeModal({ ...exchangeModal, consumedKg: v })}
+            className="saas-input"
+          />
+          <p style={{ fontSize: '11px', color: '#94a3b8', marginTop: '6px', lineHeight: 1.4 }}>
+            * Enter 0 if the bag is fully intact and unopened.<br/>
+            * Partial returns add leftover rice to 1kg Retail pool automatically.
+          </p>
+        </div>
+
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
+          <button onClick={() => setExchangeModal({ isOpen: false, product: null, consumedKg: '' })} className="saas-btn saas-btn-secondary">Cancel</button>
+          <button onClick={handleConfirmExchange} disabled={isProcessing} className="saas-btn saas-btn-danger">{isProcessing ? 'Processing...' : 'Confirm Return'}</button>
+        </div>
+      </Modal>
 
       {/* MOBILE PRODUCT ADD POPUP */}
-      {selectedMobileProduct && (
-        <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 9999, display: 'flex', justifyContent: 'center', alignItems: 'flex-start', paddingTop: '15vh', paddingLeft: '20px', paddingRight: '20px', boxSizing: 'border-box' }} onMouseDown={() => setSelectedMobileProduct(null)}>
-          <div style={{ backgroundColor: '#ffffff', width: '100%', maxWidth: '400px', borderRadius: '12px', padding: '24px', boxShadow: '0 10px 25px rgba(0,0,0,0.15)' }} onMouseDown={e => e.stopPropagation()}>
-            <h3 style={{ margin: '0 0 16px 0', color: '#334155', borderBottom: '1px solid #f1f5f9', paddingBottom: '10px', fontSize: '18px' }}>{currentT.mobileModalTitle}</h3>
-            <div style={{ marginBottom: '16px' }}>
-              <label style={{ display: 'block', fontSize: '12px', color: '#64748b', marginBottom: '4px' }}>Product Identifier</label>
-              <input type="text" value={mobileName} onChange={(e) => setMobileName(e.target.value)} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', color: '#334155', backgroundColor: '#ffffff' }} className="mobile-input-field" />
-            </div>
-            <div style={{ display: 'flex', gap: '12px', marginBottom: '20px' }}>
-              <div style={{ flex: 1 }}>
-                <label style={{ display: 'block', fontSize: '12px', color: '#64748b', marginBottom: '4px' }}>Quantity</label>
-                <CurrencyInput value={mobileQty} onChange={(v: any) => setMobileQty(v)} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', color: '#334155', backgroundColor: '#ffffff' }} className="mobile-input-field" />
-              </div>
-              <div style={{ flex: 1 }}>
-                <label style={{ display: 'block', fontSize: '12px', color: '#64748b', marginBottom: '4px' }}>Price (៛)</label>
-                <CurrencyInput value={mobilePrice} onChange={(v: any) => setMobilePrice(v)} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', color: '#334155', backgroundColor: '#ffffff' }} className="mobile-input-field" />
-              </div>
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
-              <button onClick={() => setSelectedMobileProduct(null)} style={{ padding: '10px 16px', backgroundColor: '#f1f5f9', border: 'none', borderRadius: '6px', cursor: 'pointer', color: '#64748b', fontSize: '14px' }}>{currentT.cancel}</button>
-              <button onClick={handleAddMobileProductToCart} style={{ padding: '10px 16px', backgroundColor: '#b58a3d', border: 'none', borderRadius: '6px', cursor: 'pointer', color: '#fff', fontSize: '14px' }}>{currentT.add}</button>
-            </div>
+      <Modal isOpen={!!selectedMobileProduct} onClose={() => setSelectedMobileProduct(null)} title={currentT.mobileModalTitle} icon="✏️" maxWidth="400px">
+        <div style={{ marginBottom: '16px' }}>
+          <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '8px' }}>Product Identifier</label>
+          <input type="text" value={mobileName} onChange={(e) => setMobileName(e.target.value)} className="saas-input" />
+        </div>
+        <div style={{ display: 'flex', gap: '12px', marginBottom: '20px' }}>
+          <div style={{ flex: 1 }}>
+            <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '8px' }}>Quantity</label>
+            <CurrencyInput value={mobileQty} onChange={(v: any) => setMobileQty(v)} className="saas-input" />
+          </div>
+          <div style={{ flex: 1 }}>
+            <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '8px' }}>Price (៛)</label>
+            <CurrencyInput value={mobilePrice} onChange={(v: any) => setMobilePrice(v)} className="saas-input" />
           </div>
         </div>
-      )}
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
+          <button onClick={() => setSelectedMobileProduct(null)} className="saas-btn saas-btn-secondary">{currentT.cancel}</button>
+          <button onClick={handleAddMobileProductToCart} className="saas-btn saas-btn-primary">{currentT.add}</button>
+        </div>
+      </Modal>
 
       {/* 💰 SALE SUMMARY MODAL */}
-      {saleSummary && (
-        <div className="modal-overlay" style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.85)', zIndex: 10005, display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '20px', boxSizing: 'border-box' }} onMouseDown={() => setSaleSummary(null)}>
-          <div className="modal-content" style={{ backgroundColor: '#ffffff', width: '100%', maxWidth: '400px', borderRadius: '16px', padding: '30px', boxShadow: '0 10px 25px rgba(0,0,0,0.2)' }} onMouseDown={e => e.stopPropagation()}>
-            <h2 style={{ marginTop: 0, color: saleSummary.isDebt ? '#d97706' : '#10b981', fontSize: '20px', marginBottom: '16px', textAlign: 'center' }}>
-              {saleSummary.isCashless ? 'Sale Recorded! ✅' : saleSummary.isDebt ? 'Partial Payment Logged ⏳' : 'Sale Complete! ✅'}
-            </h2>
-              
-            {saleSummary.change > 0 && (
-              <div style={{ background: '#ecfdf5', padding: '20px', borderRadius: '12px', border: '2px dashed #10b981', marginBottom: '20px', textAlign: 'center' }}>
-                <div style={{ fontSize: '13px', color: '#047857', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '1px' }}>Change to Return</div>
-                <div style={{ fontSize: '38px', color: '#047857', fontWeight: 'bold', margin: '4px 0' }}>{formatRielFromNative(saleSummary.change)}</div>
-                <div style={{ fontSize: '13px', color: '#059669', marginTop: '4px' }}>Out of {formatRielFromNative(saleSummary.totalReceivedInRiel)} received</div>
-              </div>
-            )}
-
-            <div style={{ background: '#f8fafc', padding: '24px', borderRadius: '12px', marginBottom: '20px', border: '1px solid #e2e8f0' }}>
-              <div style={{ fontSize: '11px', color: '#64748b', marginBottom: '12px', textTransform: 'uppercase', textAlign: 'center' }}>Items Description Formula</div>
-              <div style={{ maxHeight: '150px', overflowY: 'auto', marginBottom: '12px' }}>
-                {saleSummary.items?.map((item: any, idx: number) => (
-                  <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px', fontSize: '13px', color: '#334155' }}>
-                    <span>{item.custom_name}</span>
-                    <span>x{item.quantity}</span>
-                  </div>
-                ))}
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px dashed #cbd5e1', paddingTop: '16px', marginTop: '16px', fontSize: '14px' }}>
-                <span style={{ color: '#64748b' }}>Total Sale:</span>
-                <span style={{ color: saleSummary.total < 0 ? '#ef4444' : '#10b981', fontWeight: 'bold' }}>{formatRielFromNative(saleSummary.total)}</span>
-              </div>
+      <Modal isOpen={!!saleSummary} onClose={() => { setSaleSummary(null); setCompletedSale(null); }} title={saleSummary?.isCashless ? 'Sale Recorded! ✅' : saleSummary?.isDebt ? 'Partial Payment Logged ⏳' : 'Sale Complete! ✅'} icon={saleSummary?.isDebt ? "⏳" : "💰"} maxWidth="400px">
+        {saleSummary?.change ? (
+          saleSummary.change > 0 && (
+            <div style={{ background: '#ecfdf5', padding: '20px', borderRadius: '12px', border: '2px dashed #10b981', marginBottom: '20px', textAlign: 'center' }}>
+              <div style={{ fontSize: '13px', color: '#047857', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '1px' }}>Change to Return</div>
+              <div style={{ fontSize: '38px', color: '#047857', fontWeight: 'bold', margin: '4px 0' }}>{formatRielFromNative(saleSummary.change)}</div>
+              <div style={{ fontSize: '13px', color: '#059669', marginTop: '4px' }}>Out of {formatRielFromNative(saleSummary.totalReceivedInRiel)} received</div>
             </div>
+          )
+        ) : null}
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-              <button onClick={() => { setSaleSummary(null); setCompletedSale(null); setPreviewImageUrl(null); }} style={{ width: '100%', padding: '16px', background: '#f1f5f9', color: '#475569', border: 'none', borderRadius: '8px', cursor: 'pointer', fontSize: '15px', fontWeight: 'bold' }}>
-                 Close Window
-              </button>
-            </div>
+        <div style={{ background: '#f8fafc', padding: '24px', borderRadius: '12px', marginBottom: '20px', border: '1px solid #e2e8f0' }}>
+          <div style={{ fontSize: '11px', color: '#64748b', marginBottom: '12px', textTransform: 'uppercase', textAlign: 'center' }}>Items Description Formula</div>
+          <div style={{ maxHeight: '150px', overflowY: 'auto', marginBottom: '12px' }}>
+            {saleSummary?.items?.map((item: any, idx: number) => (
+              <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px', fontSize: '13px', color: '#334155' }}>
+                <span>{item.custom_name}</span>
+                <span>x{item.quantity}</span>
+              </div>
+            ))}
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px dashed #cbd5e1', paddingTop: '16px', marginTop: '16px', fontSize: '14px' }}>
+            <span style={{ color: '#64748b' }}>Total Sale:</span>
+            <span style={{ color: (saleSummary?.total ?? 0) < 0 ? '#ef4444' : '#10b981', fontWeight: 'bold' }}>{formatRielFromNative(saleSummary?.total ?? 0)}</span>
           </div>
         </div>
-      )}
+
+        <button onClick={() => { setSaleSummary(null); setCompletedSale(null); setPreviewImageUrl(null); }} className="saas-btn saas-btn-secondary" style={{ width: '100%', padding: '16px', fontSize: '15px' }}>
+            Close Window
+        </button>
+      </Modal>
 
       {/* FINAL INVISIBLE DOM CAPTURE AREA */}
       {completedSale && (
@@ -2048,48 +1963,52 @@ export default function POSPage() {
       )}
 
       {/* RENDERED INVOICE PREVIEW MODAL */}
-      {showInvoicePreview && completedSale && (
-        <div className="invoice-modal-overlay" style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.85)', zIndex: 10006, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+      <Modal isOpen={showInvoicePreview && !!completedSale} onClose={() => { setShowInvoicePreview(false); setCompletedSale(null); setPreviewImageUrl(null); }} title="Invoice Ready" icon="📄" maxWidth="850px">
+        {completedSale?.changeDue > 0 && (
+          <div style={{ width: '100%', background: '#ecfdf5', border: '2px dashed #10b981', borderRadius: '12px', padding: '16px 24px', marginBottom: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div>
+              <div style={{ fontSize: '12px', color: '#059669', fontWeight: 'bold', textTransform: 'uppercase' }}>Amount Received</div>
+              <div style={{ fontSize: '18px', color: '#047857', fontWeight: 'bold' }}>{formatRielFromNative(completedSale.amountReceived)}</div>
+            </div>
+            <div style={{ textAlign: 'right' }}>
+              <div style={{ fontSize: '13px', color: '#047857', fontWeight: 'bold', textTransform: 'uppercase' }}>Change Due ➔</div>
+              <div style={{ fontSize: '32px', color: '#047857', fontWeight: 'bold' }}>{formatRielFromNative(completedSale.changeDue)}</div>
+            </div>
+          </div>
+        )}
+
+        <div style={{ width: '100%', padding: '0 10px', display: 'flex', justifyContent: 'center', flexShrink: 1, minHeight: 0, marginBottom: '24px' }}>
+          {isGeneratingPreview || !previewImageUrl ? (
+            <div style={{ padding: '40px', backgroundColor: '#f8fafc', borderRadius: '8px', color: '#334155', display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <span style={{ fontSize: '24px' }}>⏳</span> Generating High-Resolution Invoice...
+            </div>
+          ) : (
+            <img src={previewImageUrl} alt="Invoice Preview" style={{ width: '100%', maxWidth: '794px', maxHeight: '60vh', borderRadius: '4px', objectFit: 'contain', boxShadow: '0 10px 25px rgba(0,0,0,0.2)' }} />
+          )}
+        </div>
+
+        <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%' }}>
+          <button onClick={() => { setShowInvoicePreview(false); setCompletedSale(null); setPreviewImageUrl(null); }} className="saas-btn saas-btn-danger">❌ {currentT.close}</button>
           
-          {completedSale.changeDue > 0 && (
-            <div style={{ width: '100%', maxWidth: '850px', background: '#ecfdf5', border: '2px dashed #10b981', borderRadius: '12px', padding: '16px 24px', marginBottom: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div>
-                <div style={{ fontSize: '12px', color: '#059669', fontWeight: 'bold', textTransform: 'uppercase' }}>Amount Received</div>
-                <div style={{ fontSize: '18px', color: '#047857', fontWeight: 'bold' }}>{formatRielFromNative(completedSale.amountReceived)}</div>
-              </div>
-              <div style={{ textAlign: 'right' }}>
-                <div style={{ fontSize: '13px', color: '#047857', fontWeight: 'bold', textTransform: 'uppercase' }}>Change Due ➔</div>
-                <div style={{ fontSize: '32px', color: '#047857', fontWeight: 'bold' }}>{formatRielFromNative(completedSale.changeDue)}</div>
-              </div>
+          {/* DESKTOP BUTTONS */}
+          {!isDeviceMobile && (
+            <div style={{ display: 'flex', gap: '10px' }}>
+              <button onClick={handleDesktopDownloadPNG} disabled={!previewImageUrl} className="saas-btn" style={{ background: '#f59e0b', color: '#fff' }}>💾 {currentT.openInvoice}</button>
+              <button onClick={handleNativePrint} className="saas-btn saas-btn-primary">🖨️ Print / PDF</button>
             </div>
           )}
 
-          <div className="invoice-controls" style={{ display: 'flex', justifyContent: 'space-between', width: '100%', maxWidth: '850px', marginBottom: '16px', padding: '0 20px' }}>
-            <button onClick={() => { setShowInvoicePreview(false); setCompletedSale(null); setPreviewImageUrl(null); }} style={{ backgroundColor: '#dc2626', color: '#fff', border: 'none', padding: '10px 20px', borderRadius: '8px', fontSize: '16px', cursor: 'pointer' }}>❌ {currentT.close}</button>
-            
-            <div className="desktop-controls" style={{ display: 'none', gap: '10px' }}>
-              <button onClick={handleDesktopDownloadPNG} disabled={!previewImageUrl} style={{ backgroundColor: '#f59e0b', color: '#fff', border: 'none', padding: '10px 20px', borderRadius: '8px', fontSize: '16px', cursor: 'pointer' }}>💾 {currentT.openInvoice}</button>
-              <button onClick={handleNativePrint} style={{ backgroundColor: '#3b82f6', color: '#fff', border: 'none', padding: '10px 20px', borderRadius: '8px', fontSize: '16px', cursor: 'pointer' }}>🖨️ Print / PDF</button>
+          {/* MOBILE BUTTONS */}
+          {isDeviceMobile && (
+            <div style={{ display: 'flex', gap: '10px' }}>
+              <button onClick={handleMobileShare} disabled={!previewImageUrl} className="saas-btn" style={{ background: '#3b82f6', color: '#fff' }}>📤 Share</button>
+              <button onClick={handleNativePrint} className="saas-btn saas-btn-primary">🖨️ Print</button>
             </div>
-
-            <div className="mobile-controls" style={{ display: 'flex', gap: '10px' }}>
-              <button onClick={handleMobileShare} disabled={!previewImageUrl} style={{ backgroundColor: '#3b82f6', color: '#fff', border: 'none', padding: '10px 16px', borderRadius: '8px', fontSize: '14px', cursor: 'pointer' }}>📤 {currentT.shareInvoice}</button>
-              <button onClick={handleNativePrint} style={{ backgroundColor: '#10b981', color: '#fff', border: 'none', padding: '10px 16px', borderRadius: '8px', fontSize: '14px', cursor: 'pointer' }}>🖨️ Print</button>
-            </div>
-          </div>
-
-          <div className="invoice-preview-container" style={{ width: '100%', maxWidth: '850px', padding: '0 10px', display: 'flex', justifyContent: 'center', flexShrink: 1, minHeight: 0 }}>
-            {isGeneratingPreview || !previewImageUrl ? (
-              <div style={{ padding: '40px', backgroundColor: '#fff', borderRadius: '8px', color: '#334155', display: 'flex', alignItems: 'center', gap: '12px' }}>
-                <span style={{ fontSize: '24px' }}>⏳</span> Generating High-Resolution Invoice...
-              </div>
-            ) : (
-              <img src={previewImageUrl} alt="Invoice Preview" style={{ width: '100%', maxWidth: '794px', maxHeight: '60vh', borderRadius: '4px', objectFit: 'contain', boxShadow: '0 10px 25px rgba(0,0,0,0.5)' }} />
-            )}
-          </div>
+          )}
         </div>
-      )}
+      </Modal>
 
+      {/* --- GLOBAL CSS (Includes forceful override for Mobile Tabs) --- */}
       <style jsx global>{`
         input, select, button, textarea {
           font-family: inherit;
@@ -2100,12 +2019,25 @@ export default function POSPage() {
           font-variant-numeric: tabular-nums lining-nums;
         }
 
+        /* 🔥 BULLETPROOF GLOBAL OVERRIDE FOR MOBILE TABS 🔥 */
+        .saas-tab-container {
+          flex-wrap: nowrap !important;
+          overflow-x: auto !important;
+          -webkit-overflow-scrolling: touch !important;
+          scrollbar-width: none !important;
+        }
+        .saas-tab-container::-webkit-scrollbar {
+          display: none !important;
+        }
+        .saas-tab {
+          flex-shrink: 0 !important;
+          white-space: nowrap !important;
+        }
+
         .main-wrapper { 
           padding: max(20px, env(safe-area-inset-top, 20px)) 24px 24px 24px; 
-          background: #f8fafc; 
           font-family: Arial, sans-serif; 
           box-sizing: border-box; 
-          color: #333;
           width: 100%;
           min-height: 100%;
         }
@@ -2128,19 +2060,6 @@ export default function POSPage() {
           gap: 12px;
         }
 
-        .page-title { 
-          font-size: 24px !important; 
-          color: #4a3b1b !important; 
-          margin: 0 !important; 
-          font-weight: bold;
-          letter-spacing: -0.5px;
-          line-height: normal !important; 
-          display: flex;
-          align-items: center;
-          min-width: 0;
-          white-space: nowrap !important; 
-        }
-
         input[type="text"].no-spinners::-webkit-inner-spin-button,
         input[type="text"].no-spinners::-webkit-outer-spin-button {
           -webkit-appearance: none; margin: 0;
@@ -2158,9 +2077,6 @@ export default function POSPage() {
           }
           * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
           @page { size: A5 landscape; margin: 5mm; }
-          .invoice-controls { display: none !important; }
-          .invoice-modal-overlay { background: transparent !important; }
-          .invoice-preview-container img { display: none !important; }
         }
 
         .hide-scrollbar::-webkit-scrollbar { display: none; }
@@ -2168,13 +2084,7 @@ export default function POSPage() {
 
         .mobile-fab { display: none; }
 
-        @media (min-width: 1024px) {
-          .mobile-controls { display: none !important; }
-          .desktop-controls { display: flex !important; }
-        }
-        
         @media (max-width: 1023px) { 
-          .desktop-controls { display: none !important; }
           .desktop-cart-panel { display: none !important; }
           
           .main-wrapper { 
@@ -2201,12 +2111,6 @@ export default function POSPage() {
             gap: 12px !important;
           }
 
-          .page-title {
-            font-size: 22px !important;
-            line-height: normal !important; 
-            white-space: nowrap !important; 
-          }
-
           .mobile-fab {
             display: flex !important; 
             justify-content: space-between; 
@@ -2222,10 +2126,6 @@ export default function POSPage() {
             box-shadow: 0 4px 12px rgba(0,0,0,0.2); 
             z-index: 998; 
             cursor: pointer;
-          }
-
-          .mobile-input-field, .mobile-select-menu {
-            font-size: 16px !important; 
           }
         }
       `}</style>
