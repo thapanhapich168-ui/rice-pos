@@ -6,7 +6,6 @@ import { useFocusRefresh } from '@/lib/useFocusRefresh'
 import { Customer } from '@/types'
 import { useToast } from '@/components/ToastProvider'
 import { useDebounce } from '@/lib/useDebounce'
-import TableSkeleton from '@/components/TableSkeleton'
 import EmptyState from '@/components/EmptyState'
 import Modal from '@/components/Modal'
 
@@ -32,7 +31,7 @@ export default function CustomerDatabasePage() {
   const [customers, setCustomers] = useState<Customer[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [searchQuery, setSearchQuery] = useState('')
-  const debouncedSearch = useDebounce(searchQuery, 300) // 🚀 Lightning fast mobile search
+  const debouncedSearch = useDebounce(searchQuery, 300) 
   const [edits, setEdits] = useState<Record<string, Partial<Customer>>>({})
   const [selectedToDelete, setSelectedToDelete] = useState<Set<string>>(new Set())
   const [hoveredId, setHoveredId] = useState<string | null>(null)
@@ -238,7 +237,6 @@ export default function CustomerDatabasePage() {
       if (customerTypeFilter !== 'All' && c.type !== customerTypeFilter) return false;
       if (ownerFilter !== 'All' && c.owner !== ownerFilter) return false;
 
-      // 🚀 Now uses debouncedSearch for huge performance boost on mobile
       if (debouncedSearch) {
         const q = debouncedSearch.toLowerCase();
         return (
@@ -314,10 +312,10 @@ export default function CustomerDatabasePage() {
   )
 
   return (
-    <div className="main-wrapper">
+    <div className="main-wrapper" style={{ display: 'flex', flexDirection: 'column', height: '100dvh', overflow: 'hidden' }}>
       
-      {/* HEADER */}
-      <div className="header-container">
+      {/* HEADER (Frozen) */}
+      <div className="header-container" style={{ flexShrink: 0 }}>
         <div className="header-left">
           <h1 className="saas-page-title">🧑‍🌾 Customer Database</h1>
         </div>
@@ -331,10 +329,9 @@ export default function CustomerDatabasePage() {
         </div>
       </div>
 
-      {/* TOOLBAR */}
-      <div className="saas-card" style={{ padding: '16px', marginBottom: '24px' }}>
+      {/* TOOLBAR (Frozen) */}
+      <div className="saas-card" style={{ padding: '16px', marginBottom: '24px', flexShrink: 0 }}>
         
-        {/* Top Row: Search & Add Button */}
         <div style={{ display: 'flex', gap: '12px', marginBottom: '16px', flexWrap: 'wrap' }}>
           <input 
             className="saas-input" 
@@ -398,13 +395,13 @@ export default function CustomerDatabasePage() {
       </div>
 
       {/* SPREADSHEET TABLE */}
-      <div className="saas-table-wrapper">
-        <div className="saas-table-responsive">
+      <div className="saas-table-wrapper" style={{ flex: 1, minHeight: 0, marginBottom: 0, display: 'flex', flexDirection: 'column' }}>
+        <div className="saas-table-responsive" style={{ flex: 1, overflow: 'auto' }}>
           <table className="saas-table" style={{ width: 'max-content', tableLayout: 'fixed' }}>
             <thead>
               <tr>
-                {/* Checkbox Header Column */}
-                <th className="saas-th" style={{ width: '46px', minWidth: '46px', maxWidth: '46px', padding: '16px 8px', textAlign: 'center', borderRight: '1px solid #f1f5f9' }}>
+                {/* Checkbox Header Column (Sticky) */}
+                <th className="saas-th" style={{ width: '46px', minWidth: '46px', maxWidth: '46px', padding: '16px 8px', textAlign: 'center', borderRight: '1px solid #f1f5f9', position: 'sticky', top: 0, zIndex: 30, backgroundColor: '#f8fafc', boxShadow: 'inset 0 -2px 0 0 #e2e8f0' }}>
                    <input 
                      type="checkbox" 
                      checked={selectedToDelete.size === processedCustomers.length && processedCustomers.length > 0}
@@ -416,11 +413,12 @@ export default function CustomerDatabasePage() {
                    />
                 </th>
 
-                {/* 🔥 FIXED NUMBER COLUMN HEADER */}
-                <th className="saas-th" style={{ width: '50px', minWidth: '50px', maxWidth: '50px', padding: '16px 8px', textAlign: 'center', borderRight: '1px solid #f1f5f9' }}>
+                {/* NUMBER COLUMN HEADER (Sticky) */}
+                <th className="saas-th" style={{ width: '50px', minWidth: '50px', maxWidth: '50px', padding: '16px 8px', textAlign: 'center', borderRight: '1px solid #f1f5f9', position: 'sticky', top: 0, zIndex: 30, backgroundColor: '#f8fafc', boxShadow: 'inset 0 -2px 0 0 #e2e8f0' }}>
                   #
                 </th>
 
+                {/* Dynamic Data Headers (Sticky) */}
                 {columnOrder.map(key => (
                   <th 
                     key={key} 
@@ -432,9 +430,13 @@ export default function CustomerDatabasePage() {
                     onClick={() => handleSort(key)}
                     style={{ 
                       width: columnWidths[key as string] || 150, 
-                      position: 'relative', 
                       borderRight: '1px solid #f1f5f9', 
                       cursor: 'pointer', 
+                      position: 'sticky', 
+                      top: 0, 
+                      zIndex: 30, 
+                      backgroundColor: '#f8fafc', 
+                      boxShadow: 'inset 0 -2px 0 0 #e2e8f0'
                     }}
                     title="Click to Sort, Drag to Reorder"
                   >
@@ -448,9 +450,7 @@ export default function CustomerDatabasePage() {
               </tr>
             </thead>
             <tbody>
-              {isLoading ? (
-                <TableSkeleton columns={columnOrder.length + 2} rows={8} />
-              ) : processedCustomers.length === 0 ? (
+              {processedCustomers.length === 0 && !isLoading ? (
                 <tr>
                   <td colSpan={columnOrder.length + 2} style={{ padding: 0 }}>
                     <EmptyState 
@@ -466,7 +466,6 @@ export default function CustomerDatabasePage() {
                   return (
                     <tr key={cid} onMouseEnter={() => setHoveredId(cid)} onMouseLeave={() => setHoveredId(null)} className={`saas-tr ${selectedToDelete.has(cid) ? 'selected' : ''} ${edits[cid] ? 'editing' : ''}`}>
                       
-                      {/* Checkbox Row Column */}
                       <td className="saas-td" style={{ width: '46px', padding: '8px', textAlign: 'center', borderRight: '1px solid #f1f5f9' }}>
                         <input 
                           type="checkbox" 
@@ -480,13 +479,12 @@ export default function CustomerDatabasePage() {
                         />
                       </td>
 
-                      {/* 🔥 FIXED NUMBER COLUMN ROW */}
-                      <td className="saas-td" style={{ width: '50px', padding: '8px', textAlign: 'center', borderRight: '1px solid #f1f5f9', color: '#64748b', fontWeight: 'bold' }}>
+                      {/* NUMBER COLUMN ROW (Normal font weight now) */}
+                      <td className="saas-td" style={{ width: '50px', padding: '8px', textAlign: 'center', borderRight: '1px solid #f1f5f9', color: '#64748b', fontWeight: 'normal' }}>
                         {index + 1}
                       </td>
 
                       {columnOrder.map(col => {
-                        const isNameCol = col === 'name';
                         const editing = editingCell?.id === cid && editingCell?.col === col;
                         const val = edits[cid]?.[col as keyof Customer] ?? (c as any)[col] ?? '';
                         const readOnly = isReadOnly(col as string);
@@ -494,7 +492,6 @@ export default function CustomerDatabasePage() {
                         return (
                           <td key={col as string} className={`saas-td ${editing ? 'cell-editing' : ''}`} style={{ borderRight: '1px solid #f1f5f9', overflow: 'hidden', position: 'relative', padding: 0 }}>
                             
-                            {/* Input Transform */}
                             {editing && !readOnly ? (
                               col === 'owner' ? (
                                 <select 
@@ -542,10 +539,11 @@ export default function CustomerDatabasePage() {
                                 className="cell-display"
                                 style={{ 
                                   paddingLeft: '12px', 
-                                  fontWeight: isNameCol || col === 'days_since_last_purchase' ? 'bold' : 'normal', 
-                                  color: isNameCol ? '#1e293b' : col === 'days_since_last_purchase' ? '#b58a3d' : readOnly ? '#94a3b8' : '#334155',
+                                  /* ALL FONTS ARE NOW NORMAL WEIGHT AND DEFAULT FONT */
+                                  fontWeight: 'normal', 
+                                  color: readOnly ? '#94a3b8' : '#334155',
                                   cursor: readOnly ? 'default' : 'text',
-                                  fontFamily: col === 'id' ? 'monospace' : 'inherit',
+                                  fontFamily: 'inherit',
                                   display: 'flex',
                                   justifyContent: 'space-between',
                                   alignItems: 'center',
@@ -556,7 +554,7 @@ export default function CustomerDatabasePage() {
                               >
                                 <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                                   {col === 'google_map' && val ? (
-                                    <a href={val} target="_blank" rel="noreferrer" style={{ color: '#2563eb', textDecoration: 'none', fontWeight: 'bold' }} onClick={e => e.stopPropagation()}>🗺️ Open Map</a>
+                                    <a href={val} target="_blank" rel="noreferrer" style={{ color: '#2563eb', textDecoration: 'none' }} onClick={e => e.stopPropagation()}>🗺️ Open Map</a>
                                   ) : (
                                     formatDisplayValue(col as string, val)
                                   )}

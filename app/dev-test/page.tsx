@@ -14,6 +14,18 @@ export default function MasterTestEngine() {
   const TEST_ID = `DEV_TEST_${Date.now()}`;
   const EXCHANGE_RATE = 4000;
 
+  // --- 🚨 PRODUCTION SECURITY LOCK ---
+  if (process.env.NODE_ENV === 'production') {
+    return (
+      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100dvh', background: '#f8fafc' }}>
+        <div style={{ textAlign: 'center', background: '#fff', padding: '40px', borderRadius: '12px', boxShadow: '0 4px 15px rgba(0,0,0,0.1)', borderTop: '4px solid #ef4444' }}>
+          <h1 style={{ color: '#be123c', margin: '0 0 10px 0' }}>403 - Forbidden</h1>
+          <p style={{ color: '#64748b', margin: 0 }}>The Master Test Engine is disabled in the production environment.</p>
+        </div>
+      </div>
+    );
+  }
+
   // --- LOGGING ENGINE ---
   const logMsg = (testName: string, type: 'info' | 'assert' | 'ui', message: string) => {
     setResults(prev => {
