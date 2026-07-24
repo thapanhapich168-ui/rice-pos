@@ -2,42 +2,15 @@
 
 import React, { useState, useEffect, useRef } from 'react'
 import { supabase } from '@/lib/supabaseClient'
-
-const formatRiel = (amount: number) => {
-  return `${new Intl.NumberFormat('en-US').format(Math.round(amount))} ៛`;
-};
-
-const formatUSD = (amount: number) => `$${new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(amount)}`;
-
-const formatNumber = (v: number) => new Intl.NumberFormat('en-US').format(v);
-
-const EXCHANGE_RATE = 4000;
+import { useFocusRefresh } from '@/lib/useFocusRefresh'
+import { formatRiel, formatUSD, formatNumber, EXCHANGE_RATE } from '@/utils/formatters'
+import { CurrencyInput } from '@/components/Inputs'
+import { Product, InventoryBatch, PaymentRow } from '@/types'
+import { useToast } from '@/components/ToastProvider'
 
 // --- CATEGORIES ---
 const RICE_CATEGORIES = ['All', 'មិញ', 'ខុន', 'ខ្ញី', 'ម្លិះ', 'រំដួល', 'បីកំណាត់', 'ដំណើប', 'សម្រូប', 'ផ្សេងៗ', '❌ Out of Stock'];
 const MAIN_KEYWORDS = ['មិញ', 'ខុន', 'ខ្ញី', 'ម្លិះ', 'រំដួល', 'បីកំណាត់', 'ដំណើប', 'សម្រូប'];
-
-// --- TYPES ---
-interface Product {
-  id: number
-  name: string
-  price: number
-  cost_price: number
-  weight: number
-  stock: number
-  linked_wholesale_id?: number | null
-  mtd_kg_used?: number
-  mtd_bags_used?: number
-  min_stock_level?: number
-}
-
-interface InventoryBatch {
-  id: number
-  product_id: number
-  cost_price: number
-  remaining_qty: number
-  created_at: string
-}
 
 type SortConfig = {
   key: keyof Product;
@@ -52,8 +25,6 @@ interface FilterRule {
   value: string | number
 }
 
-type PaymentRow = { id: number, method: string, amount: number | '' };
-
 type ColumnKey = keyof Product | 'expand' | 'linked_wholesale' | 'actions';
 
 const DEFAULT_WIDTHS: Record<string, number> = {
@@ -67,66 +38,9 @@ const DEFAULT_PENDING_ORDER: string[] = ['date', 'supplier', 'product', 'total_c
 const DEFAULT_SUPPLIER_WIDTHS: Record<string, number> = { select: 50, name: 240, phone: 160, location: 200, total_owed: 180 };
 const DEFAULT_SUPPLIER_ORDER: string[] = ['select', 'name', 'phone', 'location', 'total_owed'];
 
-// ==========================================
-// ROBUST LIVE COMMA FORMATTER 
-// ==========================================
-function CurrencyInput({ value, onChange, placeholder, style, autoFocus, onEnter }: any) {
-  const [inputValue, setInputValue] = useState('');
-
-  useEffect(() => {
-    if (value === '' || value === undefined) {
-      setInputValue('');
-    } else {
-      const parsed = parseFloat(inputValue.replace(/,/g, ''));
-      if (parsed !== value) {
-        setInputValue(new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 }).format(value));
-      }
-    }
-  }, [value]);
-
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    let raw = e.target.value.replace(/[^0-9.]/g, '');
-    const parts = raw.split('.');
-    if (parts.length > 2) raw = parts[0] + '.' + parts.slice(1).join('');
-
-    let formatted = parts[0] ? new Intl.NumberFormat('en-US').format(parseInt(parts[0], 10)) : '';
-    if (parts.length > 1) formatted += '.' + parts[1].substring(0, 2);
-    if (raw === '') formatted = '';
-
-    setInputValue(formatted);
-    const num = parseFloat(raw);
-    onChange(isNaN(num) ? '' : num);
-  };
-
-  return (
-    <input 
-      type="text"
-      inputMode="decimal"
-      enterKeyHint="done"
-      placeholder={placeholder}
-      value={inputValue}
-      onChange={handleChange}
-      autoFocus={autoFocus}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter' || e.keyCode === 13) {
-          e.preventDefault();
-          e.currentTarget.blur();
-          if (onEnter) onEnter();
-        }
-      }}
-      onBlur={() => {
-        setTimeout(() => {
-          window.scrollTo(0, 0);
-          document.body.scrollTop = 0;
-        }, 100);
-      }}
-      style={{ ...style, color: '#334155', fontWeight: 'normal' }}
-      className="mobile-input-field no-spinners"
-    />
-  )
-}
-
 export default function RiceControl() {
+  const { showToast } = useToast();
+
   // --- CORE STATE ---
   const [products, setProducts] = useState<Product[]>([])
   const [suppliers, setSuppliers] = useState<any[]>([])
@@ -139,13 +53,6 @@ export default function RiceControl() {
   
   const [isProcessing, setIsProcessing] = useState(false) 
   const isImportingRef = useRef(false);
-
-  // --- NOTIFICATION SYSTEM ---
-  const [toast, setToast] = useState<{show: boolean, type: 'success' | 'error' | 'info', title: string, msg: string} | null>(null);
-  const showToast = (type: 'success' | 'error' | 'info', title: string, msg: string) => {
-    setToast({ show: true, type, title, msg });
-    setTimeout(() => setToast(null), 4500);
-  };
 
   // --- CELL EDITING STATE ---
   const [editingCell, setEditingCell] = useState<{id: number, col: string} | null>(null)
@@ -309,70 +216,30 @@ export default function RiceControl() {
   const handleConfirmRepack = async () => {
     if (!repackModal.product || !repackModal.product.linked_wholesale_id) return;
     setIsProcessing(true);
+    
     try {
         const retailId = repackModal.product.id;
         const wholesaleId = repackModal.product.linked_wholesale_id;
         
-        // 0. Fetch fresh data directly from DB
-        const { data: freshRetail, error: fetchErr1 } = await supabase.from('products').select('*').eq('id', retailId).single();
-        const { data: freshWholesale, error: fetchErr2 } = await supabase.from('products').select('*').eq('id', wholesaleId).single();
+        // Fetch the current cost price to assign to the batch
+        const { data: freshWholesale, error: fetchErr } = await supabase
+           .from('products')
+           .select('cost_price')
+           .eq('id', wholesaleId)
+           .single();
+           
+        if (fetchErr || !freshWholesale) throw new Error("Linked wholesale product not found.");
 
-        if (fetchErr1 || !freshRetail) throw new Error("Could not fetch latest retail data.");
-        if (fetchErr2 || !freshWholesale) throw new Error("Linked wholesale product not found.");
+        // 🔥 CALL THE ACID RPC TRANSACTION
+        const { error } = await supabase.rpc('execute_repack', {
+           p_retail_id: retailId,
+           p_wholesale_id: wholesaleId,
+           p_cogs: Number(freshWholesale.cost_price) || 0
+        });
 
-        // 1. Deduct 50kg from retail stock (allows reaching 0 or negatives)
-        const currentRetailStock = Number(freshRetail.stock) || 0;
-        const newRetailStock = currentRetailStock - 50;
-        
-        const { error: err1 } = await supabase.from('products').update({ stock: newRetailStock }).eq('id', retailId);
-        if (err1) throw new Error("Failed to deduct retail stock: " + err1.message);
+        if (error) throw new Error(error.message);
 
-        // 2. Add 1 bag to wholesale product stock
-        const newWholesaleStock = Number(freshWholesale.stock) + 1;
-        const { error: err2 } = await supabase.from('products').update({ stock: newWholesaleStock }).eq('id', wholesaleId);
-        if (err2) throw new Error("Failed to add wholesale stock: " + err2.message);
-
-        // 3. FIFO Batch Update (Reuse existing row, do not duplicate)
-        const { data: dbBatches } = await supabase.from('inventory_batches')
-           .select('*')
-           .eq('product_id', wholesaleId)
-           .order('id', { ascending: true });
-
-        let targetBatch = null;
-        if (dbBatches && dbBatches.length > 0) {
-            targetBatch = dbBatches.find(b => b.remaining_qty > 0) || dbBatches[dbBatches.length - 1];
-        }
-
-        if (targetBatch) {
-            const { error: batchErr } = await supabase.from('inventory_batches')
-                .update({ remaining_qty: Number(targetBatch.remaining_qty) + 1 })
-                .eq('id', targetBatch.id);
-            if (batchErr) throw new Error("Failed to update batch: " + batchErr.message);
-        } else {
-            // Create a row ONLY if no history exists at all
-            const { error: err3 } = await supabase.from('inventory_batches').insert([{
-                product_id: wholesaleId,
-                product_name: freshWholesale.name,
-                cost_price: Number(freshWholesale.cost_price) || 0,
-                remaining_qty: 1
-            }]);
-            if (err3) throw new Error("Failed to create batch: " + err3.message);
-        }
-
-        // 4. Log the repack event
-        const { error: logErr } = await supabase.from('repack_logs').insert([{
-            retail_product_id: retailId,
-            wholesale_product_id: wholesaleId,
-            kg_deducted: 50,
-            bags_created: 1,
-            cogs_applied: Number(freshWholesale.cost_price) || 0
-        }]);
-        
-        if (logErr) {
-            console.warn("Repack log skipped:", logErr.message);
-        }
-
-        // Clear local edit buffers and force immediate UI update
+        // Clear local edit buffers
         setEdits(prev => {
             const next = { ...prev };
             delete next[retailId];
@@ -380,17 +247,14 @@ export default function RiceControl() {
             return next;
         });
 
-        setProducts(prev => prev.map(p => {
-            if (p.id === retailId) return { ...p, stock: newRetailStock };
-            if (p.id === wholesaleId) return { ...p, stock: newWholesaleStock };
-            return p;
-        }));
-
+        // Success!
         showToast('success', 'Repack Successful', 'Converted 50kg loose rice into 1 sealed bag.');
         setRepackModal({ isOpen: false, product: null });
         
+        // Tell React to grab the fresh, perfectly synced numbers from the database
         fetchProducts();
         fetchBatches();
+
     } catch (err: any) {
         showToast('error', 'Repack Error', err.message);
     } finally {
@@ -709,7 +573,7 @@ export default function RiceControl() {
 
       await supabase.from('inventory_batches').insert([{
         product_id: Number(importForm.product_id),
-        product_name: product.name, // 👈 Added this line!
+        product_name: product.name, 
         cost_price: unitCost,
         remaining_qty: qty
       }]);
@@ -1145,7 +1009,7 @@ export default function RiceControl() {
     if (!pendingSort) return 0;
     const { key, direction } = pendingSort;
     let valA, valB;
-    if (key === 'date') { valA = new Date(a.created_at).getTime(); valB = new Date(b.created_at).getTime(); }
+    if (key === 'date') { valA = new Date((a as any).created_at).getTime(); valB = new Date((b as any).created_at).getTime(); }
     else if (key === 'supplier') { valA = a.suppliers?.name || ''; valB = b.suppliers?.name || ''; }
     else if (key === 'product') { valA = a.products?.name || ''; valB = b.products?.name || ''; }
     else if (key === 'total_cost') { valA = Number(a.total_cost); valB = Number(b.total_cost); }
@@ -1187,19 +1051,6 @@ export default function RiceControl() {
 
   return (
     <div className="main-wrapper">
-
-      {/* TOAST NOTIFICATION */}
-      {toast && (
-        <div className={`toast-notification fade-in ${toast.type}`}>
-          <div className="toast-icon">
-            {toast.type === 'success' ? '✅' : toast.type === 'error' ? '❌' : 'ℹ️'}
-          </div>
-          <div className="toast-content">
-            <div className="toast-title">{toast.title}</div>
-            <div className="toast-msg">{toast.msg}</div>
-          </div>
-        </div>
-      )}
       
       {/* HEADER */}
       <div className="header-container">
@@ -1493,7 +1344,7 @@ export default function RiceControl() {
                                   }} 
                                 />
                               ) : (
-                                <div className="cell-display" style={{ paddingLeft: isIdCol ? '36px' : '12px', fontWeight: 'normal', color: ['mtd_kg_used', 'mtd_bags_used'].includes(col) ? '#b58a3d' : '#334155', cursor: 'text' }} onClick={() => { setEditingCell({ id: p.id, col: col as string }) }}>
+                                <div className="cell-display" style={{ paddingLeft: isIdCol ? '36px' : '12px', fontWeight: 'normal', color: ['mtd_kg_used', 'mtd_bags_used'].includes(col as string) ? '#b58a3d' : '#334155', cursor: 'text' }} onClick={() => { setEditingCell({ id: p.id, col: col as string }) }}>
                                   
                                   {col === 'name' ? (
                                     <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -1510,7 +1361,6 @@ export default function RiceControl() {
                                       )}
                                       {formatDisplayValue(col as string, val)}
                                       
-                                      {/* 🔥 FIX: Changed to onClick and separated from the parent click handler to avoid edit mode */}
                                       {activeView === 'retail' && p.stock >= 50 && p.linked_wholesale_id && (
                                         <button 
                                           onClick={(e) => { 
@@ -2045,7 +1895,7 @@ export default function RiceControl() {
                         ) : (
                           <div>
                             <div style={{ fontWeight: 'bold', color: index === 0 ? '#15803d' : '#0f172a' }}>{batchLabel}</div>
-                            <div style={{ fontSize: '12px', color: '#64748b', marginTop: '4px' }}>Arrived: {new Date(b.created_at).toLocaleDateString()}</div>
+                            <div style={{ fontSize: '12px', color: '#64748b', marginTop: '4px' }}>Arrived: {new Date((b as any).created_at).toLocaleDateString()}</div>
                           </div>
                         )}
 
@@ -2269,41 +2119,6 @@ export default function RiceControl() {
           from { opacity: 0; transform: translateY(5px); }
           to { opacity: 1; transform: translateY(0); }
         }
-
-        /* 🔥 TOAST NOTIFICATION STYLES */
-        .toast-notification {
-          position: fixed;
-          top: 20px;
-          left: 50%;
-          transform: translateX(-50%);
-          z-index: 100000;
-          display: flex;
-          align-items: center;
-          gap: 12px;
-          padding: 14px 20px;
-          border-radius: 12px;
-          box-shadow: 0 10px 25px rgba(0,0,0,0.15);
-          background: #ffffff;
-          min-width: 300px;
-          border-left: 4px solid #3b82f6;
-          animation: slideDown 0.4s cubic-bezier(0.16, 1, 0.3, 1), fadeOut 0.4s ease-in-out 4s forwards;
-        }
-        @keyframes slideDown {
-          from { opacity: 0; transform: translate(-50%, -20px); }
-          to { opacity: 1; transform: translate(-50%, 0); }
-        }
-        @keyframes fadeOut {
-          from { opacity: 1; transform: translate(-50%, 0); }
-          to { opacity: 0; transform: translate(-50%, -20px); }
-        }
-        .toast-notification.success { border-left-color: #10b981; }
-        .toast-notification.error { border-left-color: #ef4444; }
-        .toast-notification.info { border-left-color: #3b82f6; }
-        
-        .toast-icon { font-size: 20px; }
-        .toast-content { display: flex; flex-direction: column; gap: 2px; }
-        .toast-title { font-weight: bold; color: #0f172a; font-size: 14px; }
-        .toast-msg { color: #64748b; font-size: 13px; }
 
         /* 📱 RESPONSIVE CLASSES */
         .desktop-only-btn { display: block; }

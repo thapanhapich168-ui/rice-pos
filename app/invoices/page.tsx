@@ -3,6 +3,8 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabaseClient'
 import { useFocusRefresh } from '@/lib/useFocusRefresh'
+import { useToast } from '@/components/ToastProvider'
+import { formatRiel } from '@/utils/formatters'
 
 // --- TYPESCRIPT INTERFACES ---
 interface Invoice {
@@ -20,6 +22,8 @@ type FilterTab = 'All' | 'Today' | 'This Week' | 'This Month';
 type StatusTab = 'Active' | 'Voided';
 
 export default function InvoiceGallery() {
+  const { showToast } = useToast();
+
   const [invoices, setInvoices] = useState<Invoice[]>([])
   const [isLoading, setIsLoading] = useState<boolean>(true)
   const [isDeviceMobile, setIsDeviceMobile] = useState<boolean>(false)
@@ -155,14 +159,14 @@ export default function InvoiceGallery() {
         is_done: true
       }).eq('invoice_id', invoiceId);
 
-      alert(`✅ Invoice ${invoiceId} was successfully voided!`);
+      showToast('success', 'Invoice Voided', `Invoice ${invoiceId} was successfully voided!`);
       
       setSelectedInvoices(new Set());
       await fetchInvoices();
 
     } catch (error: any) {
       console.error("Void failed:", error);
-      alert(`❌ Error voiding invoice: ${error.message}`);
+      showToast('error', 'Void Failed', `Error voiding invoice: ${error.message}`);
     } finally {
       setIsLoading(false);
     }
@@ -206,9 +210,10 @@ export default function InvoiceGallery() {
       const { error: summaryError } = await supabase.from('invoice_summaries').update({ invoice_url: null }).in('invoice_id', idsToUpdate);
 
       if (salesError || summaryError) {
-        alert("Database Blocked the Update!");
+        showToast('error', 'Deletion Failed', 'Database Blocked the Update!');
       } else {
         setSelectedInvoices(new Set());
+        showToast('success', 'Images Cleared', 'Selected invoice images were successfully removed.');
         await fetchInvoices(); 
       }
     } catch (error: any) {
@@ -405,7 +410,7 @@ export default function InvoiceGallery() {
                 <input type="checkbox" checked={isSelected} onChange={() => toggleSelect(inv.invoice_id)} className="card-checkbox" />
 
                 <div onClick={() => toggleSelect(inv.invoice_id)} className="card-image-box">
-                  <img src={inv.invoice_url} alt="Invoice Document File" className="card-img" style={{ opacity: isSelected ? 0.7 : 1 }} />
+                  <img src={inv.invoice_url} alt="Invoice Document File" className={`card-img ${isSelected ? 'img-selected' : ''}`} />
                   {isVoided && (
                     <div className="void-overlay">
                       <span className="void-stamp">VOID</span>
@@ -414,9 +419,9 @@ export default function InvoiceGallery() {
                 </div>
 
                 <div className="card-body">
-                  <div className="card-id-title" style={{ textDecoration: isVoided ? 'line-through' : 'none' }}>{inv.invoice_id}</div>
+                  <div className={`card-id-title ${isVoided ? 'voided-text' : ''}`}>{inv.invoice_id}</div>
                   <div className="card-customer-row">Customer: {inv.customer_name}</div>
-                  <div className="card-amount-row">💰 {new Intl.NumberFormat('en-US').format(inv.total_sales)} ៛</div>
+                  <div className="card-amount-row">💰 {formatRiel(inv.total_sales)}</div>
                 </div>
 
                 <div className="card-footer">
@@ -442,14 +447,14 @@ export default function InvoiceGallery() {
           <table className="data-table">
             <thead>
               <tr>
-                <th style={{ width: '50px', textAlign: 'center', padding: '16px' }}>
-                  <input type="checkbox" checked={selectedInvoices.size === processedInvoices.length && processedInvoices.length > 0} onChange={toggleSelectAll} style={{ width: '18px', height: '18px', accentColor: '#b58a3d', cursor: 'pointer' }} />
+                <th className="gallery-th-check">
+                  <input type="checkbox" checked={selectedInvoices.size === processedInvoices.length && processedInvoices.length > 0} onChange={toggleSelectAll} className="gallery-checkbox" />
                 </th>
-                <th style={{ padding: '16px', color: '#0f172a' }}>Invoice ID</th>
-                <th style={{ padding: '16px', color: '#0f172a' }}>Customer</th>
-                <th style={{ padding: '16px', color: '#0f172a' }}>Total Amount</th>
-                <th style={{ padding: '16px', color: '#0f172a' }}>Date</th>
-                <th style={{ padding: '16px', color: '#0f172a', textAlign: 'center' }}>Actions</th>
+                <th className="gallery-th">Invoice ID</th>
+                <th className="gallery-th">Customer</th>
+                <th className="gallery-th">Total Amount</th>
+                <th className="gallery-th">Date</th>
+                <th className="gallery-th-center">Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -459,15 +464,15 @@ export default function InvoiceGallery() {
 
                 return (
                   <tr key={inv.id} className={`${isSelected ? 'row-selected' : ''} ${isVoided ? 'row-voided' : ''}`}>
-                    <td style={{ textAlign: 'center', padding: '16px' }}>
-                      <input type="checkbox" checked={isSelected} onChange={() => toggleSelect(inv.invoice_id)} style={{ width: '18px', height: '18px', accentColor: '#b58a3d', cursor: 'pointer' }} />
+                    <td className="gallery-td-check">
+                      <input type="checkbox" checked={isSelected} onChange={() => toggleSelect(inv.invoice_id)} className="gallery-checkbox" />
                     </td>
-                    <td style={{ padding: '16px', fontWeight: 'bold', color: '#0f172a', textDecoration: isVoided ? 'line-through' : 'none' }}>{inv.invoice_id}</td>
-                    <td style={{ padding: '16px', color: '#334155', fontWeight: 'bold' }}>{inv.customer_name}</td>
-                    <td style={{ padding: '16px', color: '#b58a3d', fontWeight: 'bold' }}>{new Intl.NumberFormat('en-US').format(inv.total_sales)} ៛</td>
-                    <td style={{ padding: '16px', color: '#475569' }}>{formatDate(inv.created_at)}</td>
-                    <td style={{ padding: '16px' }}>
-                      <div style={{ display: 'flex', gap: '8px', justifyContent: 'center' }}>
+                    <td className={`gallery-td-bold ${isVoided ? 'voided-text' : ''}`}>{inv.invoice_id}</td>
+                    <td className="gallery-td-bold text-slate">{inv.customer_name}</td>
+                    <td className="gallery-td-bold text-gold">{formatRiel(inv.total_sales)}</td>
+                    <td className="gallery-td text-slate-light">{formatDate(inv.created_at)}</td>
+                    <td className="gallery-td">
+                      <div className="gallery-action-group">
                         {!isVoided && <button onClick={() => window.location.href = `/pos?edit=${inv.invoice_id}`} className="table-edit-btn">Edit</button>}
                         {!isVoided && <button onClick={() => handleVoidInvoice(inv.invoice_id)} className="table-void-btn">Void</button>}
                         <button onClick={() => handleAction(inv.invoice_url, inv.invoice_id)} className="table-download-btn">
@@ -485,6 +490,25 @@ export default function InvoiceGallery() {
 
       {/* --- REINFORCED STYLING FOR RESPONSIVENESS --- */}
       <style jsx global>{`
+        /* DE-INLINED CSS CLASSES */
+        .img-selected { opacity: 0.7; }
+        .voided-text { text-decoration: line-through; }
+        
+        .gallery-th { padding: 16px; color: #0f172a; text-align: left; }
+        .gallery-th-center { padding: 16px; color: #0f172a; text-align: center; }
+        .gallery-th-check { width: 50px; text-align: center; padding: 16px; }
+        
+        .gallery-td { padding: 16px; }
+        .gallery-td-bold { padding: 16px; font-weight: bold; }
+        .gallery-td-check { text-align: center; padding: 16px; }
+        
+        .text-slate { color: #334155; }
+        .text-slate-light { color: #475569; }
+        .text-gold { color: #b58a3d; }
+        
+        .gallery-checkbox { width: 18px; height: 18px; accent-color: #b58a3d; cursor: pointer; }
+        .gallery-action-group { display: flex; gap: 8px; justify-content: center; }
+
         /* 🔥 DESKTOP LAYOUT */
         .main-wrapper { 
           padding: max(20px, env(safe-area-inset-top, 20px)) 24px 24px 24px; 
@@ -854,9 +878,7 @@ export default function InvoiceGallery() {
         .data-table th {
           background: #f8fafc;
           border-bottom: 2px solid #cbd5e1;
-          padding: 16px;
           font-weight: bold;
-          color: #0f172a;
         }
         .data-table tr {
           border-bottom: 1px solid #e2e8f0;

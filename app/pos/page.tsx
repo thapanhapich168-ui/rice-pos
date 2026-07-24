@@ -3,38 +3,12 @@
 import React, { useEffect, useState, useRef } from 'react'
 import { supabase } from '@/lib/supabaseClient'
 import * as htmlToImage from 'html-to-image'
+import { formatRiel, formatUSD, EXCHANGE_RATE } from '@/utils/formatters'
+import { CurrencyInput } from '@/components/Inputs'
+import { Product, InventoryBatch, Customer, PaymentRow } from '@/types'
+import { useToast } from '@/components/ToastProvider'
 
-// --- TYPES & INTERFACES ---
-interface Product {
-  id: number
-  name: string
-  price: number
-  cost_price: number
-  weight: number
-  stock: number
-  linked_wholesale_id?: number | null
-  min_stock_level?: number
-  is_archived?: boolean
-  bags_needed?: number
-}
-
-interface InventoryBatch {
-  id: number
-  product_id: number
-  cost_price: number
-  remaining_qty: number
-  created_at?: string
-}
-
-interface Customer {
-  id: number
-  name: string
-  phone?: string
-  location?: string
-  owner?: string
-  type?: string
-}
-
+// --- LOCAL TYPES ---
 interface CartItem extends Product {
   product_id: number
   quantity: number | ''
@@ -74,12 +48,8 @@ const fetchImageAsBase64 = async (path: string): Promise<string> => {
   }
 };
 
-const EXCHANGE_RATE = 4000;
 const RICE_CATEGORIES = ['🔥 Hot', 'All', 'មិញ', 'ខុន', 'ខ្ញី', 'ម្លិះ', 'រំដួល', 'បីកំណាត់', 'ដំណើប', 'សម្រូប', 'ផ្សេងៗ', '❌ Out of Stock'];
 const MAIN_KEYWORDS = ['មិញ', 'ខុន', 'ខ្ញី', 'ម្លិះ', 'រំដួល', 'បីកំណាត់', 'ដំណើប', 'សម្រូប'];
-
-const formatRiel = (amount: number) => `${new Intl.NumberFormat('en-US').format(Math.round(amount))} ៛`;
-const formatUSD = (amount: number) => `$${new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(amount)}`;
 
 const t: Record<'en' | 'kh', any> = {
   en: {
@@ -130,94 +100,9 @@ const t: Record<'en' | 'kh', any> = {
   }
 };
 
-function CurrencyInput({ value, onChange, placeholder, style, autoFocus, className, onFocus }: any) {
-  const [inputValue, setInputValue] = useState('');
-
-  useEffect(() => {
-    if (value === '' || value === undefined) {
-      setInputValue('');
-    } else {
-      const parsed = parseFloat(inputValue.replace(/,/g, ''));
-      if (parsed !== Number(value)) {
-        setInputValue(new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 }).format(Number(value)));
-      }
-    }
-  }, [value]);
-
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    let raw = e.target.value.replace(/[^0-9.]/g, '');
-    const parts = raw.split('.');
-    if (parts.length > 2) raw = parts[0] + '.' + parts.slice(1).join('');
-
-    let formatted = parts[0] ? new Intl.NumberFormat('en-US').format(parseInt(parts[0], 10)) : '';
-    if (parts.length > 1) formatted += '.' + parts[1].substring(0, 2);
-    if (raw === '') formatted = '';
-
-    setInputValue(formatted);
-    const num = parseFloat(raw);
-    onChange(isNaN(num) ? '' : num);
-  };
-
-  return (
-    <input 
-      type="text"
-      inputMode="decimal"
-      placeholder={placeholder}
-      value={inputValue}
-      onChange={handleChange}
-      onFocus={onFocus}
-      autoFocus={autoFocus}
-      style={{ ...style, color: '#334155' }}
-      className={className || "mobile-input-field"}
-    />
-  )
-}
-
-function CartInput({ value, onChange, isQty, fontSize = '14px', onFocus }: { value: number | '', onChange: (val: number | '') => void, isQty: boolean, fontSize?: string, onFocus?: () => void }) {
-  const [inputValue, setInputValue] = useState('');
-
-  useEffect(() => {
-    if (value === '' || value === undefined) {
-      setInputValue('');
-    } else {
-      const parsed = parseFloat(inputValue.replace(/,/g, ''));
-      if (parsed !== Number(value)) {
-        setInputValue(new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 }).format(Number(value)));
-      }
-    }
-  }, [value]);
-
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    let raw = e.target.value.replace(/[^0-9.]/g, '');
-    const parts = raw.split('.');
-    if (parts.length > 2) raw = parts[0] + '.' + parts.slice(1).join('');
-    
-    let formatted = parts[0] ? new Intl.NumberFormat('en-US').format(parseInt(parts[0], 10)) : '';
-    if (parts.length > 1) formatted += '.' + parts[1].substring(0, 2);
-    if (raw === '') formatted = '';
-
-    setInputValue(formatted);
-    const num = parseFloat(raw);
-    onChange(isNaN(num) ? '' : num);
-  };
-
-  return (
-    <input 
-      type="text"
-      inputMode="decimal"
-      value={inputValue}
-      onChange={handleChange}
-      onFocus={onFocus}
-      style={{ 
-        width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', 
-        fontSize: fontSize, fontWeight: 'normal', color: '#334155', backgroundColor: '#ffffff', outline: 'none', textAlign: 'center'
-      }}
-      className="mobile-input-field"
-    />
-  )
-}
-
 export default function POSPage() {
+  const { showToast } = useToast();
+
   const [products, setProducts] = useState<Product[]>([])
   const [customers, setCustomers] = useState<Customer[]>([])
   const [cart, setCart] = useState<CartItem[]>([])
@@ -582,7 +467,10 @@ export default function POSPage() {
     const finalQty = typeof mobileQty === 'number' ? mobileQty : (parseFloat(mobileQty as string) || 0);
     const finalPrice = typeof mobilePrice === 'number' ? mobilePrice : (parseFloat(mobilePrice as string) || 0);
     
-    if (finalQty <= 0) return alert("Please enter a valid quantity.");
+    if (finalQty <= 0) {
+      showToast('error', 'Invalid Input', 'Please enter a valid quantity.');
+      return;
+    }
 
     const existing = cart.find((item) => item.product_id === selectedMobileProduct.id && !item.isSpecial);
     if (existing) {
@@ -606,7 +494,8 @@ export default function POSPage() {
     let linkedRetail = products.find(p => p.linked_wholesale_id === prod.id);
 
     if (consumedKg >= 50) {
-       return alert("Consumed amount cannot be 50kg or more for a single bag return.");
+       showToast('error', 'Invalid Amount', 'Consumed amount cannot be 50kg or more for a single bag return.');
+       return;
     }
 
     setIsProcessing(true);
@@ -614,7 +503,7 @@ export default function POSPage() {
     try {
       if (consumedKg > 0 && !linkedRetail) {
          // Auto-Create Missing Retail 1kg Rice for this Wholesale Bag!
-         const newRetailName = prod.name; // <--- 🔥 FIX: Removed (សល់/Loose)
+         const newRetailName = prod.name; 
          const perKgPrice = Math.round(Number(prod.price || 0) / 50);
          const perKgCogs = Math.round(Number(prod.cost_price || 0) / 50);
 
@@ -632,7 +521,7 @@ export default function POSPage() {
          if (error) throw new Error("Failed to auto-create retail product: " + error.message);
          
          linkedRetail = newProd as Product;
-         setProducts(prev => [...prev, newProd]);
+         setProducts(prev => [...prev, newProd as Product]);
 
          // Auto-drop the new 1kg retail product into Non-Active tab so it doesn't clutter main screen!
          const newHidden = Array.from(new Set([...hiddenRetailIds, newProd.id]));
@@ -691,7 +580,7 @@ export default function POSPage() {
       setCart([...cart, ...newItems]);
       setExchangeModal({ isOpen: false, product: null, consumedKg: '' });
     } catch (err: any) {
-      alert(err.message);
+      showToast('error', 'Error', err.message);
     } finally {
       setIsProcessing(false);
     }
@@ -763,7 +652,9 @@ export default function POSPage() {
       setIsCreateCustomerModalOpen(false);
       setNewCustomerForm({ name: '', phone: '', location: '', owner: '', type: '' });
       setCustomerSearchTerm('');
-    } else alert(`Error creating customer: ${error?.message}`);
+    } else {
+      showToast('error', 'Error', `Error creating customer: ${error?.message}`);
+    }
   }
 
   async function getFIFOSplits(productId: number, qtySold: number, fallbackCogs: number) {
@@ -799,9 +690,18 @@ export default function POSPage() {
 
   // 🔥 CHECKOUT INTERCEPTOR: Warns if Retail Stock < 0 before finishing checkout
   async function initiateCheckout() {
-    if (!isCartValid) return alert("Please ensure all items have a valid quantity and price.");
-    if (activeTab === 'wholesale' && !selectedCustomerId) return alert(lang === 'kh' ? 'សូមជ្រើសរើសអតិថិជនសម្រាប់ដុំ!' : 'Please select a customer for wholesale');
-    if (showPaymentSelector && liveTotalReceivedInRiel < totalRiel && !editingInvoiceId) return alert("Amount received must be equal to or greater than the total due.");
+    if (!isCartValid) {
+      showToast('error', 'Invalid Cart', 'Please ensure all items have a valid quantity and price.');
+      return;
+    }
+    if (activeTab === 'wholesale' && !selectedCustomerId) {
+      showToast('error', 'Customer Required', lang === 'kh' ? 'សូមជ្រើសរើសអតិថិជនសម្រាប់ដុំ!' : 'Please select a customer for wholesale');
+      return;
+    }
+    if (showPaymentSelector && liveTotalReceivedInRiel < totalRiel && !editingInvoiceId) {
+      showToast('error', 'Invalid Payment', 'Amount received must be equal to or greater than the total due.');
+      return;
+    }
 
     const simulatedStockUpdates: Record<number, number> = {};
     
@@ -828,9 +728,11 @@ export default function POSPage() {
                 const bagsNeeded = Math.ceil(Math.abs(finalStock) / 50);
                 itemsNeedingBags.push({ ...p, bags_needed: bagsNeeded });
             } else if (p && p.weight < 50 && !p.linked_wholesale_id) {
-                return alert(`Not enough stock for ${p.name} and no linked wholesale bag to open!`);
+                showToast('error', 'Out of Stock', `Not enough stock for ${p.name} and no linked wholesale bag to open!`);
+                return;
             } else if (p && p.weight >= 50) {
-                return alert(`Not enough stock for wholesale bag ${p.name}!`);
+                showToast('error', 'Out of Stock', `Not enough stock for wholesale bag ${p.name}!`);
+                return;
             }
         }
     }
@@ -839,7 +741,8 @@ export default function POSPage() {
         for (const p of itemsNeedingBags) {
             const wProd = products.find(w => w.id === p.linked_wholesale_id);
             if (!wProd || wProd.stock < p.bags_needed) {
-                return alert(`Cannot open a bag for ${p.name} because its wholesale bag (${wProd?.name || 'Unknown'}) is out of stock!`);
+                showToast('error', 'Out of Stock', `Cannot open a bag for ${p.name} because its wholesale bag (${wProd?.name || 'Unknown'}) is out of stock!`);
+                return;
             }
         }
         setAutoOpenModal({ isOpen: true, items: itemsNeedingBags });
@@ -873,7 +776,7 @@ export default function POSPage() {
             await executeCheckout(prodData);
         }
     } catch (err: any) {
-        alert('Auto-Open Failed: ' + err.message);
+        showToast('error', 'Auto-Open Failed', err.message);
         setIsProcessing(false);
     }
   }
@@ -1161,7 +1064,7 @@ export default function POSPage() {
       }
 
     } catch (err: any) {
-      alert(`System Error: ${err.message || err}`);
+      showToast('error', 'System Error', err.message || String(err));
     } finally {
       setIsProcessing(false);
       setPaymentRows([{ id: Date.now(), method: 'Cash ៛', amount: '', isAuto: true }]);
@@ -1661,11 +1564,11 @@ export default function POSPage() {
                   <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-end' }}>
                     <div style={{ flex: 1 }}>
                       <span style={{ display: 'block', fontSize: '10px', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '4px' }}>{currentT.quantity}</span>
-                      <CartInput value={item.quantity} onChange={(v) => updateCartItem(item.id, 'quantity', v)} onFocus={() => updateCartItem(item.id, 'quantity', '')} isQty={true} fontSize="14px" />
+                      <CurrencyInput value={item.quantity} onChange={(v: any) => updateCartItem(item.id, 'quantity', v)} onFocus={() => updateCartItem(item.id, 'quantity', '')} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', fontSize: '14px', fontWeight: 'normal', color: '#334155', backgroundColor: '#ffffff', outline: 'none', textAlign: 'center' }} className="mobile-input-field" />
                     </div>
                     <div style={{ flex: 1 }}>
                       <span style={{ display: 'block', fontSize: '10px', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '4px' }}>{currentT.unitPrice} (៛)</span>
-                      <CartInput value={item.custom_price_riel} onChange={(v) => updateCartItem(item.id, 'custom_price_riel', v)} onFocus={() => updateCartItem(item.id, 'custom_price_riel', '')} isQty={false} fontSize="14px" />
+                      <CurrencyInput value={item.custom_price_riel} onChange={(v: any) => updateCartItem(item.id, 'custom_price_riel', v)} onFocus={() => updateCartItem(item.id, 'custom_price_riel', '')} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', fontSize: '14px', fontWeight: 'normal', color: '#334155', backgroundColor: '#ffffff', outline: 'none', textAlign: 'center' }} className="mobile-input-field" />
                     </div>
                   </div>
                 </div>
@@ -1770,11 +1673,11 @@ export default function POSPage() {
                     <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-end' }}>
                       <div style={{ flex: 1 }}>
                         <span style={{ display: 'block', fontSize: '10px', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '4px' }}>{currentT.quantity}</span>
-                        <CartInput fontSize="16px" value={item.quantity} onChange={(v) => updateCartItem(item.id, 'quantity', v)} onFocus={() => updateCartItem(item.id, 'quantity', '')} isQty={true} />
+                        <CurrencyInput value={item.quantity} onChange={(v: any) => updateCartItem(item.id, 'quantity', v)} onFocus={() => updateCartItem(item.id, 'quantity', '')} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', fontSize: '16px', fontWeight: 'normal', color: '#334155', backgroundColor: '#ffffff', outline: 'none', textAlign: 'center' }} className="mobile-input-field" />
                       </div>
                       <div style={{ flex: 1 }}>
                         <span style={{ display: 'block', fontSize: '10px', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '4px' }}>{currentT.unitPrice}</span>
-                        <CartInput fontSize="16px" value={item.custom_price_riel} onChange={(v) => updateCartItem(item.id, 'custom_price_riel', v)} onFocus={() => updateCartItem(item.id, 'custom_price_riel', '')} isQty={false} />
+                        <CurrencyInput value={item.custom_price_riel} onChange={(v: any) => updateCartItem(item.id, 'custom_price_riel', v)} onFocus={() => updateCartItem(item.id, 'custom_price_riel', '')} style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #cbd5e1', boxSizing: 'border-box', fontSize: '16px', fontWeight: 'normal', color: '#334155', backgroundColor: '#ffffff', outline: 'none', textAlign: 'center' }} className="mobile-input-field" />
                       </div>
                     </div>
                   </div>
@@ -2199,6 +2102,7 @@ export default function POSPage() {
 
         .main-wrapper { 
           padding: max(20px, env(safe-area-inset-top, 20px)) 24px 24px 24px; 
+          background: #f8fafc; 
           font-family: Arial, sans-serif; 
           box-sizing: border-box; 
           color: #333;

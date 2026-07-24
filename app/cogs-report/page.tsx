@@ -4,72 +4,14 @@ import { useState, useEffect, useRef } from 'react'
 import { supabase } from '@/lib/supabaseClient'
 import * as htmlToImage from 'html-to-image'
 import { useFocusRefresh } from '@/lib/useFocusRefresh'
-
-const EXCHANGE_RATE = 4000;
-const formatRiel = (amount: number) => `${new Intl.NumberFormat('en-US').format(Math.round(amount))} ៛`;
-const formatUSD = (amount: number) => `$${new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(amount)}`;
-
-type PaymentRow = { id: number, method: string, amount: number | '' };
-
-const parseOwner = (ownerStr: any) => {
-  const o = (ownerStr || '').toLowerCase().trim();
-  if (o === 'mom') return 'mom';
-  if (o === 'pich') return 'pich';
-  if (o === 'jing') return 'jing';
-  return 'both'; 
-};
-
-// ==========================================
-// ROBUST LIVE COMMA FORMATTER 
-// ==========================================
-function CurrencyInput({ value, onChange, placeholder, style, autoFocus, onEnter }: any) {
-  const [inputValue, setInputValue] = useState('');
-
-  useEffect(() => {
-    if (value === '' || value === 0) {
-      setInputValue('');
-    } else {
-      const parsed = parseFloat(inputValue.replace(/,/g, ''));
-      if (parsed !== value) {
-        setInputValue(new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 }).format(value));
-      }
-    }
-  }, [value]);
-
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    let raw = e.target.value.replace(/[^0-9.]/g, '');
-    const parts = raw.split('.');
-    if (parts.length > 2) raw = parts[0] + '.' + parts.slice(1).join('');
-
-    let formatted = parts[0] ? new Intl.NumberFormat('en-US').format(parseInt(parts[0], 10)) : '';
-    if (parts.length > 1) formatted += '.' + parts[1].substring(0, 2);
-    if (raw === '') formatted = '';
-
-    setInputValue(formatted);
-    const num = parseFloat(raw);
-    onChange(isNaN(num) ? '' : num);
-  };
-
-  return (
-    <input 
-      type="text"
-      inputMode="decimal"
-      placeholder={placeholder}
-      value={inputValue}
-      onChange={handleChange}
-      autoFocus={autoFocus}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter') {
-          e.currentTarget.blur();
-          if (onEnter) onEnter();
-        }
-      }}
-      style={{ ...style, color: '#334155', fontWeight: 'normal' }}
-    />
-  )
-}
+import { useToast } from '@/components/ToastProvider'
+import { formatRiel, parseOwner, EXCHANGE_RATE } from '@/utils/formatters'
+import { CurrencyInput } from '@/components/Inputs'
+import { PaymentRow } from '@/types'
 
 export default function CogsReportPage() {
+  const { showToast } = useToast();
+
   const [sales, setSales] = useState<any[]>([])
   const [retailSales, setRetailSales] = useState<any[]>([])
   const [cogsSettlements, setCogsSettlements] = useState<any[]>([])
@@ -103,6 +45,9 @@ export default function CogsReportPage() {
   // Inline History States
   const [inlinePayments, setInlinePayments] = useState<Record<string, PaymentRow[]>>({})
 
+  // 🚀 100K LOAD PROBLEM FIX: Pagination state to prevent browser freezing
+  const [loadLimit, setLoadLimit] = useState(3000);
+
   useEffect(() => {
     const isMobile = window.innerWidth < 1024 || /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
     setIsDeviceMobile(isMobile);
@@ -115,22 +60,23 @@ export default function CogsReportPage() {
 
   useEffect(() => {
     fetchReportData();
-  }, [])
+  }, [loadLimit]) // Re-runs when you click "Load Older Records"
 
-  // 🚀 NEW: Window Focus Auto-Refresh
+  // 🚀 Window Focus Auto-Refresh
   useFocusRefresh(fetchReportData);
 
   async function fetchReportData() {
     setLoading(true)
     
+    // 🚀 100K LOAD PROBLEM FIX: Applied ordering and limit to prevent massive downloads
     const [{data: sData}, {data: rData}, {data: cData}, {data: aData}, {data: invData}, {data: expData}, {data: payData}] = await Promise.all([
-        supabase.from('sales').select('*'),
-        supabase.from('retail_sales').select('*'),
-        supabase.from('cogs_settlements').select('*'),
+        supabase.from('sales').select('*').order('created_at', { ascending: false }).limit(loadLimit),
+        supabase.from('retail_sales').select('*').order('created_at', { ascending: false }).limit(loadLimit),
+        supabase.from('cogs_settlements').select('*').order('created_at', { ascending: false }).limit(loadLimit),
         supabase.from('app_settings').select('*').in('setting_key', ['personal_owe_riel', 'personal_owe_usd']),
-        supabase.from('invoice_summaries').select('*'),
-        supabase.from('expenses').select('*'),
-        supabase.from('invoice_payments').select('*')
+        supabase.from('invoice_summaries').select('*').order('created_at', { ascending: false }).limit(loadLimit),
+        supabase.from('expenses').select('*').order('created_at', { ascending: false }).limit(loadLimit),
+        supabase.from('invoice_payments').select('*').order('created_at', { ascending: false }).limit(loadLimit)
     ]);
 
     setSales(sData || [])
@@ -467,12 +413,15 @@ export default function CogsReportPage() {
     }
 
     if (totalAppliedRielEq <= 0) return;
-    if (totalAppliedRielEq > totalDue + 0.1) return alert("Cannot pay more than the total COGS balance.");
+    if (totalAppliedRielEq > totalDue + 0.1) {
+      showToast('error', 'Overpayment', 'Cannot pay more than the total COGS balance.');
+      return;
+    }
     
     // 🔥 STRICT LIABILITY GUARDRAIL
     const liabilityUsedRielEqSum = liabilityUsedRiel + (liabilityUsedUsd * EXCHANGE_RATE);
     if (liabilityUsedRielEqSum > liveMomLiability + 0.1) {
-        alert(`Not enough Mom Liability available! You only have ${formatRiel(liveMomLiability)}`);
+        showToast('error', 'Insufficient Liability', `Not enough Mom Liability available! You only have ${formatRiel(liveMomLiability)}`);
         setIsProcessing(false);
         return; 
     }
@@ -518,10 +467,11 @@ export default function CogsReportPage() {
         setInlinePayments(prev => { const n = {...prev}; delete n[targetDays[0].key]; return n; });
       }
 
+      showToast('success', 'Payment Logged', 'The COGS payment has been settled successfully.');
       fetchReportData(); 
 
     } catch (err: any) {
-      alert("Error processing: " + err.message);
+      showToast('error', 'Processing Error', err.message);
     } finally {
       setIsProcessing(false);
     }
@@ -689,21 +639,21 @@ export default function CogsReportPage() {
                         <tbody>
                           {rows.map((row, idx) => (
                             <tr key={idx}>
-                              <td style={{ textAlign: 'center' }}>
+                              <td style={{ textAlign: 'center', fontWeight: 'bold' }}>
                                 {row.invoice_id ? String(row.invoice_id).replace(/\D/g, '') : ''}
                               </td>
                               {row.isFirstOfCustomer && (
-                                <td rowSpan={row.rowSpan} style={{ verticalAlign: 'middle' }}>
+                                <td rowSpan={row.rowSpan} style={{ verticalAlign: 'middle', fontWeight: 'bold' }}>
                                   {row.customer_name}
                                 </td>
                               )}
-                              <td>
+                              <td style={{ fontWeight: 'bold' }}>
                                 <div style={{ color: '#0f172a' }}>{row.rice_type}</div>
                               </td>
-                              <td>{row.custom_rice_type || ''}</td>
-                              <td style={{ textAlign: 'center' }}>{row.qty.toLocaleString('en-US')}</td>
-                              <td style={{ textAlign: 'center' }}>{Number(row.cogs_price).toLocaleString('en-US')}</td>
-                              <td style={{ textAlign: 'center', color: row.isNegative ? 'red' : 'inherit' }}>
+                              <td style={{ fontWeight: 'bold' }}>{row.custom_rice_type || ''}</td>
+                              <td style={{ textAlign: 'center', fontWeight: 'bold' }}>{row.qty.toLocaleString('en-US')}</td>
+                              <td style={{ textAlign: 'center', fontWeight: 'bold' }}>{Number(row.cogs_price).toLocaleString('en-US')}</td>
+                              <td style={{ textAlign: 'center', fontWeight: 'bold', color: row.isNegative ? 'red' : 'inherit' }}>
                                 {Math.round(row.calculatedAmount).toLocaleString('en-US')}
                               </td>
                             </tr>
@@ -736,7 +686,7 @@ export default function CogsReportPage() {
                   </table>
                 </div>
 
-                <div style={{ textAlign: 'right', marginTop: '20px', fontSize: '12px', color: '#64748b' }}>
+                <div style={{ textAlign: 'right', marginTop: '20px', fontSize: '12px', color: '#64748b', fontWeight: 'bold' }}>
                   Generated on: {new Date().toLocaleString('en-GB')}
                 </div>
               </>
@@ -745,6 +695,7 @@ export default function CogsReportPage() {
         </div>
       )}
 
+      {/* PENDING SETTLEMENTS TAB */}
       {activeMainTab === 'pending' && (
         <div style={{ background: '#fff', borderRadius: '12px', border: '1px solid #e2e8f0', overflow: 'hidden', boxShadow: '0 4px 6px rgba(0,0,0,0.02)', paddingBottom: '80px' }}>
           <div style={{ overflowX: 'auto' }}>
@@ -776,8 +727,8 @@ export default function CogsReportPage() {
                         <td style={{ padding: '16px', color: '#334155', fontWeight: 'bold' }}>
                           {new Date(d.date).toLocaleDateString('en-GB')}
                         </td>
-                        <td style={{ padding: '16px', color: '#475569', fontWeight: 'normal' }}>{d.owner}</td>
-                        <td style={{ padding: '16px', textAlign: 'right', color: '#475569', fontWeight: 'normal' }}>{formatRiel(d.totalCogs)}</td>
+                        <td style={{ padding: '16px', color: '#475569', fontWeight: 'bold' }}>{d.owner}</td>
+                        <td style={{ padding: '16px', textAlign: 'right', color: '#475569', fontWeight: 'bold' }}>{formatRiel(d.totalCogs)}</td>
                         <td style={{ padding: '16px', textAlign: 'right', color: '#ef4444', fontWeight: 'bold', fontSize: '16px' }}>{formatRiel(remaining)}</td>
                       </tr>
                     )
@@ -839,7 +790,7 @@ export default function CogsReportPage() {
                           <div style={{ fontWeight: 'bold', marginBottom: '4px' }}>{new Date(d.date).toLocaleDateString('en-GB')}</div>
                           <div style={{ fontSize: '12px', color: '#64748b' }}>Owner: <span style={{color: '#0f172a'}}>{d.owner}</span></div>
                         </td>
-                        <td style={{ padding: '16px 20px', textAlign: 'right', color: '#475569', fontWeight: 'normal', verticalAlign: 'top' }}>{formatRiel(d.totalCogs)}</td>
+                        <td style={{ padding: '16px 20px', textAlign: 'right', color: '#475569', fontWeight: 'bold', verticalAlign: 'top' }}>{formatRiel(d.totalCogs)}</td>
                         <td style={{ padding: '16px 20px', textAlign: 'center', color: '#3b82f6', fontWeight: 'bold', verticalAlign: 'top', fontSize: '12px' }}>
                           {Array.from(d.methods).join(', ') || '-'}
                         </td>
@@ -858,7 +809,7 @@ export default function CogsReportPage() {
                                     <select 
                                       value={row.method}
                                       onChange={(e) => updateInlineRow(d.key, row.id, 'method', e.target.value, remaining)}
-                                      style={{ padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px', outline: 'none', background: '#fff', color: '#475569', cursor: 'pointer', flex: 1 }}
+                                      style={{ padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px', outline: 'none', background: '#fff', color: '#475569', cursor: 'pointer', flex: 1, fontWeight: 'bold' }}
                                     >
                                       <option value="Mom Liability ៛">📉 Mom Liability ៛</option>
                                       <option value="Mom Liability $">📉 Mom Liability $</option>
@@ -868,7 +819,7 @@ export default function CogsReportPage() {
                                       <option value="QR $">📱 QR $</option>
                                     </select>
                                     {paymentState.length > 1 && (
-                                      <button onClick={() => removeInlineSplit(d.key, row.id, remaining)} style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', fontSize: '16px' }}>✕</button>
+                                      <button onClick={() => removeInlineSplit(d.key, row.id, remaining)} style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', fontSize: '16px', fontWeight: 'bold' }}>✕</button>
                                     )}
                                   </div>
                                   <CurrencyInput
@@ -912,10 +863,10 @@ export default function CogsReportPage() {
           <div style={{ backgroundColor: '#ffffff', width: '100%', maxWidth: '450px', borderRadius: '16px', padding: '24px', boxShadow: '0 10px 25px rgba(0,0,0,0.15)', maxHeight: '90vh', overflowY: 'auto' }} onMouseDown={e => e.stopPropagation()}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', borderBottom: '1px solid #f1f5f9', paddingBottom: '12px' }}>
               <h3 style={{ margin: 0, color: '#334155', fontSize: '18px', fontWeight: 'bold' }}>💸 Bulk Settle COGS</h3>
-              <button onClick={() => setBulkModalOpen(false)} style={{ background: 'none', border: 'none', fontSize: '18px', color: '#94a3b8', cursor: 'pointer' }}>✕</button>
+              <button onClick={() => setBulkModalOpen(false)} style={{ background: 'none', border: 'none', fontSize: '18px', color: '#94a3b8', cursor: 'pointer', fontWeight: 'bold' }}>✕</button>
             </div>
 
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '16px', fontSize: '14px', color: '#475569' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '16px', fontSize: '14px', color: '#475569', fontWeight: 'bold' }}>
               <span>Settling: <b>{selectedDays.length} Days</b></span>
             </div>
 
@@ -939,7 +890,7 @@ export default function CogsReportPage() {
                       newRows[index].method = e.target.value;
                       setBulkPaymentRows(newRows);
                     }}
-                    style={{ width: '50%', padding: '12px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '14px', outline: 'none', backgroundColor: '#fff', cursor: 'pointer', color: '#334155' }}
+                    style={{ width: '50%', padding: '12px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '14px', outline: 'none', backgroundColor: '#fff', cursor: 'pointer', color: '#334155', fontWeight: 'bold' }}
                   >
                     <option value="Mom Liability ៛">📉 Mom Liability ៛</option>
                     <option value="Mom Liability $">📉 Mom Liability $</option>
@@ -963,13 +914,13 @@ export default function CogsReportPage() {
                   </div>
                   
                   {bulkPaymentRows.length > 1 && (
-                    <button onClick={() => setBulkPaymentRows(bulkPaymentRows.filter(r => r.id !== row.id))} style={{ background: 'none', border: 'none', color: '#ef4444', fontSize: '18px', cursor: 'pointer', padding: '0 4px' }}>✕</button>
+                    <button onClick={() => setBulkPaymentRows(bulkPaymentRows.filter(r => r.id !== row.id))} style={{ background: 'none', border: 'none', color: '#ef4444', fontSize: '18px', cursor: 'pointer', padding: '0 4px', fontWeight: 'bold' }}>✕</button>
                   )}
                 </div>
               ))}
 
               {activeOwnerTab === 'mom' && (
-                <div style={{ fontSize: '12px', color: '#64748b', marginTop: '12px', padding: '8px', background: '#f8fafc', borderRadius: '6px', border: '1px dashed #cbd5e1' }}>
+                <div style={{ fontSize: '12px', color: '#64748b', marginTop: '12px', padding: '8px', background: '#f8fafc', borderRadius: '6px', border: '1px dashed #cbd5e1', fontWeight: 'bold' }}>
                   <b>💡 Tip:</b> Select <i>"Mom Liability"</i> to pay this COGS using the money you collected from Mom's deliveries. 
                   <br/><br/>
                   <b>Available Liability:</b> <span style={{color: '#b58a3d', fontWeight: 'bold'}}>{formatRiel(liveMomLiability)}</span>
@@ -979,24 +930,24 @@ export default function CogsReportPage() {
 
             {bulkPaymentRows.some(r => Number(r.amount) > 0) && (
               <div style={{ marginBottom: '24px', paddingTop: '16px', borderTop: '1px dashed #cbd5e1', fontSize: '14px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px', fontWeight: 'bold' }}>
                   <span style={{ color: '#64748b' }}>Total Processed:</span>
-                  <span style={{ color: '#334155', fontWeight: 'bold' }}>{formatRiel(liveBulkReceived)}</span>
+                  <span style={{ color: '#334155' }}>{formatRiel(liveBulkReceived)}</span>
                 </div>
                 {liveBulkRemaining < 0 ? (
-                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold' }}>
                     <span style={{ color: '#ef4444' }}>Overpaid By:</span>
-                    <span style={{ color: '#dc2626', fontWeight: 'bold' }}>{formatRiel(Math.abs(liveBulkRemaining))}</span>
+                    <span style={{ color: '#dc2626' }}>{formatRiel(Math.abs(liveBulkRemaining))}</span>
                   </div>
                 ) : liveBulkRemaining > 0 ? (
-                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold' }}>
                     <span style={{ color: '#d97706' }}>Still Owes:</span>
-                    <span style={{ color: '#b45309', fontWeight: 'bold' }}>{formatRiel(liveBulkRemaining)}</span>
+                    <span style={{ color: '#b45309' }}>{formatRiel(liveBulkRemaining)}</span>
                   </div>
                 ) : (
-                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold' }}>
                     <span style={{ color: '#166534' }}>Balance:</span>
-                    <span style={{ color: '#15803d', fontWeight: 'bold' }}>Perfectly Cleared ✅</span>
+                    <span style={{ color: '#15803d' }}>Perfectly Cleared ✅</span>
                   </div>
                 )}
               </div>
@@ -1012,66 +963,43 @@ export default function CogsReportPage() {
         </div>
       )}
 
+      {/* 🚀 LOAD MORE BUTTON */}
+      <div style={{ textAlign: 'center', padding: '20px', marginTop: '20px' }}>
+        <button 
+          onClick={() => setLoadLimit(prev => prev + 2000)}
+          style={{ padding: '10px 24px', backgroundColor: '#ffffff', border: '1px solid #cbd5e1', borderRadius: '20px', color: '#475569', fontWeight: 'bold', fontSize: '13px', cursor: 'pointer', boxShadow: '0 2px 4px rgba(0,0,0,0.02)' }}
+        >
+          ⬇️ Load Older Records (Current Limit: {loadLimit})
+        </button>
+      </div>
+
       <style jsx global>{`
-        /* 🔥 DESKTOP LAYOUT FIXES (EXACT DASHBOARD CSS) */
-        .main-wrapper { 
-          padding: max(20px, env(safe-area-inset-top, 20px)) 24px 24px 24px; 
-          background: #f8fafc; 
-          font-family: Arial, sans-serif; 
-          box-sizing: border-box; 
-          color: #333;
-          width: 100%;
-          height: 100dvh; 
-          overflow-y: auto; 
-          -webkit-overflow-scrolling: touch;
+        /* ORIGINAL STYLES PRESERVED */
+        input[type="text"].no-spinners::-webkit-inner-spin-button,
+        input[type="text"].no-spinners::-webkit-outer-spin-button {
+          -webkit-appearance: none;
+          margin: 0;
+        }
+        
+        .main-wrapper {
+          padding: max(20px, env(safe-area-inset-top, 20px)) 24px 24px 24px;
+          background: #f8fafc; min-height: 100vh; font-family: Arial, sans-serif; color: #333; box-sizing: border-box; width: 100%;
         }
 
-        .header-container { 
-          display: flex;
-          justify-content: space-between; 
-          align-items: center; 
-          margin-bottom: 24px; 
-          margin-top: 0;
-          margin-left: 60px; /* 🔥 Clears the burger menu icon */
-          gap: 12px;
-          min-height: 42px; 
-          width: calc(100% - 60px); 
-          max-width: 1600px;
+        .header-container {
+          display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; margin-top: 0; margin-left: 60px; gap: 12px; min-height: 42px; width: calc(100% - 60px); max-width: 1600px;
         }
         
         .header-left {
-          display: flex;
-          align-items: center; 
-          gap: 12px;
+          display: flex; align-items: center; gap: 12px;
         }
 
-        .page-title { 
-          font-size: 24px !important; 
-          color: #4a3b1b !important; 
-          margin: 0 !important; 
-          font-weight: bold;
-          letter-spacing: -0.5px;
-          line-height: normal !important; 
-          display: flex;
-          align-items: center;
-          min-width: 0;
-          white-space: nowrap !important; 
-        }
-
-        input[type="text"].no-spinners::-webkit-inner-spin-button,
-        input[type="text"].no-spinners::-webkit-outer-spin-button {
-          -webkit-appearance: none; margin: 0;
+        .page-title {
+          font-size: 24px !important; font-weight: bold; color: #4a3b1b !important; margin: 0 !important; letter-spacing: -0.5px; line-height: normal !important; display: flex; align-items: center; min-width: 0; white-space: nowrap !important;
         }
 
         .action-btn {
-          padding: 10px 16px;
-          border-radius: 8px;
-          border: none;
-          font-weight: bold;
-          font-size: 13px;
-          cursor: pointer;
-          color: #fff;
-          transition: background 0.2s;
+          padding: 10px 16px; border-radius: 8px; font-weight: bold; font-size: 13px; cursor: pointer; transition: background 0.2s; color: #fff; border: none;
         }
         .download-btn { background: #b58a3d; }
         .share-btn { background: #3b82f6; }
@@ -1116,9 +1044,6 @@ export default function CogsReportPage() {
         .report-table th {
           font-weight: bold;
           text-align: center;
-        }
-        .report-table td {
-          font-weight: normal; 
         }
 
         @media print {

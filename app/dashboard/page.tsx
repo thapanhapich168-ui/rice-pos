@@ -2,48 +2,15 @@
 
 import React, { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabaseClient'
+import { formatRiel, formatUSD, formatNumber, parseOwner, EXCHANGE_RATE } from '@/utils/formatters'
+import { CurrencyInput } from '@/components/Inputs'
+import { useToast } from '@/components/ToastProvider'
 
-const EXCHANGE_RATE = 4000;
-
-const formatRiel = (v: number) => `${new Intl.NumberFormat('en-US').format(Math.round(v))} ៛`;
-const formatUSD = (v: number) => `$${Number(v).toFixed(2)}`;
-const formatUSDEquiv = (vRiel: number) => `$${(vRiel / EXCHANGE_RATE).toFixed(2)}`;
-const formatNumber = (v: number) => new Intl.NumberFormat('en-US').format(v);
-
-const parseOwner = (ownerStr: any) => {
-  const o = (ownerStr || '').toLowerCase().trim();
-  if (o === 'mom') return 'mom';
-  if (o === 'pich') return 'pich';
-  if (o === 'jing') return 'jing';
-  return 'both'; 
-};
-
-function CurrencyInput({ value, onChange, onBlur, placeholder, style, autoFocus, className }: any) {
-  const [inputValue, setInputValue] = useState('');
-
-  useEffect(() => {
-    if (value === '' || value === 0) setInputValue('');
-    else {
-      const parsed = parseFloat(inputValue.replace(/,/g, ''));
-      if (parsed !== Number(value)) setInputValue(new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 }).format(Number(value)));
-    }
-  }, [value]);
-
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    let raw = e.target.value.replace(/[^0-9.]/g, '');
-    const parts = raw.split('.');
-    if (parts.length > 2) raw = parts[0] + '.' + parts.slice(1).join('');
-    let formatted = parts[0] ? new Intl.NumberFormat('en-US').format(parseInt(parts[0], 10)) : '';
-    if (parts.length > 1) formatted += '.' + parts[1].substring(0, 2);
-    setInputValue(formatted === '' ? '' : formatted);
-    const num = parseFloat(raw);
-    onChange(isNaN(num) ? '' : num);
-  };
-
-  return <input type="text" inputMode="decimal" placeholder={placeholder} value={inputValue} onChange={handleChange} onBlur={onBlur} autoFocus={autoFocus} style={{ ...style, color: '#334155' }} className={className || "mobile-input-field"} />
-}
+const formatUSDEquiv = (vRiel: number) => formatUSD(vRiel / EXCHANGE_RATE);
 
 export default function DashboardPage() {
+  const { showToast } = useToast();
+
   const [wholesaleSales, setWholesaleSales] = useState<any[]>([])
   const [retailSales, setRetailSales] = useState<any[]>([])
   const [invoiceSummaries, setInvoiceSummaries] = useState<any[]>([])
@@ -76,20 +43,40 @@ export default function DashboardPage() {
 
   useEffect(() => {
     async function loadData() {
-      const [{data: salesData}, {data: sumData}, {data: retData}, {data: expData}, {data: staffData}, {data: prodData}, {data: apData}, {data: cogsData}, {data: batchData}, {data: invPayData}] = await Promise.all([
-        supabase.from('sales').select('*').limit(5000),
-        supabase.from('invoice_summaries').select('*').limit(5000),
-        supabase.from('retail_sales').select('*').limit(5000),
-        supabase.from('expenses').select('*').limit(5000),
+      // 🚀 100K LOAD PROBLEM FIX: Smart Data Filtering!
+      
+      // Calculate exactly the first day of last month to fetch only relevant metric data
+      const now = new Date();
+      const firstDayOfLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1).toISOString();
+
+      const [
+        {data: salesData}, {data: sumData}, {data: retData}, {data: expData}, 
+        {data: staffData}, {data: prodData}, {data: apData}, {data: cogsData}, 
+        {data: batchData}, {data: invPayData}
+      ] = await Promise.all([
+        // Only grab sales/expenses created on or after last month
+        supabase.from('sales').select('*').gte('created_at', firstDayOfLastMonth),
+        supabase.from('invoice_summaries').select('*').eq('is_done', false), // Only need unpaid summaries for debt math
+        supabase.from('retail_sales').select('*').gte('created_at', firstDayOfLastMonth),
+        supabase.from('expenses').select('*').gte('created_at', firstDayOfLastMonth),
         supabase.from('staff').select('*'),
         supabase.from('products').select('*').order('id'),
-        supabase.from('accounts_payable').select('*').order('created_at', { ascending: false }),
-        supabase.from('cogs_settlements').select('*'),
-        supabase.from('inventory_batches').select('*'),
-        supabase.from('invoice_payments').select('*')
+        supabase.from('accounts_payable').select('*').eq('status', 'Unpaid').order('created_at', { ascending: false }), // Only Unpaid AP
+        supabase.from('cogs_settlements').select('payment_method, paid_amount_riel, paid_amount_usd, owner_name'), // Narrow column fetch
+        supabase.from('inventory_batches').select('*').gt('remaining_qty', 0), // Only active batches
+        supabase.from('invoice_payments').select('invoice_id, payment_method, amount_paid_riel, amount_paid_usd, recorded_by') // Narrow column fetch
       ]);
 
-      setWholesaleSales(salesData || []); setInvoiceSummaries(sumData || []); setRetailSales(retData || []); setExpenses(expData || []); setStaffList(staffData || []); setInventoryList(prodData || []); setAccountsPayable(apData || []); setCogsSettlements(cogsData || []); setPriceHistory(batchData || []); setInvoicePayments(invPayData || []);
+      setWholesaleSales(salesData || []); 
+      setInvoiceSummaries(sumData || []); 
+      setRetailSales(retData || []); 
+      setExpenses(expData || []); 
+      setStaffList(staffData || []); 
+      setInventoryList(prodData || []); 
+      setAccountsPayable(apData || []); 
+      setCogsSettlements(cogsData || []); 
+      setPriceHistory(batchData || []); 
+      setInvoicePayments(invPayData || []);
 
       const keys = ['base_capital', 'initial_cash_riel', 'initial_cash_usd', 'initial_qr_riel', 'initial_qr_usd', 'personal_owe_riel', 'personal_owe_usd', 'family_owe_riel', 'family_owe_usd'];
       const { data: capData } = await supabase.from('app_settings').select('*').in('setting_key', keys)
@@ -119,7 +106,10 @@ export default function DashboardPage() {
   }, [])
 
   async function updateSetting(key: string, val: number) {
-    await supabase.from('app_settings').upsert({ setting_key: key, setting_value: val }, { onConflict: 'setting_key' })
+    const { error } = await supabase.from('app_settings').upsert({ setting_key: key, setting_value: val }, { onConflict: 'setting_key' })
+    if (error) {
+      showToast('error', 'Sync Error', 'Failed to update setting.');
+    }
   }
 
   const now = new Date()
@@ -308,7 +298,7 @@ export default function DashboardPage() {
           const parent = inventoryList.find(wp => wp.id === p.linked_wholesale_id);
           if (parent) {
             const pBatches = priceHistory.filter((b: any) => b.product_id === parent.id && Number(b.remaining_qty) > 0);
-            pBatches.sort((a: any, b: any) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+            pBatches.sort((a: any, b: any) => new Date((a as any).created_at).getTime() - new Date((b as any).created_at).getTime());
             const liveParentCogs = pBatches.length > 0 ? Number(pBatches[0].cost_price) : Number(parent.cost_price || 0);
             effectiveCostPrice = liveParentCogs / 50; 
           }
@@ -336,7 +326,7 @@ export default function DashboardPage() {
       let pValue = 0; 
       
       const activeBatches = priceHistory.filter((b: any) => b.product_id === p.id && Number(b.remaining_qty) > 0);
-      activeBatches.sort((a: any, b: any) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+      activeBatches.sort((a: any, b: any) => new Date((a as any).created_at).getTime() - new Date((b as any).created_at).getTime());
 
       const allocatedBatches: any[] = [];
       let remainingToAllocate = pStock;
@@ -478,10 +468,8 @@ export default function DashboardPage() {
                      momTotalPaidRiel += bAmtEq;
                  }
              } else {
-                 // ✅ FIX: Business is RECEIVING money for COGS, so we Add Funds
                  addFunds(bAmtEq, mName.trim()); 
                  if (owner === 'mom') {
-                     // ✅ FIX: Only clear the COGS Debt, do NOT touch personal liability here
                      momTotalPaidRiel += bAmtEq; 
                  }
              }
@@ -497,10 +485,8 @@ export default function DashboardPage() {
                   momTotalPaidRiel += totalAmtEq;
               }
           } else {
-              // ✅ FIX: Business is RECEIVING money for COGS, so we Add Funds
               addFunds(totalAmtEq, c.payment_method); 
               if (owner === 'mom') {
-                  // ✅ FIX: Only clear the COGS Debt, do NOT touch personal liability here
                   momTotalPaidRiel += totalAmtEq; 
               }
           }
@@ -620,10 +606,8 @@ export default function DashboardPage() {
           
           if (!desc.includes('សេវាដឹក') && !(desc.includes('បាវ') && cogsAmt === 0)) {
               if (desc.includes('ដូរ') || desc.includes('បញ្ចុះតម្លៃ') || desc.includes('កក់') || cogsAmt < 0) {
-                  // 🚀 FIX: Add returns directly to Mom's Personal Liability (treat it like she gave cash back)
                   momCollectedRiel += Math.abs(cogsAmt); 
               } else {
-                  // 🌾 Normal sales still increase her COGS debt
                   momTotalCogsRiel += Math.abs(cogsAmt);
               }
           }
@@ -803,7 +787,6 @@ export default function DashboardPage() {
 
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '16px', marginBottom: '16px' }}>
               
-              {/* TOTAL NET WORTH - Soft Pastel Mint */}
               <div style={{ background: '#ecfdf5', padding: '24px', borderRadius: '16px', border: '1px solid #a7f3d0', boxShadow: '0 8px 16px -4px rgba(16, 185, 129, 0.08)' }}>
                 <div style={{ fontSize: '13px', fontWeight: 'bold', color: '#047857', textTransform: 'uppercase', letterSpacing: '0.5px' }}>💵 Total Net Worth</div>
                 <div style={{ display: 'flex', gap: '16px', alignItems: 'baseline', margin: '12px 0 0 0' }}>
@@ -812,7 +795,6 @@ export default function DashboardPage() {
                 </div>
               </div>
 
-              {/* RICE STOCK ASSET - Soft Pastel Mint */}
               <div style={{ background: '#ecfdf5', padding: '24px', borderRadius: '16px', border: '1px solid #a7f3d0', boxShadow: '0 8px 16px -4px rgba(16, 185, 129, 0.08)' }}>
                 <div style={{ fontSize: '13px', fontWeight: 'bold', color: '#047857', textTransform: 'uppercase', letterSpacing: '0.5px' }}>📦 Total Rice Stock Asset</div>
                 <div style={{ fontSize: '28px', margin: '12px 0 0 0', fontWeight: 'bold', color: '#10b981' }}>{formatRiel(assetData.riceStockValue)}</div>
@@ -822,11 +804,11 @@ export default function DashboardPage() {
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginTop: '16px' }}>
                   <div>
                     <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 'bold', textTransform: 'uppercase' }}>Riel (៛)</span>
-                    <div style={{ fontSize: '20px', color: '#334155', fontWeight: 'normal', marginTop: '4px' }}>{formatRiel(assetData.liveCashRiel)}</div>
+                    <div style={{ fontSize: '20px', color: '#334155', fontWeight: 'bold', marginTop: '4px' }}>{formatRiel(assetData.liveCashRiel)}</div>
                   </div>
                   <div>
                     <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 'bold', textTransform: 'uppercase' }}>USD ($)</span>
-                    <div style={{ fontSize: '20px', color: '#334155', fontWeight: 'normal', marginTop: '4px' }}>{formatUSD(assetData.liveCashUsd)}</div>
+                    <div style={{ fontSize: '20px', color: '#334155', fontWeight: 'bold', marginTop: '4px' }}>{formatUSD(assetData.liveCashUsd)}</div>
                   </div>
                 </div>
               </div>
@@ -835,11 +817,11 @@ export default function DashboardPage() {
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginTop: '16px' }}>
                   <div>
                     <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 'bold', textTransform: 'uppercase' }}>Riel (៛)</span>
-                    <div style={{ fontSize: '20px', color: '#3b82f6', fontWeight: 'normal', marginTop: '4px' }}>{formatRiel(assetData.liveQrRiel)}</div>
+                    <div style={{ fontSize: '20px', color: '#3b82f6', fontWeight: 'bold', marginTop: '4px' }}>{formatRiel(assetData.liveQrRiel)}</div>
                   </div>
                   <div>
                     <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 'bold', textTransform: 'uppercase' }}>USD ($)</span>
-                    <div style={{ fontSize: '20px', color: '#3b82f6', fontWeight: 'normal', marginTop: '4px' }}>{formatUSD(assetData.liveQrUsd)}</div>
+                    <div style={{ fontSize: '20px', color: '#3b82f6', fontWeight: 'bold', marginTop: '4px' }}>{formatUSD(assetData.liveQrUsd)}</div>
                   </div>
                 </div>
               </div>
@@ -877,7 +859,6 @@ export default function DashboardPage() {
                 </div>
               </div>
 
-              {/* DEDICATED MOM BOX */}
               <div style={{ background: '#fff', padding: '24px', borderRadius: '16px', border: '1px solid #bbf7d0', boxShadow: '0 4px 6px rgba(0,0,0,0.02)' }}>
                 <div style={{ fontSize: '13px', color: '#047857', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 'bold' }}>👩 Mom Receivables</div>
                 
@@ -939,7 +920,6 @@ export default function DashboardPage() {
 
             <h3 style={{ margin: '0 0 16px 0', fontSize: '14px', color: '#1e293b', textTransform: 'uppercase' }}>🌾 Detailed Inventory Valuation</h3>
             
-            {/* 🔥 DRAGGABLE TABS */}
             <div style={{ display: 'flex', gap: '8px', marginBottom: '16px', overflowX: 'auto', paddingBottom: '4px' }}>
               {invTabOrder.map(tab => {
                 const labels: any = {
@@ -1061,7 +1041,7 @@ export default function DashboardPage() {
                                    <td style={{ padding: row.isMain ? '14px 20px' : '8px 20px', textAlign: 'center', color: (row.qty < 10 && row.isMain) ? '#ef4444' : '#475569', fontWeight: row.isMain ? 'bold' : 'normal', fontSize: row.isMain ? '14px' : '13px' }}>
                                      {formatNumber(row.qty)}
                                    </td>
-                                   <td style={{ padding: row.isMain ? '14px 20px' : '8px 20px', textAlign: 'right', color: '#64748b', fontWeight: 'normal', fontSize: row.isMain ? '14px' : '13px' }}>
+                                   <td style={{ padding: row.isMain ? '14px 20px' : '8px 20px', textAlign: 'right', color: '#64748b', fontWeight: 'bold', fontSize: row.isMain ? '14px' : '13px' }}>
                                      {formatRiel(row.cost)}
                                    </td>
                                    <td style={{ padding: row.isMain ? '14px 20px' : '8px 20px', textAlign: 'right', color: '#10b981', fontWeight: row.isMain ? 'bold' : 'normal', fontSize: row.isMain ? '14px' : '13px' }}>
@@ -1143,8 +1123,8 @@ export default function DashboardPage() {
               <HealthBar title="Profit" current={mtdM.totalProfit} target={lastMonthM.totalProfit} color="#10b981" />
               {activeTab === 'summary' && (
                 <>
-                  <HealthBar title="Biz Expenses" current={mtdE.bizCashRiel + mtdE.bizQrRiel + (mtdE.bizCashUsd*EXCHANGE_RATE) + (mtdE.bizQrUsd*EXCHANGE_RATE)} target={lastMonthE.bizCashRiel + lastMonthE.bizQrRiel + (lastMonthE.bizCashUsd*EXCHANGE_RATE) + (lastMonthE.bizQrUsd*EXCHANGE_RATE)} color="#b91c1c" reverseLogic />
-                  <HealthBar title="Personal Expenses" current={mtdE.persCashRiel + mtdE.persQrRiel + (mtdE.persCashUsd*EXCHANGE_RATE) + (mtdE.persQrUsd*EXCHANGE_RATE)} target={lastMonthE.persCashRiel + lastMonthE.persQrRiel + (lastMonthE.persCashUsd*EXCHANGE_RATE) + (lastMonthE.persQrUsd*EXCHANGE_RATE)} color="#f59e0b" reverseLogic />
+                  <HealthBar title="Biz Expenses" current={mtdE.bizCashRiel + mtdE.bizQrRiel + (mtdE.bizCashUsd*EXCHANGE_RATE)} target={lastMonthE.bizCashRiel + lastMonthE.bizQrRiel + (lastMonthE.bizCashUsd*EXCHANGE_RATE)} color="#b91c1c" reverseLogic />
+                  <HealthBar title="Personal Expenses" current={mtdE.persCashRiel + mtdE.persQrRiel + (mtdE.persCashUsd*EXCHANGE_RATE)} target={lastMonthE.persCashRiel + lastMonthE.persQrRiel + (lastMonthE.persCashUsd*EXCHANGE_RATE)} color="#f59e0b" reverseLogic />
                 </>
               )}
             </div>
@@ -1171,7 +1151,6 @@ export default function DashboardPage() {
           margin: 0;
         }
         
-        /* 🔥 DESKTOP LAYOUT FIXES (ONE-SCREEN LOCK) */
         .main-wrapper { 
           padding: max(20px, env(safe-area-inset-top, 20px)) 24px 24px 24px; 
           background: #f8fafc; 
@@ -1192,7 +1171,7 @@ export default function DashboardPage() {
           align-items: center; 
           margin-bottom: 24px; 
           margin-top: 0;
-          margin-left: 60px; /* 🔥 Clears the burger menu icon for horizontal alignment */
+          margin-left: 60px;
           gap: 12px;
           min-height: 42px; 
           width: calc(100vw - 84px);
@@ -1235,7 +1214,7 @@ export default function DashboardPage() {
             width: 100vw !important;
           }
           .header-container { 
-            margin-left: 54px !important; /* Clears mobile hamburger button safely */
+            margin-left: 54px !important;
             margin-right: 0 !important;
             margin-bottom: 24px !important; 
             margin-top: 0 !important;
@@ -1292,10 +1271,10 @@ function ComplexCard({ title, total, pich = 0, jing = 0, both = 0, mom = 0, hide
     <div style={{ background: '#ffffff', padding: '20px', borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: '0 4px 6px rgba(0,0,0,0.02)' }}>
       <h3 style={{ margin: 0, fontSize: '13px', color: '#64748b', textTransform: 'uppercase', fontWeight: 'bold' }}>{title}</h3>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px' }}>
-        <h2 style={{ margin: '8px 0 4px 0', fontSize: '22px', color: color, fontWeight: 'normal' }}>{formatRiel(total)}</h2>
+        <h2 style={{ margin: '8px 0 4px 0', fontSize: '22px', color: color, fontWeight: 'bold' }}>{formatRiel(total)}</h2>
       </div>
       {!hideUsdEquiv && (
-        <div style={{ fontSize: '13px', color: '#94a3b8', marginBottom: '16px', fontWeight: 'normal' }}>{formatUSDEquiv(total)}</div>
+        <div style={{ fontSize: '13px', color: '#94a3b8', marginBottom: '16px', fontWeight: 'bold' }}>{formatUSDEquiv(total)}</div>
       )}
       {hideUsdEquiv && <div style={{ height: '16px', marginBottom: '16px' }}></div>}
       
@@ -1303,19 +1282,19 @@ function ComplexCard({ title, total, pich = 0, jing = 0, both = 0, mom = 0, hide
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '6px', borderTop: '1px solid #f1f5f9', paddingTop: '16px' }}>
           <div style={{ background: '#f8fafc', padding: '6px', borderRadius: '6px', textAlign: 'center' }}>
             <div style={{ fontSize: '10px', color: '#94a3b8', textTransform: 'uppercase', fontWeight: 'bold' }}>Pich</div>
-            <div style={{ fontSize: '12px', color: '#334155', marginTop: '2px', fontWeight: 'normal' }}>{formatRiel(pich)}</div>
+            <div style={{ fontSize: '12px', color: '#334155', marginTop: '2px', fontWeight: 'bold' }}>{formatRiel(pich)}</div>
           </div>
           <div style={{ background: '#f8fafc', padding: '6px', borderRadius: '6px', textAlign: 'center' }}>
             <div style={{ fontSize: '10px', color: '#94a3b8', textTransform: 'uppercase', fontWeight: 'bold' }}>Jing</div>
-            <div style={{ fontSize: '12px', color: '#334155', marginTop: '2px', fontWeight: 'normal' }}>{formatRiel(jing)}</div>
+            <div style={{ fontSize: '12px', color: '#334155', marginTop: '2px', fontWeight: 'bold' }}>{formatRiel(jing)}</div>
           </div>
           <div style={{ background: '#f8fafc', padding: '6px', borderRadius: '6px', textAlign: 'center' }}>
             <div style={{ fontSize: '10px', color: '#94a3b8', textTransform: 'uppercase', fontWeight: 'bold' }}>Both</div>
-            <div style={{ fontSize: '12px', color: '#334155', marginTop: '2px', fontWeight: 'normal' }}>{formatRiel(both)}</div>
+            <div style={{ fontSize: '12px', color: '#334155', marginTop: '2px', fontWeight: 'bold' }}>{formatRiel(both)}</div>
           </div>
           <div style={{ background: '#fefcf3', padding: '6px', borderRadius: '6px', textAlign: 'center', border: '1px solid #fde047' }}>
             <div style={{ fontSize: '10px', color: '#ca8a04', textTransform: 'uppercase', fontWeight: 'bold' }}>Mom</div>
-            <div style={{ fontSize: '12px', color: '#854d0e', marginTop: '2px', fontWeight: 'normal' }}>{formatRiel(mom)}</div>
+            <div style={{ fontSize: '12px', color: '#854d0e', marginTop: '2px', fontWeight: 'bold' }}>{formatRiel(mom)}</div>
           </div>
         </div>
       )}
@@ -1338,12 +1317,12 @@ function ExpenseBreakdownCard({ title, cR = 0, cU = 0, qR = 0, qU = 0, color = '
       
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', borderTop: '1px solid #f1f5f9', paddingTop: '16px' }}>
         <div>
-          <div style={{ fontSize: '12px', color: '#64748b', marginBottom: '4px', fontWeight: 'bold' }}>Cash: <span style={{fontWeight: 'normal', color: '#334155'}}>{formatRiel(cR)}</span></div>
-          <div style={{ fontSize: '12px', color: '#64748b', fontWeight: 'bold' }}>QR: <span style={{fontWeight: 'normal', color: '#334155'}}>{formatRiel(qR)}</span></div>
+          <div style={{ fontSize: '12px', color: '#64748b', marginBottom: '4px', fontWeight: 'bold' }}>Cash: <span style={{fontWeight: 'bold', color: '#334155'}}>{formatRiel(cR)}</span></div>
+          <div style={{ fontSize: '12px', color: '#64748b', fontWeight: 'bold' }}>QR: <span style={{fontWeight: 'bold', color: '#334155'}}>{formatRiel(qR)}</span></div>
         </div>
         <div>
-          <div style={{ fontSize: '12px', color: '#64748b', marginBottom: '4px', fontWeight: 'bold' }}>Cash: <span style={{fontWeight: 'normal', color: '#334155'}}>{formatUSD(cU)}</span></div>
-          <div style={{ fontSize: '12px', color: '#64748b', fontWeight: 'bold' }}>QR: <span style={{fontWeight: 'normal', color: '#334155'}}>{formatUSD(qU)}</span></div>
+          <div style={{ fontSize: '12px', color: '#64748b', marginBottom: '4px', fontWeight: 'bold' }}>Cash: <span style={{fontWeight: 'bold', color: '#334155'}}>{formatUSD(cU)}</span></div>
+          <div style={{ fontSize: '12px', color: '#64748b', fontWeight: 'bold' }}>QR: <span style={{fontWeight: 'bold', color: '#334155'}}>{formatUSD(qU)}</span></div>
         </div>
       </div>
     </div>
@@ -1371,11 +1350,11 @@ function HealthBar({ title, current, target, color, reverseLogic = false }: any)
       <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '8px' }}>
         <div style={{ display: 'flex', flexDirection: 'column' }}>
           <span style={{ fontSize: '10px', color: '#64748b', textTransform: 'uppercase', fontWeight: 'bold' }}>This MTD</span>
-          <span style={{ fontSize: '13px', color: '#334155', fontWeight: 'normal' }}>{formatRiel(current)}</span>
+          <span style={{ fontSize: '13px', color: '#334155', fontWeight: 'bold' }}>{formatRiel(current)}</span>
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', textAlign: 'right' }}>
           <span style={{ fontSize: '10px', color: '#64748b', textTransform: 'uppercase', fontWeight: 'bold' }}>Last Month</span>
-          <span style={{ fontSize: '13px', color: '#334155', fontWeight: 'normal' }}>{formatRiel(target)}</span>
+          <span style={{ fontSize: '13px', color: '#334155', fontWeight: 'bold' }}>{formatRiel(target)}</span>
         </div>
       </div>
     </div>

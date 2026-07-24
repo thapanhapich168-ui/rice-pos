@@ -2,72 +2,14 @@
 
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabaseClient'
-
-const EXCHANGE_RATE = 4000;
-
-const formatRiel = (amount: number) => `${new Intl.NumberFormat('en-US').format(Math.round(amount))} ៛`;
-
-type PaymentRow = { id: number, method: string, amount: number | '' };
-
-// ==========================================
-// ROBUST LIVE COMMA FORMATTER (With Enter Support)
-// ==========================================
-function CurrencyInput({ value, onChange, placeholder, style, autoFocus, onEnter, onBlurCustom }: any) {
-  const [inputValue, setInputValue] = useState('');
-
-  useEffect(() => {
-    if (value === '' || value === undefined) {
-      setInputValue('');
-    } else {
-      const parsed = parseFloat(inputValue.replace(/,/g, ''));
-      if (parsed !== value) {
-        setInputValue(new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 }).format(value));
-      }
-    }
-  }, [value]);
-
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    let raw = e.target.value.replace(/[^0-9.]/g, '');
-    const parts = raw.split('.');
-    if (parts.length > 2) raw = parts[0] + '.' + parts.slice(1).join('');
-
-    let formatted = parts[0] ? new Intl.NumberFormat('en-US').format(parseInt(parts[0], 10)) : '';
-    if (parts.length > 1) formatted += '.' + parts[1].substring(0, 2);
-    if (raw === '') formatted = '';
-
-    setInputValue(formatted);
-    const num = parseFloat(raw);
-    onChange(isNaN(num) ? '' : num);
-  };
-
-  return (
-    <input 
-      type="text"
-      inputMode="decimal"
-      placeholder={placeholder}
-      value={inputValue}
-      onChange={handleChange}
-      autoFocus={autoFocus}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter') {
-          e.currentTarget.blur();
-          if (onEnter) onEnter();
-        }
-      }}
-      onBlur={() => {
-        if (onBlurCustom) onBlurCustom();
-        setTimeout(() => {
-          window.scrollTo(0, 0);
-          document.body.scrollTop = 0;
-        }, 100);
-      }}
-      style={{ ...style, color: '#334155', fontWeight: 'normal' }}
-      className="mobile-input-field"
-    />
-  )
-}
+import { formatRiel, EXCHANGE_RATE } from '@/utils/formatters'
+import { CurrencyInput } from '@/components/Inputs'
+import { PaymentRow } from '@/types'
+import { useToast } from '@/components/ToastProvider'
 
 export default function DeliveryPage() {
+  const { showToast } = useToast();
+
   const [deliveries, setDeliveries] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [activeTab, setActiveTab] = useState<'delivery' | 'credit'>('delivery')
@@ -77,6 +19,10 @@ export default function DeliveryPage() {
   const [creditPayments, setCreditPayments] = useState<Record<string, PaymentRow[]>>({})
 
   const [isProcessing, setIsProcessing] = useState(false);
+
+  // --- 100k LOAD PROBLEM FIX (PAGINATION STATES) ---
+  const [loadLimit, setLoadLimit] = useState(100);
+  const [hasMore, setHasMore] = useState(true);
 
   useEffect(() => {
     fetchDeliveries();
@@ -91,21 +37,38 @@ export default function DeliveryPage() {
     return () => {
       supabase.removeChannel(deliveryChannel);
     };
-  }, [])
+  }, [loadLimit]) // Re-fetch when loadLimit increases
 
   async function fetchDeliveries() {
     setLoading(true);
-    const { data, error } = await supabase
+    
+    // 1. Fetch ALL Unpaid/Pending Debts unconditionally (So we never lose track of money owed)
+    const { data: pendingData, error: pendingErr } = await supabase
       .from('invoice_summaries')
       .select('*')
       .not('customer_name', 'ilike', '%Walk-in%')
+      .eq('is_done', false)
       .order('created_at', { ascending: false });
 
-    if (error) {
-      console.error(error);
-    } else if (data) {
-      // 🔥 FIX: Completely filter out Voided invoices so they disappear instantly!
-      setDeliveries(data.filter((d: any) => d.delivery_status !== 'Voided'));
+    // 2. Fetch Completed/Done Invoices using the Load Limit (100 at a time)
+    const { data: doneData, error: doneErr, count: doneCount } = await supabase
+      .from('invoice_summaries')
+      .select('*', { count: 'exact' })
+      .not('customer_name', 'ilike', '%Walk-in%')
+      .eq('is_done', true)
+      .order('created_at', { ascending: false })
+      .limit(loadLimit);
+
+    if (pendingErr || doneErr) {
+      showToast('error', 'Fetch Error', pendingErr?.message || doneErr?.message || 'Failed to fetch deliveries');
+    } else {
+      const combined = [...(pendingData || []), ...(doneData || [])];
+      
+      // Completely filter out Voided invoices so they disappear instantly!
+      setDeliveries(combined.filter((d: any) => d.delivery_status !== 'Voided'));
+      
+      // Determine if there are more completed invoices in the database to load
+      setHasMore(doneCount ? doneCount > loadLimit : false);
     }
     
     setLoading(false);
@@ -116,7 +79,7 @@ export default function DeliveryPage() {
     setDeliveries(prev => prev.map((d: any) => d.invoice_id === invoiceId ? { ...d, [field]: value } : d));
     const { error } = await supabase.from('invoice_summaries').update({ [field]: value }).eq('invoice_id', invoiceId);
     if (error) {
-      alert(`Error updating ${field}: ${error.message}`);
+      showToast('error', 'Update Failed', `Error updating ${field}: ${error.message}`);
       fetchDeliveries();
     }
   }
@@ -214,8 +177,10 @@ export default function DeliveryPage() {
         })
         .eq('invoice_id', d.invoice_id);
 
+      showToast('success', 'Payment Saved', 'Delivery payment logged successfully.');
+
     } catch (error: any) {
-      alert(`Error processing payment: ${error.message}`);
+      showToast('error', 'Payment Error', error.message);
       fetchDeliveries(); 
     } finally {
       setIsProcessing(false);
@@ -239,9 +204,10 @@ export default function DeliveryPage() {
       }).eq('invoice_id', d.invoice_id);
       if (updErr) throw updErr;
 
+      showToast('success', 'Undo Successful', 'Payment reversed and returned to pending.');
       fetchDeliveries();
     } catch (error: any) {
-      alert(`Error undoing payment: ${error.message}`);
+      showToast('error', 'Undo Failed', error.message);
     } finally {
       setIsProcessing(false);
     }
@@ -381,8 +347,10 @@ export default function DeliveryPage() {
         }).eq('invoice_id', u.invoice_id);
       }
 
+      showToast('success', 'Credit Settled', 'Account balance updated successfully.');
+
     } catch (error: any) {
-      alert(`Error settling account: ${error.message}`);
+      showToast('error', 'Settlement Error', error.message);
       fetchDeliveries();
     } finally {
       setIsProcessing(false);
@@ -451,7 +419,7 @@ export default function DeliveryPage() {
   });
 
   function sidebarContent() {
-    if (loading) {
+    if (loading && deliveries.length === 0) {
       return <div style={{ textAlign: 'center', padding: '40px', color: '#94a3b8', fontSize: '14px' }}>Loading records...</div>;
     }
     
@@ -586,6 +554,22 @@ export default function DeliveryPage() {
               </tbody>
             </table>
           </div>
+          
+          {/* LOAD MORE BUTTON */}
+          {hasMore && (
+            <div style={{ textAlign: 'center', padding: '20px', backgroundColor: '#f8fafc', borderTop: '1px solid #e2e8f0' }}>
+              <button 
+                onClick={() => setLoadLimit(prev => prev + 100)}
+                style={{
+                  padding: '10px 24px', backgroundColor: '#ffffff', border: '1px solid #cbd5e1', 
+                  borderRadius: '20px', color: '#475569', fontWeight: 'bold', fontSize: '13px', 
+                  cursor: 'pointer', boxShadow: '0 2px 4px rgba(0,0,0,0.02)'
+                }}
+              >
+                ⬇️ Load More Completed Invoices
+              </button>
+            </div>
+          )}
         </div>
       );
     }

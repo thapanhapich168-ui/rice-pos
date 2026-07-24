@@ -2,17 +2,12 @@
 
 import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabaseClient'
+import { Product } from '@/types'
+import { formatRiel } from '@/utils/formatters'
+import { CurrencyInput } from '@/components/Inputs'
+import { useToast } from '@/components/ToastProvider'
 
-// --- TYPES ---
-interface Product {
-  id: number
-  name: string
-  price: number
-  cost_price: number
-  weight: number
-  stock: number
-}
-
+// --- LOCAL TYPES ---
 interface MixHistory {
   id: string
   time: string
@@ -26,59 +21,9 @@ interface MixHistory {
   yieldStr: string
 }
 
-const formatRiel = (amount: number) => `${new Intl.NumberFormat('en-US').format(Math.round(amount))} ៛`;
-
-// ==========================================
-// ROBUST LIVE COMMA FORMATTER (No-Zoom Mobile Safe)
-// ==========================================
-function CurrencyInput({ value, onChange, placeholder, style, autoFocus }: any) {
-  const [inputValue, setInputValue] = useState('');
-
-  useEffect(() => {
-    if (value === '' || value === 0 || value === undefined) {
-      setInputValue('');
-    } else {
-      const parsed = parseFloat(inputValue.replace(/,/g, ''));
-      if (parsed !== Number(value)) {
-        setInputValue(new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 }).format(Number(value)));
-      }
-    }
-  }, [value]);
-
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    let raw = e.target.value.replace(/[^0-9.]/g, '');
-    const parts = raw.split('.');
-    if (parts.length > 2) raw = parts[0] + '.' + parts.slice(1).join('');
-
-    let formatted = parts[0] ? new Intl.NumberFormat('en-US').format(parseInt(parts[0], 10)) : '';
-    if (parts.length > 1) formatted += '.' + parts[1].substring(0, 2);
-    if (raw === '') formatted = '';
-
-    setInputValue(formatted);
-    const num = parseFloat(raw);
-    onChange(isNaN(num) ? '' : num);
-  };
-
-  return (
-    <input 
-      type="text"
-      inputMode="decimal"
-      placeholder={placeholder}
-      value={inputValue}
-      onChange={handleChange}
-      autoFocus={autoFocus}
-      style={{ 
-        ...style, 
-        color: '#0f172a', 
-        fontSize: '16px', // Prevents iOS Zoom
-        fontWeight: 'normal' 
-      }}
-      className="mobile-input-field"
-    />
-  )
-}
-
 export default function RiceMixCalculator() {
+  const { showToast } = useToast();
+
   const [products, setProducts] = useState<Product[]>([])
   
   // Selection States
@@ -228,17 +173,22 @@ export default function RiceMixCalculator() {
 
   const handleExecuteInventorySync = async () => {
     if (!calcResult || !rice1 || !rice2) return;
-    if (showThirdRice && !rice3) return alert('Please select the 3rd rice or remove it.');
+    if (showThirdRice && !rice3) {
+      showToast('error', 'Missing Information', 'Please select the 3rd rice or remove it.');
+      return;
+    }
     
     const qtyToDeduct1 = Number(rice1Qty) || 0;
     const qtyToDeduct2 = Number(rice2Qty) || 0;
     const qtyToDeduct3 = showThirdRice ? (Number(rice3Qty) || 0) : 0;
 
     if (syncMode === 'new' && (!newMixName || !newMixPrice)) {
-      return alert('Please enter a name and selling price for the new mix.');
+      showToast('error', 'Missing Information', 'Please enter a name and selling price for the new mix.');
+      return;
     }
     if (syncMode === 'existing' && !targetProductId) {
-      return alert('Please select an existing product to update.');
+      showToast('error', 'Missing Information', 'Please select an existing product to update.');
+      return;
     }
 
     setIsProcessing(true);
@@ -289,52 +239,49 @@ export default function RiceMixCalculator() {
       setHistory(updatedHistory)
       await supabase.from('app_settings').upsert({ setting_key: 'calculator_history', setting_value: updatedHistory }, { onConflict: 'setting_key' })
 
-      alert('Inventory successfully synced and updated!');
+      showToast('success', 'Sync Successful', 'Inventory successfully synced and updated!');
       handleReset();
       fetchProducts();
 
     } catch (err: any) {
-      alert(`Error syncing inventory: ${err.message}`);
+      showToast('error', 'Sync Failed', err.message);
     } finally {
       setIsProcessing(false);
     }
   }
 
-  // 🟢 REUSABLE DROPDOWN COMPONENT
+  // 🟢 REUSABLE DROPDOWN COMPONENT (Search bar removed from here)
   const renderDropdownMenu = (target: string) => {
     if (activeDropdown !== target) return null;
     return (
-      <div style={{ position: 'absolute', top: 'calc(100% + 4px)', left: 0, right: 0, backgroundColor: '#fff', border: '1px solid #cbd5e1', borderRadius: '8px', boxShadow: '0 10px 25px rgba(0,0,0,0.15)', zIndex: 101, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-        
-        {/* Search Bar */}
-        <div style={{ padding: '8px', borderBottom: '1px solid #e2e8f0' }}>
-          <input 
-            autoFocus 
-            type="text" 
-            placeholder="Search rice..." 
-            value={dropdownSearch} 
-            onChange={e => setDropdownSearch(e.target.value)} 
-            style={{ width: '100%', padding: '10px', border: '1px solid #cbd5e1', borderRadius: '6px', outline: 'none', fontSize: '14px', boxSizing: 'border-box' }} 
-            className="mobile-input-field" 
-          />
-        </div>
+      <div className="dropdown-menu-container">
         
         {/* Category Tabs */}
-        <div style={{ display: 'flex', borderBottom: '1px solid #e2e8f0', background: '#f8fafc' }}>
-          <button onClick={() => setDropdownTab('wholesale')} style={{ flex: 1, padding: '10px', fontWeight: 'bold', border: 'none', background: dropdownTab === 'wholesale' ? '#fff' : 'transparent', color: dropdownTab === 'wholesale' ? '#b58a3d' : '#64748b', borderBottom: dropdownTab === 'wholesale' ? '2px solid #b58a3d' : 'none', cursor: 'pointer', fontSize: '13px', transition: 'all 0.2s' }}>🌾 Wholesale</button>
-          <button onClick={() => setDropdownTab('retail')} style={{ flex: 1, padding: '10px', fontWeight: 'bold', border: 'none', background: dropdownTab === 'retail' ? '#fff' : 'transparent', color: dropdownTab === 'retail' ? '#b58a3d' : '#64748b', borderBottom: dropdownTab === 'retail' ? '2px solid #b58a3d' : 'none', cursor: 'pointer', fontSize: '13px', transition: 'all 0.2s' }}>🛍️ Retail</button>
+        <div className="dropdown-tab-container">
+          <button 
+            onClick={(e) => { e.stopPropagation(); setDropdownTab('wholesale'); }} 
+            className={`dropdown-tab-btn ${dropdownTab === 'wholesale' ? 'active' : 'inactive'}`}
+          >
+            🌾 Wholesale
+          </button>
+          <button 
+            onClick={(e) => { e.stopPropagation(); setDropdownTab('retail'); }} 
+            className={`dropdown-tab-btn ${dropdownTab === 'retail' ? 'active' : 'inactive'}`}
+          >
+            🛍️ Retail
+          </button>
         </div>
         
         {/* Scrollable Results */}
-        <div className="hide-scrollbar" style={{ maxHeight: '220px', overflowY: 'auto', padding: '8px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+        <div className="dropdown-results-container hide-scrollbar">
           {dropdownFilteredProducts.length === 0 ? (
             <div style={{ padding: '16px', textAlign: 'center', color: '#94a3b8', fontSize: '13px' }}>No products found</div>
           ) : (
             dropdownFilteredProducts.map(p => (
               <div 
                 key={p.id} 
-                onClick={() => handleSelectProduct(p, target)} 
-                style={{ padding: '12px', borderBottom: '1px solid #f1f5f9', cursor: 'pointer', borderRadius: '6px', transition: 'background 0.2s' }}
+                onClick={(e) => { e.stopPropagation(); handleSelectProduct(p, target); }} 
+                className="dropdown-result-item"
               >
                 <div style={{ fontWeight: 'bold', fontSize: '14px', color: '#1e293b', marginBottom: '4px' }}>{p.name}</div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: '#64748b' }}>
@@ -365,15 +312,27 @@ export default function RiceMixCalculator() {
             <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, zIndex: 99 }} onClick={() => setActiveDropdown(null)}></div>
           )}
 
-          {/* Trigger Box */}
-          <div 
-            onClick={() => { setActiveDropdown(target); setDropdownSearch(''); setDropdownTab('wholesale'); }}
-            style={{ width: '100%', padding: '12px 14px', borderRadius: '8px', border: activeDropdown === target ? '2px solid #b58a3d' : '1px solid #cbd5e1', cursor: 'pointer', backgroundColor: '#fff', fontSize: '15px', color: riceData ? '#1e293b' : '#94a3b8', display: 'flex', justifyContent: 'space-between', alignItems: 'center', position: 'relative', zIndex: activeDropdown === target ? 100 : 1 }}
-          >
-            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {riceData ? riceData.name : '🔍 Tap to Search...'}
-            </span>
-            <span>▼</span>
+          {/* Trigger Box - NOW ACTS AS THE SEARCH INPUT */}
+          <div style={{ position: 'relative', zIndex: activeDropdown === target ? 100 : 1 }}>
+            <input 
+              type="text"
+              placeholder="🔍 Search rice..."
+              value={activeDropdown === target ? dropdownSearch : (riceData ? riceData.name : '')}
+              onClick={() => {
+                if (activeDropdown !== target) {
+                  setActiveDropdown(target);
+                  setDropdownSearch('');
+                  setDropdownTab('wholesale');
+                }
+              }}
+              onChange={(e) => {
+                setActiveDropdown(target);
+                setDropdownSearch(e.target.value);
+              }}
+              className={`rice-card-trigger ${activeDropdown === target ? 'active' : 'inactive'} mobile-input-field`}
+              style={{ paddingRight: '30px' }}
+            />
+            <span style={{ position: 'absolute', right: '14px', top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: '#94a3b8', fontSize: '12px' }}>▼</span>
           </div>
 
           {/* Dropdown Menu */}
@@ -477,7 +436,7 @@ export default function RiceMixCalculator() {
 
           {/* INLINE INVENTORY SYNC FORM */}
           {syncMode !== 'none' && (
-            <div className="fade-in" style={{ background: '#f8fafc', padding: '20px', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
+            <div className="sync-form-container fade-in">
               <div style={{ fontSize: '14px', fontWeight: 'bold', color: '#1e293b', marginBottom: '16px' }}>
                 {syncMode === 'new' ? 'Create & Sync New Product' : 'Select Target to Sync & Overwrite'}
               </div>
@@ -485,18 +444,18 @@ export default function RiceMixCalculator() {
               {syncMode === 'new' ? (
                 <div style={{ display: 'flex', gap: '16px', marginBottom: '20px', flexWrap: 'wrap' }}>
                   <div style={{ flex: 1, minWidth: '200px' }}>
-                    <label style={{ display: 'block', fontSize: '12px', fontWeight: 'bold', color: '#475569', marginBottom: '6px', textTransform: 'uppercase' }}>New Product Name</label>
-                    <input type="text" placeholder={`e.g. Mix ${rice1?.name.split(' ')[0]}-${rice2?.name.split(' ')[0]}`} value={newMixName} onChange={e => setNewMixName(e.target.value)} style={{ width: '100%', padding: '12px', borderRadius: '8px', border: '1px solid #cbd5e1', boxSizing: 'border-box', fontSize: '16px', color: '#0f172a', outline: 'none' }} />
+                    <label className="sync-input-label">New Product Name</label>
+                    <input type="text" placeholder={`e.g. Mix ${rice1?.name.split(' ')[0]}-${rice2?.name.split(' ')[0]}`} value={newMixName} onChange={e => setNewMixName(e.target.value)} className="sync-input-field" />
                   </div>
                   <div style={{ flex: 1, minWidth: '150px' }}>
-                    <label style={{ display: 'block', fontSize: '12px', fontWeight: 'bold', color: '#475569', marginBottom: '6px', textTransform: 'uppercase' }}>Size Type</label>
-                    <select value={newMixType} onChange={(e: any) => setNewMixType(e.target.value)} style={{ width: '100%', padding: '12px', borderRadius: '8px', border: '1px solid #cbd5e1', boxSizing: 'border-box', fontSize: '16px', color: '#0f172a', outline: 'none', backgroundColor: '#fff', cursor: 'pointer' }}>
+                    <label className="sync-input-label">Size Type</label>
+                    <select value={newMixType} onChange={(e: any) => setNewMixType(e.target.value)} className="sync-input-field" style={{ cursor: 'pointer' }}>
                       <option value="wholesale">Wholesale (50kg Bag)</option>
                       <option value="retail">Retail (1kg)</option>
                     </select>
                   </div>
                   <div style={{ flex: 1, minWidth: '150px' }}>
-                    <label style={{ display: 'block', fontSize: '12px', fontWeight: 'bold', color: '#475569', marginBottom: '6px', textTransform: 'uppercase' }}>Selling Price (៛)</label>
+                    <label className="sync-input-label">Selling Price (៛)</label>
                     <CurrencyInput value={newMixPrice} onChange={(v: any) => setNewMixPrice(v)} style={{ width: '100%', padding: '12px', borderRadius: '8px', border: '1px solid #cbd5e1', boxSizing: 'border-box', color: '#0f172a' }} />
                   </div>
                 </div>
@@ -505,12 +464,27 @@ export default function RiceMixCalculator() {
                   {activeDropdown === 'target' && (
                     <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, zIndex: 99 }} onClick={() => setActiveDropdown(null)}></div>
                   )}
-                  <div 
-                    onClick={() => { setActiveDropdown('target'); setDropdownSearch(''); setDropdownTab('wholesale'); }}
-                    style={{ width: '100%', padding: '14px', borderRadius: '8px', border: activeDropdown === 'target' ? '2px solid #3b82f6' : '1px solid #3b82f6', cursor: 'pointer', backgroundColor: '#fff', fontSize: '15px', color: targetProd ? '#1e293b' : '#3b82f6', fontWeight: 'bold', display: 'flex', justifyContent: 'space-between', position: 'relative', zIndex: activeDropdown === 'target' ? 100 : 1 }}
-                  >
-                    <span>{targetProd ? `${targetProd.name} (Cost: ${formatRiel(targetProd.cost_price)})` : '🔍 Tap to Select Target Product...'}</span>
-                    <span>▼</span>
+                  {/* Target Trigger Box - NOW ACTS AS THE SEARCH INPUT */}
+                  <div style={{ position: 'relative', zIndex: activeDropdown === 'target' ? 100 : 1 }}>
+                    <input 
+                      type="text"
+                      placeholder="🔍 Search target product..."
+                      value={activeDropdown === 'target' ? dropdownSearch : (targetProd ? `${targetProd.name} (Cost: ${formatRiel(targetProd.cost_price)})` : '')}
+                      onClick={() => {
+                        if (activeDropdown !== 'target') {
+                          setActiveDropdown('target');
+                          setDropdownSearch('');
+                          setDropdownTab('wholesale');
+                        }
+                      }}
+                      onChange={(e) => {
+                        setActiveDropdown('target');
+                        setDropdownSearch(e.target.value);
+                      }}
+                      className={`rice-card-trigger ${activeDropdown === 'target' ? 'active-target' : 'inactive-target'} mobile-input-field`}
+                      style={{ color: targetProd ? '#1e293b' : '#3b82f6', fontWeight: 'bold', paddingRight: '30px' }}
+                    />
+                    <span style={{ position: 'absolute', right: '14px', top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: '#3b82f6', fontSize: '12px' }}>▼</span>
                   </div>
                   
                   {renderDropdownMenu('target')}
@@ -518,7 +492,7 @@ export default function RiceMixCalculator() {
               )}
 
               <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '24px' }}>
-                <button onClick={handleExecuteInventorySync} disabled={isProcessing} style={{ padding: '14px 24px', background: '#10b981', color: '#fff', border: 'none', borderRadius: '8px', cursor: (isProcessing) ? 'not-allowed' : 'pointer', fontWeight: 'bold', fontSize: '15px', boxShadow: '0 4px 6px rgba(16, 185, 129, 0.2)' }}>
+                <button onClick={handleExecuteInventorySync} disabled={isProcessing} className="sync-submit-btn">
                   {isProcessing ? 'Processing...' : `✅ Sync and Inject ${finalYield.toLocaleString('en-US', { maximumFractionDigits: 2 })} ${outputUnit}`}
                 </button>
               </div>
@@ -573,62 +547,91 @@ export default function RiceMixCalculator() {
 
       {/* --- GLOBAL CSS --- */}
       <style jsx global>{`
+        /* DE-INLINED CORE STYLES */
+        .dropdown-menu-container {
+          position: absolute; top: calc(100% + 4px); left: 0; right: 0; background-color: #fff;
+          border: 1px solid #cbd5e1; border-radius: 8px; box-shadow: 0 10px 25px rgba(0,0,0,0.15);
+          z-index: 101; overflow: hidden; display: flex; flex-direction: column;
+        }
+        .dropdown-tab-container {
+          display: flex; border-bottom: 1px solid #e2e8f0; background: #f8fafc;
+        }
+        .dropdown-tab-btn {
+          flex: 1; padding: 10px; font-weight: bold; border: none; background: transparent; 
+          cursor: pointer; font-size: 13px; transition: all 0.2s;
+        }
+        .dropdown-tab-btn.active {
+          background: #fff; color: #b58a3d; border-bottom: 2px solid #b58a3d;
+        }
+        .dropdown-tab-btn.inactive {
+          color: #64748b; border-bottom: none;
+        }
+        .dropdown-results-container {
+          max-height: 220px; overflow-y: auto; padding: 8px; display: flex; flex-direction: column; gap: 4px;
+        }
+        .dropdown-result-item {
+          padding: 12px; border-bottom: 1px solid #f1f5f9; cursor: pointer; border-radius: 6px; transition: background 0.2s;
+        }
+        .dropdown-result-item:hover {
+          background-color: #f8fafc;
+        }
+        
+        .rice-card-trigger {
+          width: 100%; padding: 12px 14px; border-radius: 8px; cursor: text; background-color: #fff; 
+          font-size: 15px; box-sizing: border-box; outline: none; color: #1e293b;
+        }
+        .rice-card-trigger.active { border: 2px solid #b58a3d; }
+        .rice-card-trigger.inactive { border: 1px solid #cbd5e1; }
+        .rice-card-trigger.active-target { border: 2px solid #3b82f6; }
+        .rice-card-trigger.inactive-target { border: 1px solid #3b82f6; }
+        
+        .sync-form-container {
+          background: #f8fafc; padding: 20px; border-radius: 12px; border: 1px solid #e2e8f0;
+        }
+        .sync-input-label {
+          display: block; font-size: 12px; font-weight: bold; color: #475569; margin-bottom: 6px; text-transform: uppercase;
+        }
+        .sync-input-field {
+          width: 100%; padding: 12px; border-radius: 8px; border: 1px solid #cbd5e1; box-sizing: border-box; 
+          font-size: 16px; color: #0f172a; outline: none; background-color: #fff;
+        }
+        .sync-submit-btn {
+          padding: 14px 24px; background: #10b981; color: #fff; border: none; border-radius: 8px; 
+          font-weight: bold; font-size: 15px; box-shadow: 0 4px 6px rgba(16, 185, 129, 0.2); transition: filter 0.2s;
+        }
+        .sync-submit-btn:disabled {
+          cursor: not-allowed; opacity: 0.7;
+        }
+        .sync-submit-btn:not(:disabled):hover {
+          cursor: pointer; filter: brightness(1.05);
+        }
+
+        /* ORIGINAL STYLES PRESERVED */
         input[type="text"].no-spinners::-webkit-inner-spin-button,
         input[type="text"].no-spinners::-webkit-outer-spin-button {
           -webkit-appearance: none;
           margin: 0;
         }
         
-        /* 🔥 DESKTOP LAYOUT FIXES (Aligned with other pages) */
         .main-wrapper {
           padding: max(20px, env(safe-area-inset-top, 20px)) 24px 24px 24px;
-          background: #f8fafc;
-          min-height: 100vh;
-          font-family: Arial, sans-serif;
-          color: #333;
-          box-sizing: border-box;
-          width: 100%;
+          background: #f8fafc; min-height: 100vh; font-family: Arial, sans-serif; color: #333; box-sizing: border-box; width: 100%;
         }
 
         .header-container {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          margin-bottom: 24px;
-          margin-top: 0;
-          margin-left: 60px; /* 🔥 Clears the burger menu icon for horizontal alignment */
-          gap: 12px;
-          min-height: 42px; 
-          width: calc(100% - 60px); /* 👈 FIX: Subtracts the 60px margin so it fits perfectly */
-          max-width: 1600px;
+          display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; margin-top: 0; margin-left: 60px; gap: 12px; min-height: 42px; width: calc(100% - 60px); max-width: 1600px;
         }
         
         .header-left {
-          display: flex;
-          align-items: center; 
-          gap: 12px;
+          display: flex; align-items: center; gap: 12px;
         }
 
         .page-title {
-          font-size: 24px !important;
-          font-weight: bold;
-          color: #4a3b1b !important;
-          margin: 0 !important;
-          letter-spacing: -0.5px;
-          line-height: normal !important; 
-          display: flex;
-          align-items: center;
-          min-width: 0;
-          white-space: nowrap !important;
+          font-size: 24px !important; font-weight: bold; color: #4a3b1b !important; margin: 0 !important; letter-spacing: -0.5px; line-height: normal !important; display: flex; align-items: center; min-width: 0; white-space: nowrap !important;
         }
 
         .action-btn {
-          padding: 10px 16px;
-          border-radius: 8px;
-          font-weight: bold;
-          font-size: 13px;
-          cursor: pointer;
-          transition: background 0.2s;
+          padding: 10px 16px; border-radius: 8px; font-weight: bold; font-size: 13px; cursor: pointer; transition: background 0.2s;
         }
         .fade-in {
           animation: fadeIn 0.3s ease-in-out;
@@ -638,113 +641,28 @@ export default function RiceMixCalculator() {
           to { opacity: 1; transform: translateY(0); }
         }
 
-        .calculator-grid {
-          display: flex;
-          align-items: flex-start;
-          gap: 20px;
-          flex-wrap: wrap;
-        }
-        .math-symbol {
-          font-size: 32px;
-          font-weight: bold;
-          color: #cbd5e1;
-          margin-top: 40px;
-        }
-        .calc-card {
-          flex: 1;
-          min-width: 250px;
-          background: #fff;
-          padding: 24px;
-          border-radius: 12px;
-          border: 1px solid #e2e8f0;
-          box-shadow: 0 4px 6px rgba(0,0,0,0.02);
-        }
-        .card-header {
-          margin: 0 0 16px 0;
-          font-size: 16px;
-          color: #475569;
-          text-transform: uppercase;
-          font-weight: bold;
-        }
-        .input-group label {
-          display: block;
-          font-size: 12px;
-          font-weight: bold;
-          color: #64748b;
-          margin-bottom: 6px;
-          text-transform: uppercase;
-        }
+        .calculator-grid { display: flex; align-items: flex-start; gap: 20px; flex-wrap: wrap; }
+        .math-symbol { font-size: 32px; font-weight: bold; color: #cbd5e1; margin-top: 40px; }
+        .calc-card { flex: 1; min-width: 250px; background: #fff; padding: 24px; border-radius: 12px; border: 1px solid #e2e8f0; box-shadow: 0 4px 6px rgba(0,0,0,0.02); }
+        .card-header { margin: 0 0 16px 0; font-size: 16px; color: #475569; text-transform: uppercase; font-weight: bold; }
+        .input-group label { display: block; font-size: 12px; font-weight: bold; color: #64748b; margin-bottom: 6px; text-transform: uppercase; }
         
-        .price-display {
-          margin-top: 16px;
-          padding: 16px;
-          background: #fefcf3;
-          border: 1px solid #eadeca;
-          border-radius: 8px;
-        }
-        .price-display .label {
-          display: block;
-          font-size: 11px;
-          color: #8a7650;
-          text-transform: uppercase;
-          font-weight: bold;
-          margin-bottom: 4px;
-        }
-        .price-display .value {
-          font-size: 18px;
-          color: #b58a3d;
-          font-weight: bold;
-        }
+        .price-display { margin-top: 16px; padding: 16px; background: #fefcf3; border: 1px solid #eadeca; border-radius: 8px; }
+        .price-display .label { display: block; font-size: 11px; color: #8a7650; text-transform: uppercase; font-weight: bold; margin-bottom: 4px; }
+        .price-display .value { font-size: 18px; color: #b58a3d; font-weight: bold; }
 
-        .result-panel {
-          background: #fff;
-          padding: 24px;
-          border-radius: 12px;
-          border: 2px solid #bbf7d0;
-          margin-bottom: 30px;
-          box-shadow: 0 4px 6px rgba(0,0,0,0.02);
-        }
-        .result-stats {
-          display: flex;
-          gap: 20px;
-          flex-wrap: wrap;
-        }
-        .stat-box {
-          flex: 1;
-          min-width: 200px;
-          padding: 16px 24px;
-          background: #f8fafc;
-          border-radius: 8px;
-          border: 1px solid #e2e8f0;
-        }
-        .stat-box.highlight {
-          background: #fefcf3;
-          border-color: #fde047;
-        }
-        .stat-box .label {
-          display: block;
-          font-size: 12px;
-          color: #64748b;
-          margin-bottom: 6px;
-          text-transform: uppercase;
-          font-weight: bold;
-        }
-        .stat-box .value {
-          display: block;
-          font-size: 24px;
-          color: #1e293b;
-          font-weight: bold;
-        }
+        .result-panel { background: #fff; padding: 24px; border-radius: 12px; border: 2px solid #bbf7d0; margin-bottom: 30px; box-shadow: 0 4px 6px rgba(0,0,0,0.02); }
+        .result-stats { display: flex; gap: 20px; flex-wrap: wrap; }
+        .stat-box { flex: 1; min-width: 200px; padding: 16px 24px; background: #f8fafc; border-radius: 8px; border: 1px solid #e2e8f0; }
+        .stat-box.highlight { background: #fefcf3; border-color: #fde047; }
+        .stat-box .label { display: block; font-size: 12px; color: #64748b; margin-bottom: 6px; text-transform: uppercase; font-weight: bold; }
+        .stat-box .value { display: block; font-size: 24px; color: #1e293b; font-weight: bold; }
         .text-gold { color: #b58a3d !important; }
-
-        .history-section {
-          margin-top: 40px;
-        }
+        .history-section { margin-top: 40px; }
 
         .hide-scrollbar::-webkit-scrollbar { display: none; }
         .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
 
-        /* 🔥 MOBILE OVERRIDES */
         @media (max-width: 1023px) {
           .main-wrapper {
             /* Pulls the page up */

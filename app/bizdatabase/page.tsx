@@ -3,17 +3,9 @@
 import { useState, useEffect, useRef } from 'react'
 import { supabase } from '@/lib/supabaseClient'
 import { useFocusRefresh } from '@/lib/useFocusRefresh'
-
-// --- CONSTANTS & FORMATTERS ---
-const EXCHANGE_RATE = 4000;
-
-const formatRiel = (v: number) => {
-  return `${new Intl.NumberFormat('en-US').format(Math.round(v))} ៛`;
-};
-
-const formatNumber = (v: number) => {
-  return new Intl.NumberFormat('en-US').format(v);
-};
+import { formatRiel, formatNumber, EXCHANGE_RATE } from '@/utils/formatters'
+import { CurrencyInput } from '@/components/Inputs'
+import { useToast } from '@/components/ToastProvider'
 
 // Formats 'total_sales' into 'Total Sales', 'qty' to 'Quantity'
 const formatHeader = (key: string) => {
@@ -31,57 +23,6 @@ const toLocalDatetimeString = (dateStr: string) => {
   if (isNaN(d.getTime())) return '';
   const pad = (n: number) => n.toString().padStart(2, '0');
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
-
-// ==========================================
-// ROBUST LIVE COMMA FORMATTER 
-// ==========================================
-function CurrencyInput({ value, onChange, placeholder, style, autoFocus, onEnter }: any) {
-  const [inputValue, setInputValue] = useState('');
-
-  useEffect(() => {
-    if (value === '' || value === undefined || value === null) {
-      setInputValue('');
-    } else {
-      const parsed = parseFloat(inputValue.replace(/,/g, ''));
-      if (parsed !== value) {
-        setInputValue(new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 }).format(value));
-      }
-    }
-  }, [value]);
-
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    let raw = e.target.value.replace(/[^0-9.]/g, '');
-    const parts = raw.split('.');
-    if (parts.length > 2) raw = parts[0] + '.' + parts.slice(1).join('');
-
-    let formatted = parts[0] ? new Intl.NumberFormat('en-US').format(parseInt(parts[0], 10)) : '';
-    if (parts.length > 1) formatted += '.' + parts[1].substring(0, 2);
-    if (raw === '') formatted = '';
-
-    setInputValue(formatted);
-    const num = parseFloat(raw);
-    onChange(isNaN(num) ? '' : num);
-  };
-
-  return (
-    <input 
-      type="text"
-      inputMode="decimal"
-      placeholder={placeholder}
-      value={inputValue}
-      onChange={handleChange}
-      autoFocus={autoFocus}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter') {
-          e.currentTarget.blur();
-          if (onEnter) onEnter();
-        }
-      }}
-      style={{ ...style, fontWeight: 'bold' }}
-      className="cell-input no-spinners"
-    />
-  )
 }
 
 // --- UNIFIED TRANSACTION TYPE ---
@@ -106,23 +47,10 @@ type TimeFilter = 'Today' | 'This Week' | 'This Month' | 'All Time';
 
 // Standardized initial widths for all possible columns
 const DEFAULT_WIDTHS: Record<string, number> = {
-  invoice_id: 140,
-  transaction_id: 140,
-  created_at: 180,
-  customer_name: 160,
-  owner: 100,
-  rice_types: 250,
-  rice_type: 180,
-  qty: 100,
-  price_per_bag: 130,
-  cogs_price: 130,
-  total_sales: 140,
-  total_cogs: 140,
-  total_profit: 140,
-  description: 200,
-  amount: 140,
-  category: 140,
-  status: 120
+  invoice_id: 140, transaction_id: 140, created_at: 180, customer_name: 160, owner: 100,
+  rice_types: 250, rice_type: 180, qty: 100, price_per_bag: 130, cogs_price: 130,
+  total_sales: 140, total_cogs: 140, total_profit: 140, description: 200, amount: 140,
+  category: 140, status: 120
 }
 
 const DEFAULT_SUMMARY_COLS = ['invoice_id', 'created_at', 'customer_name', 'owner', 'rice_types', 'total_sales', 'total_cogs', 'total_profit'];
@@ -131,6 +59,8 @@ const DEFAULT_RETAIL_COLS = ['transaction_id', 'created_at', 'rice_type', 'qty',
 const DEFAULT_EXPENSE_COLS = ['created_at', 'description', 'amount', 'category', 'status', 'owner'];
 
 export default function BizDatabase() {
+  const { showToast } = useToast();
+
   // --- CORE STATE ---
   const [transactions, setTransactions] = useState<UnifiedTransaction[]>([])
   const [activeTab, setActiveTab] = useState<TabType>('Wholesale Invoice Summary')
@@ -470,31 +400,28 @@ export default function BizDatabase() {
       }
 
       // 2. HARD DELETE WITH FOREIGN KEY SAFETY
-      // Combine all invoice IDs that need to be scrubbed of payments to prevent blocking
       const allInvoicesToDelete = new Set([...Array.from(invoiceIdsToCascade), ...Array.from(summaryIdsToCascade)]);
       
-      // A. Delete dependent payments first
       if (allInvoicesToDelete.size > 0) {
         await supabase.from('invoice_payments').delete().in('invoice_id', Array.from(allInvoicesToDelete));
       }
 
-      // B. Delete children sales & expenses
       if (dailyIds.length > 0) await supabase.from('sales').delete().in('id', dailyIds);
       if (retIds.length > 0) await supabase.from('retail_sales').delete().in('id', retIds);
       if (bizExpIds.length > 0) await supabase.from('expenses').delete().in('id', bizExpIds);
       if (persExpIds.length > 0) await supabase.from('personal_expenses').delete().in('id', persExpIds);
       if (staffDebtIds.length > 0) await supabase.from('staff_debt').delete().in('id', staffDebtIds);
       
-      // C. Delete parent summaries safely
       if (sumIds.length > 0) await supabase.from('invoice_summaries').delete().in('id', sumIds);
       if (summaryIdsToCascade.size > 0) {
         await supabase.from('invoice_summaries').delete().in('invoice_id', Array.from(summaryIdsToCascade));
       }
       
       setSelectedToDelete(new Set());
+      showToast('success', 'Deleted Successfully', 'Records and inventory restored.');
       fetchData(true);
     } catch (e: any) {
-      alert(`Error deleting records: ${e.message}`);
+      showToast('error', 'Deletion Failed', e.message);
       fetchData(true);
     }
   }
@@ -582,14 +509,15 @@ export default function BizDatabase() {
     if (Object.keys(dbPayload).length > 0) {
       const { error } = await supabase.from(targetTable).update(dbPayload).eq('id', baseTx.raw_db_id);
       if (error) {
-        alert(`Error saving to database: ${error.message}`);
+        showToast('error', 'Save Failed', error.message);
         return;
       }
     }
 
     setEdits(prev => { const n = { ...prev }; delete n[id]; return n });
     setEditingCell(null);
-    fetchData(true); // Silent refresh
+    showToast('success', 'Saved', 'Record updated successfully.');
+    fetchData(true); 
   }
 
   // --- TIME FILTER LOGIC ---
@@ -741,19 +669,9 @@ export default function BizDatabase() {
 
   const Resizer = ({ columnKey }: { columnKey: string }) => (
     <div
+      className="resizer-handle"
       onMouseDown={(e) => handleResizeStart(e, columnKey)}
       onTouchStart={(e) => handleResizeStart(e, columnKey)}
-      style={{ 
-        position: 'absolute', 
-        right: 0, 
-        top: 0, 
-        bottom: 0, 
-        width: '14px', 
-        cursor: 'col-resize', 
-        background: 'transparent', 
-        zIndex: 10, 
-        transform: 'translateX(50%)' 
-      }}
     />
   )
 
@@ -767,7 +685,7 @@ export default function BizDatabase() {
         </div>
         <div className="header-actions">
           {selectedToDelete.size > 0 && (
-            <button onClick={handleDelete} style={{ background: '#ef4444', color: '#fff', padding: '10px 16px', borderRadius: '6px', border: 'none', fontWeight: 'bold', cursor: 'pointer', marginRight: '12px' }}>
+            <button onClick={handleDelete} className="delete-btn">
               🗑️ Delete ({selectedToDelete.size})
             </button>
           )}
@@ -806,10 +724,10 @@ export default function BizDatabase() {
         </div>
 
         {/* BOTTOM ROW: FILTERS & SEARCH */}
-        <div style={{ display: 'flex', width: '100%', gap: '12px', flexWrap: 'wrap', alignItems: 'center' }}>
+        <div className="toolbar-bottom-row">
           
           {/* TIME PRE-FILTERS */}
-          <div style={{ display: 'flex', background: '#f1f5f9', padding: '4px', borderRadius: '8px', gap: '4px' }}>
+          <div className="time-filters-wrapper">
             <button className={timeFilter === 'Today' ? 'time-btn active' : 'time-btn'} onClick={() => setTimeFilter('Today')}>Today</button>
             <button className={timeFilter === 'This Week' ? 'time-btn active' : 'time-btn'} onClick={() => setTimeFilter('This Week')}>This Week</button>
             <button className={timeFilter === 'This Month' ? 'time-btn active' : 'time-btn'} onClick={() => setTimeFilter('This Month')}>This Month</button>
@@ -827,50 +745,38 @@ export default function BizDatabase() {
       </div>
 
       {/* RECORD COUNT BADGE */}
-      <div style={{ marginBottom: '12px', color: '#64748b', fontSize: '13px', fontWeight: 'bold' }}>
+      <div className="record-count-badge">
         Showing {processedTransactions.length} records for {timeFilter}
       </div>
 
       {/* MAIN SPREADSHEET */}
       <div className="table-wrapper">
-        <table style={{ borderCollapse: 'collapse', tableLayout: 'fixed', width: 'max-content', minWidth: '100%' }}>
+        <table className="biz-table">
           <thead>
-            <tr style={{ background: '#f8fafc', borderBottom: '2px solid #e2e8f0' }}>
-              
-              <th style={{ width: '50px', padding: '14px 12px', textAlign: 'center', borderRight: '1px solid #f1f5f9' }}>
+            <tr className="biz-thead-tr">
+              <th className="biz-th-checkbox">
                 <input 
                   type="checkbox" 
+                  className="biz-checkbox"
                   checked={selectedToDelete.size === processedTransactions.length && processedTransactions.length > 0} 
                   onChange={toggleSelectAll} 
-                  style={{ width: '18px', height: '18px', cursor: 'pointer', accentColor: '#b58a3d' }} 
                 />
               </th>
 
               {activeColumns.map(key => (
                 <th 
                   key={key} 
+                  className="biz-th"
                   draggable 
                   onDragStart={(e) => handleDragStart(e, key)}
                   onDragOver={handleDragOver}
                   onDrop={(e) => handleDrop(e, key)}
                   onClick={() => handleSort(key)}
-                  style={{ 
-                    width: columnWidths[key] || 150, 
-                    position: 'relative', 
-                    padding: '14px 12px', 
-                    textAlign: 'left', 
-                    color: '#475569', 
-                    fontSize: '13px', 
-                    textTransform: 'uppercase', 
-                    fontWeight: 'bold', 
-                    borderRight: '1px solid #f1f5f9', 
-                    cursor: 'pointer',
-                    userSelect: 'none'
-                  }}
+                  style={{ width: columnWidths[key] || 150 }}
                   title="Click to sort, Drag to reorder"
                 >
                   {formatHeader(key)}
-                  <span style={{ marginLeft: '6px', fontSize: '12px', opacity: sortConfig?.key === key ? 1 : 0.3 }}>
+                  <span className="sort-icon" style={{ opacity: sortConfig?.key === key ? 1 : 0.3 }}>
                     {sortConfig?.key === key ? (sortConfig.direction === 'asc' ? '↑' : '↓') : '↕'}
                   </span>
                   <Resizer columnKey={key} />
@@ -880,377 +786,201 @@ export default function BizDatabase() {
           </thead>
           <tbody>
             {isLoading && transactions.length === 0 ? (
-              <tr>
-                <td colSpan={activeColumns.length + 1} style={{ padding: '40px', textAlign: 'center', color: '#94a3b8' }}>
-                  Loading database...
-                </td>
-              </tr>
+              <tr><td colSpan={activeColumns.length + 1} className="empty-table-cell">Loading database...</td></tr>
             ) : processedTransactions.length === 0 ? (
-              <tr>
-                <td colSpan={activeColumns.length + 1} style={{ padding: '40px', textAlign: 'center', color: '#94a3b8' }}>
-                  No records match your view.
-                </td>
-              </tr>
+              <tr><td colSpan={activeColumns.length + 1} className="empty-table-cell">No records match your view.</td></tr>
             ) : (
-              processedTransactions.map(t => (
-                <tr key={t.id} style={{ borderBottom: '1px solid #f1f5f9', transition: 'background 0.2s', background: edits[t.id] ? '#fefcf3' : (selectedToDelete.has(t.id) ? '#eff6ff' : 'transparent') }} onMouseEnter={e => { if(!edits[t.id] && !selectedToDelete.has(t.id)) e.currentTarget.style.backgroundColor = '#f8fafc' }} onMouseLeave={e => { if(!edits[t.id] && !selectedToDelete.has(t.id)) e.currentTarget.style.backgroundColor = 'transparent' }}>
-                  
-                  <td style={{ textAlign: 'center', borderRight: '1px solid #f1f5f9', padding: '14px 12px' }}>
-                    <input 
-                      type="checkbox" 
-                      checked={selectedToDelete.has(t.id)} 
-                      onChange={() => toggleSelect(t.id)} 
-                      style={{ width: '18px', height: '18px', cursor: 'pointer', accentColor: '#b58a3d' }} 
-                    />
-                  </td>
+              processedTransactions.map(t => {
+                const isRowSelected = selectedToDelete.has(t.id);
+                const isRowEditing = edits[t.id] ? true : false;
+                
+                return (
+                  <tr key={t.id} className={`biz-tr ${isRowSelected ? 'selected' : ''} ${isRowEditing ? 'editing' : ''}`}>
+                    <td className="biz-td-checkbox">
+                      <input 
+                        type="checkbox" 
+                        className="biz-checkbox"
+                        checked={isRowSelected} 
+                        onChange={() => toggleSelect(t.id)} 
+                      />
+                    </td>
 
-                  {activeColumns.map(col => {
-                    
-                    const isEditing = editingCell?.id === t.id && editingCell?.col === col;
-                    const val = edits[t.id]?.[col] ?? t[col] ?? '';
+                    {activeColumns.map(col => {
+                      const isEditing = editingCell?.id === t.id && editingCell?.col === col;
+                      const val = edits[t.id]?.[col] ?? t[col] ?? '';
 
-                    // Customer Name & Owner are un-editable on child tabs (must edit on invoice summary)
-                    const isParentFieldOnChild = (t.source === 'Walk-in Wholesale' || t.source === 'Non-Walk-in Wholesale') && ['customer_name', 'owner'].includes(col);
-                    const isUneditable = ['created_at', 'invoice_id', 'transaction_id'].includes(col) || isParentFieldOnChild;
+                      const isParentFieldOnChild = (t.source === 'Walk-in Wholesale' || t.source === 'Non-Walk-in Wholesale') && ['customer_name', 'owner'].includes(col);
+                      const isUneditable = ['created_at', 'invoice_id', 'transaction_id'].includes(col) || isParentFieldOnChild;
 
-                    return (
-                      <td 
-                        key={col} 
-                        className={isEditing ? 'cell-editing' : ''}
-                        onClick={() => { if (!isUneditable) setEditingCell({ id: t.id, col: col }) }}
-                        style={{ 
-                          padding: 0, 
-                          borderRight: '1px solid #f1f5f9', 
-                          overflow: 'hidden', 
-                          whiteSpace: 'nowrap', 
-                          textOverflow: 'ellipsis', 
-                          fontSize: '14px', 
-                          color: '#334155',
-                          position: 'relative'
-                        }}
-                      >
-                        {isEditing ? (
-                          // 🔥 RENDER INPUT FIELD WHEN EDITING
-                          ['price_per_bag', 'cogs_price', 'total_sales', 'total_cogs', 'total_profit', 'amount'].includes(col) ? (
-                            <CurrencyInput 
-                              autoFocus 
-                              value={val} 
-                              onChange={(v: any) => setEdits(prev => ({ ...prev, [t.id]: { ...(prev[t.id] || {}), [col]: v } }))} 
-                              onEnter={() => handleSaveRecord(t.id)}
-                            />
-                          ) : col === 'created_at' ? (
-                            <input 
-                              autoFocus
-                              type="datetime-local"
-                              className="cell-input"
-                              value={toLocalDatetimeString(val)}
-                              onChange={(e) => {
-                                const dateObj = new Date(e.target.value);
-                                if (!isNaN(dateObj.getTime())) {
-                                  setEdits(prev => ({ ...prev, [t.id]: { ...(prev[t.id] || {}), [col]: dateObj.toISOString() } }));
-                                }
-                              }}
-                              onBlur={() => handleSaveRecord(t.id)}
-                              onKeyDown={(e) => { 
-                                if (e.key === 'Enter') { e.currentTarget.blur(); handleSaveRecord(t.id); } 
-                                if (e.key === 'Escape') { 
-                                  setEdits(prev => { const n = { ...prev }; delete n[t.id]; return n }); 
-                                  setEditingCell(null); 
-                                } 
-                              }}
-                            />
+                      return (
+                        <td 
+                          key={col} 
+                          className={`biz-td ${isEditing ? 'cell-editing' : ''}`}
+                          onClick={() => { if (!isUneditable) setEditingCell({ id: t.id, col: col }) }}
+                        >
+                          {isEditing ? (
+                            ['price_per_bag', 'cogs_price', 'total_sales', 'total_cogs', 'total_profit', 'amount'].includes(col) ? (
+                              <CurrencyInput 
+                                autoFocus 
+                                value={val} 
+                                onChange={(v: any) => setEdits(prev => ({ ...prev, [t.id]: { ...(prev[t.id] || {}), [col]: v } }))} 
+                                onEnter={() => handleSaveRecord(t.id)}
+                              />
+                            ) : col === 'created_at' ? (
+                              <input 
+                                autoFocus
+                                type="datetime-local"
+                                className="cell-input"
+                                value={toLocalDatetimeString(val)}
+                                onChange={(e) => {
+                                  const dateObj = new Date(e.target.value);
+                                  if (!isNaN(dateObj.getTime())) {
+                                    setEdits(prev => ({ ...prev, [t.id]: { ...(prev[t.id] || {}), [col]: dateObj.toISOString() } }));
+                                  }
+                                }}
+                                onBlur={() => handleSaveRecord(t.id)}
+                                onKeyDown={(e) => { 
+                                  if (e.key === 'Enter') { e.currentTarget.blur(); handleSaveRecord(t.id); } 
+                                  if (e.key === 'Escape') { 
+                                    setEdits(prev => { const n = { ...prev }; delete n[t.id]; return n }); 
+                                    setEditingCell(null); 
+                                  } 
+                                }}
+                              />
+                            ) : (
+                              <input 
+                                autoFocus 
+                                type={col === 'qty' ? 'number' : 'text'} 
+                                className="cell-input no-spinners" 
+                                value={val} 
+                                onChange={(e) => {
+                                  const newVal = e.target.type === 'number' ? (e.target.value === '' ? '' : Number(e.target.value)) : e.target.value;
+                                  setEdits(prev => ({ ...prev, [t.id]: { ...(prev[t.id] || {}), [col]: newVal } }))
+                                }} 
+                                onBlur={() => handleSaveRecord(t.id)} 
+                                onKeyDown={(e) => { 
+                                  if (e.key === 'Enter') { e.currentTarget.blur(); handleSaveRecord(t.id); } 
+                                  if (e.key === 'Escape') { 
+                                    setEdits(prev => { const n = { ...prev }; delete n[t.id]; return n }); 
+                                    setEditingCell(null); 
+                                  } 
+                                }} 
+                              />
+                            )
                           ) : (
-                            <input 
-                              autoFocus 
-                              type={col === 'qty' ? 'number' : 'text'} 
-                              className="cell-input no-spinners" 
-                              value={val} 
-                              onChange={(e) => {
-                                const newVal = e.target.type === 'number' ? (e.target.value === '' ? '' : Number(e.target.value)) : e.target.value;
-                                setEdits(prev => ({ ...prev, [t.id]: { ...(prev[t.id] || {}), [col]: newVal } }))
-                              }} 
-                              onBlur={() => handleSaveRecord(t.id)} 
-                              onKeyDown={(e) => { 
-                                if (e.key === 'Enter') { e.currentTarget.blur(); handleSaveRecord(t.id); } 
-                                if (e.key === 'Escape') { 
-                                  setEdits(prev => { const n = { ...prev }; delete n[t.id]; return n }); 
-                                  setEditingCell(null); 
-                                } 
-                              }} 
-                            />
-                          )
-                        ) : (
-                          // 🔥 NORMAL DISPLAY (Not Editing)
-                          <div className="cell-display" style={{ cursor: isUneditable ? 'default' : 'text' }}>
-                            {/* TEXT FIELDS */}
-                            {['invoice_id', 'transaction_id', 'customer_name', 'rice_types', 'rice_type', 'description'].includes(col) && (
-                              <span style={{ fontWeight: ['invoice_id', 'transaction_id'].includes(col) ? 'bold' : 'normal', color: ['invoice_id', 'transaction_id'].includes(col) ? '#1e293b' : 'inherit' }}>
-                                {val || '-'}
-                              </span>
-                            )}
-                            
-                            {/* CAPS & BADGES */}
-                            {col === 'owner' && <span style={{ textTransform: 'capitalize', fontWeight: 'bold', color: '#64748b' }}>{val || '-'}</span>}
-                            {col === 'category' && <span style={{ textTransform: 'capitalize', color: '#475569' }}>{val || '-'}</span>}
-                            {col === 'status' && <span style={{ color: '#64748b', fontStyle: 'italic' }}>{val || '-'}</span>}
-                            
-                            {/* NUMBERS & DATES */}
-                            {col === 'created_at' && formatDate(t.created_at)}
-                            {col === 'qty' && formatNumber(val || 0)}
+                            <div className="cell-display" style={{ cursor: isUneditable ? 'default' : 'text' }}>
+                              {['invoice_id', 'transaction_id', 'customer_name', 'rice_types', 'rice_type', 'description'].includes(col) && (
+                                <span style={{ fontWeight: ['invoice_id', 'transaction_id'].includes(col) ? 'bold' : 'normal', color: ['invoice_id', 'transaction_id'].includes(col) ? '#1e293b' : 'inherit' }}>
+                                  {val || '-'}
+                                </span>
+                              )}
+                              
+                              {col === 'owner' && <span className="badge-owner">{val || '-'}</span>}
+                              {col === 'category' && <span className="badge-category">{val || '-'}</span>}
+                              {col === 'status' && <span className="badge-status">{val || '-'}</span>}
+                              
+                              {col === 'created_at' && formatDate(t.created_at)}
+                              {col === 'qty' && formatNumber(val || 0)}
 
-                            {/* CURRENCY FIELDS */}
-                            {['price_per_bag', 'cogs_price', 'total_sales', 'total_cogs', 'total_profit', 'amount'].includes(col) && (
-                              <span style={{ 
-                                fontWeight: 'bold', 
-                                color: (col === 'total_profit' && val < 0) || col === 'total_cogs' || col === 'cogs_price' || col === 'amount' ? '#ef4444' : '#10b981' 
-                              }}>
-                                {formatRiel(val || 0)}
-                              </span>
-                            )}
-                          </div>
-                        )}
-                      </td>
-                    )
-                  })}
-                </tr>
-              ))
+                              {['price_per_bag', 'cogs_price', 'total_sales', 'total_cogs', 'total_profit', 'amount'].includes(col) && (
+                                <span style={{ 
+                                  fontWeight: 'bold', 
+                                  color: (col === 'total_profit' && val < 0) || col === 'total_cogs' || col === 'cogs_price' || col === 'amount' ? '#ef4444' : '#10b981' 
+                                }}>
+                                  {formatRiel(val || 0)}
+                                </span>
+                              )}
+                            </div>
+                          )}
+                        </td>
+                      )
+                    })}
+                  </tr>
+                )
+              })
             )}
           </tbody>
         </table>
       </div>
 
-      {/* --- GLOBAL CSS --- */}
+      {/* --- GLOBAL CSS EXCLUSIVELY DE-INLINED FROM ABOVE --- */}
       <style jsx global>{`
-        /* 🔥 DESKTOP/LAPTOP BASE STYLES */
-        .main-wrapper {
-          padding: max(20px, env(safe-area-inset-top, 20px)) 24px 24px 24px; 
-          background: #f8fafc;
-          min-height: 100vh;
-          font-family: Arial, sans-serif;
-          color: #333;
-          box-sizing: border-box;
-          width: 100%;
+        /* DE-INLINED CORE STYLES */
+        .toolbar-bottom-row {
+          display: flex; width: 100%; gap: 12px; flex-wrap: wrap; align-items: center;
         }
-
-        .header-container { 
-          display: flex;
-          justify-content: space-between;
-          align-items: center; 
-          margin-bottom: 24px; 
-          margin-top: 0;
-          margin-left: 60px; /* 🔥 Clears the burger menu icon for horizontal alignment */
-          gap: 12px;
-          height: 42px; /* 🔥 Strictly locked to match the hamburger perfectly */
-          width: calc(100% - 60px); /* 🔥 Ensures right elements don't push off-screen */
-          max-width: 1600px;
+        .time-filters-wrapper {
+          display: flex; background: #f1f5f9; padding: 4px; border-radius: 8px; gap: 4px;
         }
-
-        .header-left {
-          display: flex;
-          align-items: center; 
-          gap: 12px;
+        .record-count-badge {
+          margin-bottom: 12px; color: #64748b; font-size: 13px; font-weight: bold;
         }
-
-        .page-title { 
-          font-size: 24px !important; 
-          color: #4a3b1b !important; 
-          margin: 0 !important; 
-          font-weight: bold;
-          letter-spacing: -0.5px;
-          line-height: normal !important; 
-          display: flex;
-          align-items: center;
-          min-width: 0;
-          white-space: nowrap !important; 
+        .delete-btn {
+          background: #ef4444; color: #fff; padding: 10px 16px; border-radius: 6px; border: none; font-weight: bold; cursor: pointer; margin-right: 12px; transition: background 0.2s;
         }
-
-        .header-actions {
-          display: flex;
-          align-items: center;
-        }
+        .delete-btn:hover { background: #dc2626; }
         
-        .refresh-btn {
-          padding: 10px 16px;
-          background: #e2e8f0;
-          color: #475569;
-          border: none;
-          border-radius: 6px;
-          font-weight: bold;
-          cursor: pointer;
-          transition: background 0.2s;
-          white-space: nowrap;
-          margin: 0; /* Ensures no extra spacing shifts the header */
+        .biz-table { border-collapse: collapse; table-layout: fixed; width: max-content; min-width: 100%; }
+        .biz-thead-tr { background: #f8fafc; border-bottom: 2px solid #e2e8f0; }
+        .biz-th-checkbox { width: 50px; padding: 14px 12px; text-align: center; border-right: 1px solid #f1f5f9; }
+        .biz-checkbox { width: 18px; height: 18px; cursor: pointer; accent-color: #b58a3d; }
+        .biz-th {
+          position: relative; padding: 14px 12px; text-align: left; color: #475569; font-size: 13px; text-transform: uppercase; font-weight: bold; border-right: 1px solid #f1f5f9; cursor: pointer; user-select: none;
         }
+        .sort-icon { margin-left: 6px; font-size: 12px; }
+        .resizer-handle {
+          position: absolute; right: 0; top: 0; bottom: 0; width: 14px; cursor: col-resize; background: transparent; z-index: 10; transform: translateX(50%);
+        }
+        .empty-table-cell { padding: 40px; text-align: center; color: #94a3b8; }
+        
+        .biz-tr { border-bottom: 1px solid #f1f5f9; transition: background 0.2s; background: transparent; }
+        .biz-tr:hover { background-color: #f8fafc; }
+        .biz-tr.selected { background-color: #eff6ff !important; }
+        .biz-tr.editing { background-color: #fefcf3 !important; }
+        
+        .biz-td-checkbox { text-align: center; border-right: 1px solid #f1f5f9; padding: 14px 12px; }
+        .biz-td {
+          padding: 0; border-right: 1px solid #f1f5f9; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 14px; color: #334155; position: relative;
+        }
+
+        .badge-owner { text-transform: capitalize; font-weight: bold; color: #64748b; }
+        .badge-category { text-transform: capitalize; color: #475569; }
+        .badge-status { color: #64748b; font-style: italic; }
+
+        /* ORIGINAL STYLES PRESERVED */
+        .main-wrapper { padding: max(20px, env(safe-area-inset-top, 20px)) 24px 24px 24px; background: #f8fafc; min-height: 100vh; font-family: Arial, sans-serif; color: #333; box-sizing: border-box; width: 100%; }
+        .header-container { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; margin-top: 0; margin-left: 60px; gap: 12px; height: 42px; width: calc(100% - 60px); max-width: 1600px; }
+        .header-left { display: flex; align-items: center; gap: 12px; }
+        .page-title { font-size: 24px !important; color: #4a3b1b !important; margin: 0 !important; font-weight: bold; letter-spacing: -0.5px; line-height: normal !important; display: flex; align-items: center; min-width: 0; white-space: nowrap !important; }
+        .header-actions { display: flex; align-items: center; }
+        .refresh-btn { padding: 10px 16px; background: #e2e8f0; color: #475569; border: none; border-radius: 6px; font-weight: bold; cursor: pointer; transition: background 0.2s; white-space: nowrap; margin: 0; }
         .refresh-btn:hover { background: #cbd5e1; }
-        
-        .toolbar-container {
-          display: flex;
-          flex-direction: column;
-          gap: 12px;
-          margin-bottom: 20px;
-          background: #fff;
-          padding: 16px 20px;
-          border-radius: 12px;
-          border: 1px solid #e2e8f0;
-          box-shadow: 0 4px 6px rgba(0,0,0,0.02);
-        }
-        .toolbar-tabs {
-          display: flex;
-          gap: 8px;
-          flex-wrap: wrap;
-        }
-        .tab {
-          padding: 10px 16px;
-          border-radius: 6px;
-          border: none;
-          background: transparent;
-          font-weight: bold;
-          font-size: 14px;
-          color: #64748b;
-          cursor: pointer;
-          transition: all 0.2s;
-        }
-        .tab.active {
-          background: #10b981;
-          color: #fff;
-        }
-        
-        .time-btn {
-          padding: 8px 12px;
-          border-radius: 6px;
-          border: none;
-          background: transparent;
-          font-weight: bold;
-          font-size: 13px;
-          color: #64748b;
-          cursor: pointer;
-        }
-        .time-btn.active {
-          background: #fff;
-          color: #b58a3d;
-          box-shadow: 0 2px 4px rgba(0,0,0,0.05);
-        }
-
-        .toolbar-search {
-          padding: 10px 14px;
-          border: 1px solid #cbd5e1;
-          border-radius: 6px;
-          flex: 1;
-          outline: none;
-          min-width: 200px;
-          font-size: 16px; /* Prevents iOS Zoom */
-          color: #0f172a;
-          background-color: #ffffff;
-        }
-        
-        .table-wrapper {
-          background: #fff;
-          border: 1px solid #e2e8f0;
-          border-radius: 12px;
-          overflow-x: auto;
-          -webkit-overflow-scrolling: touch;
-          box-shadow: 0 4px 6px rgba(0,0,0,0.02);
-        }
-
-        /* 🔥 NEW INTERACTIVE CELL STYLES */
-        .cell-display {
-          padding: 14px 12px;
-          width: 100%;
-          height: 100%;
-          box-sizing: border-box;
-          display: flex;
-          align-items: center;
-          white-space: nowrap;
-          overflow: hidden;
-          text-overflow: ellipsis;
-        }
-        .cell-input {
-          width: 100%;
-          height: 100%;
-          padding: 14px 12px;
-          font-size: 14px;
-          border: none;
-          outline: 2px solid #b58a3d;
-          box-shadow: 0 0 5px rgba(181, 138, 61, 0.3);
-          background: #fff;
-          position: absolute;
-          top: 0;
-          left: 0;
-          z-index: 20;
-          box-sizing: border-box;
-          color: #0f172a;
-        }
-        .cell-editing {
-          z-index: 20;
-          position: relative;
-        }
-        input[type="number"].no-spinners::-webkit-inner-spin-button,
-        input[type="number"].no-spinners::-webkit-outer-spin-button {
-          -webkit-appearance: none; margin: 0;
-        }
+        .toolbar-container { display: flex; flex-direction: column; gap: 12px; margin-bottom: 20px; background: #fff; padding: 16px 20px; border-radius: 12px; border: 1px solid #e2e8f0; box-shadow: 0 4px 6px rgba(0,0,0,0.02); }
+        .toolbar-tabs { display: flex; gap: 8px; flex-wrap: wrap; }
+        .tab { padding: 10px 16px; border-radius: 6px; border: none; background: transparent; font-weight: bold; font-size: 14px; color: #64748b; cursor: pointer; transition: all 0.2s; }
+        .tab.active { background: #10b981; color: #fff; }
+        .time-btn { padding: 8px 12px; border-radius: 6px; border: none; background: transparent; font-weight: bold; font-size: 13px; color: #64748b; cursor: pointer; }
+        .time-btn.active { background: #fff; color: #b58a3d; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+        .toolbar-search { padding: 10px 14px; border: 1px solid #cbd5e1; border-radius: 6px; flex: 1; outline: none; min-width: 200px; font-size: 16px; color: #0f172a; background-color: #ffffff; }
+        .table-wrapper { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; overflow-x: auto; -webkit-overflow-scrolling: touch; box-shadow: 0 4px 6px rgba(0,0,0,0.02); }
+        .cell-display { padding: 14px 12px; width: 100%; height: 100%; box-sizing: border-box; display: flex; align-items: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .cell-input { width: 100%; height: 100%; padding: 14px 12px; font-size: 14px; border: none; outline: 2px solid #b58a3d; box-shadow: 0 0 5px rgba(181, 138, 61, 0.3); background: #fff; position: absolute; top: 0; left: 0; z-index: 20; box-sizing: border-box; color: #0f172a; }
+        .cell-editing { z-index: 20; position: relative; }
+        input[type="number"].no-spinners::-webkit-inner-spin-button, input[type="number"].no-spinners::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
         input[type="number"].no-spinners { -moz-appearance: textfield; }
-        
-        /* 📱 MOBILE OVERRIDES */
+
         @media (max-width: 1023px) {
-          .main-wrapper {
-            padding: max(20px, env(safe-area-inset-top, 20px)) 16px 16px 16px !important; 
-          }
-
-          .header-container { 
-            margin-left: 54px !important; /* Clears the mobile hamburger button safely */
-            margin-right: 0 !important;
-            margin-bottom: 24px !important; 
-            margin-top: 0 !important;
-            display: flex !important;
-            flex-direction: row !important;
-            justify-content: space-between !important;
-            align-items: center !important; 
-            height: 44px !important;
-            width: calc(100% - 54px) !important;
-          }
-
-          .header-left {
-            display: flex !important;
-            flex-direction: row !important;
-            align-items: center !important;
-            gap: 12px !important;
-          }
-
-          .page-title {
-            font-size: 21px !important; 
-            line-height: normal !important; 
-            white-space: nowrap !important; 
-          }
-
-          .header-actions {
-            display: flex;
-          }
-          .refresh-btn {
-            padding: 8px 12px !important;
-            font-size: 13px !important;
-          }
-          
-          .toolbar-container {
-            padding: 12px;
-          }
-          .toolbar-tabs {
-            gap: 4px;
-          }
-          .tab {
-            flex: 1 1 45%;
-            padding: 12px;
-            font-size: 13px;
-          }
-          .time-btn {
-            flex: 1;
-            padding: 10px 4px;
-            font-size: 12px;
-            text-align: center;
-          }
-          .toolbar-search {
-            width: 100%;
-            box-sizing: border-box;
-          }
+          .main-wrapper { padding: max(20px, env(safe-area-inset-top, 20px)) 16px 16px 16px !important; }
+          .header-container { margin-left: 54px !important; margin-right: 0 !important; margin-bottom: 24px !important; margin-top: 0 !important; display: flex !important; flex-direction: row !important; justify-content: space-between !important; align-items: center !important; height: 44px !important; width: calc(100% - 54px) !important; }
+          .header-left { display: flex !important; flex-direction: row !important; align-items: center !important; gap: 12px !important; }
+          .page-title { font-size: 21px !important; line-height: normal !important; white-space: nowrap !important; }
+          .header-actions { display: flex; }
+          .refresh-btn { padding: 8px 12px !important; font-size: 13px !important; }
+          .toolbar-container { padding: 12px; }
+          .toolbar-tabs { gap: 4px; }
+          .tab { flex: 1 1 45%; padding: 12px; font-size: 13px; }
+          .time-btn { flex: 1; padding: 10px 4px; font-size: 12px; text-align: center; }
+          .toolbar-search { width: 100%; box-sizing: border-box; }
         }
       `}</style>
     </div>

@@ -2,70 +2,13 @@
 
 import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabaseClient'
-
-const formatRiel = (amount: number) => `${new Intl.NumberFormat('en-US').format(Math.round(amount))} ៛`;
-const formatUSD = (amount: number) => `$${new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(amount)}`;
-const EXCHANGE_RATE = 4000;
-
-// ==========================================
-// ROBUST LIVE COMMA FORMATTER (Stateless Display)
-// ==========================================
-function CurrencyInput({ value, onChange, placeholder, style, autoFocus, onEnter }: any) {
-  const [inputValue, setInputValue] = useState('');
-
-  // Sync state when parent value changes externally
-  useEffect(() => {
-    if (value === '' || value === 0) {
-      setInputValue('');
-    } else {
-      const parsed = parseFloat(inputValue.replace(/,/g, ''));
-      if (parsed !== value) {
-        setInputValue(new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 }).format(value));
-      }
-    }
-  }, [value]);
-
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    let raw = e.target.value.replace(/[^0-9.]/g, '');
-    
-    const parts = raw.split('.');
-    if (parts.length > 2) raw = parts[0] + '.' + parts.slice(1).join('');
-
-    let formatted = parts[0] ? new Intl.NumberFormat('en-US').format(parseInt(parts[0], 10)) : '';
-    if (parts.length > 1) formatted += '.' + parts[1].substring(0, 2);
-    if (raw === '') formatted = '';
-
-    setInputValue(formatted);
-    const num = parseFloat(raw);
-    onChange(isNaN(num) ? '' : num);
-  };
-
-  return (
-    <input 
-      type="text"
-      inputMode="decimal"
-      placeholder={placeholder}
-      value={inputValue}
-      onChange={handleChange}
-      autoFocus={autoFocus}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter' && onEnter) {
-          onEnter();
-        }
-      }}
-      onBlur={() => {
-        setTimeout(() => {
-          window.scrollTo(0, 0);
-          document.body.scrollTop = 0;
-        }, 100);
-      }}
-      style={{ ...style, color: '#334155', fontWeight: 'normal' }}
-      className="mobile-input-field"
-    />
-  )
-}
+import { formatRiel, formatUSD, EXCHANGE_RATE } from '@/utils/formatters'
+import { CurrencyInput } from '@/components/Inputs'
+import { useToast } from '@/components/ToastProvider'
 
 export default function ExpenseDashboard() {
+  const { showToast } = useToast();
+
   // --- Active Tab State ---
   const [activeTab, setActiveTab] = useState<'personal' | 'business' | 'staff'>('personal')
 
@@ -74,9 +17,6 @@ export default function ExpenseDashboard() {
   const [spender, setSpender] = useState<'Pich' | 'Jing' | 'Both'>('Pich')
   const [remarks, setRemarks] = useState('')
   const [loading, setLoading] = useState(false)
-
-  // Top Notification Popup State
-  const [notification, setNotification] = useState<{show: boolean, message: string, type: 'success'|'error'}>({ show: false, message: '', type: 'success' })
 
   // Split Payment Tracking
   const [paymentRows, setPaymentRows] = useState<{id: number, method: string, amount: number | ''}[]>([
@@ -113,12 +53,6 @@ export default function ExpenseDashboard() {
     fetchStaff()
   }, [])
 
-  // Notification Helper
-  const showNotification = (message: string, type: 'success' | 'error' = 'success') => {
-    setNotification({ show: true, message, type });
-    setTimeout(() => setNotification({ show: false, message: '', type: 'success' }), 3000);
-  }
-
   // --- API: Fetch Staff ---
   async function fetchStaff() {
     const { data, error } = await supabase.from('staff').select('*').order('id', { ascending: true })
@@ -129,15 +63,20 @@ export default function ExpenseDashboard() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
 
-    if (!remarks) return alert('Please add remarks/item detail')
+    if (!remarks) {
+      showToast('error', 'Missing Info', 'Please add remarks/item detail');
+      return;
+    }
     
     const activePayments = paymentRows.filter(r => (Number(r.amount) || 0) > 0);
-    if (activePayments.length === 0) return alert('Please enter at least one payment amount.');
+    if (activePayments.length === 0) {
+      showToast('error', 'Missing Info', 'Please enter at least one payment amount.');
+      return;
+    }
 
     setLoading(true)
 
     try {
-      // 🚀 FIXED: Combine multiple split payments into ONE single record for the dashboard to parse properly
       let combinedMethod = activePayments[0].method;
       if (activePayments.length > 1) {
         combinedMethod = activePayments.map(r => `${r.method}:${r.amount}`).join(',');
@@ -167,12 +106,12 @@ export default function ExpenseDashboard() {
 
       if (error) throw error;
 
-      showNotification('Expense recorded successfully!', 'success');
+      showToast('success', 'Success', 'Expense recorded successfully!');
       setRemarks('')
       setPaymentRows([{ id: Date.now(), method: 'Cash ៛', amount: '' }]);
 
     } catch (err: any) {
-      showNotification(`Error saving entry: ${err.message}`, 'error');
+      showToast('error', 'Save Failed', `Error saving entry: ${err.message}`);
     } finally {
       setLoading(false)
     }
@@ -181,7 +120,10 @@ export default function ExpenseDashboard() {
   // --- Action: Add New Staff ---
   async function handleAddStaff(e: React.FormEvent) {
     e.preventDefault()
-    if (!newStaffName) return alert('Staff name is required')
+    if (!newStaffName) {
+      showToast('error', 'Validation Error', 'Staff name is required');
+      return;
+    }
 
     setLoading(true)
     const today = new Date();
@@ -199,8 +141,9 @@ export default function ExpenseDashboard() {
     setLoading(false)
 
     if (error) {
-      alert(`Error adding staff: ${error.message}`)
+      showToast('error', 'Error', `Error adding staff: ${error.message}`);
     } else {
+      showToast('success', 'Staff Added', `${newStaffName} has been registered.`);
       setNewStaffName('')
       setNewStaffSalary('')
       fetchStaff()
@@ -231,13 +174,13 @@ export default function ExpenseDashboard() {
 
     const { error: staffErr } = await supabase.from('staff').update({ total_debt_riel: newTotalRiel, total_debt_usd: newTotalUsd }).eq('id', staff.id)
     if (staffErr) {
-      alert(`Error updating debt: ${staffErr.message}`)
+      showToast('error', 'Update Failed', `Error updating debt: ${staffErr.message}`);
       fetchStaff() 
       return;
     }
 
     const { error: histErr } = await supabase.from('staff_debt_history').insert([{ staff_id: staff.id, amount: rawAmount, payment_method: method }])
-    if (histErr) alert(`Debt updated, but history log failed: ${histErr.message}`);
+    if (histErr) showToast('info', 'Warning', `Debt updated, but history log failed: ${histErr.message}`);
 
     await supabase.from('expenses').insert([{
       expense_date: new Date().toISOString().split('T')[0],
@@ -248,25 +191,35 @@ export default function ExpenseDashboard() {
       amount_riel: saveRiel,
       description: 'STAFF_ADVANCE' 
     }])
-    showNotification(`Advance added for ${staff.name}`, 'success');
+    showToast('success', 'Advance Added', `Advance added for ${staff.name}`);
   }
 
   // --- Action: Settle/Pay Back Debt ---
   async function handleSettleSubmit() {
     const staff = settleModal.staff;
     const rawAmount = Number(settleModal.amount);
-    if (!rawAmount || rawAmount <= 0) return alert('Enter a valid settlement amount.');
+    
+    if (!rawAmount || rawAmount <= 0) {
+      showToast('error', 'Invalid Amount', 'Enter a valid settlement amount.');
+      return;
+    }
     
     let saveRiel = 0, saveUsd = 0;
     let newTotalRiel = Number(staff.total_debt_riel || 0);
     let newTotalUsd = Number(staff.total_debt_usd || 0);
 
     if (settleModal.method.includes('$')) {
-      if (rawAmount > newTotalUsd) return alert("Cannot settle more USD than they owe.");
+      if (rawAmount > newTotalUsd) {
+        showToast('error', 'Overpayment', 'Cannot settle more USD than they owe.');
+        return;
+      }
       saveUsd = -Math.abs(rawAmount);
       newTotalUsd -= rawAmount;
     } else {
-      if (rawAmount > newTotalRiel) return alert("Cannot settle more Riel than they owe.");
+      if (rawAmount > newTotalRiel) {
+        showToast('error', 'Overpayment', 'Cannot settle more Riel than they owe.');
+        return;
+      }
       saveRiel = -Math.abs(rawAmount);
       newTotalRiel -= rawAmount;
     }
@@ -287,7 +240,7 @@ export default function ExpenseDashboard() {
       description: 'STAFF_SETTLEMENT' 
     }]);
     
-    showNotification(`Settlement recorded for ${staff.name}`, 'success');
+    showToast('success', 'Settled', `Settlement recorded for ${staff.name}`);
   }
 
   // --- Action: View Staff History ---
@@ -331,7 +284,7 @@ export default function ExpenseDashboard() {
     }
 
     if (error) {
-      alert(`Failed to update ${field}: ${error.message}`);
+      showToast('error', 'Update Failed', error.message);
       fetchStaff();
     }
   }
@@ -344,8 +297,10 @@ export default function ExpenseDashboard() {
 
     const { error } = await supabase.from('staff').delete().eq('id', id);
     if (error) {
-      alert(`Failed to delete: ${error.message}`);
+      showToast('error', 'Deletion Failed', error.message);
       fetchStaff();
+    } else {
+      showToast('success', 'Deleted', `${name} has been removed.`);
     }
   }
 
@@ -378,40 +333,14 @@ export default function ExpenseDashboard() {
   return (
     <div className="main-wrapper">
 
-      {/* 🚀 TOP NOTIFICATION POPUP */}
-      {notification.show && (
-        <div style={{
-          position: 'fixed', top: '24px', left: '50%', transform: 'translateX(-50%)',
-          backgroundColor: notification.type === 'success' ? '#10b981' : '#ef4444',
-          color: '#ffffff', padding: '14px 24px', borderRadius: '8px',
-          boxShadow: '0 10px 25px rgba(0,0,0,0.15)', zIndex: 999999,
-          fontWeight: 'bold', fontSize: '15px', display: 'flex', alignItems: 'center', gap: '8px',
-          animation: 'slideDown 0.3s ease-out'
-        }}>
-          {notification.type === 'success' ? '✅' : '❌'} {notification.message}
-        </div>
-      )}
-
-      {/* 🔥 EXTRACTED HEADER: Perfectly aligns left with POS & other pages */}
+      {/* HEADER */}
       <div className="header-container">
         <div className="header-left">
           <h1 className="page-title">💸 Daily Expense & Payroll</h1>
         </div>
       </div>
 
-      <div style={{
-        backgroundColor: '#ffffff',
-        width: '100%',
-        borderRadius: '16px',
-        padding: '35px',
-        boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03)',
-        borderColor: '#e2e8f0',
-        borderWidth: '1px',
-        borderStyle: 'solid',
-        maxWidth: activeTab === 'staff' ? '1200px' : '550px', 
-        transition: 'max-width 0.3s ease',
-        boxSizing: 'border-box'
-      }} className="content-card">
+      <div className="content-card" style={{ maxWidth: activeTab === 'staff' ? '1200px' : '550px' }}>
         
         {/* THREE TAB HEADER */}
         <div className="tabs-container">
@@ -428,36 +357,36 @@ export default function ExpenseDashboard() {
 
         {/* EXPENSE TRANSACTION FORM (Shown for Personal & Business) */}
         {activeTab !== 'staff' && (
-          <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+          <form onSubmit={handleSubmit} className="exp-form">
             
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              <label style={{ color: '#475569', fontSize: '12px', fontWeight: 'bold', textTransform: 'uppercase' }}>Transaction Date</label>
-              <input type="date" value={expenseDate} onChange={(e) => setExpenseDate(e.target.value)} required style={{ backgroundColor: '#ffffff', borderColor: '#cbd5e1', borderWidth: '1px', borderStyle: 'solid', borderRadius: '8px', padding: '12px 14px', color: '#334155', outline: 'none', width: '100%', maxWidth: '100%', boxSizing: 'border-box', fontWeight: 'normal' }} className="mobile-input-field" />
+            <div className="exp-form-group">
+              <label className="exp-label">Transaction Date</label>
+              <input type="date" value={expenseDate} onChange={(e) => setExpenseDate(e.target.value)} required className="exp-input mobile-input-field" />
             </div>
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              <label style={{ color: '#475569', fontSize: '12px', fontWeight: 'bold', textTransform: 'uppercase' }}>Who Paid? / Purchaser</label>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(100px, 1fr))', gap: '10px' }}>
+            <div className="exp-form-group">
+              <label className="exp-label">Who Paid? / Purchaser</label>
+              <div className="exp-radio-grid">
                 {(['Pich', 'Jing', 'Both'] as const).map((person) => (
-                  <label key={person} style={{ display: 'flex', alignItems: 'center', gap: '10px', backgroundColor: spender === person ? '#fefcf3' : '#ffffff', borderWidth: '1px', borderStyle: 'solid', borderColor: spender === person ? '#b59410' : '#cbd5e1', padding: '12px', borderRadius: '8px', color: spender === person ? '#334155' : '#64748b', cursor: 'pointer', fontSize: '14px', fontWeight: 'normal', transition: 'all 0.2s ease' }}>
+                  <label key={person} className={`exp-radio-label ${spender === person ? 'active' : ''}`}>
                     <input type="radio" name="spender" value={person} checked={spender === person} onChange={() => setSpender(person)} style={{ display: 'none' }} />
-                    <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: 'transparent', borderColor: '#cbd5e1', borderWidth: '2px', borderStyle: 'solid', display: 'inline-block' }} />
+                    <span className="exp-radio-circle" />
                     {person}
                   </label>
                 ))}
               </div>
             </div>
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              <label style={{ color: '#475569', fontSize: '12px', fontWeight: 'bold', textTransform: 'uppercase' }}>Remarks / What did you buy?</label>
-              <input type="text" placeholder="Electricity Bill, Lunch..." value={remarks} onChange={(e) => setRemarks(e.target.value)} required style={{ backgroundColor: '#ffffff', borderColor: '#cbd5e1', borderWidth: '1px', borderStyle: 'solid', borderRadius: '8px', padding: '12px 14px', color: '#334155', outline: 'none', width: '100%', boxSizing: 'border-box', fontWeight: 'normal' }} className="mobile-input-field" onBlur={() => { setTimeout(() => { window.scrollTo(0, 0); document.body.scrollTop = 0; }, 100); }} />
+            <div className="exp-form-group">
+              <label className="exp-label">Remarks / What did you buy?</label>
+              <input type="text" placeholder="Electricity Bill, Lunch..." value={remarks} onChange={(e) => setRemarks(e.target.value)} required className="exp-input mobile-input-field" onBlur={() => { setTimeout(() => { window.scrollTo(0, 0); document.body.scrollTop = 0; }, 100); }} />
             </div>
 
             {/* DYNAMIC SPLIT PAYMENT METHOD FOR EXPENSES */}
-            <div style={{ background: '#f8fafc', padding: '12px', borderRadius: '12px', border: '1px solid #e2e8f0', marginTop: '8px' }}>
+            <div className="exp-split-container">
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-                <label style={{ fontSize: '12px', color: '#475569', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Amount Spent</label>
-                <button type="button" onClick={() => setPaymentRows([...paymentRows, { id: Date.now(), method: 'Cash ៛', amount: '' }])} style={{ background: '#e0f2fe', color: '#0369a1', border: 'none', borderRadius: '4px', fontSize: '11px', fontWeight: 'bold', padding: '6px 12px', cursor: 'pointer' }}>+ Split</button>
+                <label className="exp-label" style={{ marginBottom: 0 }}>Amount Spent</label>
+                <button type="button" onClick={() => setPaymentRows([...paymentRows, { id: Date.now(), method: 'Cash ៛', amount: '' }])} className="exp-add-split-btn">+ Split</button>
               </div>
               
               {paymentRows.map((row, index) => (
@@ -469,8 +398,7 @@ export default function ExpenseDashboard() {
                       newRows[index].method = e.target.value;
                       setPaymentRows(newRows);
                     }}
-                    style={{ width: '45%', padding: '10px', borderRadius: '8px', border: '1px solid #cbd5e1', outline: 'none', backgroundColor: '#fff', cursor: 'pointer', color: '#334155', fontWeight: 'normal' }}
-                    className="mobile-select-menu"
+                    className="exp-select mobile-select-menu"
                   >
                     <option value="Cash ៛">💵 Cash ៛</option>
                     <option value="Cash $">💵 Cash $</option>
@@ -487,18 +415,19 @@ export default function ExpenseDashboard() {
                         newRows[index].amount = val;
                         setPaymentRows(newRows);
                       }}
-                      style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #cbd5e1', boxSizing: 'border-box', outline: 'none', color: '#334155', textAlign: 'right', fontWeight: 'normal' }}
+                      className="exp-input"
+                      style={{ textAlign: 'right' }}
                     />
                   </div>
                   
                   {paymentRows.length > 1 && (
-                    <button type="button" onClick={() => setPaymentRows(paymentRows.filter(r => r.id !== row.id))} style={{ background: 'none', border: 'none', color: '#ef4444', fontSize: '18px', cursor: 'pointer', padding: '0 4px', fontWeight: 'bold' }}>✕</button>
+                    <button type="button" onClick={() => setPaymentRows(paymentRows.filter(r => r.id !== row.id))} className="exp-remove-btn">✕</button>
                   )}
                 </div>
               ))}
             </div>
 
-            <button type="submit" disabled={loading || !hasPayments} style={{ backgroundColor: '#b59410', color: '#ffffff', padding: '15px', border: 'none', borderRadius: '8px', fontSize: '14px', fontWeight: 'bold', cursor: 'pointer', transition: 'background 0.2s ease', marginTop: '10px', opacity: (loading || !hasPayments) ? 0.7 : 1 }}>
+            <button type="submit" disabled={loading || !hasPayments} className={`exp-submit-btn ${(loading || !hasPayments) ? 'disabled' : ''}`}>
               {loading ? 'Processing...' : `Log ${activeTab === 'business' ? 'Business' : 'Personal'} Expense`}
             </button>
           </form>
@@ -508,40 +437,40 @@ export default function ExpenseDashboard() {
         {activeTab === 'staff' && (
           <div>
             {/* Add New Staff Form */}
-            <form onSubmit={handleAddStaff} style={{ padding: '16px', backgroundColor: '#f8fafc', borderRadius: '12px', marginBottom: '24px', border: '1px solid #e2e8f0' }}>
-              <div style={{ fontWeight: 'bold', color: '#1b4d3e', marginBottom: '8px', fontSize: '15px' }}>➕ Register New Staff</div>
+            <form onSubmit={handleAddStaff} className="staff-add-form">
+              <div className="staff-add-title">➕ Register New Staff</div>
               <div style={{ display: 'flex', gap: '15px', flexWrap: 'wrap', alignItems: 'flex-end' }}>
-                <div style={{ flex: '1 1 200px' }}>
-                  <label style={{ fontSize: '11px', fontWeight: 'bold', color: '#475569', textTransform: 'uppercase', marginBottom: '6px', display: 'block' }}>Name</label>
-                  <input type="text" placeholder="Staff Name" value={newStaffName} onChange={e => setNewStaffName(e.target.value)} style={{ backgroundColor: '#ffffff', borderColor: '#cbd5e1', borderWidth: '1px', borderStyle: 'solid', borderRadius: '8px', padding: '12px 14px', color: '#334155', outline: 'none', width: '100%', boxSizing: 'border-box', fontWeight: 'normal' }} className="mobile-input-field" onBlur={() => { setTimeout(() => { window.scrollTo(0, 0); document.body.scrollTop = 0; }, 100); }} required />
+                <div className="staff-add-col">
+                  <label className="exp-label">Name</label>
+                  <input type="text" placeholder="Staff Name" value={newStaffName} onChange={e => setNewStaffName(e.target.value)} className="exp-input mobile-input-field" onBlur={() => { setTimeout(() => { window.scrollTo(0, 0); document.body.scrollTop = 0; }, 100); }} required />
                 </div>
-                <div style={{ flex: '1 1 150px' }}>
-                  <label style={{ fontSize: '11px', fontWeight: 'bold', color: '#475569', textTransform: 'uppercase', marginBottom: '6px', display: 'block' }}>Monthly Salary (៛)</label>
-                  <CurrencyInput value={newStaffSalary} onChange={(v: any) => setNewStaffSalary(v)} style={{ backgroundColor: '#ffffff', borderColor: '#cbd5e1', borderWidth: '1px', borderStyle: 'solid', borderRadius: '8px', padding: '12px 14px', color: '#334155', outline: 'none', width: '100%', boxSizing: 'border-box', fontWeight: 'normal' }} placeholder="1,200,000" />
+                <div className="staff-add-col-small">
+                  <label className="exp-label">Monthly Salary (៛)</label>
+                  <CurrencyInput value={newStaffSalary} onChange={(v: any) => setNewStaffSalary(v)} className="exp-input" placeholder="1,200,000" />
                 </div>
-                <button type="submit" disabled={loading} style={{ backgroundColor: '#b59410', color: '#ffffff', padding: '12px 24px', border: 'none', borderRadius: '8px', fontSize: '14px', fontWeight: 'bold', cursor: 'pointer', height: '44px' }}>Add Staff</button>
+                <button type="submit" disabled={loading} className="staff-add-btn">Add Staff</button>
               </div>
             </form>
 
             {/* Editable Staff Payroll Table */}
-            <div style={{ overflowX: 'auto', borderRadius: '8px', border: '1px solid #e2e8f0', boxShadow: '0 4px 6px rgba(0,0,0,0.02)' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', minWidth: '1050px' }}>
-                <thead style={{ backgroundColor: '#f8fafc', borderBottom: '1px solid #cbd5e1' }}>
+            <div className="staff-table-wrapper">
+              <table className="staff-table">
+                <thead className="staff-thead">
                   <tr>
-                    <th style={{ padding: '12px', color: '#475569', fontSize: '12px', fontWeight: 'bold', textTransform: 'uppercase' }}>Name</th>
-                    <th style={{ padding: '12px', color: '#475569', fontSize: '12px', fontWeight: 'bold', textTransform: 'uppercase' }}>Start Date</th>
-                    <th style={{ padding: '12px', color: '#475569', fontSize: '12px', fontWeight: 'bold', textTransform: 'uppercase', textAlign: 'right' }}>Monthly Salary</th>
-                    <th style={{ padding: '12px', color: '#10b981', fontSize: '12px', fontWeight: 'bold', textTransform: 'uppercase', textAlign: 'right' }}>Earned MTD</th>
-                    <th style={{ padding: '12px', color: '#ef4444', fontSize: '12px', fontWeight: 'bold', textTransform: 'uppercase', textAlign: 'right' }}>Debt (៛)</th>
-                    <th style={{ padding: '12px', color: '#ef4444', fontSize: '12px', fontWeight: 'bold', textTransform: 'uppercase', textAlign: 'right' }}>Debt ($)</th>
-                    <th style={{ padding: '12px', color: '#3b82f6', fontSize: '12px', fontWeight: 'bold', textTransform: 'uppercase', textAlign: 'right' }}>Net Payout</th>
-                    <th style={{ padding: '12px', color: '#b59410', fontSize: '12px', fontWeight: 'bold', textTransform: 'uppercase', textAlign: 'center', width: '280px' }}>➕ Add Advance</th>
-                    <th style={{ padding: '12px', color: '#475569', fontSize: '12px', fontWeight: 'bold', textAlign: 'center', width: '100px' }}>Actions</th>
+                    <th className="staff-th">Name</th>
+                    <th className="staff-th">Start Date</th>
+                    <th className="staff-th" style={{ textAlign: 'right' }}>Monthly Salary</th>
+                    <th className="staff-th" style={{ textAlign: 'right', color: '#10b981' }}>Earned MTD</th>
+                    <th className="staff-th" style={{ textAlign: 'right', color: '#ef4444' }}>Debt (៛)</th>
+                    <th className="staff-th" style={{ textAlign: 'right', color: '#ef4444' }}>Debt ($)</th>
+                    <th className="staff-th" style={{ textAlign: 'right', color: '#3b82f6' }}>Net Payout</th>
+                    <th className="staff-th" style={{ textAlign: 'center', color: '#b59410', width: '280px' }}>➕ Add Advance</th>
+                    <th className="staff-th" style={{ textAlign: 'center', width: '100px' }}>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {staffList.length === 0 ? (
-                    <tr><td colSpan={9} style={{ textAlign: 'center', padding: '30px', color: '#94a3b8', fontSize: '14px', fontWeight: 'normal' }}>No staff recorded yet.</td></tr>
+                    <tr><td colSpan={9} className="staff-empty-cell">No staff recorded yet.</td></tr>
                   ) : (
                     staffList.map((staff) => {
                       const monthlySalary = Number(staff.salary) || 0;
@@ -557,90 +486,92 @@ export default function ExpenseDashboard() {
                       const isNegativePayout = netPayout < 0;
 
                       return (
-                        <tr key={staff.id} style={{ borderBottom: '1px solid #f1f5f9', backgroundColor: '#ffffff', transition: 'background 0.2s' }}>
+                        <tr key={staff.id} className="staff-tr">
                           
                           {/* 1. Name */}
                           <td 
-                            style={{ padding: '12px', color: '#334155', cursor: 'text', fontSize: '14px', fontWeight: 'normal' }}
+                            className="staff-td"
+                            style={{ cursor: 'text' }}
                             onClick={() => { setEditingCell({ id: staff.id, field: 'name' }); setEditValue(staff.name); }}
                           >
                             {editingCell?.id === staff.id && editingCell?.field === 'name' ? (
-                              <input autoFocus value={editValue} onChange={e => setEditValue(e.target.value)} onBlur={() => saveInlineEdit(staff.id, 'name')} onKeyDown={e => e.key === 'Enter' && saveInlineEdit(staff.id, 'name')} style={{ backgroundColor: '#ffffff', borderColor: '#cbd5e1', borderWidth: '1px', borderStyle: 'solid', borderRadius: '6px', padding: '8px 10px', color: '#334155', outline: '2px solid #b58a3d', width: '100%', boxSizing: 'border-box', fontWeight: 'normal' }} className="mobile-input-field" />
+                              <input autoFocus value={editValue} onChange={e => setEditValue(e.target.value)} onBlur={() => saveInlineEdit(staff.id, 'name')} onKeyDown={e => e.key === 'Enter' && saveInlineEdit(staff.id, 'name')} className="staff-inline-input mobile-input-field" />
                             ) : staff.name}
                           </td>
 
                           {/* 2. Start Date */}
                           <td 
-                            style={{ padding: '12px', color: '#475569', cursor: 'text', fontSize: '14px', fontWeight: 'normal' }}
+                            className="staff-td"
+                            style={{ cursor: 'text' }}
                             onClick={() => { setEditingCell({ id: staff.id, field: 'start_date' }); setEditValue(staff.start_date || ''); }}
                           >
                             {editingCell?.id === staff.id && editingCell?.field === 'start_date' ? (
-                              <input type="date" autoFocus value={editValue} onChange={e => setEditValue(e.target.value)} onBlur={() => saveInlineEdit(staff.id, 'start_date')} onKeyDown={e => e.key === 'Enter' && saveInlineEdit(staff.id, 'start_date')} style={{ backgroundColor: '#ffffff', borderColor: '#cbd5e1', borderWidth: '1px', borderStyle: 'solid', borderRadius: '6px', padding: '8px 10px', color: '#334155', outline: '2px solid #b58a3d', width: '100%', boxSizing: 'border-box', fontWeight: 'normal' }} className="mobile-input-field" />
+                              <input type="date" autoFocus value={editValue} onChange={e => setEditValue(e.target.value)} onBlur={() => saveInlineEdit(staff.id, 'start_date')} onKeyDown={e => e.key === 'Enter' && saveInlineEdit(staff.id, 'start_date')} className="staff-inline-input mobile-input-field" />
                             ) : (
                               <div>
                                 {staff.start_date || 'N/A'}
-                                <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '2px', fontWeight: 'normal' }}>{daysWorked} days</div>
+                                <div className="staff-days-worked">{daysWorked} days</div>
                               </div>
                             )}
                           </td>
 
                           {/* 3. Monthly Salary */}
                           <td 
-                            style={{ padding: '12px', color: '#475569', cursor: 'text', textAlign: 'right', fontSize: '14px', fontWeight: 'normal' }}
+                            className="staff-td"
+                            style={{ cursor: 'text', textAlign: 'right' }}
                             onClick={() => { setEditingCell({ id: staff.id, field: 'salary' }); setEditValue(String(staff.salary || 0)); }}
                           >
                             {editingCell?.id === staff.id && editingCell?.field === 'salary' ? (
-                              <CurrencyInput autoFocus value={Number(editValue)} onChange={(v:any) => setEditValue(String(v))} onEnter={() => saveInlineEdit(staff.id, 'salary')} style={{ backgroundColor: '#ffffff', borderColor: '#cbd5e1', borderWidth: '1px', borderStyle: 'solid', borderRadius: '6px', padding: '8px 10px', color: '#334155', outline: '2px solid #b58a3d', width: '100%', boxSizing: 'border-box', fontWeight: 'normal', textAlign: 'right' }} />
+                              <CurrencyInput autoFocus value={Number(editValue)} onChange={(v:any) => setEditValue(String(v))} onEnter={() => saveInlineEdit(staff.id, 'salary')} className="staff-inline-input" style={{ textAlign: 'right' }} />
                             ) : formatRiel(monthlySalary)}
                           </td>
 
                           {/* 4. Total Earned */}
-                          <td style={{ padding: '12px', color: '#10b981', textAlign: 'right', fontSize: '14px', fontWeight: 'normal' }}>
+                          <td className="staff-td" style={{ color: '#10b981', textAlign: 'right' }}>
                             {formatRiel(totalEarned)}
                           </td>
 
                           {/* 5. Total Debt RIEL */}
-                          <td style={{ padding: '12px', textAlign: 'right' }}>
+                          <td className="staff-td" style={{ textAlign: 'right' }}>
                              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px' }}>
                                 <div 
-                                    style={{ color: '#ef4444', cursor: 'text', fontSize: '14px', fontWeight: 'bold' }}
+                                    className="staff-debt-value"
                                     onClick={() => { setEditingCell({ id: staff.id, field: 'total_debt_riel' }); setEditValue(String(staff.total_debt_riel || 0)); }}
                                 >
                                   {editingCell?.id === staff.id && editingCell?.field === 'total_debt_riel' ? (
-                                    <CurrencyInput autoFocus value={Number(editValue)} onChange={(v:any) => setEditValue(String(v))} onEnter={() => saveInlineEdit(staff.id, 'total_debt_riel')} style={{ backgroundColor: '#ffffff', borderColor: '#cbd5e1', borderWidth: '1px', borderStyle: 'solid', borderRadius: '6px', padding: '8px 10px', outline: '2px solid #b58a3d', width: '100%', boxSizing: 'border-box', textAlign: 'right', color: '#ef4444', fontWeight: 'normal' }} />
+                                    <CurrencyInput autoFocus value={Number(editValue)} onChange={(v:any) => setEditValue(String(v))} onEnter={() => saveInlineEdit(staff.id, 'total_debt_riel')} className="staff-inline-input" style={{ textAlign: 'right', color: '#ef4444' }} />
                                   ) : formatRiel(totalDebtRiel)}
                                 </div>
                              </div>
                           </td>
 
                           {/* 6. Total Debt USD */}
-                          <td style={{ padding: '12px', textAlign: 'right' }}>
+                          <td className="staff-td" style={{ textAlign: 'right' }}>
                              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px' }}>
                                 <div 
-                                    style={{ color: '#ef4444', cursor: 'text', fontSize: '14px', fontWeight: 'bold' }}
+                                    className="staff-debt-value"
                                     onClick={() => { setEditingCell({ id: staff.id, field: 'total_debt_usd' }); setEditValue(String(staff.total_debt_usd || 0)); }}
                                 >
                                   {editingCell?.id === staff.id && editingCell?.field === 'total_debt_usd' ? (
-                                    <CurrencyInput autoFocus value={Number(editValue)} onChange={(v:any) => setEditValue(String(v))} onEnter={() => saveInlineEdit(staff.id, 'total_debt_usd')} style={{ backgroundColor: '#ffffff', borderColor: '#cbd5e1', borderWidth: '1px', borderStyle: 'solid', borderRadius: '6px', padding: '8px 10px', outline: '2px solid #b58a3d', width: '100%', boxSizing: 'border-box', textAlign: 'right', color: '#ef4444', fontWeight: 'normal' }} />
+                                    <CurrencyInput autoFocus value={Number(editValue)} onChange={(v:any) => setEditValue(String(v))} onEnter={() => saveInlineEdit(staff.id, 'total_debt_usd')} className="staff-inline-input" style={{ textAlign: 'right', color: '#ef4444' }} />
                                   ) : formatUSD(totalDebtUsd)}
                                 </div>
                              </div>
                           </td>
 
                           {/* 7. Net Payout */}
-                          <td style={{ padding: '12px', color: isNegativePayout ? '#ef4444' : '#3b82f6', textAlign: 'right', fontSize: '14px', fontWeight: 'bold' }}>
+                          <td className="staff-td" style={{ color: isNegativePayout ? '#ef4444' : '#3b82f6', textAlign: 'right', fontWeight: 'bold' }}>
                             {isNegativePayout ? '-' : ''}{formatRiel(Math.abs(netPayout))}
                           </td>
 
                           {/* 8. Action: Add Debt & Method */}
-                          <td style={{ padding: '12px', textAlign: 'center' }}>
+                          <td className="staff-td" style={{ textAlign: 'center' }}>
                             <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                               <div style={{ display: 'flex', gap: '6px' }}>
                                 <select 
                                   value={debtMethods[staff.id] || 'Cash ៛'} 
                                   onChange={e => setDebtMethods({ ...debtMethods, [staff.id]: e.target.value })}
-                                  style={{ backgroundColor: '#ffffff', borderColor: '#cbd5e1', borderWidth: '1px', borderStyle: 'solid', borderRadius: '6px', color: '#334155', outline: 'none', width: '85px', padding: '6px', fontSize: '13px', fontWeight: 'normal' }}
-                                  className="mobile-select-menu"
+                                  className="staff-action-select mobile-select-menu"
                                 >
                                   <option value="Cash ៛">Cash ៛</option>
                                   <option value="Cash $">Cash $</option>
@@ -652,12 +583,12 @@ export default function ExpenseDashboard() {
                                   value={debtAdditions[staff.id] || ''} 
                                   onChange={(v:any) => setDebtAdditions({ ...debtAdditions, [staff.id]: v })} 
                                   onEnter={() => handleAddDebt(staff)}
-                                  style={{ backgroundColor: '#ffffff', borderColor: '#cbd5e1', borderWidth: '1px', borderStyle: 'solid', borderRadius: '6px', color: '#334155', outline: 'none', boxSizing: 'border-box', fontWeight: 'normal', flex: 1, padding: '6px', fontSize: '13px', textAlign: 'right' }} 
+                                  className="staff-action-input"
                                 />
                                 <button 
                                   onClick={() => handleAddDebt(staff)}
                                   disabled={!debtAdditions[staff.id]}
-                                  style={{ border: 'none', borderRadius: '6px', fontSize: '13px', transition: 'background 0.2s', fontWeight: 'bold', background: debtAdditions[staff.id] ? '#10b981' : '#e2e8f0', color: debtAdditions[staff.id] ? '#fff' : '#94a3b8', cursor: debtAdditions[staff.id] ? 'pointer' : 'not-allowed', padding: '6px 12px' }}
+                                  className={`staff-action-add-btn ${debtAdditions[staff.id] ? 'active' : ''}`}
                                 >
                                   Add
                                 </button>
@@ -668,7 +599,7 @@ export default function ExpenseDashboard() {
                                 {(totalDebtRiel > 0 || totalDebtUsd > 0) && (
                                   <button 
                                     onClick={() => setSettleModal({ isOpen: true, staff: staff, amount: '', method: 'Cash ៛' })}
-                                    style={{ background: '#dcfce7', color: '#166534', border: '1px solid #bbf7d0', borderRadius: '4px', padding: '4px 8px', fontSize: '11px', cursor: 'pointer', fontWeight: 'bold' }}
+                                    className="staff-action-settle-btn"
                                   >
                                     ✅ Settle
                                   </button>
@@ -678,22 +609,10 @@ export default function ExpenseDashboard() {
                           </td>
 
                           {/* 9. Actions: History & Delete */}
-                          <td style={{ padding: '12px', textAlign: 'center' }}>
+                          <td className="staff-td" style={{ textAlign: 'center' }}>
                             <div style={{ display: 'flex', justifyContent: 'center', gap: '8px' }}>
-                              <button 
-                                onClick={() => handleViewHistory(staff)}
-                                style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '16px', opacity: 0.7 }}
-                                title="View Debt History"
-                              >
-                                🕒
-                              </button>
-                              <button 
-                                onClick={() => handleDeleteStaff(staff.id, staff.name)}
-                                style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '16px', opacity: 0.7 }}
-                                title="Delete Staff"
-                              >
-                                🗑️
-                              </button>
+                              <button onClick={() => handleViewHistory(staff)} className="staff-icon-btn" title="View Debt History">🕒</button>
+                              <button onClick={() => handleDeleteStaff(staff.id, staff.name)} className="staff-icon-btn" title="Delete Staff">🗑️</button>
                             </div>
                           </td>
 
@@ -704,7 +623,7 @@ export default function ExpenseDashboard() {
                 </tbody>
               </table>
             </div>
-            <p style={{ fontSize: '12px', color: '#94a3b8', marginTop: '16px', textAlign: 'center', fontWeight: 'normal' }}>
+            <p className="staff-tip-text">
               💡 <b>Tip:</b> Click on any Name, Start Date, Monthly Salary, or Debt to edit it directly. Press Enter to save.
             </p>
           </div>
@@ -714,16 +633,16 @@ export default function ExpenseDashboard() {
 
       {/* STAFF DEBT HISTORY MODAL */}
       {historyModal.isOpen && historyModal.staff && (
-        <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 10000, display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '20px', boxSizing: 'border-box' }} onMouseDown={() => setHistoryModal({ isOpen: false, staff: null, history: [] })}>
-          <div style={{ backgroundColor: '#ffffff', width: '100%', maxWidth: '500px', borderRadius: '12px', padding: '24px', boxShadow: '0 10px 25px rgba(0,0,0,0.15)' }} onMouseDown={e => e.stopPropagation()}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #f1f5f9', paddingBottom: '12px', marginBottom: '16px' }}>
-              <h3 style={{ margin: 0, color: '#1e293b', fontSize: '18px', fontWeight: 'bold' }}>🕒 Debt History: {historyModal.staff.name}</h3>
-              <button onClick={() => setHistoryModal({ isOpen: false, staff: null, history: [] })} style={{ background: 'none', border: 'none', fontSize: '18px', cursor: 'pointer', color: '#94a3b8', fontWeight: 'bold' }}>✕</button>
+        <div className="exp-modal-overlay" onMouseDown={() => setHistoryModal({ isOpen: false, staff: null, history: [] })}>
+          <div className="exp-modal-content" style={{ maxWidth: '500px' }} onMouseDown={e => e.stopPropagation()}>
+            <div className="exp-modal-header">
+              <h3 className="exp-modal-title">🕒 Debt History: {historyModal.staff.name}</h3>
+              <button onClick={() => setHistoryModal({ isOpen: false, staff: null, history: [] })} className="exp-modal-close-btn">✕</button>
             </div>
             
-            <div style={{ maxHeight: '400px', overflowY: 'auto', paddingRight: '8px' }}>
+            <div className="exp-modal-body">
               {historyModal.history.length === 0 ? (
-                <p style={{ textAlign: 'center', color: '#94a3b8', fontSize: '14px', padding: '20px', fontWeight: 'normal' }}>No debt history found.</p>
+                <p className="exp-modal-empty">No debt history found.</p>
               ) : (
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '14px' }}>
                   <thead>
@@ -736,9 +655,9 @@ export default function ExpenseDashboard() {
                   <tbody>
                     {historyModal.history.map((record) => (
                       <tr key={record.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                        <td style={{ padding: '12px 0', color: '#334155', fontWeight: 'normal' }}>{new Date(record.created_at).toLocaleDateString()}</td>
-                        <td style={{ padding: '12px 0', color: '#475569', fontWeight: 'normal' }}>{record.payment_method}</td>
-                        <td style={{ padding: '12px 0', textAlign: 'right', color: '#ef4444', fontWeight: 'normal' }}>
+                        <td style={{ padding: '12px 0', color: '#334155' }}>{new Date(record.created_at).toLocaleDateString()}</td>
+                        <td style={{ padding: '12px 0', color: '#475569' }}>{record.payment_method}</td>
+                        <td style={{ padding: '12px 0', textAlign: 'right', color: '#ef4444' }}>
                           {record.payment_method.includes('$') ? formatUSD(record.amount) : formatRiel(record.amount)}
                         </td>
                       </tr>
@@ -748,8 +667,8 @@ export default function ExpenseDashboard() {
               )}
             </div>
             
-            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '20px' }}>
-              <button onClick={() => setHistoryModal({ isOpen: false, staff: null, history: [] })} style={{ padding: '10px 16px', backgroundColor: '#f1f5f9', border: 'none', borderRadius: '6px', cursor: 'pointer', color: '#475569', fontSize: '14px', fontWeight: 'bold' }}>Close</button>
+            <div className="exp-modal-footer">
+              <button onClick={() => setHistoryModal({ isOpen: false, staff: null, history: [] })} className="exp-btn-cancel">Close</button>
             </div>
           </div>
         </div>
@@ -757,21 +676,21 @@ export default function ExpenseDashboard() {
 
       {/* STAFF SETTLEMENT MODAL */}
       {settleModal.isOpen && settleModal.staff && (
-        <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 10000, display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '20px', boxSizing: 'border-box' }} onMouseDown={() => setSettleModal({ isOpen: false, staff: null, amount: '', method: 'Cash ៛' })}>
-          <div style={{ backgroundColor: '#ffffff', width: '100%', maxWidth: '400px', borderRadius: '12px', padding: '24px', boxShadow: '0 10px 25px rgba(0,0,0,0.15)' }} onMouseDown={e => e.stopPropagation()}>
-            <h3 style={{ margin: '0 0 16px 0', color: '#1e293b', borderBottom: '1px solid #f1f5f9', paddingBottom: '10px', fontSize: '18px', fontWeight: 'bold' }}>✅ Settle Debt: {settleModal.staff.name}</h3>
+        <div className="exp-modal-overlay" onMouseDown={() => setSettleModal({ isOpen: false, staff: null, amount: '', method: 'Cash ៛' })}>
+          <div className="exp-modal-content" style={{ maxWidth: '400px' }} onMouseDown={e => e.stopPropagation()}>
+            <h3 className="exp-modal-title" style={{ borderBottom: '1px solid #f1f5f9', paddingBottom: '10px', marginBottom: '16px' }}>✅ Settle Debt: {settleModal.staff.name}</h3>
             
             <div style={{ fontSize: '14px', color: '#64748b', marginBottom: '8px' }}>Current Debt (៛): <b style={{ color: '#ef4444', fontSize: '16px' }}>{formatRiel(settleModal.staff.total_debt_riel || 0)}</b></div>
             <div style={{ fontSize: '14px', color: '#64748b', marginBottom: '20px' }}>Current Debt ($): <b style={{ color: '#ef4444', fontSize: '16px' }}>{formatUSD(settleModal.staff.total_debt_usd || 0)}</b></div>
 
             <div style={{ marginBottom: '16px' }}>
-              <label style={{ display: 'block', fontSize: '12px', color: '#64748b', marginBottom: '6px', fontWeight: 'bold' }}>Settlement Amount</label>
-              <CurrencyInput autoFocus value={settleModal.amount} onChange={(v:any) => setSettleModal({...settleModal, amount: v})} style={{ width: '100%', padding: '12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '16px', boxSizing: 'border-box', backgroundColor: '#fff', color: '#0f172a' }} />
+              <label className="exp-label">Settlement Amount</label>
+              <CurrencyInput autoFocus value={settleModal.amount} onChange={(v:any) => setSettleModal({...settleModal, amount: v})} className="exp-input" />
             </div>
 
             <div style={{ marginBottom: '24px' }}>
-              <label style={{ display: 'block', fontSize: '12px', color: '#64748b', marginBottom: '6px', fontWeight: 'bold' }}>Payment Received Into</label>
-              <select value={settleModal.method} onChange={e => setSettleModal({...settleModal, method: e.target.value})} style={{ width: '100%', padding: '12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '15px', outline: 'none', backgroundColor: '#fff', color: '#0f172a', cursor: 'pointer' }}>
+              <label className="exp-label">Payment Received Into</label>
+              <select value={settleModal.method} onChange={e => setSettleModal({...settleModal, method: e.target.value})} className="exp-select" style={{ width: '100%', cursor: 'pointer' }}>
                 <option value="Cash ៛">💵 Cash ៛</option>
                 <option value="Cash $">💵 Cash $</option>
                 <option value="QR ៛">📱 QR ៛</option>
@@ -779,9 +698,9 @@ export default function ExpenseDashboard() {
               </select>
             </div>
 
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
-              <button onClick={() => setSettleModal({ isOpen: false, staff: null, amount: '', method: 'Cash ៛' })} style={{ padding: '12px 16px', background: '#f1f5f9', color: '#475569', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', fontSize: '14px' }}>Cancel</button>
-              <button onClick={handleSettleSubmit} style={{ padding: '12px 16px', background: '#10b981', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', fontSize: '14px' }}>Confirm Settlement</button>
+            <div className="exp-modal-footer">
+              <button onClick={() => setSettleModal({ isOpen: false, staff: null, amount: '', method: 'Cash ៛' })} className="exp-btn-cancel">Cancel</button>
+              <button onClick={handleSettleSubmit} className="exp-btn-save">Confirm Settlement</button>
             </div>
           </div>
         </div>
@@ -789,31 +708,91 @@ export default function ExpenseDashboard() {
 
       {/* --- GLOBAL CSS --- */}
       <style jsx global>{`
-        /* Force inherit font for all inputs and enable tabular numbers for exact matching height */
+        /* --- DE-INLINED CSS CLASSES --- */
+        
+        /* FORM INPUTS */
+        .exp-form { display: flex; flex-direction: column; gap: 20px; }
+        .exp-form-group { display: flex; flex-direction: column; gap: 8px; }
+        .exp-input {
+          background-color: #ffffff; border: 1px solid #cbd5e1; border-radius: 8px; padding: 12px 14px;
+          color: #334155; outline: none; width: 100%; box-sizing: border-box; font-size: 16px;
+        }
+        .exp-input:focus { border-color: #b58a3d; box-shadow: 0 0 0 2px rgba(181, 138, 61, 0.2); }
+        .exp-label { color: #475569; font-size: 12px; font-weight: bold; text-transform: uppercase; display: block; margin-bottom: 6px; }
+        .exp-select {
+          width: 45%; padding: 10px; border-radius: 8px; border: 1px solid #cbd5e1; outline: none; background-color: #fff; cursor: pointer; color: #334155; font-size: 16px;
+        }
+
+        /* RADIO BUTTONS */
+        .exp-radio-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(100px, 1fr)); gap: 10px; }
+        .exp-radio-label {
+          display: flex; align-items: center; gap: 10px; background-color: #ffffff; border: 1px solid #cbd5e1; padding: 12px; border-radius: 8px; color: #64748b; cursor: pointer; font-size: 14px; transition: all 0.2s ease;
+        }
+        .exp-radio-label.active { background-color: #fefcf3; border-color: #b59410; color: #334155; }
+        .exp-radio-circle { width: 8px; height: 8px; border-radius: 50%; background-color: transparent; border: 2px solid #cbd5e1; display: inline-block; }
+        .exp-radio-label.active .exp-radio-circle { border-color: #b59410; background-color: #b59410; }
+
+        /* SPLIT PAYMENTS */
+        .exp-split-container { background: #f8fafc; padding: 12px; border-radius: 12px; border: 1px solid #e2e8f0; margin-top: 8px; }
+        .exp-add-split-btn { background: #e0f2fe; color: #0369a1; border: none; border-radius: 4px; font-size: 11px; font-weight: bold; padding: 6px 12px; cursor: pointer; }
+        .exp-remove-btn { background: none; border: none; color: #ef4444; font-size: 18px; cursor: pointer; padding: 0 4px; font-weight: bold; }
+        
+        /* SUBMIT BUTTON */
+        .exp-submit-btn {
+          background-color: #b59410; color: #ffffff; padding: 15px; border: none; border-radius: 8px; font-size: 14px; font-weight: bold; cursor: pointer; transition: background 0.2s ease; margin-top: 10px; width: 100%;
+        }
+        .exp-submit-btn.disabled { opacity: 0.7; cursor: not-allowed; }
+
+        /* STAFF TABLE */
+        .staff-add-form { padding: 16px; background-color: #f8fafc; border-radius: 12px; margin-bottom: 24px; border: 1px solid #e2e8f0; }
+        .staff-add-title { font-weight: bold; color: #1b4d3e; margin-bottom: 8px; font-size: 15px; }
+        .staff-add-col { flex: 1 1 200px; }
+        .staff-add-col-small { flex: 1 1 150px; }
+        .staff-add-btn { background-color: #b59410; color: #ffffff; padding: 12px 24px; border: none; border-radius: 8px; font-size: 14px; font-weight: bold; cursor: pointer; height: 44px; }
+        
+        .staff-table-wrapper { overflow-x: auto; border-radius: 8px; border: 1px solid #e2e8f0; box-shadow: 0 4px 6px rgba(0,0,0,0.02); }
+        .staff-table { width: 100%; border-collapse: collapse; text-align: left; min-width: 1050px; }
+        .staff-thead { background-color: #f8fafc; border-bottom: 1px solid #cbd5e1; }
+        .staff-th { padding: 12px; color: #475569; font-size: 12px; font-weight: bold; text-transform: uppercase; }
+        .staff-tr { border-bottom: 1px solid #f1f5f9; background-color: #ffffff; transition: background 0.2s; }
+        .staff-tr:hover { background-color: #f8fafc; }
+        .staff-td { padding: 12px; font-size: 14px; color: #334155; }
+        .staff-empty-cell { text-align: center; padding: 30px; color: #94a3b8; font-size: 14px; }
+        
+        .staff-inline-input { background-color: #ffffff; border: 1px solid #cbd5e1; border-radius: 6px; padding: 8px 10px; color: #334155; outline: 2px solid #b58a3d; width: 100%; box-sizing: border-box; font-size: 14px; }
+        .staff-days-worked { font-size: 11px; color: #94a3b8; margin-top: 2px; }
+        .staff-debt-value { cursor: text; font-size: 14px; font-weight: bold; color: #ef4444; }
+        
+        .staff-action-select { background-color: #ffffff; border: 1px solid #cbd5e1; border-radius: 6px; color: #334155; outline: none; width: 85px; padding: 6px; font-size: 13px; }
+        .staff-action-input { background-color: #ffffff; border: 1px solid #cbd5e1; border-radius: 6px; color: #334155; outline: none; box-sizing: border-box; flex: 1; padding: 6px; font-size: 13px; text-align: right; }
+        .staff-action-add-btn { border: none; border-radius: 6px; font-size: 13px; transition: background 0.2s; font-weight: bold; background: #e2e8f0; color: #94a3b8; cursor: not-allowed; padding: 6px 12px; }
+        .staff-action-add-btn.active { background: #10b981; color: #fff; cursor: pointer; }
+        .staff-action-settle-btn { background: #dcfce7; color: #166534; border: 1px solid #bbf7d0; border-radius: 4px; padding: 4px 8px; font-size: 11px; cursor: pointer; font-weight: bold; }
+        .staff-icon-btn { background: none; border: none; cursor: pointer; font-size: 16px; opacity: 0.7; }
+        .staff-tip-text { font-size: 12px; color: #94a3b8; margin-top: 16px; text-align: center; }
+
+        /* MODALS */
+        .exp-modal-overlay { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background-color: rgba(0,0,0,0.5); z-index: 10000; display: flex; justify-content: center; align-items: center; padding: 20px; box-sizing: border-box; }
+        .exp-modal-content { background-color: #ffffff; width: 100%; border-radius: 12px; padding: 24px; box-shadow: 0 10px 25px rgba(0,0,0,0.15); }
+        .exp-modal-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #f1f5f9; padding-bottom: 12px; margin-bottom: 16px; }
+        .exp-modal-title { margin: 0; color: #1e293b; font-size: 18px; font-weight: bold; }
+        .exp-modal-close-btn { background: none; border: none; font-size: 18px; cursor: pointer; color: #94a3b8; font-weight: bold; }
+        .exp-modal-body { max-height: 400px; overflow-y: auto; padding-right: 8px; }
+        .exp-modal-empty { text-align: center; color: #94a3b8; font-size: 14px; padding: 20px; }
+        .exp-modal-footer { display: flex; justify-content: flex-end; margin-top: 20px; gap: 12px; }
+        .exp-btn-cancel { padding: 12px 16px; background: #f1f5f9; color: #475569; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; font-size: 14px; }
+        .exp-btn-save { padding: 12px 16px; background: #10b981; color: #fff; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; font-size: 14px; }
+
+        /* ORIGINAL BASE STYLES PRESERVED */
         input, select, button, textarea {
           font-family: inherit;
           font-variant-numeric: tabular-nums lining-nums;
         }
-        
+
         body {
           font-variant-numeric: tabular-nums lining-nums;
         }
 
-        input[type="number"].no-spinners::-webkit-inner-spin-button,
-        input[type="number"].no-spinners::-webkit-outer-spin-button {
-          -webkit-appearance: none;
-          margin: 0;
-        }
-        input[type="number"].no-spinners {
-          -moz-appearance: textfield;
-        }
-
-        @keyframes slideDown {
-          from { transform: translate(-50%, -20px); opacity: 0; }
-          to { transform: translate(-50%, 0); opacity: 1; }
-        }
-
-        /* 🔥 GLOBAL (Laptop/Desktop) RULES */
         .main-wrapper { 
           padding: max(20px, env(safe-area-inset-top, 20px)) 24px 24px 24px; 
           background: #f8fafc; 
@@ -831,7 +810,6 @@ export default function ExpenseDashboard() {
           -webkit-overflow-scrolling: touch;
         }
 
-        /* 🔥 Extracted header now perfectly aligns horizontally with the Hamburger icon */
         .header-container { 
           width: calc(100% - 60px);
           max-width: 1600px;
@@ -892,6 +870,28 @@ export default function ExpenseDashboard() {
           background: #1b4d3e !important;
           color: #ffffff !important;
           box-shadow: 0 2px 8px rgba(27,77,62,0.15) !important;
+        }
+
+        input[type="number"].no-spinners::-webkit-inner-spin-button,
+        input[type="number"].no-spinners::-webkit-outer-spin-button {
+          -webkit-appearance: none;
+          margin: 0;
+        }
+        input[type="number"].no-spinners {
+          -moz-appearance: textfield;
+        }
+
+        .content-card {
+          background-color: #ffffff;
+          width: 100%;
+          border-radius: 16px;
+          padding: 35px;
+          box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
+          border-color: #e2e8f0;
+          border-width: 1px;
+          border-style: solid;
+          transition: max-width 0.3s ease;
+          box-sizing: border-box;
         }
 
         /* 🔥 MOBILE CSS OVERRIDES */

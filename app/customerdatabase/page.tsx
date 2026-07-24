@@ -3,20 +3,8 @@
 import { useEffect, useState, useRef } from 'react'
 import { supabase } from '@/lib/supabaseClient'
 import { useFocusRefresh } from '@/lib/useFocusRefresh'
-
-// --- TYPES ---
-interface Customer {
-  id: string;
-  name: string;
-  owner: string;
-  type: string;
-  phone: string;
-  location: string;
-  google_map: string;
-  created_at: string;
-  last_purchase_date: string;
-  days_since_last_purchase?: number | null; 
-}
+import { Customer } from '@/types'
+import { useToast } from '@/components/ToastProvider'
 
 type SortConfig = {
   key: keyof Customer;
@@ -24,15 +12,8 @@ type SortConfig = {
 } | null;
 
 const DEFAULT_WIDTHS: Record<string, number> = {
-  created_at: 120,
-  id: 280,
-  name: 240, 
-  owner: 120,
-  type: 120,
-  phone: 150,
-  location: 200,
-  google_map: 120,
-  last_purchase_date: 150,
+  created_at: 120, id: 280, name: 240, owner: 120, type: 120,
+  phone: 150, location: 200, google_map: 120, last_purchase_date: 150,
   days_since_last_purchase: 160 
 }
 
@@ -41,6 +22,8 @@ const DEFAULT_ORDER: Array<keyof Customer> = [
 ]
 
 export default function CustomerDatabasePage() {
+  const { showToast } = useToast();
+
   // --- CORE STATE ---
   const [customers, setCustomers] = useState<Customer[]>([])
   const [searchQuery, setSearchQuery] = useState('')
@@ -97,7 +80,6 @@ export default function CustomerDatabasePage() {
   }
 
   async function loadCustomers() {
-    // 🔥 NEW: Only fetch customers that have NOT been archived
     const { data, error } = await supabase
       .from('customers')
       .select('*')
@@ -105,7 +87,7 @@ export default function CustomerDatabasePage() {
       .order('created_at', { ascending: false })
       
     if (!error && data) {
-      setCustomers(data)
+      setCustomers(data as Customer[])
       setEdits({})
     }
   }
@@ -115,7 +97,7 @@ export default function CustomerDatabasePage() {
     if (!edits[id]) return;
     
     if (edits[id].name !== undefined && edits[id].name?.trim() === '') {
-      alert("❌ Customer Name cannot be empty.");
+      showToast('error', 'Validation Error', 'Customer Name cannot be empty.');
       return;
     }
 
@@ -123,16 +105,16 @@ export default function CustomerDatabasePage() {
     if (!error) {
       setEdits(prev => { const n = { ...prev }; delete n[id]; return n })
       setEditingCell(null)
+      showToast('success', 'Saved', 'Customer updated successfully.');
       loadCustomers()
     } else {
-      alert(`Error saving: ${error.message}`)
+      showToast('error', 'Save Failed', error.message);
     }
   }
 
   const handleDelete = async () => {
-    if (!confirm(`Are you sure you want to delete ${selectedToDelete.size} customer(s)?`)) return
+    if (!confirm(`Are you sure you want to archive ${selectedToDelete.size} customer(s)?`)) return
     
-    // 🔥 NEW: Soft Delete (Archive) instead of hard delete
     const { error } = await supabase
       .from('customers')
       .update({ is_archived: true })
@@ -140,9 +122,10 @@ export default function CustomerDatabasePage() {
       
     if (!error) { 
       setSelectedToDelete(new Set()); 
+      showToast('success', 'Deleted', 'Customer(s) archived successfully.');
       loadCustomers() 
     } else {
-      alert(`❌ Cannot delete customer: ${error.message}`)
+      showToast('error', 'Deletion Failed', error.message);
     }
   }
 
@@ -157,10 +140,11 @@ export default function CustomerDatabasePage() {
 
     if (!error) {
       setShowAddModal(false)
+      showToast('success', 'Customer Added', `${newCustomer.name} added successfully.`);
       setNewCustomer({ name: '', owner: 'Both', type: 'ហូប', phone: '', location: '', google_map: '' })
       loadCustomers() 
     } else {
-      alert(`Error: ${error.message}`)
+      showToast('error', 'Error', error.message);
     }
   }
 
@@ -230,7 +214,8 @@ export default function CustomerDatabasePage() {
 
   const processedCustomers = customers
     .map(c => {
-      const merged = { ...c, ...edits[c.id] };
+      const cid = String(c.id);
+      const merged = { ...c, ...edits[cid] };
       
       let daysSince = null;
       if (merged.last_purchase_date) {
@@ -361,7 +346,6 @@ export default function CustomerDatabasePage() {
           All Owners
         </button>
         {(['Pich', 'Jing', 'Both', 'Mom'] as const).map(ownerItem => {
-          // 🔥 NEW: Dynamic calculation based on the current Customer Type filter
           const filteredByType = customerTypeFilter === 'All' ? customers : customers.filter(c => c.type === customerTypeFilter);
           const count = filteredByType.filter(c => c.owner === ownerItem).length;
           return (
@@ -382,11 +366,9 @@ export default function CustomerDatabasePage() {
           onClick={() => setCustomerTypeFilter('All')} 
           style={{ padding: '8px 16px', borderRadius: '20px', border: customerTypeFilter === 'All' ? 'none' : '1px solid #cbd5e1', backgroundColor: customerTypeFilter === 'All' ? '#b58a3d' : '#ffffff', color: customerTypeFilter === 'All' ? '#fff' : '#475569', fontWeight: 'bold', cursor: 'pointer', fontSize: '13px', whiteSpace: 'nowrap' }}
         >
-          {/* 🔥 NEW: Dynamic base calculation based on the current Owner filter */}
           All Types ({ownerFilter === 'All' ? customers.length : customers.filter(c => c.owner === ownerFilter).length})
         </button>
         {(['ហូប', 'លក់បាយ', 'លក់ត', 'ធ្វើនំ', 'អំណោយ'] as const).map(typeItem => {
-          // 🔥 NEW: Dynamic calculation based on the current Owner filter
           const filteredByOwner = ownerFilter === 'All' ? customers : customers.filter(c => c.owner === ownerFilter);
           const count = filteredByOwner.filter(c => c.type === typeItem).length;
           return (
@@ -413,7 +395,7 @@ export default function CustomerDatabasePage() {
                    type="checkbox" 
                    checked={selectedToDelete.size === processedCustomers.length && processedCustomers.length > 0}
                    onChange={(e) => {
-                     if (e.target.checked) setSelectedToDelete(new Set(processedCustomers.map(c => c.id)));
+                     if (e.target.checked) setSelectedToDelete(new Set(processedCustomers.map(c => String(c.id))));
                      else setSelectedToDelete(new Set());
                    }}
                    style={{ cursor: 'pointer', accentColor: '#b58a3d', width: '16px', height: '16px' }}
@@ -429,12 +411,12 @@ export default function CustomerDatabasePage() {
                 <th 
                   key={key} 
                   draggable 
-                  onDragStart={(e) => handleDragStart(e, key)}
+                  onDragStart={(e) => handleDragStart(e, key as string)}
                   onDragOver={handleDragOver}
-                  onDrop={(e) => handleDrop(e, key)}
+                  onDrop={(e) => handleDrop(e, key as string)}
                   onClick={() => handleSort(key)}
                   style={{ 
-                    width: columnWidths[key] || 150, 
+                    width: columnWidths[key as string] || 150, 
                     position: 'relative', 
                     padding: '16px 12px', 
                     textAlign: 'left', 
@@ -448,11 +430,11 @@ export default function CustomerDatabasePage() {
                   }}
                   title="Click to Sort, Drag to Reorder"
                 >
-                  {formatHeader(key)}
+                  {formatHeader(key as string)}
                   <span style={{ marginLeft: '6px', fontSize: '12px', opacity: sortConfig?.key === key ? 1 : 0.3 }}>
                     {sortConfig?.key === key ? (sortConfig.direction === 'asc' ? '↑' : '↓') : '↕'}
                   </span>
-                  <Resizer columnKey={key} />
+                  <Resizer columnKey={key as string} />
                 </th>
               ))}
             </tr>
@@ -461,112 +443,115 @@ export default function CustomerDatabasePage() {
             {processedCustomers.length === 0 ? (
               <tr><td colSpan={columnOrder.length + 2} style={{ padding: '40px', textAlign: 'center', color: '#94a3b8' }}>No customers found.</td></tr>
             ) : (
-              processedCustomers.map((c, index) => (
-                <tr key={c.id} onMouseEnter={() => setHoveredId(c.id)} onMouseLeave={() => setHoveredId(null)} style={{ borderBottom: '1px solid #f1f5f9', background: edits[c.id] ? '#fefcf3' : 'transparent', transition: 'background 0.2s' }}>
-                  
-                  {/* Checkbox Row Column */}
-                  <td style={{ width: '46px', padding: '8px', textAlign: 'center', borderRight: '1px solid #f1f5f9', background: edits[c.id] ? '#fefcf3' : 'transparent' }}>
-                    <input 
-                      type="checkbox" 
-                      checked={selectedToDelete.has(c.id)}
-                      onChange={() => {
-                        const next = new Set(selectedToDelete)
-                        next.has(c.id) ? next.delete(c.id) : next.add(c.id)
-                        setSelectedToDelete(next)
-                      }} 
-                      style={{ cursor: 'pointer', width: '16px', height: '16px', margin: 0, accentColor: '#b58a3d' }} 
-                    />
-                  </td>
+              processedCustomers.map((c, index) => {
+                const cid = String(c.id);
+                return (
+                  <tr key={cid} onMouseEnter={() => setHoveredId(cid)} onMouseLeave={() => setHoveredId(null)} style={{ borderBottom: '1px solid #f1f5f9', background: edits[cid] ? '#fefcf3' : 'transparent', transition: 'background 0.2s' }}>
+                    
+                    {/* Checkbox Row Column */}
+                    <td style={{ width: '46px', padding: '8px', textAlign: 'center', borderRight: '1px solid #f1f5f9', background: edits[cid] ? '#fefcf3' : 'transparent' }}>
+                      <input 
+                        type="checkbox" 
+                        checked={selectedToDelete.has(cid)}
+                        onChange={() => {
+                          const next = new Set(selectedToDelete)
+                          next.has(cid) ? next.delete(cid) : next.add(cid)
+                          setSelectedToDelete(next)
+                        }} 
+                        style={{ cursor: 'pointer', width: '16px', height: '16px', margin: 0, accentColor: '#b58a3d' }} 
+                      />
+                    </td>
 
-                  {/* 🔥 FIXED NUMBER COLUMN ROW */}
-                  <td style={{ width: '50px', padding: '8px', textAlign: 'center', borderRight: '1px solid #f1f5f9', color: '#64748b', fontSize: '13px', fontWeight: 'bold', background: edits[c.id] ? '#fefcf3' : 'transparent' }}>
-                    {index + 1}
-                  </td>
+                    {/* 🔥 FIXED NUMBER COLUMN ROW */}
+                    <td style={{ width: '50px', padding: '8px', textAlign: 'center', borderRight: '1px solid #f1f5f9', color: '#64748b', fontSize: '13px', fontWeight: 'bold', background: edits[cid] ? '#fefcf3' : 'transparent' }}>
+                      {index + 1}
+                    </td>
 
-                  {columnOrder.map(col => {
-                    const isNameCol = col === 'name';
-                    const editing = editingCell?.id === c.id && editingCell?.col === col;
-                    const val = edits[c.id]?.[col] ?? (c as any)[col] ?? '';
-                    const readOnly = isReadOnly(col);
+                    {columnOrder.map(col => {
+                      const isNameCol = col === 'name';
+                      const editing = editingCell?.id === cid && editingCell?.col === col;
+                      const val = edits[cid]?.[col as keyof Customer] ?? (c as any)[col] ?? '';
+                      const readOnly = isReadOnly(col as string);
 
-                    return (
-                      <td key={col} className={editing ? 'cell-editing' : ''} style={{ borderRight: '1px solid #f1f5f9', overflow: 'hidden', position: 'relative', padding: 0 }}>
-                        
-                        {/* Input Transform */}
-                        {editing && !readOnly ? (
-                          col === 'owner' ? (
-                            <select 
-                              autoFocus 
-                              className="cell-input" 
-                              value={val} 
-                              onChange={(e) => setEdits(prev => ({ ...prev, [c.id]: { ...(prev[c.id] || {}), [col]: e.target.value } }))}
-                              onBlur={() => handleSaveRecord(c.id)}
-                              onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); if (e.key === 'Escape') setEditingCell(null); }}
-                            >
-                              <option value="Both">Both</option>
-                              <option value="Jing">Jing</option>
-                              <option value="Pich">Pich</option>
-                              <option value="Mom">Mom</option>
-                            </select>
-                          ) : col === 'type' ? (
-                            <select 
-                              autoFocus 
-                              className="cell-input" 
-                              value={val} 
-                              onChange={(e) => setEdits(prev => ({ ...prev, [c.id]: { ...(prev[c.id] || {}), [col]: e.target.value } }))}
-                              onBlur={() => handleSaveRecord(c.id)}
-                              onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); if (e.key === 'Escape') setEditingCell(null); }}
-                            >
-                              <option value="ហូប">ហូប</option>
-                              <option value="លក់បាយ">លក់បាយ</option>
-                              <option value="លក់ត">លក់ត</option>
-                              <option value="ធ្វើនំ">ធ្វើនំ</option>
-                              <option value="អំណោយ">អំណោយ</option>
-                            </select>
+                      return (
+                        <td key={col as string} className={editing ? 'cell-editing' : ''} style={{ borderRight: '1px solid #f1f5f9', overflow: 'hidden', position: 'relative', padding: 0 }}>
+                          
+                          {/* Input Transform */}
+                          {editing && !readOnly ? (
+                            col === 'owner' ? (
+                              <select 
+                                autoFocus 
+                                className="cell-input" 
+                                value={val} 
+                                onChange={(e) => setEdits(prev => ({ ...prev, [cid]: { ...(prev[cid] || {}), [col]: e.target.value } }))}
+                                onBlur={() => handleSaveRecord(cid)}
+                                onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); if (e.key === 'Escape') setEditingCell(null); }}
+                              >
+                                <option value="Both">Both</option>
+                                <option value="Jing">Jing</option>
+                                <option value="Pich">Pich</option>
+                                <option value="Mom">Mom</option>
+                              </select>
+                            ) : col === 'type' ? (
+                              <select 
+                                autoFocus 
+                                className="cell-input" 
+                                value={val} 
+                                onChange={(e) => setEdits(prev => ({ ...prev, [cid]: { ...(prev[cid] || {}), [col]: e.target.value } }))}
+                                onBlur={() => handleSaveRecord(cid)}
+                                onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); if (e.key === 'Escape') setEditingCell(null); }}
+                              >
+                                <option value="ហូប">ហូប</option>
+                                <option value="លក់បាយ">លក់បាយ</option>
+                                <option value="លក់ត">លក់ត</option>
+                                <option value="ធ្វើនំ">ធ្វើនំ</option>
+                                <option value="អំណោយ">អំណោយ</option>
+                              </select>
+                            ) : (
+                              <input 
+                                autoFocus
+                                type="text"
+                                className="cell-input"
+                                style={{ paddingLeft: '12px' }}
+                                value={val}
+                                onChange={(e) => setEdits(prev => ({ ...prev, [cid]: { ...(prev[cid] || {}), [col]: e.target.value } }))}
+                                onBlur={() => handleSaveRecord(cid)}
+                                onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); if (e.key === 'Escape') { setEdits(prev => { const n = { ...prev }; delete n[cid]; return n }); setEditingCell(null); } }}
+                              />
+                            )
                           ) : (
-                            <input 
-                              autoFocus
-                              type="text"
-                              className="cell-input"
-                              style={{ paddingLeft: '12px' }}
-                              value={val}
-                              onChange={(e) => setEdits(prev => ({ ...prev, [c.id]: { ...(prev[c.id] || {}), [col]: e.target.value } }))}
-                              onBlur={() => handleSaveRecord(c.id)}
-                              onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); if (e.key === 'Escape') { setEdits(prev => { const n = { ...prev }; delete n[c.id]; return n }); setEditingCell(null); } }}
-                            />
-                          )
-                        ) : (
-                          <div 
-                            className="cell-display"
-                            style={{ 
-                              paddingLeft: '12px', 
-                              fontWeight: isNameCol || col === 'days_since_last_purchase' ? 'bold' : 'normal', 
-                              color: isNameCol ? '#1e293b' : col === 'days_since_last_purchase' ? '#b58a3d' : readOnly ? '#94a3b8' : '#334155',
-                              cursor: readOnly ? 'default' : 'text',
-                              fontFamily: col === 'id' ? 'monospace' : 'inherit',
-                              display: 'flex',
-                              justifyContent: 'space-between',
-                              alignItems: 'center',
-                              width: '100%',
-                              boxSizing: 'border-box'
-                            }}
-                            onClick={() => !readOnly && setEditingCell({ id: c.id, col: col as string })}
-                          >
-                            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                              {col === 'google_map' && val ? (
-                                <a href={val} target="_blank" rel="noreferrer" style={{ color: '#2563eb', textDecoration: 'none', fontWeight: 'bold' }} onClick={e => e.stopPropagation()}>🗺️ Open Map</a>
-                              ) : (
-                                formatDisplayValue(col as string, val)
-                              )}
-                            </span>
-                          </div>
-                        )}
+                            <div 
+                              className="cell-display"
+                              style={{ 
+                                paddingLeft: '12px', 
+                                fontWeight: isNameCol || col === 'days_since_last_purchase' ? 'bold' : 'normal', 
+                                color: isNameCol ? '#1e293b' : col === 'days_since_last_purchase' ? '#b58a3d' : readOnly ? '#94a3b8' : '#334155',
+                                cursor: readOnly ? 'default' : 'text',
+                                fontFamily: col === 'id' ? 'monospace' : 'inherit',
+                                display: 'flex',
+                                justifyContent: 'space-between',
+                                alignItems: 'center',
+                                width: '100%',
+                                boxSizing: 'border-box'
+                              }}
+                              onClick={() => !readOnly && setEditingCell({ id: cid, col: col as string })}
+                            >
+                              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                {col === 'google_map' && val ? (
+                                  <a href={val} target="_blank" rel="noreferrer" style={{ color: '#2563eb', textDecoration: 'none', fontWeight: 'bold' }} onClick={e => e.stopPropagation()}>🗺️ Open Map</a>
+                                ) : (
+                                  formatDisplayValue(col as string, val)
+                                )}
+                              </span>
+                            </div>
+                          )}
 
-                      </td>
-                    )
-                  })}
-                </tr>
-              ))
+                        </td>
+                      )
+                    })}
+                  </tr>
+                )
+              })
             )}
           </tbody>
         </table>

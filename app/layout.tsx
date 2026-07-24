@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from 'next'
 import './globals.css'
 import Sidebar from '@/components/Sidebar'
 import SplashScreen from '@/components/SplashScreen'
+import { ToastProvider } from '@/components/ToastProvider'
 
 export const metadata: Metadata = {
   title: 'Angkor Radiant Rice POS',
@@ -30,18 +31,20 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body>
-        <SplashScreen>
-          {/* Changed 100dvh to 100% so it perfectly fits inside the pinned body */}
-          <div style={{ display: 'flex', width: '100%', height: '100%', overflow: 'hidden' }}>
-            
-            <Sidebar />
+        <ToastProvider>
+          <SplashScreen>
+            {/* Changed 100dvh to 100% so it perfectly fits inside the pinned body */}
+            <div style={{ display: 'flex', width: '100%', height: '100%', overflow: 'hidden' }}>
+              
+              <Sidebar />
 
-            <main className="app-scroller">
-              {children}
-            </main>
-            
-          </div>
-        </SplashScreen>
+              <main className="app-scroller">
+                {children}
+              </main>
+              
+            </div>
+          </SplashScreen>
+        </ToastProvider>
       </body>
     </html>
   )
