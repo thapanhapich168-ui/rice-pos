@@ -1058,10 +1058,11 @@ export default function RiceControl() {
   const livePendingRemaining = payPendingModal.totalDue - liveTotalPendingReceived;
 
   return (
-    <div className="main-wrapper">
+    // 🔥 APP LAYOUT: Flex Column + Overflow Hidden locks the outer page
+    <div className="main-wrapper" style={{ display: 'flex', flexDirection: 'column', height: '100dvh', overflow: 'hidden' }}>
       
-      {/* HEADER */}
-      <div className="header-container">
+      {/* HEADER (Frozen) */}
+      <div className="header-container" style={{ flexShrink: 0 }}>
         <div className="header-left">
           <h1 className="saas-page-title">🌾 Rice Inventory & Suppliers</h1>
         </div>
@@ -1089,8 +1090,8 @@ export default function RiceControl() {
         </div>
       </div>
 
-      {/* TOOLBAR & TABS */}
-      <div className="saas-card" style={{ marginBottom: '24px', padding: '16px 20px', display: 'flex', gap: '16px', flexWrap: 'wrap', alignItems: 'center' }}>
+      {/* TOOLBAR & TABS (Frozen) */}
+      <div className="saas-card" style={{ marginBottom: '24px', padding: '16px 20px', display: 'flex', gap: '16px', flexWrap: 'wrap', alignItems: 'center', flexShrink: 0 }}>
         <div className="saas-tab-container hide-scrollbar" style={{ margin: 0, padding: 0, border: 'none', boxShadow: 'none', background: 'transparent' }}>
           <button className={`saas-tab ${activeView === 'retail' ? 'active' : ''}`} onClick={() => { setActiveView('retail'); setActiveCategory('All'); }}>🛍️ Retail</button>
           <button className={`saas-tab ${activeView === 'wholesale' ? 'active' : ''}`} onClick={() => setActiveView('wholesale')}>🌾 Wholesale</button>
@@ -1112,10 +1113,30 @@ export default function RiceControl() {
             
             <div className="toolbar-filters" style={{ display: 'flex', gap: '10px' }}>
               <button className="saas-btn saas-btn-primary mobile-only-btn" onClick={handleOpenAddProduct}>
-                + Add Product
+                Add
               </button>
-              <button className="saas-btn saas-btn-secondary" onClick={() => setIsFilterOpen(true)} style={{ color: filterRules.length > 0 ? '#3b82f6' : '#0f172a' }}>
-                Y Filter {filterRules.length > 0 && `(${filterRules.length})`}
+              
+              <button 
+                className="saas-btn saas-btn-secondary" 
+                onClick={() => setIsFilterOpen(true)} 
+                style={{ 
+                  color: filterRules.length > 0 ? '#3b82f6' : '#0f172a', 
+                  display: 'flex', 
+                  alignItems: 'center', 
+                  justifyContent: 'center', 
+                  padding: '10px' 
+                }}
+              >
+                {/* Clean SVG Filter Icon */}
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon>
+                </svg>
+                {/* Shows active filter count if greater than 0 */}
+                {filterRules.length > 0 && (
+                  <span style={{ marginLeft: '6px', fontSize: '13px', fontWeight: 'bold' }}>
+                    {filterRules.length}
+                  </span>
+                )}
               </button>
             </div>
           </div>
@@ -1130,11 +1151,11 @@ export default function RiceControl() {
         )}
       </div>
 
-      {/* RICE CATEGORIES (ONLY WHOLESALE) */}
+      {/* RICE CATEGORIES (Frozen) */}
       {activeView === 'wholesale' && (
         <div 
           className="saas-tab-container hide-scrollbar" 
-          style={{ paddingBottom: '16px', marginBottom: '8px', WebkitOverflowScrolling: 'touch', userSelect: 'none', background: 'transparent', border: 'none', boxShadow: 'none' }}
+          style={{ paddingBottom: '16px', marginBottom: '8px', WebkitOverflowScrolling: 'touch', userSelect: 'none', background: 'transparent', border: 'none', boxShadow: 'none', flexShrink: 0 }}
         >
           {categoryOrder.map(cat => (
             <button 
@@ -1153,10 +1174,10 @@ export default function RiceControl() {
         </div>
       )}
 
-      {/* SPREADSHEET VIEWS: RETAIL & WHOLESALE */}
+      {/* 🔥 SPREADSHEET VIEWS: RETAIL & WHOLESALE */}
       {(activeView === 'retail' || activeView === 'wholesale') && (
-        <div className="saas-table-wrapper fade-in">
-          <div className="saas-table-responsive">
+        <div className="saas-table-wrapper fade-in" style={{ flex: 1, minHeight: 0, marginBottom: 0, display: 'flex', flexDirection: 'column' }}>
+          <div className="saas-table-responsive" style={{ flex: 1, overflow: 'auto' }}>
             <table className="saas-table" style={{ minWidth: '100%', tableLayout: 'fixed', width: 'max-content' }}>
               <thead>
                 <tr>
@@ -1168,7 +1189,7 @@ export default function RiceControl() {
                     const isDraggable = key !== 'actions' && key !== 'linked_wholesale' && key !== 'expand';
 
                     if (key === 'expand') {
-                      return <th key={key} className="saas-th" style={{ width: '40px', minWidth: '40px', maxWidth: '40px', padding: '16px 8px', borderRight: '1px solid #f1f5f9' }}></th>;
+                      return <th key={key} className="saas-th" style={{ width: '40px', minWidth: '40px', maxWidth: '40px', padding: '16px 8px', borderRight: '1px solid #f1f5f9', position: 'sticky', top: 0, zIndex: 30, backgroundColor: '#f8fafc', boxShadow: 'inset 0 -2px 0 0 #e2e8f0' }}></th>;
                     }
 
                     return (
@@ -1180,7 +1201,14 @@ export default function RiceControl() {
                         onDragOver={onDragOverCol}
                         onDrop={(e) => handleProductDrop(e, key as string)}
                         onClick={() => handleProductSort(key)}
-                        style={{ width: columnWidths[key as string] || 150, position: 'relative', textAlign: key === 'actions' ? 'center' : 'left', borderRight: '1px solid #f1f5f9', cursor: isDraggable ? 'pointer' : 'default', whiteSpace: 'nowrap', userSelect: 'none' }}
+                        style={{ 
+                          width: columnWidths[key as string] || 150, 
+                          position: 'sticky', top: 0, zIndex: 30, backgroundColor: '#f8fafc', boxShadow: 'inset 0 -2px 0 0 #e2e8f0',
+                          textAlign: key === 'actions' ? 'center' : 'left', 
+                          borderRight: '1px solid #f1f5f9', 
+                          cursor: isDraggable ? 'pointer' : 'default', 
+                          whiteSpace: 'nowrap', userSelect: 'none' 
+                        }}
                       >
                         {key === 'linked_wholesale' ? 'Linked Wholesale Bag' : key === 'mtd_kg_used' ? 'MTD Used (Kg)' : key === 'mtd_bags_used' ? 'MTD Used (Bags)' : key === 'min_stock_level' ? 'Min Stock' : (key as string).replace('_', ' ')}
                         {isDraggable && (<span style={{ marginLeft: '6px', fontSize: '12px', opacity: sortConfig?.key === key ? 1 : 0.3 }}>{sortConfig?.key === key ? (sortConfig.direction === 'asc' ? '↑' : '↓') : '↕'}</span>)}
@@ -1450,8 +1478,8 @@ export default function RiceControl() {
 
       {/* IMPORT FORM TAB */}
       {activeView === 'import' && (
-        <div className="fade-in" style={{ display: 'flex', justifyContent: 'center' }}>
-          <div className="saas-card" style={{ width: '100%', maxWidth: '600px' }}>
+        <div className="fade-in" style={{ display: 'flex', justifyContent: 'center', flex: 1, overflowY: 'auto' }}>
+          <div className="saas-card" style={{ width: '100%', maxWidth: '600px', height: 'fit-content' }}>
             <h2 className="saas-card-title" style={{ fontSize: '18px', borderBottom: '1px solid #f1f5f9', paddingBottom: '12px' }}>🚚 Receive New Stock</h2>
             
             <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', marginTop: '20px' }}>
@@ -1582,12 +1610,12 @@ export default function RiceControl() {
         </div>
       )}
 
-      {/* PENDING PAYMENTS TAB */}
+      {/* 🔥 PENDING PAYMENTS TAB */}
       {activeView === 'pending' && (
-        <div className="saas-table-wrapper fade-in">
-          <div className="saas-table-responsive">
+        <div className="saas-table-wrapper fade-in" style={{ flex: 1, minHeight: 0, marginBottom: 0, display: 'flex', flexDirection: 'column' }}>
+          <div className="saas-table-responsive" style={{ flex: 1, overflow: 'auto' }}>
             <table className="saas-table" style={{ minWidth: '100%', tableLayout: 'fixed', width: 'max-content' }}>
-              <thead style={{ background: '#fff1f2' }}>
+              <thead>
                 <tr>
                   {pendingColOrder.map(col => {
                     const isDraggable = col !== 'actions';
@@ -1611,7 +1639,7 @@ export default function RiceControl() {
                         onClick={() => handlePendingSort(col)}
                         style={{ 
                           width: pendingColWidths[col] || 150, 
-                          position: 'relative', 
+                          position: 'sticky', top: 0, zIndex: 30, backgroundColor: '#fff1f2', boxShadow: 'inset 0 -2px 0 0 #ffe4e6',
                           textAlign: col === 'actions' ? 'center' : (['total_cost', 'paid_so_far', 'remaining_debt'].includes(col) ? 'right' : 'left'), 
                           color: '#991b1b', 
                           borderRight: '1px solid #ffe4e6', 
@@ -1685,10 +1713,10 @@ export default function RiceControl() {
         </div>
       )}
 
-      {/* SUPPLIERS DATABASE TAB */}
+      {/* 🔥 SUPPLIERS DATABASE TAB */}
       {activeView === 'suppliers' && (
-        <div className="saas-table-wrapper fade-in">
-          <div className="saas-table-responsive">
+        <div className="saas-table-wrapper fade-in" style={{ flex: 1, minHeight: 0, marginBottom: 0, display: 'flex', flexDirection: 'column' }}>
+          <div className="saas-table-responsive" style={{ flex: 1, overflow: 'auto' }}>
             <table className="saas-table" style={{ minWidth: '100%', tableLayout: 'fixed', width: 'max-content' }}>
               <thead>
                 <tr>
@@ -1702,7 +1730,7 @@ export default function RiceControl() {
 
                     if (col === 'select') {
                       return (
-                        <th key={col} className="saas-th" style={{ width: '50px', minWidth: '50px', maxWidth: '50px', padding: '16px 8px', textAlign: 'center' }}>
+                        <th key={col} className="saas-th" style={{ width: '50px', minWidth: '50px', maxWidth: '50px', padding: '16px 8px', textAlign: 'center', position: 'sticky', top: 0, zIndex: 30, backgroundColor: '#f8fafc', boxShadow: 'inset 0 -2px 0 0 #e2e8f0', borderRight: '1px solid #f1f5f9' }}>
                           <input 
                             type="checkbox" 
                             checked={selectedSuppliersToDelete.size === suppliers.length && suppliers.length > 0}
@@ -1727,8 +1755,9 @@ export default function RiceControl() {
                         onClick={() => handleSupplierSort(col)}
                         style={{ 
                           width: supplierColWidths[col] || 150, 
-                          position: 'relative', 
+                          position: 'sticky', top: 0, zIndex: 30, backgroundColor: '#f8fafc', boxShadow: 'inset 0 -2px 0 0 #e2e8f0',
                           textAlign: col === 'total_owed' ? 'right' : 'left', 
+                          borderRight: '1px solid #f1f5f9',
                           cursor: isDraggable ? 'pointer' : 'default', 
                           whiteSpace: 'nowrap', 
                           userSelect: 'none' 
@@ -1756,7 +1785,7 @@ export default function RiceControl() {
                     <tr key={s.id} className="saas-tr">
                       {supplierColOrder.map(col => {
                         if (col === 'select') return (
-                          <td className="saas-td" key={col} style={{ textAlign: 'center' }}>
+                          <td className="saas-td" key={col} style={{ textAlign: 'center', borderRight: '1px solid #f1f5f9' }}>
                             <input 
                               type="checkbox" 
                               checked={selectedSuppliersToDelete.has(s.id)}
@@ -1769,11 +1798,11 @@ export default function RiceControl() {
                             />
                           </td>
                         );
-                        if (col === 'name') return <td className="saas-td" key={col} style={{ fontWeight: 'bold' }}>{s.name}</td>;
-                        if (col === 'phone') return <td className="saas-td" key={col}>{s.phone || '-'}</td>;
-                        if (col === 'location') return <td className="saas-td" key={col}>{s.location || '-'}</td>;
+                        if (col === 'name') return <td className="saas-td" key={col} style={{ fontWeight: 'bold', borderRight: '1px solid #f1f5f9' }}>{s.name}</td>;
+                        if (col === 'phone') return <td className="saas-td" key={col} style={{ borderRight: '1px solid #f1f5f9' }}>{s.phone || '-'}</td>;
+                        if (col === 'location') return <td className="saas-td" key={col} style={{ borderRight: '1px solid #f1f5f9' }}>{s.location || '-'}</td>;
                         if (col === 'total_owed') return (
-                          <td className="saas-td" key={col} style={{ textAlign: 'right', fontWeight: 'bold', color: Number(s.total_owed_riel) > 0 ? '#ef4444' : '#10b981' }}>
+                          <td className="saas-td" key={col} style={{ textAlign: 'right', fontWeight: 'bold', borderRight: '1px solid #f1f5f9', color: Number(s.total_owed_riel) > 0 ? '#ef4444' : '#10b981' }}>
                             {formatRiel(s.total_owed_riel || 0)}
                             {Number(s.total_owed_usd) > 0 && <div style={{ fontSize: '12px', marginTop: '4px' }}>{formatUSD(s.total_owed_usd)}</div>}
                           </td>
@@ -2131,14 +2160,16 @@ export default function RiceControl() {
 
         .header-container { 
           display: flex;
-          justify-content: flex-start;
+          justify-content: space-between; /* 🔥 Pushes title left and buttons right */
           align-items: center; 
           margin-bottom: 24px; 
           margin-top: 0;
-          margin-left: 60px; 
+          margin-left: 60px; /* Clears sidebar */
           gap: 12px;
           min-height: 48px; 
-          width: 100%;
+          width: calc(100% - 60px); /* Prevents horizontal scroll/overflow */
+          max-width: 1600px;
+          padding-right: 24px; /* Breathing room on the far right */
         }
         
         .header-left {
@@ -2150,6 +2181,7 @@ export default function RiceControl() {
         .header-actions {
           display: flex;
           gap: 10px;
+          margin-left: auto; /* 🔥 Hard-locks the buttons to the right */
         }
 
         .hide-scrollbar::-webkit-scrollbar { display: none; }
@@ -2252,6 +2284,14 @@ export default function RiceControl() {
           .desktop-only-btn { display: none !important; }
           .mobile-only-btn { display: flex !important; }
           .mobile-only-flex { display: flex !important; }
+
+          .mobile-action-row {
+            display: flex;
+            flex: 1;
+            gap: 12px;
+            align-items: center;
+            min-width: 300px;
+          }
 
           .header-container { 
             margin-left: 54px !important; 

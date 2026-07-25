@@ -76,7 +76,8 @@ export default function CogsReportPage() {
         supabase.from('app_settings').select('*').in('setting_key', ['personal_owe_riel', 'personal_owe_usd']),
         supabase.from('invoice_summaries').select('*').order('created_at', { ascending: false }).limit(loadLimit),
         supabase.from('expenses').select('*').order('created_at', { ascending: false }).limit(loadLimit),
-        supabase.from('invoice_payments').select('*').order('created_at', { ascending: false }).limit(loadLimit)
+        // NO ORDER BY CREATED_AT HERE
+        supabase.from('invoice_payments').select('*').limit(loadLimit)
     ]);
 
     setSales(sData || [])
@@ -511,10 +512,11 @@ export default function CogsReportPage() {
   let combinedGrandTotal = 0;
 
   return (
-    <div className="main-wrapper">
+    // 🔥 APP LAYOUT: Locks the page layout for inner scrolling
+    <div className="main-wrapper" style={{ display: 'flex', flexDirection: 'column', height: '100dvh', overflow: 'hidden' }}>
       
-      {/* HEADER CONTAINER */}
-      <div className="header-container">
+      {/* HEADER CONTAINER (Frozen) */}
+      <div className="header-container" style={{ flexShrink: 0 }}>
         <div className="header-left">
           <h1 className="saas-page-title">🌾 COGS Accounting</h1>
         </div>
@@ -523,8 +525,15 @@ export default function CogsReportPage() {
           {activeMainTab === 'report' && (
             <>
               {isDeviceMobile ? (
-                <button onClick={handleMobileShare} disabled={isCapturing} className="saas-btn" style={{ background: '#3b82f6', color: '#fff' }}>
-                  {isCapturing ? '⏳...' : '📤 Share'}
+                <button onClick={handleMobileShare} disabled={isCapturing} className="saas-btn" style={{ background: '#3b82f6', color: '#fff', padding: '10px' }} title="Download / Share">
+                  {isCapturing ? '⏳' : (
+                    // 🔥 Clean Mobile SVG Icon
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                      <polyline points="7 10 12 15 17 10"></polyline>
+                      <line x1="12" y1="15" x2="12" y2="3"></line>
+                    </svg>
+                  )}
                 </button>
               ) : (
                 <button onClick={handleDownload} disabled={isCapturing} className="saas-btn" style={{ background: '#b58a3d', color: '#fff' }}>
@@ -536,8 +545,8 @@ export default function CogsReportPage() {
         </div>
       </div>
 
-      {/* MAIN SAAS TABS */}
-      <div className="saas-tab-container" style={{ padding: '8px', border: '1px solid #e2e8f0', background: '#fff' }}>
+      {/* MAIN SAAS TABS (Frozen) */}
+      <div className="saas-tab-container" style={{ padding: '8px', border: '1px solid #e2e8f0', background: '#fff', flexShrink: 0, marginBottom: '16px' }}>
         <button 
           onClick={() => setActiveMainTab('report')} 
           className={`saas-tab ${activeMainTab === 'report' ? 'active' : ''}`}
@@ -561,27 +570,28 @@ export default function CogsReportPage() {
         </button>
       </div>
 
-      {/* FILTERS CARD */}
-      <div className="saas-card" style={{ padding: '16px 20px', marginBottom: '24px', display: 'flex', gap: '15px', alignItems: 'center', flexWrap: 'wrap' }}>
+      {/* FILTERS CARD (Frozen) */}
+      <div className="saas-card" style={{ padding: '16px', marginBottom: '16px', display: 'flex', gap: '15px', alignItems: 'center', flexWrap: 'wrap', flexShrink: 0 }}>
         
         {activeMainTab === 'report' ? (
-          <>
-            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+          // 🔥 Fixed: Removed width: 100% and changed nowrap to wrap so it sits inline on desktop!
+          <div style={{ display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexShrink: 0 }}>
               <label style={{ fontWeight: 'bold', fontSize: '13px', color: '#64748b' }}>From:</label>
-              <input type="date" value={fromDate} onChange={e => setFromDate(e.target.value)} className="saas-input" style={{ width: 'auto', padding: '8px' }} />
+              <input type="date" value={fromDate} onChange={e => setFromDate(e.target.value)} className="saas-input" style={{ width: '135px', padding: '8px' }} />
             </div>
-            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+            <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexShrink: 0 }}>
               <label style={{ fontWeight: 'bold', fontSize: '13px', color: '#64748b' }}>To:</label>
-              <input type="date" value={toDate} onChange={e => setToDate(e.target.value)} className="saas-input" style={{ width: 'auto', padding: '8px' }} />
+              <input type="date" value={toDate} onChange={e => setToDate(e.target.value)} className="saas-input" style={{ width: '135px', padding: '8px' }} />
             </div>
-          </>
+          </div>
         ) : (
-          <div className="saas-tab-container" style={{ margin: 0, padding: '4px', border: 'none', boxShadow: 'none', background: '#f1f5f9' }}>
+          <div className="saas-tab-container hide-scrollbar" style={{ margin: 0, padding: '4px', border: 'none', boxShadow: 'none', background: '#f1f5f9', display: 'flex', flexWrap: 'nowrap', overflowX: 'auto' }}>
             {['today', 'week', 'month', 'all'].map(f => (
               <button 
                 key={f} onClick={() => setTimeFilter(f as any)} 
                 className={`saas-tab ${timeFilter === f ? 'active' : ''}`}
-                style={timeFilter === f ? { background: '#0f172a', color: '#fff', padding: '8px 16px' } : { padding: '8px 16px' }}
+                style={timeFilter === f ? { background: '#0f172a', color: '#fff', padding: '8px 16px', flexShrink: 0 } : { padding: '8px 16px', flexShrink: 0 }}
               >
                 {f === 'week' ? 'This Week' : f === 'month' ? 'This Month' : f === 'all' ? 'All Time' : f}
               </button>
@@ -589,9 +599,9 @@ export default function CogsReportPage() {
           </div>
         )}
         
-        <div style={{ borderLeft: '1px solid #e2e8f0', height: '24px', margin: '0 5px' }} />
+        <div style={{ width: '1px', height: '24px', backgroundColor: '#e2e8f0' }} className="desktop-only-divider" />
         
-        <div className="saas-tab-container" style={{ margin: 0, padding: '4px', border: 'none', boxShadow: 'none', background: '#f1f5f9' }}>
+        <div className="saas-tab-container" style={{ margin: 0, padding: '4px', border: 'none', boxShadow: 'none', background: '#f1f5f9', flexShrink: 0 }}>
           <button 
             onClick={() => setActiveOwnerTab('mom')} 
             className={`saas-tab ${activeOwnerTab === 'mom' ? 'active' : ''}`}
@@ -609,289 +619,314 @@ export default function CogsReportPage() {
         </div>
       </div>
 
-      {/* A4 REPORT TAB (Inner Table Intentionally Untouched for Print Quality) */}
-      {activeMainTab === 'report' && (
-        <div className="a4-paper-container" ref={reportRef}>
-          <img className="center-logo" src="https://i.imgur.com/s0hg3MQ.png" alt="Logo" crossOrigin="anonymous" />
-          
-          <div className="a4-content">
-            <h1 style={{ textAlign: 'center', fontSize: '22px', color: 'green', margin: '0 0 20px 0', fontFamily: "'Noto Sans Khmer', Arial, sans-serif", fontWeight: 'bold' }}>
-              🌾 អង្ករត្រូវទូទាត់ 🧾
-            </h1>
+      {/* 🔥 MAIN CONTENT AREA (Scrolls Internally) */}
+      <div className="hide-scrollbar" style={{ flex: 1, overflowY: 'auto', minHeight: 0, paddingBottom: '40px', display: 'flex', flexDirection: 'column' }}>
 
-            {loading ? (
-              <p style={{ textAlign: 'center', color: '#64748b', padding: '40px' }}>Loading records...</p>
-            ) : reportSales.length === 0 ? (
-              <p style={{ textAlign: 'center', color: '#94a3b8', padding: '40px' }}>No sales records found for this date range.</p>
-            ) : (
-              <>
-                {Object.keys(groupedBySeller).map((seller) => {
-                  const { rows, sellerGrandTotal } = processSellerData(groupedBySeller[seller]);
-                  combinedGrandTotal += sellerGrandTotal;
+        {/* A4 REPORT TAB */}
+        {activeMainTab === 'report' && (
+          <>
+            <div className="a4-paper-container" ref={reportRef} style={{ flexShrink: 0, margin: '0 auto 24px auto' }}>
+              <img className="center-logo" src="https://i.imgur.com/s0hg3MQ.png" alt="Logo" crossOrigin="anonymous" />
+              
+              <div className="a4-content">
+                <h1 style={{ textAlign: 'center', fontSize: '22px', color: 'green', margin: '0 0 20px 0', fontFamily: "'Noto Sans Khmer', Arial, sans-serif", fontWeight: 'bold' }}>
+                  🌾 អង្ករត្រូវទូទាត់ 🧾
+                </h1>
 
-                  return (
-                    <div key={seller} style={{ marginBottom: '30px' }}>
-                      <h2 style={{ fontSize: '16px', margin: '0 0 8px 0', color: '#333', fontFamily: "'Noto Sans Khmer', Arial, sans-serif", fontWeight: 'bold' }}>
-                        ថៅកែ {seller.toUpperCase()}
-                      </h2>
-                      <table className="report-table">
-                        <thead>
-                          <tr style={{ backgroundColor: '#fffacd' }}>
-                            <th style={{ width: '10%' }}>INV</th>
-                            <th style={{ width: '20%' }}>អតិថិជន</th>
-                            <th style={{ width: '20%' }}>ប្រភេទអង្ករ</th>
-                            <th style={{ width: '20%' }}>ឈ្មោះក្នុងប៊ុង</th>
-                            <th style={{ width: '10%' }}>ចំនួន</th>
-                            <th style={{ width: '10%' }}>តម្លៃ</th>
-                            <th style={{ width: '10%' }}>សរុប</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {rows.map((row, idx) => (
-                            <tr key={idx}>
-                              <td style={{ textAlign: 'center', fontWeight: 'bold' }}>
-                                {row.invoice_id ? String(row.invoice_id).replace(/\D/g, '') : ''}
-                              </td>
-                              {row.isFirstOfCustomer && (
-                                <td rowSpan={row.rowSpan} style={{ verticalAlign: 'middle', fontWeight: 'bold' }}>
-                                  {row.customer_name}
+                {loading ? (
+                  <p style={{ textAlign: 'center', color: '#64748b', padding: '40px' }}>Loading records...</p>
+                ) : reportSales.length === 0 ? (
+                  <p style={{ textAlign: 'center', color: '#94a3b8', padding: '40px' }}>No sales records found for this date range.</p>
+                ) : (
+                  <>
+                    {Object.keys(groupedBySeller).map((seller) => {
+                      const { rows, sellerGrandTotal } = processSellerData(groupedBySeller[seller]);
+                      combinedGrandTotal += sellerGrandTotal;
+
+                      return (
+                        <div key={seller} style={{ marginBottom: '30px' }}>
+                          <h2 style={{ fontSize: '16px', margin: '0 0 8px 0', color: '#333', fontFamily: "'Noto Sans Khmer', Arial, sans-serif", fontWeight: 'bold' }}>
+                            ថៅកែ {seller.toUpperCase()}
+                          </h2>
+                          <table className="report-table">
+                            <thead>
+                              <tr style={{ backgroundColor: '#fffacd' }}>
+                                <th style={{ width: '10%' }}>INV</th>
+                                <th style={{ width: '20%' }}>អតិថិជន</th>
+                                <th style={{ width: '20%' }}>ប្រភេទអង្ករ</th>
+                                <th style={{ width: '20%' }}>ឈ្មោះក្នុងប៊ុង</th>
+                                <th style={{ width: '10%' }}>ចំនួន</th>
+                                <th style={{ width: '10%' }}>តម្លៃ</th>
+                                <th style={{ width: '10%' }}>សរុប</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {rows.map((row, idx) => (
+                                <tr key={idx}>
+                                  <td style={{ textAlign: 'center', fontWeight: 'bold' }}>
+                                    {row.invoice_id ? String(row.invoice_id).replace(/\D/g, '') : ''}
+                                  </td>
+                                  {row.isFirstOfCustomer && (
+                                    <td rowSpan={row.rowSpan} style={{ verticalAlign: 'middle', fontWeight: 'bold' }}>
+                                      {row.customer_name}
+                                    </td>
+                                  )}
+                                  <td style={{ fontWeight: 'bold' }}>
+                                    <div style={{ color: '#0f172a' }}>{row.rice_type}</div>
+                                  </td>
+                                  <td style={{ fontWeight: 'bold' }}>{row.custom_rice_type || ''}</td>
+                                  <td style={{ textAlign: 'center', fontWeight: 'bold' }}>{row.qty.toLocaleString('en-US')}</td>
+                                  <td style={{ textAlign: 'center', fontWeight: 'bold' }}>{Number(row.cogs_price).toLocaleString('en-US')}</td>
+                                  <td style={{ textAlign: 'center', fontWeight: 'bold', color: row.isNegative ? 'red' : 'inherit' }}>
+                                    {Math.round(row.calculatedAmount).toLocaleString('en-US')}
+                                  </td>
+                                </tr>
+                              ))}
+                              
+                              <tr style={{ backgroundColor: '#fffacd', fontWeight: 'bold' }}>
+                                <td colSpan={6} style={{ textAlign: 'right', paddingRight: '15px' }}>សរុប</td>
+                                <td style={{ textAlign: 'center', fontSize: '14px' }}>
+                                  {Math.round(sellerGrandTotal).toLocaleString('en-US')}
                                 </td>
-                              )}
-                              <td style={{ fontWeight: 'bold' }}>
-                                <div style={{ color: '#0f172a' }}>{row.rice_type}</div>
-                              </td>
-                              <td style={{ fontWeight: 'bold' }}>{row.custom_rice_type || ''}</td>
-                              <td style={{ textAlign: 'center', fontWeight: 'bold' }}>{row.qty.toLocaleString('en-US')}</td>
-                              <td style={{ textAlign: 'center', fontWeight: 'bold' }}>{Number(row.cogs_price).toLocaleString('en-US')}</td>
-                              <td style={{ textAlign: 'center', fontWeight: 'bold', color: row.isNegative ? 'red' : 'inherit' }}>
-                                {Math.round(row.calculatedAmount).toLocaleString('en-US')}
-                              </td>
-                            </tr>
-                          ))}
-                          
-                          <tr style={{ backgroundColor: '#fffacd', fontWeight: 'bold' }}>
-                            <td colSpan={6} style={{ textAlign: 'right', paddingRight: '15px' }}>សរុប</td>
-                            <td style={{ textAlign: 'center', fontSize: '14px' }}>
-                              {Math.round(sellerGrandTotal).toLocaleString('en-US')}
+                              </tr>
+                            </tbody>
+                          </table>
+                        </div>
+                      );
+                    })}
+
+                    <div style={{ marginTop: '40px' }}>
+                      <table className="combined-summary-table" style={{ width: '100%', borderCollapse: 'collapse', border: '2px solid #000' }}>
+                        <tbody>
+                          <tr style={{ backgroundColor: '#fffacd' }}>
+                            <td style={{ textAlign: 'right', fontWeight: 'bold', width: '80%', padding: '12px', border: '1px solid #000', fontSize: '16px' }}>
+                              សរុបរួមទាំងអស់
+                            </td>
+                            <td style={{ width: '20%', fontSize: '18px', fontWeight: 'bold', textAlign: 'center', border: '1px solid #000', padding: '12px', color: '#b58a3d' }}>
+                              {Math.round(combinedGrandTotal).toLocaleString('en-US')} ៛
                             </td>
                           </tr>
                         </tbody>
                       </table>
                     </div>
-                  );
-                })}
 
-                <div style={{ marginTop: '40px' }}>
-                  <table className="combined-summary-table" style={{ width: '100%', borderCollapse: 'collapse', border: '2px solid #000' }}>
-                    <tbody>
-                      <tr style={{ backgroundColor: '#fffacd' }}>
-                        <td style={{ textAlign: 'right', fontWeight: 'bold', width: '80%', padding: '12px', border: '1px solid #000', fontSize: '16px' }}>
-                          សរុបរួមទាំងអស់
-                        </td>
-                        <td style={{ width: '20%', fontSize: '18px', fontWeight: 'bold', textAlign: 'center', border: '1px solid #000', padding: '12px', color: '#b58a3d' }}>
-                          {Math.round(combinedGrandTotal).toLocaleString('en-US')} ៛
-                        </td>
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
-
-                <div style={{ textAlign: 'right', marginTop: '20px', fontSize: '12px', color: '#64748b', fontWeight: 'bold' }}>
-                  Generated on: {new Date().toLocaleString('en-GB')}
-                </div>
-              </>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* PENDING SETTLEMENTS TAB */}
-      {activeMainTab === 'pending' && (
-        <div className="saas-table-wrapper" style={{ paddingBottom: selectedDays.length > 0 ? '80px' : '0' }}>
-          <div className="saas-table-responsive">
-            <table className="saas-table" style={{ minWidth: '100%', tableLayout: 'auto' }}>
-              <thead style={{ background: '#fef2f2' }}>
-                <tr>
-                  <th className="saas-th" style={{ textAlign: 'center', width: '50px', color: '#991b1b', borderBottom: '1px solid #fecaca' }}>
-                    <input type="checkbox" onChange={handleSelectAll} checked={selectedDays.length > 0 && selectedDays.length === pendingDays.length} style={{ width: '18px', height: '18px', cursor: 'pointer' }} />
-                  </th>
-                  <th className="saas-th" style={{ color: '#991b1b', borderBottom: '1px solid #fecaca' }}>COGS Date</th>
-                  <th className="saas-th" style={{ color: '#991b1b', borderBottom: '1px solid #fecaca' }}>Owner</th>
-                  <th className="saas-th" style={{ textAlign: 'right', color: '#991b1b', borderBottom: '1px solid #fecaca' }}>Total COGS (៛)</th>
-                  <th className="saas-th" style={{ textAlign: 'right', color: '#991b1b', borderBottom: '1px solid #fecaca' }}>Remaining Debt (៛)</th>
-                </tr>
-              </thead>
-              <tbody>
-                {loading ? (
-                   <TableSkeleton columns={5} rows={5} />
-                ) : pendingDays.length === 0 ? (
-                  <tr>
-                    <td colSpan={5} style={{ padding: 0 }}>
-                      <EmptyState 
-                        icon="🎉" 
-                        title="All caught up!" 
-                        message="No pending COGS! You are all settled up!" 
-                      />
-                    </td>
-                  </tr>
-                ) : (
-                  pendingDays.map((d: any) => {
-                    const remaining = d.totalCogs - d.totalPaid;
-                    const isSelected = selectedDays.includes(d.key);
-                    
-                    return (
-                      <tr key={d.key} className={`saas-tr ${isSelected ? 'selected' : ''}`} onClick={() => handleSelectDay(d.key)} style={{ cursor: 'pointer' }}>
-                        <td className="saas-td" style={{ textAlign: 'center' }}>
-                          <input type="checkbox" checked={isSelected} readOnly style={{ width: '18px', height: '18px', cursor: 'pointer' }} />
-                        </td>
-                        <td className="saas-td" style={{ fontWeight: 'bold' }}>
-                          {new Date(d.date).toLocaleDateString('en-GB')}
-                        </td>
-                        <td className="saas-td" style={{ fontWeight: 'bold' }}>{d.owner}</td>
-                        <td className="saas-td" style={{ textAlign: 'right', fontWeight: 'bold' }}>{formatRiel(d.totalCogs)}</td>
-                        <td className="saas-td" style={{ textAlign: 'right', color: '#ef4444', fontWeight: 'bold', fontSize: '16px' }}>{formatRiel(remaining)}</td>
-                      </tr>
-                    )
-                  })
+                    <div style={{ textAlign: 'right', marginTop: '20px', fontSize: '12px', color: '#64748b', fontWeight: 'bold' }}>
+                      Generated on: {new Date().toLocaleString('en-GB')}
+                    </div>
+                  </>
                 )}
-              </tbody>
-            </table>
-          </div>
+              </div>
+            </div>
 
-          {selectedDays.length > 0 && (
-            <div style={{ position: 'fixed', bottom: '30px', left: '50%', transform: 'translateX(-50%)', background: '#1e293b', padding: '16px 32px', borderRadius: '50px', boxShadow: '0 10px 25px rgba(0,0,0,0.3)', display: 'flex', gap: '24px', alignItems: 'center', zIndex: 100 }}>
-              <div style={{ color: '#fff', fontSize: '15px' }}>
-                <span style={{ color: '#94a3b8' }}>Selected: </span> <b>{selectedDays.length} Days</b>
-              </div>
-              <div style={{ color: '#fff', fontSize: '15px' }}>
-                <span style={{ color: '#94a3b8' }}>Total COGS Due: </span> 
-                <b style={{ color: '#f87171', fontSize: '18px' }}>
-                  {formatRiel(selectedDays.reduce((sum, k) => sum + (dailyMap[k].totalCogs - dailyMap[k].totalPaid), 0))}
-                </b>
-              </div>
-              <button 
-                onClick={() => setBulkModalOpen(true)}
-                className="saas-btn saas-btn-primary"
-                style={{ borderRadius: '30px', boxShadow: '0 4px 10px rgba(16,185,129,0.3)', padding: '12px 24px', fontSize: '15px' }}
-              >
-                Settle Selected
+            <div style={{ textAlign: 'center', padding: '20px', flexShrink: 0 }}>
+              <button onClick={() => setLoadLimit(prev => prev + 2000)} className="saas-btn saas-btn-secondary" style={{ borderRadius: '20px', boxShadow: '0 2px 4px rgba(0,0,0,0.02)' }}>
+                ⬇️ Load Older Records (Current Limit: {loadLimit})
               </button>
             </div>
-          )}
-        </div>
-      )}
+          </>
+        )}
 
-      {/* HISTORY TAB */}
-      {activeMainTab === 'history' && (
-        <div className="saas-table-wrapper">
-          <div className="saas-table-responsive">
-            <table className="saas-table" style={{ minWidth: '1050px', tableLayout: 'auto' }}>
-              <thead>
-                <tr>
-                  <th className="saas-th">COGS Date & Owner</th>
-                  <th className="saas-th" style={{ textAlign: 'right' }}>Total COGS (៛)</th>
-                  <th className="saas-th" style={{ textAlign: 'center' }}>Methods Applied</th>
-                  <th className="saas-th" style={{ textAlign: 'right' }}>Paid Amount (៛)</th>
-                  <th className="saas-th" style={{ textAlign: 'right' }}>Remaining Debt (៛)</th>
-                  <th className="saas-th" style={{ textAlign: 'center', width: '200px' }}>Settle Remaining</th>
-                  <th className="saas-th" style={{ textAlign: 'center', width: '120px' }}>Complete</th>
-                </tr>
-              </thead>
-              <tbody>
-                {loading ? (
-                   <TableSkeleton columns={7} rows={5} />
-                ) : historyDays.length === 0 ? (
+        {/* PENDING SETTLEMENTS TAB */}
+        {activeMainTab === 'pending' && (
+          <div className="saas-table-wrapper" style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, marginBottom: 0 }}>
+            <div className="saas-table-responsive" style={{ flex: 1, overflow: 'auto' }}>
+              <table className="saas-table" style={{ minWidth: '100%', tableLayout: 'auto' }}>
+                <thead>
                   <tr>
-                    <td colSpan={7} style={{ padding: 0 }}>
-                      <EmptyState 
-                        icon="📚" 
-                        title="No history found" 
-                        message="No settled records found for this view." 
-                      />
-                    </td>
+                    <th className="saas-th" style={{ position: 'sticky', top: 0, zIndex: 30, background: '#fef2f2', boxShadow: 'inset 0 -2px 0 0 #fecaca', textAlign: 'center', width: '50px', color: '#991b1b' }}>
+                      <input type="checkbox" onChange={handleSelectAll} checked={selectedDays.length > 0 && selectedDays.length === pendingDays.length} style={{ width: '18px', height: '18px', cursor: 'pointer' }} />
+                    </th>
+                    <th className="saas-th" style={{ position: 'sticky', top: 0, zIndex: 30, background: '#fef2f2', boxShadow: 'inset 0 -2px 0 0 #fecaca', color: '#991b1b' }}>COGS Date</th>
+                    <th className="saas-th" style={{ position: 'sticky', top: 0, zIndex: 30, background: '#fef2f2', boxShadow: 'inset 0 -2px 0 0 #fecaca', color: '#991b1b' }}>Owner</th>
+                    <th className="saas-th" style={{ position: 'sticky', top: 0, zIndex: 30, background: '#fef2f2', boxShadow: 'inset 0 -2px 0 0 #fecaca', textAlign: 'right', color: '#991b1b' }}>Total COGS (៛)</th>
+                    <th className="saas-th" style={{ position: 'sticky', top: 0, zIndex: 30, background: '#fef2f2', boxShadow: 'inset 0 -2px 0 0 #fecaca', textAlign: 'right', color: '#991b1b' }}>Remaining Debt (៛)</th>
                   </tr>
-                ) : (
-                  historyDays.map((d: any) => {
-                    const remaining = d.totalCogs - d.totalPaid;
-                    const isDone = remaining <= 0;
-                    const paymentState = getInlinePaymentState(d.key, remaining);
-                    
-                    return (
-                      <tr key={d.key} className="saas-tr" style={{ opacity: isDone ? 0.7 : 1 }}>
-                        <td className="saas-td">
-                          <div style={{ fontWeight: 'bold', marginBottom: '4px' }}>{new Date(d.date).toLocaleDateString('en-GB')}</div>
-                          <div style={{ fontSize: '12px', color: '#64748b' }}>Owner: <span style={{color: '#0f172a'}}>{d.owner}</span></div>
-                        </td>
-                        <td className="saas-td" style={{ textAlign: 'right', fontWeight: 'bold' }}>{formatRiel(d.totalCogs)}</td>
-                        <td className="saas-td" style={{ textAlign: 'center', color: '#3b82f6', fontWeight: 'bold', fontSize: '12px' }}>
-                          {Array.from(d.methods).join(', ') || '-'}
-                        </td>
-                        <td className="saas-td" style={{ textAlign: 'right', color: '#10b981', fontWeight: 'bold' }}>{formatRiel(d.totalPaid)}</td>
-                        
-                        <td className="saas-td" style={{ textAlign: 'right', color: '#ef4444', fontWeight: 'bold', fontSize: '15px' }}>
-                          {remaining > 0 ? formatRiel(remaining) : ''}
-                        </td>
+                </thead>
+                <tbody>
+                  {loading ? (
+                     <TableSkeleton columns={5} rows={5} />
+                  ) : pendingDays.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} style={{ padding: 0 }}>
+                        <EmptyState 
+                          icon="🎉" 
+                          title="All caught up!" 
+                          message="No pending COGS! You are all settled up!" 
+                        />
+                      </td>
+                    </tr>
+                  ) : (
+                    pendingDays.map((d: any) => {
+                      const remaining = d.totalCogs - d.totalPaid;
+                      const isSelected = selectedDays.includes(d.key);
+                      
+                      return (
+                        <tr key={d.key} className={`saas-tr ${isSelected ? 'selected' : ''}`} onClick={() => handleSelectDay(d.key)} style={{ cursor: 'pointer' }}>
+                          <td className="saas-td" style={{ textAlign: 'center' }}>
+                            <input type="checkbox" checked={isSelected} readOnly style={{ width: '18px', height: '18px', cursor: 'pointer' }} />
+                          </td>
+                          <td className="saas-td" style={{ fontWeight: 'bold' }}>
+                            {new Date(d.date).toLocaleDateString('en-GB')}
+                          </td>
+                          <td className="saas-td" style={{ fontWeight: 'bold' }}>{d.owner}</td>
+                          <td className="saas-td" style={{ textAlign: 'right', fontWeight: 'bold' }}>{formatRiel(d.totalCogs)}</td>
+                          <td className="saas-td" style={{ textAlign: 'right', color: '#ef4444', fontWeight: 'bold', fontSize: '16px' }}>{formatRiel(remaining)}</td>
+                        </tr>
+                      )
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
 
-                        <td className="saas-td" style={{ textAlign: 'right' }}>
-                          {remaining > 0 ? (
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                              {paymentState.map(row => (
-                                <div key={row.id} style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                                  <div style={{ display: 'flex', gap: '4px' }}>
-                                    <select 
-                                      value={row.method}
-                                      onChange={(e) => updateInlineRow(d.key, row.id, 'method', e.target.value, remaining)}
-                                      className="saas-input"
-                                      style={{ padding: '8px', flex: 1, fontWeight: 'bold', cursor: 'pointer' }}
-                                    >
-                                      <option value="Mom Liability ៛">📉 Mom Liability ៛</option>
-                                      <option value="Mom Liability $">📉 Mom Liability $</option>
-                                      <option value="Cash ៛">💵 Cash ៛</option>
-                                      <option value="Cash $">💵 Cash $</option>
-                                      <option value="QR ៛">📱 QR ៛</option>
-                                      <option value="QR $">📱 QR $</option>
-                                    </select>
-                                    {paymentState.length > 1 && (
-                                      <button onClick={() => removeInlineSplit(d.key, row.id, remaining)} style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', fontSize: '16px', fontWeight: 'bold' }}>✕</button>
-                                    )}
-                                  </div>
-                                  <CurrencyInput
-                                    placeholder={formatRiel(remaining)}
-                                    value={row.amount}
-                                    onChange={(v: any) => updateInlineRow(d.key, row.id, 'amount', v, remaining)}
-                                    onEnter={() => handleProcessCreditPayment(d, paymentState)}
-                                    className="saas-input"
-                                    style={{ padding: '8px', textAlign: 'right' }}
-                                  />
-                                </div>
-                              ))}
-                              <button onClick={() => addInlineSplit(d.key, remaining)} style={{ background: 'none', border: 'none', color: '#3b82f6', fontSize: '12px', cursor: 'pointer', textAlign: 'right', fontWeight: 'bold' }}>+ Add Split</button>
-                            </div>
-                          ) : (
-                            <div style={{ color: '#10b981', fontSize: '13px', fontWeight: 'bold', textAlign: 'center' }}>Fully Settled</div>
-                          )}
-                        </td>
+            <div style={{ textAlign: 'center', padding: '20px', flexShrink: 0 }}>
+              <button onClick={() => setLoadLimit(prev => prev + 2000)} className="saas-btn saas-btn-secondary" style={{ borderRadius: '20px', boxShadow: '0 2px 4px rgba(0,0,0,0.02)' }}>
+                ⬇️ Load Older Records (Current Limit: {loadLimit})
+              </button>
+            </div>
 
-                        <td className="saas-td" style={{ textAlign: 'center' }}>
-                          {!isDone && (
-                            <button 
-                              onClick={() => handleProcessCreditPayment(d, paymentState)}
-                              className="saas-btn saas-btn-primary"
-                              style={{ width: '100%', padding: '8px 12px' }}
-                            >
-                              ✔ Done
-                            </button>
-                          )}
-                        </td>
-                      </tr>
-                    )
-                  })
-                )}
-              </tbody>
-            </table>
+            {selectedDays.length > 0 && (
+              <div style={{ position: 'fixed', bottom: '30px', left: '50%', transform: 'translateX(-50%)', background: '#1e293b', padding: '16px 32px', borderRadius: '50px', boxShadow: '0 10px 25px rgba(0,0,0,0.3)', display: 'flex', gap: '24px', alignItems: 'center', zIndex: 100 }}>
+                <div style={{ color: '#fff', fontSize: '15px' }}>
+                  <span style={{ color: '#94a3b8' }}>Selected: </span> <b>{selectedDays.length} Days</b>
+                </div>
+                <div style={{ color: '#fff', fontSize: '15px' }}>
+                  <span style={{ color: '#94a3b8' }}>Total COGS Due: </span> 
+                  <b style={{ color: '#f87171', fontSize: '18px' }}>
+                    {formatRiel(selectedDays.reduce((sum, k) => sum + (dailyMap[k].totalCogs - dailyMap[k].totalPaid), 0))}
+                  </b>
+                </div>
+                <button 
+                  onClick={() => setBulkModalOpen(true)}
+                  className="saas-btn saas-btn-primary"
+                  style={{ borderRadius: '30px', boxShadow: '0 4px 10px rgba(16,185,129,0.3)', padding: '12px 24px', fontSize: '15px' }}
+                >
+                  Settle Selected
+                </button>
+              </div>
+            )}
           </div>
-        </div>
-      )}
+        )}
+
+        {/* HISTORY TAB */}
+        {activeMainTab === 'history' && (
+          <div className="saas-table-wrapper" style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, marginBottom: 0 }}>
+            <div className="saas-table-responsive" style={{ flex: 1, overflow: 'auto' }}>
+              <table className="saas-table" style={{ minWidth: '1050px', tableLayout: 'auto' }}>
+                <thead>
+                  <tr>
+                    <th className="saas-th" style={{ position: 'sticky', top: 0, zIndex: 30, background: '#f8fafc', boxShadow: 'inset 0 -2px 0 0 #e2e8f0' }}>COGS Date & Owner</th>
+                    <th className="saas-th" style={{ position: 'sticky', top: 0, zIndex: 30, background: '#f8fafc', boxShadow: 'inset 0 -2px 0 0 #e2e8f0', textAlign: 'right' }}>Total COGS (៛)</th>
+                    <th className="saas-th" style={{ position: 'sticky', top: 0, zIndex: 30, background: '#f8fafc', boxShadow: 'inset 0 -2px 0 0 #e2e8f0', textAlign: 'center' }}>Methods Applied</th>
+                    <th className="saas-th" style={{ position: 'sticky', top: 0, zIndex: 30, background: '#f8fafc', boxShadow: 'inset 0 -2px 0 0 #e2e8f0', textAlign: 'right' }}>Paid Amount (៛)</th>
+                    <th className="saas-th" style={{ position: 'sticky', top: 0, zIndex: 30, background: '#f8fafc', boxShadow: 'inset 0 -2px 0 0 #e2e8f0', textAlign: 'right' }}>Remaining Debt (៛)</th>
+                    <th className="saas-th" style={{ position: 'sticky', top: 0, zIndex: 30, background: '#f8fafc', boxShadow: 'inset 0 -2px 0 0 #e2e8f0', textAlign: 'center', width: '200px' }}>Settle Remaining</th>
+                    <th className="saas-th" style={{ position: 'sticky', top: 0, zIndex: 30, background: '#f8fafc', boxShadow: 'inset 0 -2px 0 0 #e2e8f0', textAlign: 'center', width: '120px' }}>Complete</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {loading ? (
+                     <TableSkeleton columns={7} rows={5} />
+                  ) : historyDays.length === 0 ? (
+                    <tr>
+                      <td colSpan={7} style={{ padding: 0 }}>
+                        <EmptyState 
+                          icon="📚" 
+                          title="No history found" 
+                          message="No settled records found for this view." 
+                        />
+                      </td>
+                    </tr>
+                  ) : (
+                    historyDays.map((d: any) => {
+                      const remaining = d.totalCogs - d.totalPaid;
+                      const isDone = remaining <= 0;
+                      const paymentState = getInlinePaymentState(d.key, remaining);
+                      
+                      return (
+                        <tr key={d.key} className="saas-tr" style={{ opacity: isDone ? 0.7 : 1 }}>
+                          <td className="saas-td">
+                            <div style={{ fontWeight: 'bold', marginBottom: '4px' }}>{new Date(d.date).toLocaleDateString('en-GB')}</div>
+                            <div style={{ fontSize: '12px', color: '#64748b' }}>Owner: <span style={{color: '#0f172a'}}>{d.owner}</span></div>
+                          </td>
+                          <td className="saas-td" style={{ textAlign: 'right', fontWeight: 'bold' }}>{formatRiel(d.totalCogs)}</td>
+                          <td className="saas-td" style={{ textAlign: 'center', color: '#3b82f6', fontWeight: 'bold', fontSize: '12px' }}>
+                            {Array.from(d.methods).join(', ') || '-'}
+                          </td>
+                          <td className="saas-td" style={{ textAlign: 'right', color: '#10b981', fontWeight: 'bold' }}>{formatRiel(d.totalPaid)}</td>
+                          
+                          <td className="saas-td" style={{ textAlign: 'right', color: '#ef4444', fontWeight: 'bold', fontSize: '15px' }}>
+                            {remaining > 0 ? formatRiel(remaining) : ''}
+                          </td>
+
+                          <td className="saas-td" style={{ textAlign: 'right' }}>
+                            {remaining > 0 ? (
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                {paymentState.map(row => (
+                                  <div key={row.id} style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                                    <div style={{ display: 'flex', gap: '4px' }}>
+                                      <select 
+                                        value={row.method}
+                                        onChange={(e) => updateInlineRow(d.key, row.id, 'method', e.target.value, remaining)}
+                                        className="saas-input"
+                                        style={{ padding: '8px', flex: 1, fontWeight: 'bold', cursor: 'pointer' }}
+                                      >
+                                        <option value="Mom Liability ៛">📉 Mom Liability ៛</option>
+                                        <option value="Mom Liability $">📉 Mom Liability $</option>
+                                        <option value="Cash ៛">💵 Cash ៛</option>
+                                        <option value="Cash $">💵 Cash $</option>
+                                        <option value="QR ៛">📱 QR ៛</option>
+                                        <option value="QR $">📱 QR $</option>
+                                      </select>
+                                      {paymentState.length > 1 && (
+                                        <button onClick={() => removeInlineSplit(d.key, row.id, remaining)} style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', fontSize: '16px', fontWeight: 'bold' }}>✕</button>
+                                      )}
+                                    </div>
+                                    <CurrencyInput
+                                      placeholder={formatRiel(remaining)}
+                                      value={row.amount}
+                                      onChange={(v: any) => updateInlineRow(d.key, row.id, 'amount', v, remaining)}
+                                      onEnter={() => handleProcessCreditPayment(d, paymentState)}
+                                      className="saas-input"
+                                      style={{ padding: '8px', textAlign: 'right' }}
+                                    />
+                                  </div>
+                                ))}
+                                <button onClick={() => addInlineSplit(d.key, remaining)} style={{ background: 'none', border: 'none', color: '#3b82f6', fontSize: '12px', cursor: 'pointer', textAlign: 'right', fontWeight: 'bold' }}>+ Add Split</button>
+                              </div>
+                            ) : (
+                              <div style={{ color: '#10b981', fontSize: '13px', fontWeight: 'bold', textAlign: 'center' }}>Fully Settled</div>
+                            )}
+                          </td>
+
+                          <td className="saas-td" style={{ textAlign: 'center' }}>
+                            {!isDone && (
+                              <button 
+                                onClick={() => handleProcessCreditPayment(d, paymentState)}
+                                className="saas-btn saas-btn-primary"
+                                style={{ width: '100%', padding: '8px 12px' }}
+                              >
+                                ✔ Done
+                              </button>
+                            )}
+                          </td>
+                        </tr>
+                      )
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            <div style={{ textAlign: 'center', padding: '20px', flexShrink: 0 }}>
+              <button onClick={() => setLoadLimit(prev => prev + 2000)} className="saas-btn saas-btn-secondary" style={{ borderRadius: '20px', boxShadow: '0 2px 4px rgba(0,0,0,0.02)' }}>
+                ⬇️ Load Older Records (Current Limit: {loadLimit})
+              </button>
+            </div>
+          </div>
+        )}
+
+      </div> {/* END OF MAIN CONTENT SCROLLER */}
 
       {/* BULK SETTLE MODAL */}
       {bulkModalOpen && (
@@ -1001,17 +1036,6 @@ export default function CogsReportPage() {
         </div>
       )}
 
-      {/* 🚀 LOAD MORE BUTTON */}
-      <div style={{ textAlign: 'center', padding: '20px', marginTop: '20px' }}>
-        <button 
-          onClick={() => setLoadLimit(prev => prev + 2000)}
-          className="saas-btn saas-btn-secondary"
-          style={{ borderRadius: '20px', boxShadow: '0 2px 4px rgba(0,0,0,0.02)' }}
-        >
-          ⬇️ Load Older Records (Current Limit: {loadLimit})
-        </button>
-      </div>
-
       {/* --- PAGE-SPECIFIC CSS (A4 REPORT) --- */}
       <style jsx global>{`
         .a4-paper-container {
@@ -1033,7 +1057,7 @@ export default function CogsReportPage() {
           left: 50%;
           transform: translate(-50%, -50%);
           width: 300px;
-          opacity: 0.05;
+          opacity: 0.04; /* 🔥 Highly softened watermark so it's not intrusive */
           z-index: 0;
           pointer-events: none;
         }
@@ -1078,6 +1102,8 @@ export default function CogsReportPage() {
         }
 
         @media (max-width: 1023px) { 
+          .desktop-only-divider { display: none !important; }
+          
           .header-container {
             margin-left: 54px !important; 
             margin-right: 0 !important;

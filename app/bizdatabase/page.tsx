@@ -68,7 +68,7 @@ export default function BizDatabase() {
   const [transactions, setTransactions] = useState<UnifiedTransaction[]>([])
   const [activeTab, setActiveTab] = useState<TabType>('Wholesale Invoice Summary')
   const [searchQuery, setSearchQuery] = useState('')
-  const debouncedSearch = useDebounce(searchQuery, 300) // 🚀 Lightning fast mobile search
+  const debouncedSearch = useDebounce(searchQuery, 300)
   const [timeFilter, setTimeFilter] = useState<TimeFilter>('Today')
   const [isLoading, setIsLoading] = useState(true)
 
@@ -136,28 +136,15 @@ export default function BizDatabase() {
       console.warn("Retail table not found", e)
     }
 
-    let bizExpensesData: any[] = []
+    // 🔥 OPTION A: ONE TABLE METHOD
+    // We only fetch from "expenses" ONE TIME. 
+    // No more 404 errors looking for personal_expenses or staff_debt tables!
+    let allExpenses: any[] = []
     try {
       const { data, error } = await supabase.from('expenses').select('*')
-      if (data && !error) bizExpensesData = data;
+      if (data && !error) allExpenses = data;
     } catch (e) {
       console.warn("Expenses table not found", e)
-    }
-
-    let personalExpensesData: any[] = []
-    try {
-      const { data, error } = await supabase.from('personal_expenses').select('*')
-      if (data && !error) personalExpensesData = data;
-    } catch (e) {
-      console.warn("Personal expenses table not found", e)
-    }
-
-    let staffDebtData: any[] = []
-    try {
-      const { data, error } = await supabase.from('staff_debt').select('*')
-      if (data && !error) staffDebtData = data;
-    } catch (e) {
-      console.warn("Staff debt table not found", e)
     }
 
     const unified: UnifiedTransaction[] = []
@@ -243,60 +230,26 @@ export default function BizDatabase() {
       })
     }
 
-    if (bizExpensesData && bizExpensesData.length > 0) {
-      bizExpensesData.forEach(e => {
+    // 🔥 SORTING THE "ONE TABLE" INTO 3 SEPARATE TABS
+    if (allExpenses && allExpenses.length > 0) {
+      allExpenses.forEach(e => {
         const amtRiel = Number(e.amount_riel || 0);
         const amtUsd = Number(e.amount_usd || 0);
         const totalRielValue = amtRiel !== 0 ? Math.abs(amtRiel) : Math.abs(amtUsd) * EXCHANGE_RATE;
 
-        unified.push({
-          id: `biz_exp_${e.id}`,
-          raw_db_id: e.id, 
-          source: 'Biz Expense',
-          created_at: e.created_at,
-          description: e.remarks || e.description || `Biz Expense #${e.id}`,
-          amount: totalRielValue,
-          category: e.description || e.category || 'Uncategorized',
-          status: e.payment_method || e.status || 'cleared',
-          owner: e.spender || e.owner || '-'
-        })
-      })
-    }
-
-    if (personalExpensesData && personalExpensesData.length > 0) {
-      personalExpensesData.forEach(e => {
-        const amtRiel = Number(e.amount_riel || 0);
-        const amtUsd = Number(e.amount_usd || 0);
-        const totalRielValue = amtRiel !== 0 ? Math.abs(amtRiel) : Math.abs(amtUsd) * EXCHANGE_RATE;
+        let targetSource: TabType = 'Biz Expense';
+        if (e.description === 'PERSONAL') targetSource = 'Personal Expense';
+        else if (e.description === 'STAFF_DEBT') targetSource = 'Staff Debt';
+        else targetSource = 'Biz Expense';
 
         unified.push({
-          id: `pers_exp_${e.id}`,
+          id: `exp_${e.id}`, // Unified prefix for expenses
           raw_db_id: e.id, 
-          source: 'Personal Expense',
+          source: targetSource,
           created_at: e.created_at,
-          description: e.remarks || e.description || `Personal Expense #${e.id}`,
+          description: e.remarks || `Expense #${e.id}`, // Maps UI Description -> DB Remarks
           amount: totalRielValue,
-          category: e.description || e.category || 'Uncategorized',
-          status: e.payment_method || e.status || 'cleared',
-          owner: e.spender || e.owner || '-'
-        })
-      })
-    }
-
-    if (staffDebtData && staffDebtData.length > 0) {
-      staffDebtData.forEach(e => {
-        const amtRiel = Number(e.amount_riel || 0);
-        const amtUsd = Number(e.amount_usd || 0);
-        const totalRielValue = amtRiel !== 0 ? Math.abs(amtRiel) : Math.abs(amtUsd) * EXCHANGE_RATE;
-
-        unified.push({
-          id: `staff_debt_${e.id}`,
-          raw_db_id: e.id, 
-          source: 'Staff Debt',
-          created_at: e.created_at,
-          description: e.remarks || e.description || `Staff Debt #${e.id}`,
-          amount: totalRielValue,
-          category: e.description || e.category || 'Uncategorized',
+          category: e.category || 'Uncategorized',     // Maps UI Category -> DB Category
           status: e.payment_method || e.status || 'cleared',
           owner: e.spender || e.owner || '-'
         })
@@ -317,9 +270,7 @@ export default function BizDatabase() {
     const sumIds: any[] = [];
     const dailyIds: any[] = [];
     const retIds: any[] = [];
-    const bizExpIds: any[] = [];
-    const persExpIds: any[] = [];
-    const staffDebtIds: any[] = [];
+    const expenseIds: any[] = []; // 🔥 ONE ID ARRAY for all expense types
 
     const itemsToRestore: UnifiedTransaction[] = [];
     const invoiceIdsToCascade = new Set<string>(); 
@@ -344,14 +295,9 @@ export default function BizDatabase() {
           retIds.push(t.raw_db_id);
           itemsToRestore.push(t);
         }
-        else if (t.source === 'Biz Expense') {
-          bizExpIds.push(t.raw_db_id);
-        }
-        else if (t.source === 'Personal Expense') {
-          persExpIds.push(t.raw_db_id);
-        }
-        else if (t.source === 'Staff Debt') {
-          staffDebtIds.push(t.raw_db_id);
+        // 🔥 ALL EXPENSE TABS FUNNEL INTO THIS ONE ARRAY
+        else if (t.source === 'Biz Expense' || t.source === 'Personal Expense' || t.source === 'Staff Debt') {
+          expenseIds.push(t.raw_db_id);
         }
       }
     });
@@ -401,9 +347,9 @@ export default function BizDatabase() {
 
       if (dailyIds.length > 0) await supabase.from('sales').delete().in('id', dailyIds);
       if (retIds.length > 0) await supabase.from('retail_sales').delete().in('id', retIds);
-      if (bizExpIds.length > 0) await supabase.from('expenses').delete().in('id', bizExpIds);
-      if (persExpIds.length > 0) await supabase.from('personal_expenses').delete().in('id', persExpIds);
-      if (staffDebtIds.length > 0) await supabase.from('staff_debt').delete().in('id', staffDebtIds);
+      
+      // 🔥 DELETES ALL EXPENSES IN ONE SWOOP
+      if (expenseIds.length > 0) await supabase.from('expenses').delete().in('id', expenseIds);
       
       if (sumIds.length > 0) await supabase.from('invoice_summaries').delete().in('id', sumIds);
       if (summaryIdsToCascade.size > 0) {
@@ -486,10 +432,11 @@ export default function BizDatabase() {
       dbPayload.total_cogs = newQty * newCogs;
       dbPayload.total_profit = (newPrice - newCogs) * newQty;
     }
+    // 🔥 ALWAYS SAVES EDITS TO 'expenses' REGARDLESS OF TAB
     else if (baseTx.source === 'Biz Expense' || baseTx.source === 'Personal Expense' || baseTx.source === 'Staff Debt') {
-      targetTable = baseTx.source === 'Biz Expense' ? 'expenses' : baseTx.source === 'Personal Expense' ? 'personal_expenses' : 'staff_debt';
-      if (payload.description !== undefined) dbPayload.remarks = payload.description; 
-      if (payload.category !== undefined) dbPayload.description = payload.category; 
+      targetTable = 'expenses';
+      if (payload.description !== undefined) dbPayload.remarks = payload.description; // UI Description saves to DB remarks
+      if (payload.category !== undefined) dbPayload.category = payload.category; 
       if (payload.owner !== undefined) dbPayload.spender = payload.owner; 
       if (payload.status !== undefined) dbPayload.payment_method = payload.status; 
       if (payload.amount !== undefined) {
@@ -624,7 +571,6 @@ export default function BizDatabase() {
       if (t.source !== activeTab) return false;
       if (!isWithinTimeFilter(t.created_at)) return false;
 
-      // 🚀 Now uses debouncedSearch for massive mobile performance gain
       if (debouncedSearch) {
         const query = debouncedSearch.toLowerCase()
         const searchableText = `${t.invoice_id || ''} ${t.transaction_id || ''} ${t.customer_name || ''} ${t.rice_types || ''} ${t.rice_type || ''} ${t.description || ''} ${t.category || ''}`.toLowerCase()
@@ -669,10 +615,11 @@ export default function BizDatabase() {
   )
 
   return (
-    <div className="main-wrapper">
+    // 🔥 APP LAYOUT: Flex Column + Overflow Hidden locks the outer page
+    <div className="main-wrapper" style={{ display: 'flex', flexDirection: 'column', height: '100dvh', overflow: 'hidden' }}>
       
-      {/* HEADER */}
-      <div className="header-container">
+      {/* HEADER (Frozen) */}
+      <div className="header-container" style={{ flexShrink: 0 }}>
         <div className="header-left">
           <h1 className="saas-page-title">🔐 Business Database</h1>
         </div>
@@ -688,8 +635,8 @@ export default function BizDatabase() {
         </div>
       </div>
 
-      {/* TOOLBAR */}
-      <div className="saas-card" style={{ padding: '16px', marginBottom: '24px' }}>
+      {/* TOOLBAR (Frozen) */}
+      <div className="saas-card" style={{ padding: '16px', marginBottom: '24px', flexShrink: 0 }}>
         
         {/* TOP ROW: TABS */}
         <div className="saas-tab-container" style={{ border: 'none', padding: 0, boxShadow: 'none', borderBottom: '1px solid #e2e8f0', borderRadius: 0, paddingBottom: '12px', marginBottom: '16px' }}>
@@ -736,18 +683,19 @@ export default function BizDatabase() {
         </div>
       </div>
 
-      {/* RECORD COUNT BADGE */}
-      <div className="record-count-badge">
+      {/* RECORD COUNT BADGE (Frozen) */}
+      <div className="record-count-badge" style={{ flexShrink: 0 }}>
         Showing {processedTransactions.length} records for {timeFilter}
       </div>
 
-      {/* MAIN SPREADSHEET */}
-      <div className="saas-table-wrapper">
-        <div className="saas-table-responsive">
+      {/* 🔥 MAIN SPREADSHEET (Fills remaining space and scrolls internally) */}
+      <div className="saas-table-wrapper" style={{ flex: 1, minHeight: 0, marginBottom: 0, display: 'flex', flexDirection: 'column' }}>
+        <div className="saas-table-responsive" style={{ flex: 1, overflow: 'auto' }}>
           <table className="saas-table" style={{ minWidth: '100%', tableLayout: 'fixed' }}>
             <thead>
               <tr>
-                <th className="saas-th" style={{ width: '50px', textAlign: 'center', borderRight: '1px solid #f1f5f9' }}>
+                {/* Checkbox Header Column (Sticky) */}
+                <th className="saas-th" style={{ width: '50px', textAlign: 'center', borderRight: '1px solid #f1f5f9', position: 'sticky', top: 0, zIndex: 30, backgroundColor: '#f8fafc', boxShadow: 'inset 0 -2px 0 0 #e2e8f0' }}>
                   <input 
                     type="checkbox" 
                     className="biz-checkbox"
@@ -756,6 +704,7 @@ export default function BizDatabase() {
                   />
                 </th>
 
+                {/* Dynamic Data Headers (Sticky) */}
                 {activeColumns.map(key => (
                   <th 
                     key={key} 
@@ -765,7 +714,16 @@ export default function BizDatabase() {
                     onDragOver={handleDragOver}
                     onDrop={(e) => handleDrop(e, key)}
                     onClick={() => handleSort(key)}
-                    style={{ width: columnWidths[key] || 150, borderRight: '1px solid #f1f5f9', cursor: 'pointer', position: 'relative' }}
+                    style={{ 
+                      width: columnWidths[key] || 150, 
+                      borderRight: '1px solid #f1f5f9', 
+                      cursor: 'pointer', 
+                      position: 'sticky', 
+                      top: 0, 
+                      zIndex: 30, 
+                      backgroundColor: '#f8fafc', 
+                      boxShadow: 'inset 0 -2px 0 0 #e2e8f0'
+                    }}
                     title="Click to sort, Drag to reorder"
                   >
                     {formatHeader(key)}

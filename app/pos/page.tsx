@@ -380,10 +380,13 @@ export default function POSPage() {
   async function loadProductsAndSettings() {
     const { data: prodData } = await supabase.from('products').select('*').order('id', { ascending: true })
     if (prodData) setProducts(prodData)
-    const { data: setObj } = await supabase.from('app_settings').select('*').eq('setting_key', 'pos_product_order').single()
+    
+    // 🔥 FIXED: Changed .single() to .maybeSingle()
+    const { data: setObj } = await supabase.from('app_settings').select('*').eq('setting_key', 'pos_product_order').maybeSingle()
     if (setObj && setObj.setting_value) setProductOrder(setObj.setting_value)
 
-    const { data: hiddenSet } = await supabase.from('app_settings').select('*').eq('setting_key', 'hidden_retail_ids').single()
+    // 🔥 FIXED: Changed .single() to .maybeSingle()
+    const { data: hiddenSet } = await supabase.from('app_settings').select('*').eq('setting_key', 'hidden_retail_ids').maybeSingle()
     if (hiddenSet && hiddenSet.setting_value) setHiddenRetailIds(hiddenSet.setting_value)
   }
 
