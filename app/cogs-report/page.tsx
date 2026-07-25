@@ -76,7 +76,6 @@ export default function CogsReportPage() {
         supabase.from('app_settings').select('*').in('setting_key', ['personal_owe_riel', 'personal_owe_usd']),
         supabase.from('invoice_summaries').select('*').order('created_at', { ascending: false }).limit(loadLimit),
         supabase.from('expenses').select('*').order('created_at', { ascending: false }).limit(loadLimit),
-        // NO ORDER BY CREATED_AT HERE
         supabase.from('invoice_payments').select('*').limit(loadLimit)
     ]);
 
@@ -512,7 +511,6 @@ export default function CogsReportPage() {
   let combinedGrandTotal = 0;
 
   return (
-    // 🔥 APP LAYOUT: Locks the page layout for inner scrolling
     <div className="main-wrapper" style={{ display: 'flex', flexDirection: 'column', height: '100dvh', overflow: 'hidden' }}>
       
       {/* HEADER CONTAINER (Frozen) */}
@@ -525,9 +523,15 @@ export default function CogsReportPage() {
           {activeMainTab === 'report' && (
             <>
               {isDeviceMobile ? (
-                <button onClick={handleMobileShare} disabled={isCapturing} className="saas-btn" style={{ background: '#3b82f6', color: '#fff', padding: '10px' }} title="Download / Share">
+                // 🔥 FIXED: Mobile Button is now a compact blue download icon
+                <button 
+                  onClick={handleMobileShare} 
+                  disabled={isCapturing} 
+                  className="saas-btn saas-btn-primary" 
+                  style={{ padding: '10px' }} 
+                  title="Download / Share"
+                >
                   {isCapturing ? '⏳' : (
-                    // 🔥 Clean Mobile SVG Icon
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                       <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
                       <polyline points="7 10 12 15 17 10"></polyline>
@@ -571,11 +575,10 @@ export default function CogsReportPage() {
       </div>
 
       {/* FILTERS CARD (Frozen) */}
-      <div className="saas-card" style={{ padding: '16px', marginBottom: '16px', display: 'flex', gap: '15px', alignItems: 'center', flexWrap: 'wrap', flexShrink: 0 }}>
-        
+      <div className="saas-card filter-card-layout" style={{ padding: '16px 20px', marginBottom: '16px', flexShrink: 0 }}>
         {activeMainTab === 'report' ? (
-          // 🔥 Fixed: Removed width: 100% and changed nowrap to wrap so it sits inline on desktop!
-          <div style={{ display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
+          // 🔥 FIXED: Forced 'nowrap' so From and To ALWAYS stay on one single horizontal line!
+          <div className="hide-scrollbar" style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'nowrap', maxWidth: '100%', overflowX: 'auto' }}>
             <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexShrink: 0 }}>
               <label style={{ fontWeight: 'bold', fontSize: '13px', color: '#64748b' }}>From:</label>
               <input type="date" value={fromDate} onChange={e => setFromDate(e.target.value)} className="saas-input" style={{ width: '135px', padding: '8px' }} />
@@ -601,18 +604,18 @@ export default function CogsReportPage() {
         
         <div style={{ width: '1px', height: '24px', backgroundColor: '#e2e8f0' }} className="desktop-only-divider" />
         
-        <div className="saas-tab-container" style={{ margin: 0, padding: '4px', border: 'none', boxShadow: 'none', background: '#f1f5f9', flexShrink: 0 }}>
+        <div className="saas-tab-container hide-scrollbar" style={{ margin: 0, padding: '4px', border: 'none', boxShadow: 'none', background: '#f1f5f9', flexShrink: 0, display: 'flex', flexWrap: 'nowrap', overflowX: 'auto' }}>
           <button 
             onClick={() => setActiveOwnerTab('mom')} 
             className={`saas-tab ${activeOwnerTab === 'mom' ? 'active' : ''}`}
-            style={{ padding: '8px 16px' }}
+            style={{ padding: '8px 16px', flexShrink: 0 }}
           >
             Mom COGS
           </button>
           <button 
             onClick={() => setActiveOwnerTab('others')} 
             className={`saas-tab ${activeOwnerTab === 'others' ? 'active' : ''}`}
-            style={{ padding: '8px 16px' }}
+            style={{ padding: '8px 16px', flexShrink: 0 }}
           >
             Pich / Jing / Both
           </button>
@@ -1038,6 +1041,12 @@ export default function CogsReportPage() {
 
       {/* --- PAGE-SPECIFIC CSS (A4 REPORT) --- */}
       <style jsx global>{`
+        .filter-card-layout {
+          display: flex;
+          align-items: center;
+          gap: 16px;
+        }
+
         .a4-paper-container {
           width: 100%;
           max-width: 794px; 
@@ -1056,8 +1065,9 @@ export default function CogsReportPage() {
           top: 50%;
           left: 50%;
           transform: translate(-50%, -50%);
-          width: 300px;
-          opacity: 0.04; /* 🔥 Highly softened watermark so it's not intrusive */
+          width: 40%; /* 🔥 Automatically shrinks on phones */
+          max-width: 300px; /* 🔥 Prevents it from getting too big on laptops */
+          opacity: 0.04; 
           z-index: 0;
           pointer-events: none;
         }
@@ -1104,6 +1114,10 @@ export default function CogsReportPage() {
         @media (max-width: 1023px) { 
           .desktop-only-divider { display: none !important; }
           
+          .filter-card-layout {
+            flex-wrap: wrap !important;
+          }
+
           .header-container {
             margin-left: 54px !important; 
             margin-right: 0 !important;
@@ -1122,8 +1136,13 @@ export default function CogsReportPage() {
             align-items: center !important;
             gap: 12px !important;
           }
+          
+          /* 🔥 FIXED: Mathematically forces a realistic A4 shape on phones! */
           .a4-paper-container {
-            padding: 16px; min-height: auto;
+            padding: 16px; 
+            min-height: auto; /* Removes the super-long CVS receipt look */
+            aspect-ratio: 1 / 1.4142; /* The exact aspect ratio of A4 paper */
+            overflow-x: auto; 
           }
         }
       `}</style>
