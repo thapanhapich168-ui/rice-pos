@@ -66,6 +66,8 @@ function CustomDatePicker({ value, onChange }: { value: string; onChange: (val: 
     <div style={{ position: 'relative', width: '100%' }}>
       <div 
         onClick={() => setIsOpen(!isOpen)}
+        role="button"
+        tabIndex={0}
         className="saas-input"
         style={{ 
           display: 'flex', 
@@ -77,6 +79,8 @@ function CustomDatePicker({ value, onChange }: { value: string; onChange: (val: 
           boxSizing: 'border-box',
           padding: '0 12px',
           userSelect: 'none',
+          WebkitUserSelect: 'none',
+          WebkitTapHighlightColor: 'transparent',
           borderRadius: '8px'
         }}
       >
@@ -84,8 +88,8 @@ function CustomDatePicker({ value, onChange }: { value: string; onChange: (val: 
           {formatDisplay(value) || 'Select date'}
         </span>
         
-        {/* 🔥 1. Clean SVG Calendar Icon instead of Emoji */}
-        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: '#94a3b8' }}>
+        {/* 🔥 Safari SVG Fix: Explicit flex-shrink and strict stroke color */}
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, minWidth: '16px', display: 'block' }}>
           <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
           <line x1="16" y1="2" x2="16" y2="6"></line>
           <line x1="8" y1="2" x2="8" y2="6"></line>
@@ -653,7 +657,6 @@ export default function ExpenseDashboard() {
               <div className="top-action-row" style={{ marginBottom: '32px' }}>
                 <div className="date-wrapper">
                   <label style={{ display: 'block', fontSize: '11px', color: '#64748b', fontWeight: 'bold', marginBottom: '8px', textTransform: 'uppercase' }}>Date</label>
-                  {/* 🔥 INJECTED CUSTOM DATE PICKER */}
                   <CustomDatePicker value={expenseDate} onChange={setExpenseDate} />
                 </div>
                 
@@ -975,6 +978,7 @@ export default function ExpenseDashboard() {
                     ))}
                   </div>
 
+                  {/* 🔥 Upgraded Insights Date Filters */}
                   {insightFilter === 'custom' && (
                     <div style={{ display: 'flex', gap: '12px', marginBottom: '24px', alignItems: 'center', flexWrap: 'nowrap', width: '100%' }}>
                       
