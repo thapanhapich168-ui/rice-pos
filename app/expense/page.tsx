@@ -976,18 +976,20 @@ export default function ExpenseDashboard() {
                   </div>
 
                   {insightFilter === 'custom' && (
-                    <div style={{ display: 'flex', gap: '16px', marginBottom: '24px', alignItems: 'center', flexWrap: 'wrap' }}>
+                    <div style={{ display: 'flex', gap: '12px', marginBottom: '24px', alignItems: 'center', flexWrap: 'nowrap', width: '100%' }}>
                       
-                      {/* 🔥 3. Upgraded to CustomDatePicker */}
-                      <div style={{ display: 'flex', gap: '8px', alignItems: 'center', width: '220px' }}>
-                        <label style={{ fontWeight: 'bold', fontSize: '13px', color: '#64748b' }}>From:</label>
-                        <CustomDatePicker value={insightFrom} onChange={setInsightFrom} />
+                      <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flex: 1, minWidth: 0 }}>
+                        <label style={{ fontWeight: 'bold', fontSize: '12px', color: '#64748b' }}>From:</label>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <CustomDatePicker value={insightFrom} onChange={setInsightFrom} />
+                        </div>
                       </div>
                       
-                      {/* 🔥 3. Upgraded to CustomDatePicker */}
-                      <div style={{ display: 'flex', gap: '8px', alignItems: 'center', width: '220px' }}>
-                        <label style={{ fontWeight: 'bold', fontSize: '13px', color: '#64748b' }}>To:</label>
-                        <CustomDatePicker value={insightTo} onChange={setInsightTo} />
+                      <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flex: 1, minWidth: 0 }}>
+                        <label style={{ fontWeight: 'bold', fontSize: '12px', color: '#64748b' }}>To:</label>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <CustomDatePicker value={insightTo} onChange={setInsightTo} />
+                        </div>
                       </div>
                       
                     </div>
