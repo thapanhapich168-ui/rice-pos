@@ -1192,28 +1192,24 @@ export default function ExpenseDashboard() {
           .desktop-only-flex { display: none !important; }
           .mobile-only-flex { display: flex !important; }
 
-          /* Mobile Safari Fix for Top Action Row */
+          /* 🔥 Mobile Safari Fix: Strict Grid to prevent Date Picker overlap */
           .top-action-row {
-            flex-direction: row !important;
+            display: grid !important;
+            grid-template-columns: minmax(0, 1fr) auto auto !important;
             align-items: flex-end !important;
-            flex-wrap: nowrap !important;
             gap: 8px !important;
+            width: 100% !important;
           }
           .top-action-row .date-wrapper {
-            flex: 1 1 auto !important;
-            min-width: 0 !important;
+            width: 100% !important;
             max-width: none !important;
           }
           .top-action-row .button-wrapper {
-            flex: 0 0 auto !important;
-            width: auto !important;
-            display: flex !important;
-            gap: 8px !important;
-            justify-content: flex-end !important;
+            display: contents !important; /* Forces buttons to act as direct grid items */
           }
           .top-action-row .button-wrapper button {
-            flex: none !important;
-            padding: 0 12px !important;
+            padding: 0 14px !important;
+            width: auto !important;
           }
 
           .content-container {
