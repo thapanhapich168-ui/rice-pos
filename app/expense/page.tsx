@@ -545,7 +545,7 @@ export default function ExpenseDashboard() {
                         
                         <div style={{ flex: 1 }}>
                           <CurrencyInput 
-                            placeholder="Amount..." 
+                            placeholder="0.00" 
                             value={row.amount} 
                             onChange={(val: any) => updatePaymentSplit(exp.id, row.id, 'amount', val)}
                             className="saas-input"
