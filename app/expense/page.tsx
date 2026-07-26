@@ -492,8 +492,8 @@ export default function ExpenseDashboard() {
             <form onSubmit={handleSubmit} className="saas-card" style={{ padding: '30px', margin: 0, width: '100%' }}>
               
               {/* Date, Add, and Submit Row */}
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: '32px', gap: '16px', flexWrap: 'nowrap' }}>
-                <div style={{ flex: 1, maxWidth: '200px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: '32px', gap: '12px', flexWrap: 'wrap' }}>
+                <div style={{ flex: '1 1 140px' }}>
                   <label style={{ display: 'block', fontSize: '11px', color: '#64748b', fontWeight: 'bold', marginBottom: '8px', textTransform: 'uppercase' }}>Date</label>
                   <input 
                     type="date" 
@@ -505,11 +505,11 @@ export default function ExpenseDashboard() {
                   />
                 </div>
                 
-                <div style={{ display: 'flex', gap: '8px', flexShrink: 0 }}>
+                <div style={{ display: 'flex', gap: '8px', flexShrink: 0, marginLeft: 'auto' }}>
                   <button 
                     type="button" 
                     onClick={addNewExpense}
-                    className="saas-btn saas-btn-secondary" 
+                    className="saas-btn" 
                     style={{ padding: '0 16px', fontWeight: 'bold', whiteSpace: 'nowrap', margin: 0, height: '42px', flexShrink: 0, background: '#e0f2fe', color: '#0284c7', border: 'none', borderRadius: '8px' }}
                   >
                     + Add
@@ -519,7 +519,7 @@ export default function ExpenseDashboard() {
                     onClick={() => setConfirmModal(true)}
                     disabled={loading} 
                     className={`saas-btn ${loading ? 'saas-btn-secondary' : 'saas-btn-primary'}`}
-                    style={{ padding: '0 24px', fontWeight: 'bold', whiteSpace: 'nowrap', margin: 0, height: '42px', flexShrink: 0, opacity: loading ? 0.7 : 1 }}
+                    style={{ padding: '0 20px', fontWeight: 'bold', whiteSpace: 'nowrap', margin: 0, height: '42px', flexShrink: 0, opacity: loading ? 0.7 : 1, borderRadius: '8px' }}
                   >
                     <span className="hide-on-mobile">{loading ? 'Processing...' : `Submit ${getActiveList().length} Expense(s)`}</span>
                     <span className="show-on-mobile">Submit</span>
@@ -566,7 +566,7 @@ export default function ExpenseDashboard() {
                               key={person}
                               onClick={() => updateExpense(exp.id, 'spender', person)}
                               className={`saas-tab ${exp.spender === person ? 'active' : ''}`}
-                              style={exp.spender === person ? { background: '#0f172a', color: '#fff', flex: 1, padding: 0 } : { flex: 1, padding: 0 }}
+                              style={exp.spender === person ? { background: '#e0f2fe', color: '#0284c7', fontWeight: 'bold', flex: 1, padding: 0 } : { flex: 1, padding: 0 }}
                             >
                               {person}
                             </button>
