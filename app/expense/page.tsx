@@ -402,22 +402,37 @@ export default function ExpenseDashboard() {
     const validExp = dbExpenses.filter(e => filterDate(e.expense_date || e.created_at));
     const validDebt = dbStaffDebt.filter(d => filterDate(d.created_at));
 
-    let totalPers = 0, totalBiz = 0, totalDebt = 0;
+    let totalPersRiel = 0, totalPersUsd = 0;
+    let totalBizRiel = 0, totalBizUsd = 0;
+    let totalDebtRiel = 0, totalDebtUsd = 0;
 
     validExp.forEach(e => {
-      const amt = Number(e.amount_riel) + (Number(e.amount_usd) * EXCHANGE_RATE);
-      if (e.description === 'PERSONAL') totalPers += amt;
-      if (e.description === 'BUSINESS') totalBiz += amt;
+      const amtRiel = Number(e.amount_riel) || 0;
+      const amtUsd = Number(e.amount_usd) || 0;
+      
+      if (e.description === 'PERSONAL') {
+        totalPersRiel += amtRiel;
+        totalPersUsd += amtUsd;
+      }
+      if (e.description === 'BUSINESS') {
+        totalBizRiel += amtRiel;
+        totalBizUsd += amtUsd;
+      }
     });
 
     validDebt.forEach(d => {
       let amt = Number(d.amount);
-      if ((d.payment_method || '').includes('$')) amt *= EXCHANGE_RATE;
-      if (!(d.payment_method || '').includes('Settled')) totalDebt += amt; 
+      if (!(d.payment_method || '').includes('Settled')) {
+        if ((d.payment_method || '').includes('$')) totalDebtUsd += amt;
+        else totalDebtRiel += amt;
+      }
     });
 
-    const topPers = validExp.filter(e => e.description === 'PERSONAL').sort((a,b) => (Number(b.amount_riel) + Number(b.amount_usd)*EXCHANGE_RATE) - (Number(a.amount_riel) + Number(a.amount_usd)*EXCHANGE_RATE)).slice(0, 5);
-    const topBiz = validExp.filter(e => e.description === 'BUSINESS').sort((a,b) => (Number(b.amount_riel) + Number(b.amount_usd)*EXCHANGE_RATE) - (Number(a.amount_riel) + Number(a.amount_usd)*EXCHANGE_RATE)).slice(0, 5);
+    const totalExpRiel = totalPersRiel + totalBizRiel;
+    const totalExpUsd = totalPersUsd + totalBizUsd;
+
+    const topPers = validExp.filter(e => e.description === 'PERSONAL').sort((a,b) => ((Number(b.amount_riel)||0) + (Number(b.amount_usd)||0)*EXCHANGE_RATE) - ((Number(a.amount_riel)||0) + (Number(a.amount_usd)||0)*EXCHANGE_RATE)).slice(0, 5);
+    const topBiz = validExp.filter(e => e.description === 'BUSINESS').sort((a,b) => ((Number(b.amount_riel)||0) + (Number(b.amount_usd)||0)*EXCHANGE_RATE) - ((Number(a.amount_riel)||0) + (Number(a.amount_usd)||0)*EXCHANGE_RATE)).slice(0, 5);
 
     // Chart Data (31 days)
     const thisMonthData = new Array(31).fill(0);
@@ -446,18 +461,17 @@ export default function ExpenseDashboard() {
        }
     });
 
-    return { totalPers, totalBiz, totalExp: totalPers + totalBiz, totalDebt, topPers, topBiz, thisMonthData, lastMonthData };
+    return { totalPersRiel, totalPersUsd, totalBizRiel, totalBizUsd, totalExpRiel, totalExpUsd, totalDebtRiel, totalDebtUsd, topPers, topBiz, thisMonthData, lastMonthData };
   }, [dbTab, dbExpenses, dbStaffDebt, insightFilter, insightFrom, insightTo]);
 
 
   if (!isMounted) return null; 
 
   return (
-    // 🔥 FROZEN LAYOUT WRAPPER 
-    <div className="main-wrapper" style={{ display: 'flex', flexDirection: 'column', height: '100dvh', overflow: 'hidden' }}>
+    <div className="main-wrapper" style={{ display: 'flex', flexDirection: 'column', height: '100dvh', overflow: 'hidden', backgroundColor: '#f8fafc' }}>
 
-      {/* 🔥 FROZEN HEADER & TABS */}
-      <div style={{ flexShrink: 0, width: '100%', paddingBottom: '16px' }}>
+      {/* 🔥 STICKY FROZEN HEADER & TABS */}
+      <div style={{ position: 'sticky', top: 0, zIndex: 50, backgroundColor: '#f8fafc', flexShrink: 0, width: '100%', paddingBottom: '16px', paddingTop: '16px' }}>
         <div className="header-container">
           <div className="header-left">
             <h1 className="saas-page-title">💸 Daily Expense & Payroll</h1>
@@ -465,7 +479,7 @@ export default function ExpenseDashboard() {
         </div>
 
         <div className="content-container">
-          {/* 🔥 Clean White Flex Container for Tabs with Border */}
+          {/* Clean White Flex Container for Tabs with Border */}
           <div className="hide-scrollbar" style={{ display: 'flex', flexWrap: 'nowrap', overflowX: 'auto', WebkitOverflowScrolling: 'touch', gap: '8px', background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '12px', padding: '6px' }}>
             <button type="button" onClick={() => setActiveTab('personal')} className={`saas-tab ${activeTab === 'personal' ? 'active' : ''}`} style={{ flexShrink: 0, padding: '10px 24px' }}>
               🏡 Personal
@@ -483,7 +497,7 @@ export default function ExpenseDashboard() {
         </div>
       </div>
 
-      {/* 🔥 SCROLLING CONTENT AREA */}
+      {/* SCROLLING CONTENT AREA */}
       <div className="hide-scrollbar" style={{ flex: 1, overflowY: 'auto', paddingBottom: '60px', paddingTop: '8px' }}>
         <div className="content-container">
 
@@ -491,9 +505,9 @@ export default function ExpenseDashboard() {
           {(activeTab === 'personal' || activeTab === 'business') && (
             <form onSubmit={handleSubmit} className="saas-card" style={{ padding: '30px', margin: 0, width: '100%' }}>
               
-              {/* Date, Add, and Submit Row */}
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: '32px', gap: '16px', flexWrap: 'nowrap' }}>
-                <div style={{ flex: 1, maxWidth: '200px' }}>
+              {/* Top Action Row (Date, Add, Submit) */}
+              <div className="top-action-row" style={{ marginBottom: '32px' }}>
+                <div className="date-wrapper">
                   <label style={{ display: 'block', fontSize: '11px', color: '#64748b', fontWeight: 'bold', marginBottom: '8px', textTransform: 'uppercase' }}>Date</label>
                   <input 
                     type="date" 
@@ -505,12 +519,12 @@ export default function ExpenseDashboard() {
                   />
                 </div>
                 
-                <div style={{ display: 'flex', gap: '8px', flexShrink: 0 }}>
+                <div className="button-wrapper">
                   <button 
                     type="button" 
                     onClick={addNewExpense}
-                    className="saas-btn saas-btn-secondary" 
-                    style={{ padding: '0 16px', fontWeight: 'bold', whiteSpace: 'nowrap', margin: 0, height: '42px', flexShrink: 0, background: '#e0f2fe', color: '#0284c7', border: 'none', borderRadius: '8px' }}
+                    className="saas-btn" 
+                    style={{ padding: '0 16px', fontWeight: 'bold', whiteSpace: 'nowrap', margin: 0, height: '42px', background: '#e0f2fe', color: '#0284c7', border: '1px solid #bae6fd', borderRadius: '8px' }}
                   >
                     + Add
                   </button>
@@ -519,7 +533,7 @@ export default function ExpenseDashboard() {
                     onClick={() => setConfirmModal(true)}
                     disabled={loading} 
                     className={`saas-btn ${loading ? 'saas-btn-secondary' : 'saas-btn-primary'}`}
-                    style={{ padding: '0 24px', fontWeight: 'bold', whiteSpace: 'nowrap', margin: 0, height: '42px', flexShrink: 0, opacity: loading ? 0.7 : 1 }}
+                    style={{ padding: '0 24px', fontWeight: 'bold', whiteSpace: 'nowrap', margin: 0, height: '42px', opacity: loading ? 0.7 : 1, borderRadius: '8px' }}
                   >
                     <span className="hide-on-mobile">{loading ? 'Processing...' : `Submit ${getActiveList().length} Expense(s)`}</span>
                     <span className="show-on-mobile">Submit</span>
@@ -532,41 +546,60 @@ export default function ExpenseDashboard() {
                 {getActiveList().map((exp, index) => (
                   <div key={exp.id} className="expense-entry-card" style={{ padding: '24px', background: '#ffffff', borderRadius: '12px', border: '1px solid #cbd5e1', position: 'relative', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.02)' }}>
                     
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-                      <label style={{ margin: 0, color: '#3b82f6', fontWeight: 'bold', fontSize: '15px' }}>
-                        {getActiveList().length - index}. Remarks
-                      </label>
-                      {getActiveList().length > 1 && (
-                        <button type="button" onClick={() => removeExpense(exp.id)} style={{ color: '#ef4444', background: '#fee2e2', borderRadius: '6px', padding: '6px 12px', border: 'none', cursor: 'pointer', fontSize: '12px', fontWeight: 'bold' }}>
-                          ✕ Remove
-                        </button>
-                      )}
-                    </div>
-
-                    <input 
-                      type="text" 
-                      placeholder=""
-                      value={exp.remarks} 
-                      onChange={(e) => updateExpense(exp.id, 'remarks', e.target.value)} 
-                      required 
-                      className="saas-input" 
-                      style={{ width: '100%', height: '42px', margin: '0 0 24px 0', boxSizing: 'border-box' }}
-                    />
+                    {/* Clean Red X Button */}
+                    {getActiveList().length > 1 && (
+                      <button type="button" onClick={() => removeExpense(exp.id)} style={{ position: 'absolute', top: '12px', right: '12px', color: '#ef4444', background: 'transparent', border: 'none', cursor: 'pointer', fontSize: '20px', fontWeight: 'bold', padding: '4px', lineHeight: 1 }} title="Remove">
+                        ✕
+                      </button>
+                    )}
                     
-                    {/* 🔥 2-COLUMN GRID LAYOUT (Since Remarks is full width above) */}
+                    {/* 🔥 3-COLUMN GRID SETUP */}
                     <div className="expense-grid">
 
-                      {/* Col 1: Spender */}
+                      {/* Col 1: Remarks (Desktop: Boxed Label, Mobile: Inline Underline) */}
+                      <>
+                        {/* Desktop Remarks */}
+                        <div className="expense-col desktop-only-flex" style={{ flexDirection: 'column', gap: '8px' }}>
+                          <label style={{ height: '16px', lineHeight: '16px', fontSize: '11px', color: '#64748b', fontWeight: 'bold', textTransform: 'uppercase', margin: 0 }}>Remarks</label>
+                          <input 
+                            type="text" 
+                            placeholder="Remarks"
+                            value={exp.remarks} 
+                            onChange={(e) => updateExpense(exp.id, 'remarks', e.target.value)} 
+                            required 
+                            className="saas-input" 
+                            style={{ width: '100%', height: '42px', margin: 0, boxSizing: 'border-box' }}
+                          />
+                        </div>
+
+                        {/* Mobile Remarks */}
+                        <div className="expense-col mobile-only-flex" style={{ flexDirection: 'column', justifyContent: 'flex-end', gap: '8px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', height: '42px', borderBottom: '1px dashed #cbd5e1', paddingBottom: '4px' }}>
+                            <span style={{ color: '#3b82f6', fontWeight: 'bold', fontSize: '16px', marginRight: '8px' }}>
+                              {getActiveList().length - index}.
+                            </span>
+                            <input 
+                              type="text" 
+                              placeholder="Remarks"
+                              value={exp.remarks} 
+                              onChange={(e) => updateExpense(exp.id, 'remarks', e.target.value)} 
+                              required 
+                              style={{ width: '100%', height: '100%', border: 'none', background: 'transparent', outline: 'none', fontSize: '16px', color: '#0f172a' }}
+                            />
+                          </div>
+                        </div>
+                      </>
+
+                      {/* Col 2: Spender (Refined Light Colors, Rounded Pill) */}
                       <div className="expense-col" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                         <label style={{ height: '16px', lineHeight: '16px', fontSize: '11px', color: '#64748b', fontWeight: 'bold', textTransform: 'uppercase', margin: 0 }}>Spender</label>
-                        <div className="saas-tab-container" style={{ margin: 0, padding: '4px', background: '#f1f5f9', border: 'none', boxShadow: 'none', height: '42px', display: 'flex', boxSizing: 'border-box' }}>
+                        <div className="saas-tab-container" style={{ margin: 0, padding: '4px', background: '#f1f5f9', border: 'none', boxShadow: 'none', height: '42px', display: 'flex', boxSizing: 'border-box', borderRadius: '8px' }}>
                           {(['Pich', 'Jing', 'Both'] as const).map(person => (
                             <button
                               type="button"
                               key={person}
                               onClick={() => updateExpense(exp.id, 'spender', person)}
-                              className={`saas-tab ${exp.spender === person ? 'active' : ''}`}
-                              style={exp.spender === person ? { background: '#0f172a', color: '#fff', flex: 1, padding: 0 } : { flex: 1, padding: 0 }}
+                              style={exp.spender === person ? { background: '#e0f2fe', color: '#0284c7', fontWeight: '500', flex: 1, padding: 0, borderRadius: '6px', border: 'none', height: '100%', fontSize: '14px', cursor: 'pointer' } : { flex: 1, padding: 0, fontWeight: '500', color: '#94a3b8', background: 'transparent', border: 'none', height: '100%', fontSize: '14px', cursor: 'pointer' }}
                             >
                               {person}
                             </button>
@@ -574,7 +607,7 @@ export default function ExpenseDashboard() {
                         </div>
                       </div>
 
-                      {/* Col 2: Payments */}
+                      {/* Col 3: Payments */}
                       <div className="expense-col" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                         <div style={{ height: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                           <label style={{ lineHeight: '16px', fontSize: '11px', color: '#64748b', fontWeight: 'bold', margin: 0, textTransform: 'uppercase' }}>Payment Method(s)</label>
@@ -808,27 +841,68 @@ export default function ExpenseDashboard() {
                   )}
 
                   {/* Core Metrics */}
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px', marginBottom: '32px' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '16px', marginBottom: '32px' }}>
+                    
                     <div className="saas-card">
                       <div className="saas-card-title">📉 Total Expenses</div>
-                      <div style={{ fontSize: '26px', color: '#ef4444', fontWeight: 'bold', marginTop: '12px' }}>{formatRiel(insightsData?.totalExp || 0)}</div>
-                      <div style={{ fontSize: '16px', color: '#f87171', fontWeight: 'bold', marginTop: '4px' }}>{formatUSD((insightsData?.totalExp || 0) / EXCHANGE_RATE)}</div>
+                      <div style={{ display: 'flex', gap: '16px', marginTop: '16px' }}>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontSize: '20px', color: '#ef4444', fontWeight: 'bold' }}>{formatRiel(insightsData?.totalExpRiel || 0)}</div>
+                          <div style={{ fontSize: '11px', color: '#94a3b8', textTransform: 'uppercase', marginTop: '4px' }}>Total Riel</div>
+                        </div>
+                        <div style={{ width: '1px', background: '#e2e8f0' }}></div>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontSize: '20px', color: '#ef4444', fontWeight: 'bold' }}>{formatUSD(insightsData?.totalExpUsd || 0)}</div>
+                          <div style={{ fontSize: '11px', color: '#94a3b8', textTransform: 'uppercase', marginTop: '4px' }}>Total USD</div>
+                        </div>
+                      </div>
                     </div>
+
                     <div className="saas-card">
                       <div className="saas-card-title">🏢 Business Expenses</div>
-                      <div style={{ fontSize: '26px', color: '#b91c1c', fontWeight: 'bold', marginTop: '12px' }}>{formatRiel(insightsData?.totalBiz || 0)}</div>
-                      <div style={{ fontSize: '16px', color: '#ef4444', fontWeight: 'bold', marginTop: '4px' }}>{formatUSD((insightsData?.totalBiz || 0) / EXCHANGE_RATE)}</div>
+                      <div style={{ display: 'flex', gap: '16px', marginTop: '16px' }}>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontSize: '20px', color: '#b91c1c', fontWeight: 'bold' }}>{formatRiel(insightsData?.totalBizRiel || 0)}</div>
+                          <div style={{ fontSize: '11px', color: '#94a3b8', textTransform: 'uppercase', marginTop: '4px' }}>Biz Riel</div>
+                        </div>
+                        <div style={{ width: '1px', background: '#e2e8f0' }}></div>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontSize: '20px', color: '#b91c1c', fontWeight: 'bold' }}>{formatUSD(insightsData?.totalBizUsd || 0)}</div>
+                          <div style={{ fontSize: '11px', color: '#94a3b8', textTransform: 'uppercase', marginTop: '4px' }}>Biz USD</div>
+                        </div>
+                      </div>
                     </div>
+
                     <div className="saas-card">
                       <div className="saas-card-title">🏡 Personal Expenses</div>
-                      <div style={{ fontSize: '26px', color: '#f59e0b', fontWeight: 'bold', marginTop: '12px' }}>{formatRiel(insightsData?.totalPers || 0)}</div>
-                      <div style={{ fontSize: '16px', color: '#fbbf24', fontWeight: 'bold', marginTop: '4px' }}>{formatUSD((insightsData?.totalPers || 0) / EXCHANGE_RATE)}</div>
+                      <div style={{ display: 'flex', gap: '16px', marginTop: '16px' }}>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontSize: '20px', color: '#f59e0b', fontWeight: 'bold' }}>{formatRiel(insightsData?.totalPersRiel || 0)}</div>
+                          <div style={{ fontSize: '11px', color: '#94a3b8', textTransform: 'uppercase', marginTop: '4px' }}>Pers Riel</div>
+                        </div>
+                        <div style={{ width: '1px', background: '#e2e8f0' }}></div>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontSize: '20px', color: '#f59e0b', fontWeight: 'bold' }}>{formatUSD(insightsData?.totalPersUsd || 0)}</div>
+                          <div style={{ fontSize: '11px', color: '#94a3b8', textTransform: 'uppercase', marginTop: '4px' }}>Pers USD</div>
+                        </div>
+                      </div>
                     </div>
+
                     <div className="saas-card">
                       <div className="saas-card-title" style={{ color: '#64748b' }}>ℹ️ Total Staff Debt Logged</div>
-                      <div style={{ fontSize: '26px', color: '#64748b', fontWeight: 'bold', marginTop: '12px' }}>{formatRiel(insightsData?.totalDebt || 0)}</div>
-                      <div style={{ fontSize: '16px', color: '#94a3b8', fontWeight: 'bold', marginTop: '4px' }}>{formatUSD((insightsData?.totalDebt || 0) / EXCHANGE_RATE)}</div>
+                      <div style={{ display: 'flex', gap: '16px', marginTop: '16px' }}>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontSize: '20px', color: '#64748b', fontWeight: 'bold' }}>{formatRiel(insightsData?.totalDebtRiel || 0)}</div>
+                          <div style={{ fontSize: '11px', color: '#94a3b8', textTransform: 'uppercase', marginTop: '4px' }}>Debt Riel</div>
+                        </div>
+                        <div style={{ width: '1px', background: '#e2e8f0' }}></div>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontSize: '20px', color: '#64748b', fontWeight: 'bold' }}>{formatUSD(insightsData?.totalDebtUsd || 0)}</div>
+                          <div style={{ fontSize: '11px', color: '#94a3b8', textTransform: 'uppercase', marginTop: '4px' }}>Debt USD</div>
+                        </div>
+                      </div>
                     </div>
+
                   </div>
 
                   {/* Top 5 Lists */}
@@ -840,7 +914,10 @@ export default function ExpenseDashboard() {
                           {insightsData?.topPers.map((item: any, idx: number) => (
                             <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #f1f5f9', paddingBottom: '8px' }}>
                               <div style={{ fontSize: '14px', color: '#334155', fontWeight: 'bold' }}>{idx + 1}. {item.remarks}</div>
-                              <div style={{ fontSize: '15px', color: '#f59e0b', fontWeight: 'bold' }}>{formatRiel(Number(item.amount_riel) + Number(item.amount_usd)*EXCHANGE_RATE)}</div>
+                              <div style={{ fontSize: '14px', fontWeight: 'bold', textAlign: 'right' }}>
+                                {Number(item.amount_riel) > 0 && <div style={{ color: '#f59e0b' }}>{formatRiel(Number(item.amount_riel))}</div>}
+                                {Number(item.amount_usd) > 0 && <div style={{ color: '#f59e0b' }}>{formatUSD(Number(item.amount_usd))}</div>}
+                              </div>
                             </div>
                           ))}
                         </div>
@@ -853,7 +930,10 @@ export default function ExpenseDashboard() {
                           {insightsData?.topBiz.map((item: any, idx: number) => (
                             <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #f1f5f9', paddingBottom: '8px' }}>
                               <div style={{ fontSize: '14px', color: '#334155', fontWeight: 'bold' }}>{idx + 1}. {item.remarks}</div>
-                              <div style={{ fontSize: '15px', color: '#b91c1c', fontWeight: 'bold' }}>{formatRiel(Number(item.amount_riel) + Number(item.amount_usd)*EXCHANGE_RATE)}</div>
+                              <div style={{ fontSize: '14px', fontWeight: 'bold', textAlign: 'right' }}>
+                                {Number(item.amount_riel) > 0 && <div style={{ color: '#b91c1c' }}>{formatRiel(Number(item.amount_riel))}</div>}
+                                {Number(item.amount_usd) > 0 && <div style={{ color: '#b91c1c' }}>{formatUSD(Number(item.amount_usd))}</div>}
+                              </div>
                             </div>
                           ))}
                         </div>
@@ -893,7 +973,6 @@ export default function ExpenseDashboard() {
                               style={{ textAlign: col.align as any, cursor: 'pointer', userSelect: 'none' }}
                             >
                               {col.label}
-                              {/* 🔥 FIX: Added '?' to dbSortConfig?.direction to satisfy strict TypeScript null checks */}
                               <span style={{ marginLeft: '6px', fontSize: '12px', opacity: dbSortConfig?.key === col.key ? 1 : 0.3 }}>
                                 {dbSortConfig?.key === col.key ? (dbSortConfig?.direction === 'asc' ? '↑' : '↓') : '↕'}
                               </span>
@@ -1037,13 +1116,15 @@ export default function ExpenseDashboard() {
         /* 🔥 ALIGNMENT CONTAINERS 🔥 */
         .hide-on-mobile { display: inline; }
         .show-on-mobile { display: none; }
+        .desktop-only-flex { display: flex; }
+        .mobile-only-flex { display: none; }
 
         .content-container {
           width: 100%;
           max-width: 1600px;
           margin: 0 auto;
-          padding-left: 0px; /* 🔥 Snaps left to perfectly align with the burger icon */
-          padding-right: 0px; /* Matches full screen width */
+          padding-left: 0px; 
+          padding-right: 0px; 
           box-sizing: border-box;
         }
         
@@ -1051,7 +1132,7 @@ export default function ExpenseDashboard() {
           width: 100%;
           max-width: 1600px;
           margin: 0 auto 24px auto;
-          padding-left: 60px; /* 🔥 Keeps the title safely pushed past the burger icon */
+          padding-left: 60px; 
           padding-right: 0px;
           display: flex;
           justify-content: flex-start;
@@ -1072,6 +1153,23 @@ export default function ExpenseDashboard() {
           -webkit-appearance: none; margin: 0;
         }
 
+        /* 🔥 DESKTOP LAYOUT FOR TOP ACTION ROW */
+        .top-action-row {
+          display: flex;
+          justify-content: space-between;
+          align-items: flex-end;
+          gap: 16px;
+        }
+        .top-action-row .date-wrapper {
+          flex: 1;
+          max-width: 200px;
+        }
+        .top-action-row .button-wrapper {
+          display: flex;
+          gap: 8px;
+          flex-shrink: 0;
+        }
+
         /* 🔥 RESPONSIVE EXPENSE GRID FOR DESKTOP 🔥 */
         .expense-grid {
           display: grid;
@@ -1081,9 +1179,9 @@ export default function ExpenseDashboard() {
 
         @media (min-width: 1024px) {
           .expense-grid {
-             grid-template-columns: 1fr 1.5fr; 
+             grid-template-columns: 1.5fr 1.2fr 1.5fr; /* 3 Columns neatly divided */
              gap: 24px;
-             align-items: flex-start; 
+             align-items: flex-end; 
           }
         }
 
@@ -1091,14 +1189,40 @@ export default function ExpenseDashboard() {
         @media (max-width: 1023px) { 
           .hide-on-mobile { display: none !important; }
           .show-on-mobile { display: inline !important; }
+          .desktop-only-flex { display: none !important; }
+          .mobile-only-flex { display: flex !important; }
+
+          /* Mobile Safari Fix for Top Action Row */
+          .top-action-row {
+            flex-direction: row !important;
+            align-items: flex-end !important;
+            flex-wrap: nowrap !important;
+            gap: 8px !important;
+          }
+          .top-action-row .date-wrapper {
+            flex: 1 1 auto !important;
+            min-width: 0 !important;
+            max-width: none !important;
+          }
+          .top-action-row .button-wrapper {
+            flex: 0 0 auto !important;
+            width: auto !important;
+            display: flex !important;
+            gap: 8px !important;
+            justify-content: flex-end !important;
+          }
+          .top-action-row .button-wrapper button {
+            flex: none !important;
+            padding: 0 12px !important;
+          }
 
           .content-container {
-            padding-left: 0px !important;
-            padding-right: 0px !important;
+            padding-left: 16px !important;
+            padding-right: 16px !important;
           }
 
           .header-container { 
-            padding-left: 54px !important; /* Mobile clear */
+            padding-left: 54px !important; 
             padding-right: 16px !important;
             margin-bottom: 24px !important; 
             display: flex !important;
