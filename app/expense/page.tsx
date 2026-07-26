@@ -492,8 +492,8 @@ export default function ExpenseDashboard() {
             <form onSubmit={handleSubmit} className="saas-card" style={{ padding: '30px', margin: 0, width: '100%' }}>
               
               {/* Date, Add, and Submit Row */}
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: '32px', gap: '16px', flexWrap: 'nowrap' }}>
-                <div style={{ flex: 1, maxWidth: '200px' }}>
+              <div className="top-action-row" style={{ marginBottom: '32px' }}>
+                <div className="date-col" style={{ flex: '1 1 200px' }}>
                   <label style={{ display: 'block', fontSize: '11px', color: '#64748b', fontWeight: 'bold', marginBottom: '8px', textTransform: 'uppercase' }}>Date</label>
                   <input 
                     type="date" 
@@ -505,12 +505,12 @@ export default function ExpenseDashboard() {
                   />
                 </div>
                 
-                <div style={{ display: 'flex', gap: '8px', flexShrink: 0 }}>
+                <div className="buttons-group" style={{ display: 'flex', gap: '8px', flexShrink: 0 }}>
                   <button 
                     type="button" 
                     onClick={addNewExpense}
-                    className="saas-btn saas-btn-secondary" 
-                    style={{ padding: '0 16px', fontWeight: 'bold', whiteSpace: 'nowrap', margin: 0, height: '42px', flexShrink: 0, background: '#e0f2fe', color: '#0284c7', border: 'none', borderRadius: '8px' }}
+                    className="saas-btn" 
+                    style={{ padding: '0 16px', fontWeight: 'bold', whiteSpace: 'nowrap', margin: 0, height: '42px', background: '#e0f2fe', color: '#0284c7', border: 'none', borderRadius: '8px' }}
                   >
                     + Add
                   </button>
@@ -519,7 +519,7 @@ export default function ExpenseDashboard() {
                     onClick={() => setConfirmModal(true)}
                     disabled={loading} 
                     className={`saas-btn ${loading ? 'saas-btn-secondary' : 'saas-btn-primary'}`}
-                    style={{ padding: '0 24px', fontWeight: 'bold', whiteSpace: 'nowrap', margin: 0, height: '42px', flexShrink: 0, opacity: loading ? 0.7 : 1 }}
+                    style={{ padding: '0 20px', fontWeight: 'bold', whiteSpace: 'nowrap', margin: 0, height: '42px', opacity: loading ? 0.7 : 1, borderRadius: '8px' }}
                   >
                     <span className="hide-on-mobile">{loading ? 'Processing...' : `Submit ${getActiveList().length} Expense(s)`}</span>
                     <span className="show-on-mobile">Submit</span>
@@ -1092,13 +1092,33 @@ export default function ExpenseDashboard() {
           .hide-on-mobile { display: none !important; }
           .show-on-mobile { display: inline !important; }
 
+          /* 🔥 Mobile Safari layout fix for top buttons */
+          .top-action-row {
+            display: flex !important;
+            flex-direction: column !important;
+            align-items: stretch !important;
+            gap: 12px !important;
+          }
+          .top-action-row .date-col {
+            width: 100% !important;
+            max-width: 100% !important;
+          }
+          .top-action-row .buttons-group {
+            display: flex !important;
+            gap: 8px !important;
+            width: 100% !important;
+          }
+          .top-action-row .buttons-group button {
+            flex: 1 !important;
+          }
+
           .content-container {
-            padding-left: 0px !important;
-            padding-right: 0px !important;
+            padding-left: 16px !important;
+            padding-right: 16px !important;
           }
 
           .header-container { 
-            padding-left: 54px !important; /* Mobile clear */
+            padding-left: 54px !important; 
             padding-right: 16px !important;
             margin-bottom: 24px !important; 
             display: flex !important;
