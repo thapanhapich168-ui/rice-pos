@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useMemo } from 'react'
 import { supabase } from '@/lib/supabaseClient'
 import { formatRiel, formatUSD, EXCHANGE_RATE } from '@/utils/formatters'
 import { CurrencyInput } from '@/components/Inputs'
@@ -28,11 +28,12 @@ export default function ExpenseDashboard() {
   const [isMounted, setIsMounted] = useState(false);
 
   // --- Active Tab State ---
-  const [activeTab, setActiveTab] = useState<'personal' | 'business' | 'staff'>('personal')
+  const [activeTab, setActiveTab] = useState<'personal' | 'business' | 'staff' | 'database'>('personal')
 
   // --- Expense Ledger States (Auto-saved) ---
   const [expenseDate, setExpenseDate] = useState('')
   const [loading, setLoading] = useState(false)
+  const [confirmModal, setConfirmModal] = useState(false)
 
   const createNewExpense = (): PendingExpense => ({
     id: Date.now().toString() + Math.random().toString().slice(2, 6),
@@ -50,40 +51,56 @@ export default function ExpenseDashboard() {
   const [newStaffName, setNewStaffName] = useState('')
   const [newStaffSalary, setNewStaffSalary] = useState<number | ''>('')
   
-  // Debt Addition States
   const [debtAdditions, setDebtAdditions] = useState<Record<number, number | ''>>({})
   const [debtMethods, setDebtMethods] = useState<Record<number, string>>({})
   
-  // Debt History Modal State
   const [historyModal, setHistoryModal] = useState<{ isOpen: boolean, staff: any, history: any[] }>({
     isOpen: false, staff: null, history: []
   })
 
-  // Settle Debt Modal State
   const [settleModal, setSettleModal] = useState<{ isOpen: boolean, staff: any, amount: number | '', method: string }>({
     isOpen: false, staff: null, amount: '', method: 'Cash ៛'
   })
 
-  // Inline Editing State
   const [editingCell, setEditingCell] = useState<{ id: number, field: string } | null>(null)
   const [editValue, setEditValue] = useState<string>('')
+
+  // --- Database Tab States ---
+  const [dbExpenses, setDbExpenses] = useState<any[]>([])
+  const [dbStaffDebt, setDbStaffDebt] = useState<any[]>([])
+  const [dbTab, setDbTab] = useState<'personal' | 'business' | 'staff_debt' | 'insight'>('personal')
+  const [dbTabOrder, setDbTabOrder] = useState(['personal', 'business', 'staff_debt', 'insight'])
+  const [dbSortConfig, setDbSortConfig] = useState<{key: string, direction: 'asc' | 'desc'} | null>(null)
+  const [isFetchingDb, setIsFetchingDb] = useState(false)
+
+  // Insights State
+  const [insightFilter, setInsightFilter] = useState<'today'|'week'|'month'|'custom'>('month')
+  const [insightFrom, setInsightFrom] = useState('')
+  const [insightTo, setInsightTo] = useState('')
 
   // --- Initialization & Local Storage Sync ---
   useEffect(() => {
     setIsMounted(true);
     const today = new Date().toISOString().split('T')[0]
     setExpenseDate(today)
+    setInsightFrom(today)
+    setInsightTo(today)
     fetchStaff()
+    fetchDatabase()
 
-    // Hydrate from Local Storage
     const savedPers = localStorage.getItem('expense_ledger_personal');
     const savedBiz = localStorage.getItem('expense_ledger_business');
+    const savedDbTabOrder = localStorage.getItem('expense_db_tab_order');
     
     if (savedPers) setPendingPersonal(JSON.parse(savedPers));
     else setPendingPersonal([createNewExpense()]);
     
     if (savedBiz) setPendingBusiness(JSON.parse(savedBiz));
     else setPendingBusiness([createNewExpense()]);
+
+    if (savedDbTabOrder) {
+      try { setDbTabOrder(JSON.parse(savedDbTabOrder)); } catch(e){}
+    }
   }, [])
 
   useEffect(() => {
@@ -94,6 +111,10 @@ export default function ExpenseDashboard() {
     if (isMounted) localStorage.setItem('expense_ledger_business', JSON.stringify(pendingBusiness));
   }, [pendingBusiness, isMounted])
 
+  useEffect(() => {
+    if (isMounted) localStorage.setItem('expense_db_tab_order', JSON.stringify(dbTabOrder));
+  }, [dbTabOrder, isMounted])
+
 
   // --- Helper: Dynamic Ledger Handlers ---
   const getActiveList = () => activeTab === 'personal' ? pendingPersonal : pendingBusiness;
@@ -103,10 +124,11 @@ export default function ExpenseDashboard() {
     setActiveList(getActiveList().map(exp => exp.id === id ? { ...exp, [field]: value } : exp));
   }
 
+  // Prepend new payment split so it appears at top
   const addPaymentSplit = (expId: string) => {
     setActiveList(getActiveList().map(exp => {
       if (exp.id === expId) {
-        return { ...exp, payments: [...exp.payments, { id: Date.now(), method: 'Cash ៛', amount: '' }] }
+        return { ...exp, payments: [{ id: Date.now(), method: 'Cash ៛', amount: '' }, ...exp.payments] }
       }
       return exp;
     }));
@@ -137,6 +159,7 @@ export default function ExpenseDashboard() {
     setActiveList(getActiveList().filter(exp => exp.id !== id));
   }
 
+  // Prepend new expense so it appears at top
   const addNewExpense = () => {
     setActiveList([createNewExpense(), ...getActiveList()]);
   }
@@ -149,9 +172,22 @@ export default function ExpenseDashboard() {
     setIsFetchingStaff(false)
   }
 
+  // --- API: Fetch Database Tab ---
+  async function fetchDatabase() {
+    setIsFetchingDb(true)
+    const [ {data: exp}, {data: debt} ] = await Promise.all([
+       supabase.from('expenses').select('*').order('created_at', { ascending: false }).limit(2000),
+       supabase.from('staff_debt_history').select('*, staff:staff_id(name)').order('created_at', { ascending: false }).limit(2000)
+    ])
+    setDbExpenses(exp || []);
+    setDbStaffDebt(debt || []);
+    setIsFetchingDb(false)
+  }
+
   // --- Action: Submit Bulk Expenses ---
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault()
+  async function handleSubmit(e?: React.FormEvent) {
+    if (e) e.preventDefault()
+    setConfirmModal(false)
 
     const list = getActiveList();
     const validExpenses = list.filter(exp => exp.remarks.trim() !== '' && exp.payments.some(p => Number(p.amount) > 0));
@@ -195,15 +231,13 @@ export default function ExpenseDashboard() {
         };
       });
 
-      // Insert keeping the order
-      const { error } = await supabase.from('expenses').insert(payloadArray.reverse()); // Reverse back to chronological order for the DB
+      const { error } = await supabase.from('expenses').insert(payloadArray.reverse()); 
 
       if (error) throw error;
 
       showToast('success', 'Success', `${validExpenses.length} expense(s) recorded successfully!`);
-      
-      // Reset the list cleanly
       setActiveList([createNewExpense()]);
+      fetchDatabase(); 
 
     } catch (err: any) {
       showToast('error', 'Save Failed', `Error saving entry: ${err.message}`);
@@ -212,111 +246,56 @@ export default function ExpenseDashboard() {
     }
   }
 
-  // --- Action: Add New Staff ---
+  // --- Staff Methods ---
   async function handleAddStaff(e: React.FormEvent) {
     e.preventDefault()
-    if (!newStaffName) {
-      showToast('error', 'Validation Error', 'Staff name is required');
-      return;
-    }
-
+    if (!newStaffName) { showToast('error', 'Validation Error', 'Staff name is required'); return; }
     setLoading(true)
     const today = new Date();
     const firstOfMonth = new Date(today.getFullYear(), today.getMonth(), 1).toISOString().split('T')[0];
-
-    const { error } = await supabase.from('staff').insert([
-      { 
-        name: newStaffName, 
-        salary: Number(newStaffSalary) || 0,
-        total_debt_riel: 0, 
-        total_debt_usd: 0,  
-        start_date: firstOfMonth
-      }
-    ])
+    const { error } = await supabase.from('staff').insert([{ name: newStaffName, salary: Number(newStaffSalary) || 0, total_debt_riel: 0, total_debt_usd: 0, start_date: firstOfMonth }])
     setLoading(false)
-
-    if (error) {
-      showToast('error', 'Error', `Error adding staff: ${error.message}`);
-    } else {
+    if (error) { showToast('error', 'Error', `Error adding staff: ${error.message}`); } else {
       showToast('success', 'Staff Added', `${newStaffName} has been registered.`);
-      setNewStaffName('')
-      setNewStaffSalary('')
-      fetchStaff()
+      setNewStaffName(''); setNewStaffSalary(''); fetchStaff();
     }
   }
 
-  // --- Action: Add Debt to Staff ---
   async function handleAddDebt(staff: any) {
     const rawAmount = Number(debtAdditions[staff.id])
     if (!rawAmount || rawAmount === 0) return
-
     const method = debtMethods[staff.id] || 'Cash ៛'
-    
     let saveRiel = 0, saveUsd = 0;
-    let newTotalRiel = Number(staff.total_debt_riel || 0);
-    let newTotalUsd = Number(staff.total_debt_usd || 0);
+    let newTotalRiel = Number(staff.total_debt_riel || 0); let newTotalUsd = Number(staff.total_debt_usd || 0);
 
-    if (method.includes('$')) {
-      saveUsd = rawAmount;
-      newTotalUsd += rawAmount;
-    } else {
-      saveRiel = rawAmount;
-      newTotalRiel += rawAmount;
-    }
+    if (method.includes('$')) { saveUsd = rawAmount; newTotalUsd += rawAmount; } else { saveRiel = rawAmount; newTotalRiel += rawAmount; }
 
     setStaffList(prev => prev.map(s => s.id === staff.id ? { ...s, total_debt_riel: newTotalRiel, total_debt_usd: newTotalUsd } : s));
     setDebtAdditions(prev => ({ ...prev, [staff.id]: '' }))
 
     const { error: staffErr } = await supabase.from('staff').update({ total_debt_riel: newTotalRiel, total_debt_usd: newTotalUsd }).eq('id', staff.id)
-    if (staffErr) {
-      showToast('error', 'Update Failed', `Error updating debt: ${staffErr.message}`);
-      fetchStaff() 
-      return;
-    }
+    if (staffErr) { showToast('error', 'Update Failed', `Error updating debt: ${staffErr.message}`); fetchStaff(); return; }
 
-    const { error: histErr } = await supabase.from('staff_debt_history').insert([{ staff_id: staff.id, amount: rawAmount, payment_method: method }])
-    if (histErr) showToast('info', 'Warning', `Debt updated, but history log failed: ${histErr.message}`);
-
-    await supabase.from('expenses').insert([{
-      expense_date: new Date().toISOString().split('T')[0],
-      spender: 'Both', 
-      payment_method: method,
-      remarks: `Staff Advance: ${staff.name}`,
-      amount_usd: saveUsd, 
-      amount_riel: saveRiel,
-      description: 'STAFF_ADVANCE' 
-    }])
+    await supabase.from('staff_debt_history').insert([{ staff_id: staff.id, amount: rawAmount, payment_method: method }])
+    await supabase.from('expenses').insert([{ expense_date: new Date().toISOString().split('T')[0], spender: 'Both', payment_method: method, remarks: `Staff Advance: ${staff.name}`, amount_usd: saveUsd, amount_riel: saveRiel, description: 'STAFF_ADVANCE' }])
     showToast('success', 'Advance Added', `Advance added for ${staff.name}`);
+    fetchDatabase();
   }
 
-  // --- Action: Settle/Pay Back Debt ---
   async function handleSettleSubmit() {
     const staff = settleModal.staff;
     const rawAmount = Number(settleModal.amount);
-    
-    if (!rawAmount || rawAmount <= 0) {
-      showToast('error', 'Invalid Amount', 'Enter a valid settlement amount.');
-      return;
-    }
+    if (!rawAmount || rawAmount <= 0) { showToast('error', 'Invalid Amount', 'Enter a valid settlement amount.'); return; }
     
     let saveRiel = 0, saveUsd = 0;
-    let newTotalRiel = Number(staff.total_debt_riel || 0);
-    let newTotalUsd = Number(staff.total_debt_usd || 0);
+    let newTotalRiel = Number(staff.total_debt_riel || 0); let newTotalUsd = Number(staff.total_debt_usd || 0);
 
     if (settleModal.method.includes('$')) {
-      if (rawAmount > newTotalUsd) {
-        showToast('error', 'Overpayment', 'Cannot settle more USD than they owe.');
-        return;
-      }
-      saveUsd = -Math.abs(rawAmount);
-      newTotalUsd -= rawAmount;
+      if (rawAmount > newTotalUsd) { showToast('error', 'Overpayment', 'Cannot settle more USD than they owe.'); return; }
+      saveUsd = -Math.abs(rawAmount); newTotalUsd -= rawAmount;
     } else {
-      if (rawAmount > newTotalRiel) {
-        showToast('error', 'Overpayment', 'Cannot settle more Riel than they owe.');
-        return;
-      }
-      saveRiel = -Math.abs(rawAmount);
-      newTotalRiel -= rawAmount;
+      if (rawAmount > newTotalRiel) { showToast('error', 'Overpayment', 'Cannot settle more Riel than they owe.'); return; }
+      saveRiel = -Math.abs(rawAmount); newTotalRiel -= rawAmount;
     }
 
     setStaffList(prev => prev.map(s => s.id === staff.id ? { ...s, total_debt_riel: newTotalRiel, total_debt_usd: newTotalUsd } : s));
@@ -324,472 +303,652 @@ export default function ExpenseDashboard() {
 
     await supabase.from('staff').update({ total_debt_riel: newTotalRiel, total_debt_usd: newTotalUsd }).eq('id', staff.id);
     await supabase.from('staff_debt_history').insert([{ staff_id: staff.id, amount: rawAmount, payment_method: `Settled: ${settleModal.method}` }]);
-
-    await supabase.from('expenses').insert([{
-      expense_date: new Date().toISOString().split('T')[0],
-      spender: 'Both', 
-      payment_method: settleModal.method,
-      remarks: `Staff Debt Settlement: ${staff.name}`,
-      amount_usd: saveUsd, 
-      amount_riel: saveRiel,
-      description: 'STAFF_SETTLEMENT' 
-    }]);
+    await supabase.from('expenses').insert([{ expense_date: new Date().toISOString().split('T')[0], spender: 'Both', payment_method: settleModal.method, remarks: `Staff Debt Settlement: ${staff.name}`, amount_usd: saveUsd, amount_riel: saveRiel, description: 'STAFF_SETTLEMENT' }]);
     
     showToast('success', 'Settled', `Settlement recorded for ${staff.name}`);
+    fetchDatabase();
   }
 
-  // --- Action: View Staff History ---
   async function handleViewHistory(staff: any) {
     const { data, error } = await supabase.from('staff_debt_history').select('*').eq('staff_id', staff.id).order('created_at', { ascending: false })
-    if (!error) {
-      setHistoryModal({ isOpen: true, staff: staff, history: data || [] })
-    }
+    if (!error) setHistoryModal({ isOpen: true, staff: staff, history: data || [] })
   }
 
-  // --- Action: Save Inline Edit ---
   async function saveInlineEdit(id: number, field: string) {
-    if (!editValue && editValue !== '0' && field !== 'name') {
-      setEditingCell(null);
-      return;
-    }
-
+    if (!editValue && editValue !== '0' && field !== 'name') { setEditingCell(null); return; }
     let finalValue: any = editValue;
-    if (field === 'salary' || field === 'total_debt_riel' || field === 'total_debt_usd') {
-      finalValue = Number(editValue.replace(/,/g, '')) || 0;
-    }
-
+    if (field === 'salary' || field === 'total_debt_riel' || field === 'total_debt_usd') { finalValue = Number(editValue.replace(/,/g, '')) || 0; }
     const staff = staffList.find(s => s.id === id);
-
     setStaffList(prev => prev.map(s => s.id === id ? { ...s, [field]: finalValue } : s));
     setEditingCell(null);
 
     const { error } = await supabase.from('staff').update({ [field]: finalValue }).eq('id', id);
-    
     if (!error && (field === 'total_debt_riel' || field === 'total_debt_usd') && staff) {
         const difference = finalValue - (Number(staff[field]) || 0);
         if (difference !== 0) {
-            await supabase.from('staff_debt_history').insert([{ 
-                staff_id: id, 
-                amount: Math.abs(difference), 
-                payment_method: difference > 0 
-                  ? `Manual Increase ${field.includes('usd') ? '$' : '៛'}` 
-                  : `Manual Reduction ${field.includes('usd') ? '$' : '៛'}` 
-            }]);
+            await supabase.from('staff_debt_history').insert([{ staff_id: id, amount: Math.abs(difference), payment_method: difference > 0 ? `Manual Increase ${field.includes('usd') ? '$' : '៛'}` : `Manual Reduction ${field.includes('usd') ? '$' : '៛'}` }]);
+            fetchDatabase();
         }
     }
-
-    if (error) {
-      showToast('error', 'Update Failed', error.message);
-      fetchStaff();
-    }
+    if (error) { showToast('error', 'Update Failed', error.message); fetchStaff(); }
   }
 
-  // --- Action: Delete Staff ---
   async function handleDeleteStaff(id: number, name: string) {
     if (!confirm(`Are you sure you want to remove ${name} from the payroll?`)) return;
-    
     setStaffList(prev => prev.filter(s => s.id !== id));
-
     const { error } = await supabase.from('staff').delete().eq('id', id);
-    if (error) {
-      showToast('error', 'Deletion Failed', error.message);
-      fetchStaff();
-    } else {
-      showToast('success', 'Deleted', `${name} has been removed.`);
-    }
+    if (error) { showToast('error', 'Deletion Failed', error.message); fetchStaff(); } else showToast('success', 'Deleted', `${name} has been removed.`);
   }
 
   function calculateDaysWorked(startDateStr: string) {
     if (!startDateStr) return 0;
-    
-    const today = new Date();
-    today.setHours(0, 0, 0, 0); 
-
-    const currentMonth = today.getMonth();
-    const currentYear = today.getFullYear();
-    
-    const startDate = new Date(startDateStr);
-    startDate.setHours(0, 0, 0, 0);
-    
+    const today = new Date(); today.setHours(0, 0, 0, 0); 
+    const currentMonth = today.getMonth(); const currentYear = today.getFullYear();
+    const startDate = new Date(startDateStr); startDate.setHours(0, 0, 0, 0);
     let effectiveStartDate = startDate;
     if (startDate.getMonth() !== currentMonth || startDate.getFullYear() !== currentYear) {
-      effectiveStartDate = new Date(currentYear, currentMonth, 1);
-      effectiveStartDate.setHours(0, 0, 0, 0);
+      effectiveStartDate = new Date(currentYear, currentMonth, 1); effectiveStartDate.setHours(0, 0, 0, 0);
     }
-
     const diffTime = today.getTime() - effectiveStartDate.getTime();
     const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24)) + 1; 
-    
     return diffDays > 0 ? diffDays : 0;
   }
 
-  if (!isMounted) return null; // Prevents Local Storage Hydration mismatch
+  // --- Database Tab Sorting & Filtering ---
+  const filteredAndSortedDb = useMemo(() => {
+    let baseData: any[] = [];
+    if (dbTab === 'staff_debt') baseData = dbStaffDebt;
+    else if (dbTab === 'insight') return []; // Insight uses its own rendering
+    else baseData = dbExpenses.filter(e => e.description === dbTab.toUpperCase());
+
+    if (!dbSortConfig) return baseData;
+
+    return [...baseData].sort((a, b) => {
+        const { key, direction } = dbSortConfig;
+        let valA = a[key], valB = b[key];
+        
+        if (key === 'staff_name') { valA = a.staff?.name || ''; valB = b.staff?.name || ''; }
+        if (key === 'expense_date') { valA = new Date(a.expense_date || a.created_at).getTime(); valB = new Date(b.expense_date || b.created_at).getTime(); }
+
+        if (valA < valB) return direction === 'asc' ? -1 : 1;
+        if (valA > valB) return direction === 'asc' ? 1 : -1;
+        return 0;
+    });
+  }, [dbTab, dbExpenses, dbStaffDebt, dbSortConfig]);
+
+  // --- Insights Calculation Logic ---
+  const insightsData = useMemo(() => {
+    if (dbTab !== 'insight') return null;
+
+    const filterDate = (dateStr: string) => {
+      if (!dateStr) return false;
+      const d = new Date(dateStr); d.setHours(0,0,0,0);
+      const today = new Date(); today.setHours(0,0,0,0);
+      
+      if (insightFilter === 'today') return d.getTime() === today.getTime();
+      if (insightFilter === 'week') {
+        const lw = new Date(today); lw.setDate(lw.getDate() - 7);
+        return d >= lw && d <= today;
+      }
+      if (insightFilter === 'month') return d.getMonth() === today.getMonth() && d.getFullYear() === today.getFullYear();
+      if (insightFilter === 'custom') {
+        const f = new Date(insightFrom); f.setHours(0,0,0,0);
+        const t = new Date(insightTo); t.setHours(23,59,59,999);
+        return d >= f && d <= t;
+      }
+      return true;
+    };
+
+    const validExp = dbExpenses.filter(e => filterDate(e.expense_date || e.created_at));
+    const validDebt = dbStaffDebt.filter(d => filterDate(d.created_at));
+
+    let totalPers = 0, totalBiz = 0, totalDebt = 0;
+
+    validExp.forEach(e => {
+      const amt = Number(e.amount_riel) + (Number(e.amount_usd) * EXCHANGE_RATE);
+      if (e.description === 'PERSONAL') totalPers += amt;
+      if (e.description === 'BUSINESS') totalBiz += amt;
+    });
+
+    validDebt.forEach(d => {
+      let amt = Number(d.amount);
+      if ((d.payment_method || '').includes('$')) amt *= EXCHANGE_RATE;
+      if (!(d.payment_method || '').includes('Settled')) totalDebt += amt; 
+    });
+
+    const topPers = validExp.filter(e => e.description === 'PERSONAL').sort((a,b) => (Number(b.amount_riel) + Number(b.amount_usd)*EXCHANGE_RATE) - (Number(a.amount_riel) + Number(a.amount_usd)*EXCHANGE_RATE)).slice(0, 5);
+    const topBiz = validExp.filter(e => e.description === 'BUSINESS').sort((a,b) => (Number(b.amount_riel) + Number(b.amount_usd)*EXCHANGE_RATE) - (Number(a.amount_riel) + Number(a.amount_usd)*EXCHANGE_RATE)).slice(0, 5);
+
+    // Chart Data (31 days)
+    const thisMonthData = new Array(31).fill(0);
+    const lastMonthData = new Array(31).fill(0);
+
+    const isThisMonth = (dateStr: string) => {
+       const d = new Date(dateStr); const now = new Date();
+       return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+    }
+    const isLastMonth = (dateStr: string) => {
+       const d = new Date(dateStr); const now = new Date();
+       const lm = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+       return d.getMonth() === lm.getMonth() && d.getFullYear() === lm.getFullYear();
+    }
+
+    dbExpenses.forEach(e => {
+       if (e.description !== 'PERSONAL' && e.description !== 'BUSINESS') return;
+       const d = new Date(e.expense_date || e.created_at);
+       const dayIdx = d.getDate() - 1;
+       const amt = Number(e.amount_riel) + (Number(e.amount_usd) * EXCHANGE_RATE);
+       
+       if (isThisMonth(e.expense_date || e.created_at) && dayIdx >= 0 && dayIdx < 31) {
+          thisMonthData[dayIdx] += amt;
+       } else if (isLastMonth(e.expense_date || e.created_at) && dayIdx >= 0 && dayIdx < 31) {
+          lastMonthData[dayIdx] += amt;
+       }
+    });
+
+    return { totalPers, totalBiz, totalExp: totalPers + totalBiz, totalDebt, topPers, topBiz, thisMonthData, lastMonthData };
+  }, [dbTab, dbExpenses, dbStaffDebt, insightFilter, insightFrom, insightTo]);
+
+
+  if (!isMounted) return null; 
 
   return (
-    <div className="main-wrapper">
+    // 🔥 FROZEN LAYOUT WRAPPER 
+    <div className="main-wrapper" style={{ display: 'flex', flexDirection: 'column', height: '100dvh', overflow: 'hidden' }}>
 
-      {/* HEADER */}
-      <div className="header-container">
-        <div className="header-left">
-          <h1 className="saas-page-title">💸 Daily Expense & Payroll</h1>
+      {/* 🔥 FROZEN HEADER & TABS */}
+      <div style={{ flexShrink: 0, width: '100%', paddingBottom: '16px' }}>
+        <div className="header-container">
+          <div className="header-left">
+            <h1 className="saas-page-title">💸 Daily Expense & Payroll</h1>
+          </div>
+        </div>
+
+        <div className="content-container">
+          {/* 🔥 Clean White Flex Container for Tabs with Border */}
+          <div className="hide-scrollbar" style={{ display: 'flex', flexWrap: 'nowrap', overflowX: 'auto', WebkitOverflowScrolling: 'touch', gap: '8px', background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '12px', padding: '6px' }}>
+            <button type="button" onClick={() => setActiveTab('personal')} className={`saas-tab ${activeTab === 'personal' ? 'active' : ''}`} style={{ flexShrink: 0, padding: '10px 24px' }}>
+              🏡 Personal
+            </button>
+            <button type="button" onClick={() => setActiveTab('business')} className={`saas-tab ${activeTab === 'business' ? 'active' : ''}`} style={{ flexShrink: 0, padding: '10px 24px' }}>
+              🏢 Business
+            </button>
+            <button type="button" onClick={() => setActiveTab('staff')} className={`saas-tab ${activeTab === 'staff' ? 'active' : ''}`} style={{ flexShrink: 0, padding: '10px 24px' }}>
+              👥 Staff Payroll
+            </button>
+            <button type="button" onClick={() => setActiveTab('database')} className={`saas-tab ${activeTab === 'database' ? 'active' : ''}`} style={activeTab === 'database' ? { background: '#10b981', color: '#fff', flexShrink: 0, padding: '10px 24px' } : { flexShrink: 0, padding: '10px 24px' }}>
+              🗄️ Expense Database
+            </button>
+          </div>
         </div>
       </div>
 
-      <div style={{ width: '100%', maxWidth: activeTab === 'staff' ? '1200px' : '550px', margin: '0 auto' }}>
-        
-        {/* THREE TAB HEADER */}
-        <div className="saas-tab-container" style={{ width: '100%', padding: '6px', background: '#fff', border: '1px solid #e2e8f0' }}>
-          <button type="button" onClick={() => setActiveTab('personal')} className={`saas-tab ${activeTab === 'personal' ? 'active' : ''}`} style={{ flex: 1, textAlign: 'center' }}>
-            🏡 Personal
-          </button>
-          <button type="button" onClick={() => setActiveTab('business')} className={`saas-tab ${activeTab === 'business' ? 'active' : ''}`} style={{ flex: 1, textAlign: 'center' }}>
-            🏢 Business
-          </button>
-          <button type="button" onClick={() => setActiveTab('staff')} className={`saas-tab ${activeTab === 'staff' ? 'active' : ''}`} style={{ flex: 1, textAlign: 'center' }}>
-            👥 Staff Payroll
-          </button>
-        </div>
+      {/* 🔥 SCROLLING CONTENT AREA */}
+      <div className="hide-scrollbar" style={{ flex: 1, overflowY: 'auto', paddingBottom: '60px', paddingTop: '8px' }}>
+        <div className="content-container">
 
-        {/* --- DYNAMIC EXPENSE LEDGER (Shown for Personal & Business) --- */}
-        {activeTab !== 'staff' && (
-          <form onSubmit={handleSubmit} className="saas-card" style={{ padding: '30px' }}>
-            
-            {/* 🔥 FIXED: Perfect horizontal alignment by using flex-stretch and putting label outside */}
-            <div style={{ marginBottom: '24px' }}>
-              <label style={{ display: 'block', fontSize: '11px', color: '#64748b', fontWeight: 'bold', marginBottom: '8px', textTransform: 'uppercase' }}>Date</label>
-              <div style={{ display: 'flex', gap: '12px', alignItems: 'stretch' }}>
-                <input 
-                  type="date" 
-                  value={expenseDate} 
-                  onChange={(e) => setExpenseDate(e.target.value)} 
-                  required 
-                  className="saas-input" 
-                  style={{ flex: 1, width: '100%', margin: 0 }} 
-                />
-                <button 
-                  type="button" 
-                  onClick={addNewExpense}
-                  className="saas-btn saas-btn-primary" 
-                  style={{ padding: '0 24px', fontWeight: 'bold', whiteSpace: 'nowrap', margin: 0, height: 'auto' }}
-                >
-                  + Add
-                </button>
-              </div>
-            </div>
-
-            {/* List of Pending Expenses */}
-            {getActiveList().map((exp, index) => (
-              <div key={exp.id} style={{ marginBottom: '24px', padding: '20px', background: '#ffffff', borderRadius: '12px', border: '1px solid #cbd5e1', position: 'relative', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.02)' }}>
-                
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-                  {/* Dynamic counting to reverse match array indexing */}
-                  <label style={{ margin: 0, color: '#3b82f6', fontWeight: 'bold', fontSize: '14px' }}>{getActiveList().length - index}. Item Description</label>
-                  {getActiveList().length > 1 && (
-                    <button type="button" onClick={() => removeExpense(exp.id)} style={{ color: '#ef4444', background: '#fee2e2', borderRadius: '50%', width: '28px', height: '28px', border: 'none', cursor: 'pointer', fontSize: '12px', fontWeight: 'bold', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>✕</button>
-                  )}
+          {/* --- DYNAMIC EXPENSE LEDGER (Personal & Business) --- */}
+          {(activeTab === 'personal' || activeTab === 'business') && (
+            <form onSubmit={handleSubmit} className="saas-card" style={{ padding: '30px', margin: 0, width: '100%' }}>
+              
+              {/* Date, Add, and Submit Row */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: '32px', gap: '16px', flexWrap: 'nowrap' }}>
+                <div style={{ flex: 1, maxWidth: '200px' }}>
+                  <label style={{ display: 'block', fontSize: '11px', color: '#64748b', fontWeight: 'bold', marginBottom: '8px', textTransform: 'uppercase' }}>Date</label>
+                  <input 
+                    type="date" 
+                    value={expenseDate} 
+                    onChange={(e) => setExpenseDate(e.target.value)} 
+                    required 
+                    className="saas-input" 
+                    style={{ width: '100%', margin: 0, height: '42px', boxSizing: 'border-box' }} 
+                  />
                 </div>
                 
-                {/* 1. Remarks (Full Width) */}
-                <input 
-                  type="text" 
-                  value={exp.remarks} 
-                  onChange={(e) => updateExpense(exp.id, 'remarks', e.target.value)} 
-                  required 
-                  className="saas-input" 
-                  style={{ marginBottom: '20px' }}
-                />
+                <div style={{ display: 'flex', gap: '8px', flexShrink: 0 }}>
+                  <button 
+                    type="button" 
+                    onClick={addNewExpense}
+                    className="saas-btn saas-btn-secondary" 
+                    style={{ padding: '0 16px', fontWeight: 'bold', whiteSpace: 'nowrap', margin: 0, height: '42px', flexShrink: 0, background: '#e0f2fe', color: '#0284c7', border: 'none', borderRadius: '8px' }}
+                  >
+                    + Add
+                  </button>
+                  <button 
+                    type="button" 
+                    onClick={() => setConfirmModal(true)}
+                    disabled={loading} 
+                    className={`saas-btn ${loading ? 'saas-btn-secondary' : 'saas-btn-primary'}`}
+                    style={{ padding: '0 24px', fontWeight: 'bold', whiteSpace: 'nowrap', margin: 0, height: '42px', flexShrink: 0, opacity: loading ? 0.7 : 1 }}
+                  >
+                    <span className="hide-on-mobile">{loading ? 'Processing...' : `Submit ${getActiveList().length} Expense(s)`}</span>
+                    <span className="show-on-mobile">Submit</span>
+                  </button>
+                </div>
+              </div>
 
-                {/* 2. Indented Properties Container */}
-                <div style={{ marginLeft: '16px', paddingLeft: '20px', borderLeft: '3px solid #e2e8f0' }}>
-                  
-                  {/* Spender */}
-                  <div style={{ marginBottom: '20px' }}>
-                    <label style={{ display: 'block', fontSize: '11px', color: '#64748b', marginBottom: '8px', fontWeight: 'bold', textTransform: 'uppercase' }}>Spender</label>
-                    <div className="saas-tab-container" style={{ margin: 0, padding: '4px', background: '#f1f5f9', border: 'none', boxShadow: 'none' }}>
-                      {(['Pich', 'Jing', 'Both'] as const).map(person => (
-                        <button
-                          type="button"
-                          key={person}
-                          onClick={() => updateExpense(exp.id, 'spender', person)}
-                          className={`saas-tab ${exp.spender === person ? 'active' : ''}`}
-                          style={exp.spender === person ? { background: '#0f172a', color: '#fff', flex: 1, padding: '6px' } : { flex: 1, padding: '6px' }}
-                        >
-                          {person}
+              {/* List of Pending Expenses */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+                {getActiveList().map((exp, index) => (
+                  <div key={exp.id} className="expense-entry-card" style={{ padding: '24px', background: '#ffffff', borderRadius: '12px', border: '1px solid #cbd5e1', position: 'relative', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.02)' }}>
+                    
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                      <label style={{ margin: 0, color: '#3b82f6', fontWeight: 'bold', fontSize: '15px' }}>
+                        {getActiveList().length - index}. Remarks
+                      </label>
+                      {getActiveList().length > 1 && (
+                        <button type="button" onClick={() => removeExpense(exp.id)} style={{ color: '#ef4444', background: '#fee2e2', borderRadius: '6px', padding: '6px 12px', border: 'none', cursor: 'pointer', fontSize: '12px', fontWeight: 'bold' }}>
+                          ✕ Remove
                         </button>
-                      ))}
+                      )}
+                    </div>
+
+                    <input 
+                      type="text" 
+                      placeholder=""
+                      value={exp.remarks} 
+                      onChange={(e) => updateExpense(exp.id, 'remarks', e.target.value)} 
+                      required 
+                      className="saas-input" 
+                      style={{ width: '100%', height: '42px', margin: '0 0 24px 0', boxSizing: 'border-box' }}
+                    />
+                    
+                    {/* 🔥 2-COLUMN GRID LAYOUT (Since Remarks is full width above) */}
+                    <div className="expense-grid">
+
+                      {/* Col 1: Spender */}
+                      <div className="expense-col" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                        <label style={{ height: '16px', lineHeight: '16px', fontSize: '11px', color: '#64748b', fontWeight: 'bold', textTransform: 'uppercase', margin: 0 }}>Spender</label>
+                        <div className="saas-tab-container" style={{ margin: 0, padding: '4px', background: '#f1f5f9', border: 'none', boxShadow: 'none', height: '42px', display: 'flex', boxSizing: 'border-box' }}>
+                          {(['Pich', 'Jing', 'Both'] as const).map(person => (
+                            <button
+                              type="button"
+                              key={person}
+                              onClick={() => updateExpense(exp.id, 'spender', person)}
+                              className={`saas-tab ${exp.spender === person ? 'active' : ''}`}
+                              style={exp.spender === person ? { background: '#0f172a', color: '#fff', flex: 1, padding: 0 } : { flex: 1, padding: 0 }}
+                            >
+                              {person}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Col 2: Payments */}
+                      <div className="expense-col" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                        <div style={{ height: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <label style={{ lineHeight: '16px', fontSize: '11px', color: '#64748b', fontWeight: 'bold', margin: 0, textTransform: 'uppercase' }}>Payment Method(s)</label>
+                          <button type="button" onClick={() => addPaymentSplit(exp.id)} className="saas-btn" style={{ background: '#e0f2fe', color: '#0284c7', border: 'none', padding: '0 8px', fontSize: '11px', fontWeight: 'bold', height: '20px', display: 'flex', alignItems: 'center' }}>
+                            + Split
+                          </button>
+                        </div>
+
+                        {exp.payments.map((row) => (
+                          <div key={row.id} className="payment-row" style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                            <select 
+                              value={row.method} 
+                              onChange={e => updatePaymentSplit(exp.id, row.id, 'method', e.target.value)}
+                              className="saas-input"
+                              style={{ flex: '0 0 110px', cursor: 'pointer', fontSize: '14px', margin: 0, height: '42px', padding: '0 8px', boxSizing: 'border-box' }}
+                            >
+                              <option value="Cash ៛">💵 Cash ៛</option>
+                              <option value="Cash $">💵 Cash $</option>
+                              <option value="QR ៛">📱 QR ៛</option>
+                              <option value="QR $">📱 QR $</option>
+                            </select>
+                            
+                            <div style={{ flex: 1 }}>
+                              <CurrencyInput 
+                                placeholder="0" 
+                                value={row.amount} 
+                                onChange={(val: any) => updatePaymentSplit(exp.id, row.id, 'amount', val)}
+                                className="saas-input"
+                                style={{ textAlign: 'right', height: '42px', margin: 0, boxSizing: 'border-box' }}
+                              />
+                            </div>
+                            
+                            {exp.payments.length > 1 && (
+                              <button type="button" onClick={() => removePaymentSplit(exp.id, row.id)} style={{ background: 'none', border: 'none', color: '#ef4444', fontSize: '18px', cursor: 'pointer', padding: '0 4px', fontWeight: 'bold', height: '42px' }}>✕</button>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+
                     </div>
                   </div>
+                ))}
+              </div>
+            </form>
+          )}
 
-                  {/* Payment Methods */}
-                  <div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-                      <label style={{ fontSize: '11px', color: '#64748b', fontWeight: 'bold', margin: 0, textTransform: 'uppercase' }}>Payment Method(s)</label>
-                      <button type="button" onClick={() => addPaymentSplit(exp.id)} className="saas-btn" style={{ background: '#e0f2fe', color: '#0284c7', border: 'none', padding: '4px 10px', fontSize: '11px', fontWeight: 'bold' }}>
-                        + Add Split
+          {/* --- STAFF MANAGEMENT UI --- */}
+          {activeTab === 'staff' && (
+            <div>
+              <div className="saas-card" style={{ marginBottom: '24px', padding: '20px' }}>
+                <div className="saas-card-title" style={{ marginBottom: '16px' }}>➕ Register New Staff</div>
+                <form onSubmit={handleAddStaff} style={{ display: 'flex', gap: '16px', flexWrap: 'wrap', alignItems: 'flex-end' }}>
+                  <div style={{ flex: '1 1 200px' }}>
+                    <label style={{ fontSize: '11px', fontWeight: 'bold', color: '#64748b', display: 'block', marginBottom: '8px', textTransform: 'uppercase' }}>Name</label>
+                    <input type="text" placeholder="Staff Name" value={newStaffName} onChange={e => setNewStaffName(e.target.value)} className="saas-input" onBlur={() => { setTimeout(() => { window.scrollTo(0, 0); document.body.scrollTop = 0; }, 100); }} required />
+                  </div>
+                  <div style={{ flex: '1 1 150px' }}>
+                    <label style={{ fontSize: '11px', fontWeight: 'bold', color: '#64748b', display: 'block', marginBottom: '8px', textTransform: 'uppercase' }}>Monthly Salary (៛)</label>
+                    <CurrencyInput value={newStaffSalary} onChange={(v: any) => setNewStaffSalary(v)} className="saas-input" placeholder="1,200,000" />
+                  </div>
+                  <button type="submit" disabled={loading} className="saas-btn saas-btn-primary" style={{ padding: '12px 24px' }}>Add Staff</button>
+                </form>
+              </div>
+
+              <div className="saas-table-wrapper">
+                <div className="saas-table-responsive">
+                  <table className="saas-table" style={{ minWidth: '1050px' }}>
+                    <thead>
+                      <tr>
+                        <th className="saas-th">Name</th>
+                        <th className="saas-th">Start Date</th>
+                        <th className="saas-th" style={{ textAlign: 'right' }}>Monthly Salary</th>
+                        <th className="saas-th" style={{ textAlign: 'right', color: '#10b981' }}>Earned MTD</th>
+                        <th className="saas-th" style={{ textAlign: 'right', color: '#ef4444' }}>Debt (៛)</th>
+                        <th className="saas-th" style={{ textAlign: 'right', color: '#ef4444' }}>Debt ($)</th>
+                        <th className="saas-th" style={{ textAlign: 'right', color: '#3b82f6' }}>Net Payout</th>
+                        <th className="saas-th" style={{ textAlign: 'center', color: '#b58a3d', width: '280px' }}>➕ Add Advance</th>
+                        <th className="saas-th" style={{ textAlign: 'center', width: '100px' }}>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {isFetchingStaff ? (
+                        <TableSkeleton columns={9} rows={3} />
+                      ) : staffList.length === 0 ? (
+                        <tr>
+                          <td colSpan={9} style={{ padding: 0 }}>
+                            <EmptyState icon="👥" title="No staff found" message="Register your first staff member above." />
+                          </td>
+                        </tr>
+                      ) : (
+                        staffList.map((staff) => {
+                          const monthlySalary = Number(staff.salary) || 0;
+                          const dailyRate = monthlySalary / 30; 
+                          const daysWorked = calculateDaysWorked(staff.start_date);
+                          const totalEarned = Math.round(dailyRate * daysWorked);
+                          
+                          const totalDebtRiel = Number(staff.total_debt_riel) || 0;
+                          const totalDebtUsd = Number(staff.total_debt_usd) || 0;
+
+                          const netPayout = totalEarned - totalDebtRiel - (totalDebtUsd * EXCHANGE_RATE);
+                          const isNegativePayout = netPayout < 0;
+
+                          return (
+                            <tr key={staff.id} className="saas-tr">
+                              <td className="saas-td" style={{ cursor: 'text', fontWeight: 'bold' }} onClick={() => { setEditingCell({ id: staff.id, field: 'name' }); setEditValue(staff.name); }}>
+                                {editingCell?.id === staff.id && editingCell?.field === 'name' ? (
+                                  <input autoFocus value={editValue} onChange={e => setEditValue(e.target.value)} onBlur={() => saveInlineEdit(staff.id, 'name')} onKeyDown={e => e.key === 'Enter' && saveInlineEdit(staff.id, 'name')} className="saas-input" />
+                                ) : staff.name}
+                              </td>
+                              <td className="saas-td" style={{ cursor: 'text' }} onClick={() => { setEditingCell({ id: staff.id, field: 'start_date' }); setEditValue(staff.start_date || ''); }}>
+                                {editingCell?.id === staff.id && editingCell?.field === 'start_date' ? (
+                                  <input type="date" autoFocus value={editValue} onChange={e => setEditValue(e.target.value)} onBlur={() => saveInlineEdit(staff.id, 'start_date')} onKeyDown={e => e.key === 'Enter' && saveInlineEdit(staff.id, 'start_date')} className="saas-input" />
+                                ) : (
+                                  <div>{staff.start_date || 'N/A'}<div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '2px', fontWeight: 'bold' }}>{daysWorked} days</div></div>
+                                )}
+                              </td>
+                              <td className="saas-td" style={{ cursor: 'text', textAlign: 'right' }} onClick={() => { setEditingCell({ id: staff.id, field: 'salary' }); setEditValue(String(staff.salary || 0)); }}>
+                                {editingCell?.id === staff.id && editingCell?.field === 'salary' ? (
+                                  <CurrencyInput autoFocus value={Number(editValue)} onChange={(v:any) => setEditValue(String(v))} onEnter={() => saveInlineEdit(staff.id, 'salary')} className="saas-input" style={{ textAlign: 'right' }} />
+                                ) : formatRiel(monthlySalary)}
+                              </td>
+                              <td className="saas-td" style={{ color: '#10b981', textAlign: 'right', fontWeight: 'bold' }}>{formatRiel(totalEarned)}</td>
+                              <td className="saas-td" style={{ textAlign: 'right' }}>
+                                 <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px' }}>
+                                    <div style={{ cursor: 'text', fontWeight: 'bold', color: '#ef4444' }} onClick={() => { setEditingCell({ id: staff.id, field: 'total_debt_riel' }); setEditValue(String(staff.total_debt_riel || 0)); }}>
+                                      {editingCell?.id === staff.id && editingCell?.field === 'total_debt_riel' ? (
+                                        <CurrencyInput autoFocus value={Number(editValue)} onChange={(v:any) => setEditValue(String(v))} onEnter={() => saveInlineEdit(staff.id, 'total_debt_riel')} className="saas-input" style={{ textAlign: 'right', color: '#ef4444', width: '100px' }} />
+                                      ) : formatRiel(totalDebtRiel)}
+                                    </div>
+                                 </div>
+                              </td>
+                              <td className="saas-td" style={{ textAlign: 'right' }}>
+                                 <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px' }}>
+                                    <div style={{ cursor: 'text', fontWeight: 'bold', color: '#ef4444' }} onClick={() => { setEditingCell({ id: staff.id, field: 'total_debt_usd' }); setEditValue(String(staff.total_debt_usd || 0)); }}>
+                                      {editingCell?.id === staff.id && editingCell?.field === 'total_debt_usd' ? (
+                                        <CurrencyInput autoFocus value={Number(editValue)} onChange={(v:any) => setEditValue(String(v))} onEnter={() => saveInlineEdit(staff.id, 'total_debt_usd')} className="saas-input" style={{ textAlign: 'right', color: '#ef4444', width: '80px' }} />
+                                      ) : formatUSD(totalDebtUsd)}
+                                    </div>
+                                 </div>
+                              </td>
+                              <td className="saas-td" style={{ color: isNegativePayout ? '#ef4444' : '#3b82f6', textAlign: 'right', fontWeight: 'bold', fontSize: '15px' }}>
+                                {isNegativePayout ? '-' : ''}{formatRiel(Math.abs(netPayout))}
+                              </td>
+                              <td className="saas-td" style={{ textAlign: 'center' }}>
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                  <div style={{ display: 'flex', gap: '6px' }}>
+                                    <select value={debtMethods[staff.id] || 'Cash ៛'} onChange={e => setDebtMethods({ ...debtMethods, [staff.id]: e.target.value })} className="saas-input" style={{ width: '85px', padding: '6px' }}>
+                                      <option value="Cash ៛">Cash ៛</option><option value="Cash $">Cash $</option><option value="QR ៛">QR ៛</option><option value="QR $">QR $</option>
+                                    </select>
+                                    <CurrencyInput placeholder="0" value={debtAdditions[staff.id] || ''} onChange={(v:any) => setDebtAdditions({ ...debtAdditions, [staff.id]: v })} onEnter={() => handleAddDebt(staff)} className="saas-input" style={{ flex: 1, padding: '6px', textAlign: 'right' }} />
+                                    <button onClick={() => handleAddDebt(staff)} disabled={!debtAdditions[staff.id]} className={`saas-btn ${debtAdditions[staff.id] ? 'saas-btn-primary' : 'saas-btn-secondary'}`} style={{ padding: '6px 12px' }}>Add</button>
+                                  </div>
+                                  <div style={{ display: 'flex', justifyContent: 'center', gap: '8px' }}>
+                                    {(totalDebtRiel > 0 || totalDebtUsd > 0) && (
+                                      <button onClick={() => setSettleModal({ isOpen: true, staff: staff, amount: '', method: 'Cash ៛' })} className="saas-btn" style={{ background: '#ecfdf5', color: '#047857', border: '1px solid #a7f3d0', padding: '6px 12px', fontSize: '12px' }}>✅ Settle</button>
+                                    )}
+                                  </div>
+                                </div>
+                              </td>
+                              <td className="saas-td" style={{ textAlign: 'center' }}>
+                                <div style={{ display: 'flex', justifyContent: 'center', gap: '8px' }}>
+                                  <button onClick={() => handleViewHistory(staff)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '16px' }} title="View Debt History">🕒</button>
+                                  <button onClick={() => handleDeleteStaff(staff.id, staff.name)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '16px' }} title="Delete Staff">🗑️</button>
+                                </div>
+                              </td>
+                            </tr>
+                          )
+                        })
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* --- EXPENSE DATABASE UI --- */}
+          {activeTab === 'database' && (
+            <div>
+              <div className="saas-tab-container hide-scrollbar" style={{ border: 'none', padding: '4px', background: '#f1f5f9', margin: '0 0 24px 0', flexWrap: 'nowrap', overflowX: 'auto', borderRadius: '12px' }}>
+                {dbTabOrder.map(tab => {
+                  const labels: any = { personal: '🏡 Personal Expenses', business: '🏢 Business Expenses', staff_debt: '💸 Staff Debt Log', insight: '📊 Expense Insight' };
+                  return (
+                    <button
+                      key={tab} draggable
+                      onDragStart={(e) => { e.dataTransfer.setData('text/dbtab', tab); }}
+                      onDragOver={(e) => e.preventDefault()}
+                      onDrop={(e) => {
+                        e.preventDefault(); const sourceTab = e.dataTransfer.getData('text/dbtab');
+                        if (!sourceTab || sourceTab === tab) return;
+                        setDbTabOrder(prev => { const newOrder = prev.filter(t => t !== sourceTab); newOrder.splice(newOrder.indexOf(tab), 0, sourceTab); return newOrder; });
+                      }}
+                      onClick={() => setDbTab(tab as any)}
+                      className={`saas-tab ${dbTab === tab ? 'active' : ''}`}
+                      style={dbTab === tab && tab === 'insight' ? { cursor: 'grab', background: '#3b82f6', color: '#fff', padding: '10px 20px' } : { cursor: 'grab', padding: '10px 20px' }}
+                    >
+                      {labels[tab]}
+                    </button>
+                  )
+                })}
+              </div>
+
+              {dbTab === 'insight' ? (
+                // --- INSIGHTS VIEW ---
+                <div className="fade-in">
+                  
+                  {/* Filters */}
+                  <div className="saas-tab-container hide-scrollbar" style={{ margin: '0 0 24px 0', padding: '4px', background: '#f1f5f9', display: 'flex', flexWrap: 'nowrap', overflowX: 'auto', border: 'none' }}>
+                    {['today', 'week', 'month', 'custom'].map(f => (
+                      <button 
+                        key={f} onClick={() => setInsightFilter(f as any)} 
+                        className={`saas-tab ${insightFilter === f ? 'active' : ''}`} 
+                        style={insightFilter === f ? { background: '#0f172a', color: '#fff', padding: '8px 16px' } : { padding: '8px 16px' }}
+                      >
+                        {f === 'custom' ? 'Custom Range' : f === 'week' ? 'This Week' : f === 'month' ? 'This Month' : 'Today'}
                       </button>
-                    </div>
-
-                    {exp.payments.map((row) => (
-                      <div key={row.id} style={{ display: 'flex', gap: '8px', marginBottom: '8px', alignItems: 'center' }}>
-                        <select 
-                          value={row.method} 
-                          onChange={e => updatePaymentSplit(exp.id, row.id, 'method', e.target.value)}
-                          className="saas-input"
-                          style={{ flex: '0 0 110px', cursor: 'pointer', fontSize: '14px', margin: 0, padding: '10px 8px' }}
-                        >
-                          <option value="Cash ៛">💵 Cash ៛</option>
-                          <option value="Cash $">💵 Cash $</option>
-                          <option value="QR ៛">📱 QR ៛</option>
-                          <option value="QR $">📱 QR $</option>
-                        </select>
-                        
-                        <div style={{ flex: 1 }}>
-                          <CurrencyInput 
-                            placeholder="0.00" 
-                            value={row.amount} 
-                            onChange={(val: any) => updatePaymentSplit(exp.id, row.id, 'amount', val)}
-                            className="saas-input"
-                            style={{ textAlign: 'right', padding: '10px 8px' }}
-                          />
-                        </div>
-                        
-                        {exp.payments.length > 1 && (
-                          <button type="button" onClick={() => removePaymentSplit(exp.id, row.id)} style={{ background: 'none', border: 'none', color: '#ef4444', fontSize: '18px', cursor: 'pointer', padding: '0 4px', fontWeight: 'bold' }}>✕</button>
-                        )}
-                      </div>
                     ))}
                   </div>
 
+                  {insightFilter === 'custom' && (
+                    <div style={{ display: 'flex', gap: '16px', marginBottom: '24px', alignItems: 'center', flexWrap: 'wrap' }}>
+                      <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                        <label style={{ fontWeight: 'bold', fontSize: '13px', color: '#64748b' }}>From:</label>
+                        <input type="date" value={insightFrom} onChange={e => setInsightFrom(e.target.value)} className="saas-input" style={{ width: '135px', padding: '8px' }} />
+                      </div>
+                      <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                        <label style={{ fontWeight: 'bold', fontSize: '13px', color: '#64748b' }}>To:</label>
+                        <input type="date" value={insightTo} onChange={e => setInsightTo(e.target.value)} className="saas-input" style={{ width: '135px', padding: '8px' }} />
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Core Metrics */}
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px', marginBottom: '32px' }}>
+                    <div className="saas-card">
+                      <div className="saas-card-title">📉 Total Expenses</div>
+                      <div style={{ fontSize: '26px', color: '#ef4444', fontWeight: 'bold', marginTop: '12px' }}>{formatRiel(insightsData?.totalExp || 0)}</div>
+                      <div style={{ fontSize: '16px', color: '#f87171', fontWeight: 'bold', marginTop: '4px' }}>{formatUSD((insightsData?.totalExp || 0) / EXCHANGE_RATE)}</div>
+                    </div>
+                    <div className="saas-card">
+                      <div className="saas-card-title">🏢 Business Expenses</div>
+                      <div style={{ fontSize: '26px', color: '#b91c1c', fontWeight: 'bold', marginTop: '12px' }}>{formatRiel(insightsData?.totalBiz || 0)}</div>
+                      <div style={{ fontSize: '16px', color: '#ef4444', fontWeight: 'bold', marginTop: '4px' }}>{formatUSD((insightsData?.totalBiz || 0) / EXCHANGE_RATE)}</div>
+                    </div>
+                    <div className="saas-card">
+                      <div className="saas-card-title">🏡 Personal Expenses</div>
+                      <div style={{ fontSize: '26px', color: '#f59e0b', fontWeight: 'bold', marginTop: '12px' }}>{formatRiel(insightsData?.totalPers || 0)}</div>
+                      <div style={{ fontSize: '16px', color: '#fbbf24', fontWeight: 'bold', marginTop: '4px' }}>{formatUSD((insightsData?.totalPers || 0) / EXCHANGE_RATE)}</div>
+                    </div>
+                    <div className="saas-card">
+                      <div className="saas-card-title" style={{ color: '#64748b' }}>ℹ️ Total Staff Debt Logged</div>
+                      <div style={{ fontSize: '26px', color: '#64748b', fontWeight: 'bold', marginTop: '12px' }}>{formatRiel(insightsData?.totalDebt || 0)}</div>
+                      <div style={{ fontSize: '16px', color: '#94a3b8', fontWeight: 'bold', marginTop: '4px' }}>{formatUSD((insightsData?.totalDebt || 0) / EXCHANGE_RATE)}</div>
+                    </div>
+                  </div>
+
+                  {/* Top 5 Lists */}
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '24px', marginBottom: '32px' }}>
+                    <div className="saas-card">
+                      <h3 className="saas-card-title">🏆 Top 5 Personal Expenses</h3>
+                      {insightsData?.topPers.length === 0 ? <div style={{ fontSize: '13px', color: '#94a3b8' }}>No data available.</div> : (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                          {insightsData?.topPers.map((item: any, idx: number) => (
+                            <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #f1f5f9', paddingBottom: '8px' }}>
+                              <div style={{ fontSize: '14px', color: '#334155', fontWeight: 'bold' }}>{idx + 1}. {item.remarks}</div>
+                              <div style={{ fontSize: '15px', color: '#f59e0b', fontWeight: 'bold' }}>{formatRiel(Number(item.amount_riel) + Number(item.amount_usd)*EXCHANGE_RATE)}</div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                    <div className="saas-card">
+                      <h3 className="saas-card-title">🏆 Top 5 Business Expenses</h3>
+                      {insightsData?.topBiz.length === 0 ? <div style={{ fontSize: '13px', color: '#94a3b8' }}>No data available.</div> : (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                          {insightsData?.topBiz.map((item: any, idx: number) => (
+                            <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #f1f5f9', paddingBottom: '8px' }}>
+                              <div style={{ fontSize: '14px', color: '#334155', fontWeight: 'bold' }}>{idx + 1}. {item.remarks}</div>
+                              <div style={{ fontSize: '15px', color: '#b91c1c', fontWeight: 'bold' }}>{formatRiel(Number(item.amount_riel) + Number(item.amount_usd)*EXCHANGE_RATE)}</div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Chart */}
+                  <h2 className="section-divider" style={{ fontWeight: 'bold' }}>📉 EXPENSE TREND (Day 1 - 31)</h2>
+                  <div style={{ marginBottom: '40px' }}>
+                    <LineChartCard title="Total Expenses: This Month vs Last Month" dataCurrent={insightsData?.thisMonthData || []} dataLast={insightsData?.lastMonthData || []} color="#ef4444" />
+                  </div>
+
                 </div>
-              </div>
-            ))}
-
-            {/* Final Submit Button */}
-            <button 
-              type="submit" 
-              disabled={loading} 
-              className={`saas-btn ${loading ? 'saas-btn-secondary' : 'saas-btn-primary'}`}
-              style={{ width: '100%', padding: '16px', fontSize: '16px', opacity: loading ? 0.7 : 1 }}
-            >
-              {loading ? 'Processing...' : `Log ${getActiveList().length} Expense(s)`}
-            </button>
-          </form>
-        )}
-
-        {/* STAFF MANAGEMENT UI (Shown only when Staff tab is active) */}
-        {activeTab === 'staff' && (
-          <div>
-            {/* Add New Staff Form */}
-            <div className="saas-card" style={{ marginBottom: '24px', padding: '20px' }}>
-              <div className="saas-card-title" style={{ marginBottom: '16px' }}>➕ Register New Staff</div>
-              <form onSubmit={handleAddStaff} style={{ display: 'flex', gap: '16px', flexWrap: 'wrap', alignItems: 'flex-end' }}>
-                <div style={{ flex: '1 1 200px' }}>
-                  <label style={{ fontSize: '11px', fontWeight: 'bold', color: '#64748b', display: 'block', marginBottom: '8px', textTransform: 'uppercase' }}>Name</label>
-                  <input type="text" placeholder="Staff Name" value={newStaffName} onChange={e => setNewStaffName(e.target.value)} className="saas-input" onBlur={() => { setTimeout(() => { window.scrollTo(0, 0); document.body.scrollTop = 0; }, 100); }} required />
-                </div>
-                <div style={{ flex: '1 1 150px' }}>
-                  <label style={{ fontSize: '11px', fontWeight: 'bold', color: '#64748b', display: 'block', marginBottom: '8px', textTransform: 'uppercase' }}>Monthly Salary (៛)</label>
-                  <CurrencyInput value={newStaffSalary} onChange={(v: any) => setNewStaffSalary(v)} className="saas-input" placeholder="1,200,000" />
-                </div>
-                <button type="submit" disabled={loading} className="saas-btn saas-btn-primary" style={{ padding: '12px 24px' }}>Add Staff</button>
-              </form>
-            </div>
-
-            {/* Editable Staff Payroll Table */}
-            <div className="saas-table-wrapper">
-              <div className="saas-table-responsive">
-                <table className="saas-table" style={{ minWidth: '1050px' }}>
-                  <thead>
-                    <tr>
-                      <th className="saas-th">Name</th>
-                      <th className="saas-th">Start Date</th>
-                      <th className="saas-th" style={{ textAlign: 'right' }}>Monthly Salary</th>
-                      <th className="saas-th" style={{ textAlign: 'right', color: '#10b981' }}>Earned MTD</th>
-                      <th className="saas-th" style={{ textAlign: 'right', color: '#ef4444' }}>Debt (៛)</th>
-                      <th className="saas-th" style={{ textAlign: 'right', color: '#ef4444' }}>Debt ($)</th>
-                      <th className="saas-th" style={{ textAlign: 'right', color: '#3b82f6' }}>Net Payout</th>
-                      <th className="saas-th" style={{ textAlign: 'center', color: '#b58a3d', width: '280px' }}>➕ Add Advance</th>
-                      <th className="saas-th" style={{ textAlign: 'center', width: '100px' }}>Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {isFetchingStaff ? (
-                      <TableSkeleton columns={9} rows={3} />
-                    ) : staffList.length === 0 ? (
-                      <tr>
-                        <td colSpan={9} style={{ padding: 0 }}>
-                          <EmptyState 
-                            icon="👥" 
-                            title="No staff found" 
-                            message="Register your first staff member above." 
-                          />
-                        </td>
-                      </tr>
-                    ) : (
-                      staffList.map((staff) => {
-                        const monthlySalary = Number(staff.salary) || 0;
-                        const dailyRate = monthlySalary / 30; 
-                        const daysWorked = calculateDaysWorked(staff.start_date);
-                        const totalEarned = Math.round(dailyRate * daysWorked);
-                        
-                        const totalDebtRiel = Number(staff.total_debt_riel) || 0;
-                        const totalDebtUsd = Number(staff.total_debt_usd) || 0;
-
-                        // Net Payout Calculation securely checks both buckets
-                        const netPayout = totalEarned - totalDebtRiel - (totalDebtUsd * EXCHANGE_RATE);
-                        const isNegativePayout = netPayout < 0;
-
-                        return (
-                          <tr key={staff.id} className="saas-tr">
-                            
-                            {/* 1. Name */}
-                            <td 
-                              className="saas-td"
-                              style={{ cursor: 'text', fontWeight: 'bold' }}
-                              onClick={() => { setEditingCell({ id: staff.id, field: 'name' }); setEditValue(staff.name); }}
+              ) : (
+                // --- REGULAR DATABASE TABLE VIEW ---
+                <div className="saas-table-wrapper" style={{ marginBottom: '32px' }}>
+                  <div className="saas-table-responsive">
+                    <table className="saas-table">
+                      <thead>
+                        <tr>
+                          {[
+                            { key: dbTab === 'staff_debt' ? 'created_at' : 'expense_date', label: 'Date', align: 'left' },
+                            { key: dbTab === 'staff_debt' ? 'staff_name' : 'remarks', label: dbTab === 'staff_debt' ? 'Staff Name' : 'Description', align: 'left' },
+                            ...(dbTab !== 'staff_debt' ? [{ key: 'spender', label: 'Spender', align: 'center' }] : []),
+                            { key: 'payment_method', label: 'Payment Method', align: 'left' },
+                            { key: dbTab === 'staff_debt' ? 'amount' : 'amount_riel', label: 'Amount (៛)', align: 'right' },
+                            ...(dbTab !== 'staff_debt' ? [{ key: 'amount_usd', label: 'Amount ($)', align: 'right' }] : [])
+                          ].map((col: any) => (
+                            <th 
+                              key={col.key} className="saas-th"
+                              onClick={() => {
+                                let direction: 'asc' | 'desc' = 'desc';
+                                if (dbSortConfig && dbSortConfig.key === col.key && dbSortConfig.direction === 'desc') direction = 'asc';
+                                setDbSortConfig({ key: col.key, direction });
+                              }}
+                              style={{ textAlign: col.align as any, cursor: 'pointer', userSelect: 'none' }}
                             >
-                              {editingCell?.id === staff.id && editingCell?.field === 'name' ? (
-                                <input autoFocus value={editValue} onChange={e => setEditValue(e.target.value)} onBlur={() => saveInlineEdit(staff.id, 'name')} onKeyDown={e => e.key === 'Enter' && saveInlineEdit(staff.id, 'name')} className="saas-input" />
-                              ) : staff.name}
+                              {col.label}
+                              {/* 🔥 FIX: Added '?' to dbSortConfig?.direction to satisfy strict TypeScript null checks */}
+                              <span style={{ marginLeft: '6px', fontSize: '12px', opacity: dbSortConfig?.key === col.key ? 1 : 0.3 }}>
+                                {dbSortConfig?.key === col.key ? (dbSortConfig?.direction === 'asc' ? '↑' : '↓') : '↕'}
+                              </span>
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {isFetchingDb ? (
+                          <TableSkeleton columns={dbTab === 'staff_debt' ? 4 : 6} rows={6} />
+                        ) : filteredAndSortedDb.length === 0 ? (
+                          <tr>
+                            <td colSpan={dbTab === 'staff_debt' ? 4 : 6} style={{ padding: 0 }}>
+                              <EmptyState icon="📭" title="No Records" message="No data found in this category." />
                             </td>
-
-                            {/* 2. Start Date */}
-                            <td 
-                              className="saas-td"
-                              style={{ cursor: 'text' }}
-                              onClick={() => { setEditingCell({ id: staff.id, field: 'start_date' }); setEditValue(staff.start_date || ''); }}
-                            >
-                              {editingCell?.id === staff.id && editingCell?.field === 'start_date' ? (
-                                <input type="date" autoFocus value={editValue} onChange={e => setEditValue(e.target.value)} onBlur={() => saveInlineEdit(staff.id, 'start_date')} onKeyDown={e => e.key === 'Enter' && saveInlineEdit(staff.id, 'start_date')} className="saas-input" />
-                              ) : (
-                                <div>
-                                  {staff.start_date || 'N/A'}
-                                  <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '2px', fontWeight: 'bold' }}>{daysWorked} days</div>
-                                </div>
-                              )}
-                            </td>
-
-                            {/* 3. Monthly Salary */}
-                            <td 
-                              className="saas-td"
-                              style={{ cursor: 'text', textAlign: 'right' }}
-                              onClick={() => { setEditingCell({ id: staff.id, field: 'salary' }); setEditValue(String(staff.salary || 0)); }}
-                            >
-                              {editingCell?.id === staff.id && editingCell?.field === 'salary' ? (
-                                <CurrencyInput autoFocus value={Number(editValue)} onChange={(v:any) => setEditValue(String(v))} onEnter={() => saveInlineEdit(staff.id, 'salary')} className="saas-input" style={{ textAlign: 'right' }} />
-                              ) : formatRiel(monthlySalary)}
-                            </td>
-
-                            {/* 4. Total Earned */}
-                            <td className="saas-td" style={{ color: '#10b981', textAlign: 'right', fontWeight: 'bold' }}>
-                              {formatRiel(totalEarned)}
-                            </td>
-
-                            {/* 5. Total Debt RIEL */}
-                            <td className="saas-td" style={{ textAlign: 'right' }}>
-                               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px' }}>
-                                  <div 
-                                      style={{ cursor: 'text', fontWeight: 'bold', color: '#ef4444' }}
-                                      onClick={() => { setEditingCell({ id: staff.id, field: 'total_debt_riel' }); setEditValue(String(staff.total_debt_riel || 0)); }}
-                                  >
-                                    {editingCell?.id === staff.id && editingCell?.field === 'total_debt_riel' ? (
-                                      <CurrencyInput autoFocus value={Number(editValue)} onChange={(v:any) => setEditValue(String(v))} onEnter={() => saveInlineEdit(staff.id, 'total_debt_riel')} className="saas-input" style={{ textAlign: 'right', color: '#ef4444', width: '100px' }} />
-                                    ) : formatRiel(totalDebtRiel)}
-                                  </div>
-                               </div>
-                            </td>
-
-                            {/* 6. Total Debt USD */}
-                            <td className="saas-td" style={{ textAlign: 'right' }}>
-                               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px' }}>
-                                  <div 
-                                      style={{ cursor: 'text', fontWeight: 'bold', color: '#ef4444' }}
-                                      onClick={() => { setEditingCell({ id: staff.id, field: 'total_debt_usd' }); setEditValue(String(staff.total_debt_usd || 0)); }}
-                                  >
-                                    {editingCell?.id === staff.id && editingCell?.field === 'total_debt_usd' ? (
-                                      <CurrencyInput autoFocus value={Number(editValue)} onChange={(v:any) => setEditValue(String(v))} onEnter={() => saveInlineEdit(staff.id, 'total_debt_usd')} className="saas-input" style={{ textAlign: 'right', color: '#ef4444', width: '80px' }} />
-                                    ) : formatUSD(totalDebtUsd)}
-                                  </div>
-                               </div>
-                            </td>
-
-                            {/* 7. Net Payout */}
-                            <td className="saas-td" style={{ color: isNegativePayout ? '#ef4444' : '#3b82f6', textAlign: 'right', fontWeight: 'bold', fontSize: '15px' }}>
-                              {isNegativePayout ? '-' : ''}{formatRiel(Math.abs(netPayout))}
-                            </td>
-
-                            {/* 8. Action: Add Debt & Method */}
-                            <td className="saas-td" style={{ textAlign: 'center' }}>
-                              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                                <div style={{ display: 'flex', gap: '6px' }}>
-                                  <select 
-                                    value={debtMethods[staff.id] || 'Cash ៛'} 
-                                    onChange={e => setDebtMethods({ ...debtMethods, [staff.id]: e.target.value })}
-                                    className="saas-input"
-                                    style={{ width: '85px', padding: '6px' }}
-                                  >
-                                    <option value="Cash ៛">Cash ៛</option>
-                                    <option value="Cash $">Cash $</option>
-                                    <option value="QR ៛">QR ៛</option>
-                                    <option value="QR $">QR $</option>
-                                  </select>
-                                  <CurrencyInput 
-                                    placeholder="0" 
-                                    value={debtAdditions[staff.id] || ''} 
-                                    onChange={(v:any) => setDebtAdditions({ ...debtAdditions, [staff.id]: v })} 
-                                    onEnter={() => handleAddDebt(staff)}
-                                    className="saas-input"
-                                    style={{ flex: 1, padding: '6px', textAlign: 'right' }}
-                                  />
-                                  <button 
-                                    onClick={() => handleAddDebt(staff)}
-                                    disabled={!debtAdditions[staff.id]}
-                                    className={`saas-btn ${debtAdditions[staff.id] ? 'saas-btn-primary' : 'saas-btn-secondary'}`}
-                                    style={{ padding: '6px 12px' }}
-                                  >
-                                    Add
-                                  </button>
-                                </div>
-                                
-                                {/* Settle Action Buttons Directly Below */}
-                                <div style={{ display: 'flex', justifyContent: 'center', gap: '8px' }}>
-                                  {(totalDebtRiel > 0 || totalDebtUsd > 0) && (
-                                    <button 
-                                      onClick={() => setSettleModal({ isOpen: true, staff: staff, amount: '', method: 'Cash ៛' })}
-                                      className="saas-btn"
-                                      style={{ background: '#ecfdf5', color: '#047857', border: '1px solid #a7f3d0', padding: '6px 12px', fontSize: '12px' }}
-                                    >
-                                      ✅ Settle
-                                    </button>
-                                  )}
-                                </div>
-                              </div>
-                            </td>
-
-                            {/* 9. Actions: History & Delete */}
-                            <td className="saas-td" style={{ textAlign: 'center' }}>
-                              <div style={{ display: 'flex', justifyContent: 'center', gap: '8px' }}>
-                                <button onClick={() => handleViewHistory(staff)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '16px' }} title="View Debt History">🕒</button>
-                                <button onClick={() => handleDeleteStaff(staff.id, staff.name)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '16px' }} title="Delete Staff">🗑️</button>
-                              </div>
-                            </td>
-
                           </tr>
-                        )
-                      })
-                    )}
-                  </tbody>
-                </table>
-              </div>
-              {staffList.length > 0 && (
-                <div style={{ padding: '16px', textAlign: 'center', fontSize: '12px', color: '#64748b', background: '#f8fafc', borderTop: '1px solid #e2e8f0' }}>
-                  💡 <b>Tip:</b> Click on any Name, Start Date, Monthly Salary, or Debt to edit it directly. Press Enter to save.
+                        ) : (
+                          filteredAndSortedDb.map((row: any) => (
+                            <tr key={row.id} className="saas-tr">
+                              <td className="saas-td" style={{ fontSize: '14px', color: '#334155' }}>
+                                {new Date(dbTab === 'staff_debt' ? row.created_at : row.expense_date).toLocaleDateString('en-GB')}
+                              </td>
+                              <td className="saas-td" style={{ fontSize: '14px', fontWeight: 'bold', color: '#0f172a' }}>
+                                {dbTab === 'staff_debt' ? row.staff?.name : row.remarks}
+                              </td>
+                              {dbTab !== 'staff_debt' && (
+                                <td className="saas-td" style={{ fontSize: '14px', textAlign: 'center', color: '#64748b' }}>
+                                  {row.spender}
+                                </td>
+                              )}
+                              <td className="saas-td" style={{ fontSize: '14px', color: '#3b82f6', fontWeight: 'bold' }}>
+                                {row.payment_method}
+                              </td>
+                              <td className="saas-td" style={{ fontSize: '14px', textAlign: 'right', fontWeight: 'bold', color: '#ef4444' }}>
+                                {dbTab === 'staff_debt' ? 
+                                  (row.payment_method.includes('$') ? '-' : formatRiel(row.amount)) : 
+                                  formatRiel(row.amount_riel)}
+                              </td>
+                              {dbTab !== 'staff_debt' && (
+                                <td className="saas-td" style={{ fontSize: '14px', textAlign: 'right', fontWeight: 'bold', color: '#ef4444' }}>
+                                  {formatUSD(row.amount_usd)}
+                                </td>
+                              )}
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
               )}
             </div>
-          </div>
-        )}
+          )}
 
+        </div>
       </div>
 
       {/* STAFF DEBT HISTORY MODAL */}
@@ -849,6 +1008,17 @@ export default function ExpenseDashboard() {
         </div>
       </Modal>
 
+      {/* EXPENSE CONFIRMATION MODAL */}
+      <Modal isOpen={confirmModal} onClose={() => setConfirmModal(false)} title="Confirm Expenses" icon="✅" maxWidth="400px">
+        <div style={{ fontSize: '15px', color: '#475569', marginBottom: '24px', lineHeight: '1.5' }}>
+          Are you sure you want to log <b>{getActiveList().length} expense(s)</b> for <b>{new Date(expenseDate).toLocaleDateString('en-GB')}</b>?
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
+          <button onClick={() => setConfirmModal(false)} className="saas-btn saas-btn-secondary">Cancel</button>
+          <button onClick={() => handleSubmit()} className="saas-btn saas-btn-primary">Yes, Log Expenses</button>
+        </div>
+      </Modal>
+
       {/* --- GLOBAL CSS --- */}
       <style jsx global>{`
         input, select, button, textarea {
@@ -860,17 +1030,35 @@ export default function ExpenseDashboard() {
           font-variant-numeric: tabular-nums lining-nums;
         }
 
-        .header-container { 
-          width: calc(100% - 60px);
+        .section-divider { font-size: 15px; color: #475569; margin-bottom: 16px; border-bottom: 1px solid #e2e8f0; padding-bottom: 6px; }
+        .fade-in { animation: fadeIn 0.3s ease-in-out; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+
+        /* 🔥 ALIGNMENT CONTAINERS 🔥 */
+        .hide-on-mobile { display: inline; }
+        .show-on-mobile { display: none; }
+
+        .content-container {
+          width: 100%;
           max-width: 1600px;
+          margin: 0 auto;
+          padding-left: 0px; /* 🔥 Snaps left to perfectly align with the burger icon */
+          padding-right: 0px; /* Matches full screen width */
+          box-sizing: border-box;
+        }
+        
+        .header-container { 
+          width: 100%;
+          max-width: 1600px;
+          margin: 0 auto 24px auto;
+          padding-left: 60px; /* 🔥 Keeps the title safely pushed past the burger icon */
+          padding-right: 0px;
           display: flex;
           justify-content: flex-start;
           align-items: center; 
-          margin-bottom: 24px; 
-          margin-top: 0;
-          margin-left: 60px; /* Clears the burger menu icon for horizontal alignment */
           gap: 12px;
           min-height: 42px; 
+          box-sizing: border-box;
         }
 
         .header-left {
@@ -884,29 +1072,85 @@ export default function ExpenseDashboard() {
           -webkit-appearance: none; margin: 0;
         }
 
+        /* 🔥 RESPONSIVE EXPENSE GRID FOR DESKTOP 🔥 */
+        .expense-grid {
+          display: grid;
+          grid-template-columns: 1fr;
+          gap: 16px;
+        }
+
+        @media (min-width: 1024px) {
+          .expense-grid {
+             grid-template-columns: 1fr 1.5fr; 
+             gap: 24px;
+             align-items: flex-start; 
+          }
+        }
+
         /* 🔥 MOBILE CSS OVERRIDES */
         @media (max-width: 1023px) { 
+          .hide-on-mobile { display: none !important; }
+          .show-on-mobile { display: inline !important; }
+
+          .content-container {
+            padding-left: 0px !important;
+            padding-right: 0px !important;
+          }
+
           .header-container { 
-            margin-left: 54px !important; /* Clears mobile hamburger button safely */
-            margin-right: 0 !important;
+            padding-left: 54px !important; /* Mobile clear */
+            padding-right: 16px !important;
             margin-bottom: 24px !important; 
-            margin-top: 0 !important;
             display: flex !important;
             flex-direction: row !important;
             justify-content: flex-start !important;
             align-items: center !important; 
             min-height: 44px !important;
-            width: calc(100% - 54px) !important;
-          }
-
-          .header-left {
-            display: flex !important;
-            flex-direction: row !important;
-            align-items: center !important;
-            gap: 12px !important;
           }
         }
       `}</style>
+    </div>
+  )
+}
+
+function LineChartCard({ title, dataCurrent, dataLast, color }: any) {
+  const maxVal = Math.max(...dataCurrent, ...dataLast, 1) 
+  const formatPoints = (arr: any[]) => {
+    return arr.map((val: any, idx: number) => {
+      const x = (idx / 30) * 1000; const y = 200 - ((val / maxVal) * 200); return `${x},${y}`;
+    }).join(' ');
+  }
+  const currentPoints = formatPoints(dataCurrent); const lastPoints = formatPoints(dataLast);
+  return (
+    <div className="saas-card">
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '12px' }}>
+        <h3 style={{ margin: 0, fontSize: '14px', color: '#475569', fontWeight: 'bold' }}>{title}</h3>
+        <div style={{ display: 'flex', gap: '16px', fontSize: '12px', fontWeight: 'bold' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <div style={{ width: '14px', height: '4px', background: color, borderRadius: '2px' }}></div> <span style={{ color: '#334155' }}>This Mth</span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <div style={{ width: '14px', height: '4px', borderBottom: '2px dashed #cbd5e1' }}></div> <span style={{ color: '#94a3b8' }}>Last Mth</span>
+          </div>
+        </div>
+      </div>
+      <div style={{ width: '100%', height: '220px', position: 'relative' }}>
+        <svg viewBox="0 0 1000 200" preserveAspectRatio="none" style={{ width: '100%', height: '100%', overflow: 'visible' }}>
+          <line x1="0" y1="50" x2="1000" y2="50" stroke="#f1f5f9" strokeWidth="1" />
+          <line x1="0" y1="100" x2="1000" y2="100" stroke="#f1f5f9" strokeWidth="1" />
+          <line x1="0" y1="150" x2="1000" y2="150" stroke="#f1f5f9" strokeWidth="1" />
+          <line x1="0" y1="200" x2="1000" y2="200" stroke="#e2e8f0" strokeWidth="2" />
+          <polyline points={lastPoints} fill="none" stroke="#cbd5e1" strokeWidth="2" strokeDasharray="5,5" />
+          <polyline points={currentPoints} fill="none" stroke={color} strokeWidth="3" strokeLinejoin="round" strokeLinecap="round" />
+          {dataCurrent.map((val: any, idx: number) => {
+            const x = (idx / 30) * 1000; const y = 200 - ((val / maxVal) * 200);
+            return val > 0 ? <circle key={idx} cx={x} cy={y} r="4" fill="#ffffff" stroke={color} strokeWidth="2" /> : null;
+          })}
+        </svg>
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '12px', color: '#94a3b8', fontSize: '11px', fontWeight: 'bold' }}>
+          <span>1</span><span>5</span><span>10</span><span>15</span><span>20</span><span>25</span><span>31</span>
+        </div>
+      </div>
     </div>
   )
 }
