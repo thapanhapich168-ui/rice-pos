@@ -454,20 +454,27 @@ export default function ExpenseDashboard() {
         {activeTab !== 'staff' && (
           <form onSubmit={handleSubmit} className="saas-card" style={{ padding: '30px' }}>
             
-            {/* 🔥 FIXED: Date and Add Expense button side-by-side! */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: '24px', gap: '12px', flexWrap: 'wrap' }}>
-              <div style={{ flex: 1, minWidth: '150px' }}>
-                <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '8px' }}>Date</label>
-                <input type="date" value={expenseDate} onChange={(e) => setExpenseDate(e.target.value)} required className="saas-input" style={{ width: '100%' }} />
+            {/* 🔥 FIXED: Perfect horizontal alignment by using flex-stretch and putting label outside */}
+            <div style={{ marginBottom: '24px' }}>
+              <label style={{ display: 'block', fontSize: '11px', color: '#64748b', fontWeight: 'bold', marginBottom: '8px', textTransform: 'uppercase' }}>Date</label>
+              <div style={{ display: 'flex', gap: '12px', alignItems: 'stretch' }}>
+                <input 
+                  type="date" 
+                  value={expenseDate} 
+                  onChange={(e) => setExpenseDate(e.target.value)} 
+                  required 
+                  className="saas-input" 
+                  style={{ flex: 1, width: '100%', margin: 0 }} 
+                />
+                <button 
+                  type="button" 
+                  onClick={addNewExpense}
+                  className="saas-btn saas-btn-primary" 
+                  style={{ padding: '0 24px', fontWeight: 'bold', whiteSpace: 'nowrap', margin: 0, height: 'auto' }}
+                >
+                  + Add
+                </button>
               </div>
-              <button 
-                type="button" 
-                onClick={addNewExpense}
-                className="saas-btn saas-btn-primary" 
-                style={{ height: '42px', padding: '0 16px', fontWeight: 'bold', whiteSpace: 'nowrap' }}
-              >
-                + Add
-              </button>
             </div>
 
             {/* List of Pending Expenses */}
@@ -524,7 +531,6 @@ export default function ExpenseDashboard() {
 
                     {exp.payments.map((row) => (
                       <div key={row.id} style={{ display: 'flex', gap: '8px', marginBottom: '8px', alignItems: 'center' }}>
-                        {/* 🔥 FIXED: Explicit font size and margin to stop native OS weirdness */}
                         <select 
                           value={row.method} 
                           onChange={e => updatePaymentSplit(exp.id, row.id, 'method', e.target.value)}
