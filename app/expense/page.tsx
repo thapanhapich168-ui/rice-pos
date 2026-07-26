@@ -9,22 +9,40 @@ import Modal from '@/components/Modal'
 import TableSkeleton from '@/components/TableSkeleton'
 import EmptyState from '@/components/EmptyState'
 
+// --- Interfaces ---
+interface PaymentSplit {
+  id: number;
+  method: string;
+  amount: number | '';
+}
+
+interface PendingExpense {
+  id: string;
+  remarks: string;
+  spender: 'Pich' | 'Jing' | 'Both';
+  payments: PaymentSplit[];
+}
+
 export default function ExpenseDashboard() {
   const { showToast } = useToast();
+  const [isMounted, setIsMounted] = useState(false);
 
   // --- Active Tab State ---
   const [activeTab, setActiveTab] = useState<'personal' | 'business' | 'staff'>('personal')
 
-  // --- Expense Form States ---
+  // --- Expense Ledger States (Auto-saved) ---
   const [expenseDate, setExpenseDate] = useState('')
-  const [spender, setSpender] = useState<'Pich' | 'Jing' | 'Both'>('Pich')
-  const [remarks, setRemarks] = useState('')
   const [loading, setLoading] = useState(false)
 
-  // Split Payment Tracking
-  const [paymentRows, setPaymentRows] = useState<{id: number, method: string, amount: number | ''}[]>([
-    { id: Date.now(), method: 'Cash ៛', amount: '' }
-  ]);
+  const createNewExpense = (): PendingExpense => ({
+    id: Date.now().toString() + Math.random().toString().slice(2, 6),
+    remarks: '',
+    spender: 'Pich',
+    payments: [{ id: Date.now(), method: 'Cash ៛', amount: '' }]
+  });
+
+  const [pendingPersonal, setPendingPersonal] = useState<PendingExpense[]>([])
+  const [pendingBusiness, setPendingBusiness] = useState<PendingExpense[]>([])
 
   // --- Staff Management States ---
   const [staffList, setStaffList] = useState<any[]>([])
@@ -50,12 +68,78 @@ export default function ExpenseDashboard() {
   const [editingCell, setEditingCell] = useState<{ id: number, field: string } | null>(null)
   const [editValue, setEditValue] = useState<string>('')
 
-  // Initialization
+  // --- Initialization & Local Storage Sync ---
   useEffect(() => {
+    setIsMounted(true);
     const today = new Date().toISOString().split('T')[0]
     setExpenseDate(today)
     fetchStaff()
+
+    // Hydrate from Local Storage
+    const savedPers = localStorage.getItem('expense_ledger_personal');
+    const savedBiz = localStorage.getItem('expense_ledger_business');
+    
+    if (savedPers) setPendingPersonal(JSON.parse(savedPers));
+    else setPendingPersonal([createNewExpense()]);
+    
+    if (savedBiz) setPendingBusiness(JSON.parse(savedBiz));
+    else setPendingBusiness([createNewExpense()]);
   }, [])
+
+  useEffect(() => {
+    if (isMounted) localStorage.setItem('expense_ledger_personal', JSON.stringify(pendingPersonal));
+  }, [pendingPersonal, isMounted])
+
+  useEffect(() => {
+    if (isMounted) localStorage.setItem('expense_ledger_business', JSON.stringify(pendingBusiness));
+  }, [pendingBusiness, isMounted])
+
+
+  // --- Helper: Dynamic Ledger Handlers ---
+  const getActiveList = () => activeTab === 'personal' ? pendingPersonal : pendingBusiness;
+  const setActiveList = (newList: PendingExpense[]) => activeTab === 'personal' ? setPendingPersonal(newList) : setPendingBusiness(newList);
+
+  const updateExpense = (id: string, field: keyof PendingExpense, value: any) => {
+    setActiveList(getActiveList().map(exp => exp.id === id ? { ...exp, [field]: value } : exp));
+  }
+
+  const addPaymentSplit = (expId: string) => {
+    setActiveList(getActiveList().map(exp => {
+      if (exp.id === expId) {
+        return { ...exp, payments: [...exp.payments, { id: Date.now(), method: 'Cash ៛', amount: '' }] }
+      }
+      return exp;
+    }));
+  }
+
+  const updatePaymentSplit = (expId: string, payId: number, field: string, value: any) => {
+    setActiveList(getActiveList().map(exp => {
+      if (exp.id === expId) {
+        return {
+          ...exp,
+          payments: exp.payments.map(p => p.id === payId ? { ...p, [field]: value } : p)
+        }
+      }
+      return exp;
+    }));
+  }
+
+  const removePaymentSplit = (expId: string, payId: number) => {
+    setActiveList(getActiveList().map(exp => {
+      if (exp.id === expId) {
+        return { ...exp, payments: exp.payments.filter(p => p.id !== payId) }
+      }
+      return exp;
+    }));
+  }
+
+  const removeExpense = (id: string) => {
+    setActiveList(getActiveList().filter(exp => exp.id !== id));
+  }
+
+  const addNewExpense = () => {
+    setActiveList([createNewExpense(), ...getActiveList()]);
+  }
 
   // --- API: Fetch Staff ---
   async function fetchStaff() {
@@ -65,56 +149,61 @@ export default function ExpenseDashboard() {
     setIsFetchingStaff(false)
   }
 
-  // --- Action: Submit Expense ---
+  // --- Action: Submit Bulk Expenses ---
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
 
-    if (!remarks) {
-      showToast('error', 'Missing Info', 'Please add remarks/item detail');
-      return;
-    }
-    
-    const activePayments = paymentRows.filter(r => (Number(r.amount) || 0) > 0);
-    if (activePayments.length === 0) {
-      showToast('error', 'Missing Info', 'Please enter at least one payment amount.');
+    const list = getActiveList();
+    const validExpenses = list.filter(exp => exp.remarks.trim() !== '' && exp.payments.some(p => Number(p.amount) > 0));
+
+    if (validExpenses.length === 0) {
+      showToast('error', 'Missing Info', 'Please add at least one valid expense with remarks and a payment amount.');
       return;
     }
 
     setLoading(true)
 
     try {
-      let combinedMethod = activePayments[0].method;
-      if (activePayments.length > 1) {
-        combinedMethod = activePayments.map(r => `${r.method}:${r.amount}`).join(',');
-      }
-
-      let totalUsd = 0;
-      let totalRiel = 0;
-
-      for (const row of activePayments) {
-        let rawAmount = Number(row.amount);
-        if (row.method.includes('$')) {
-          totalUsd += rawAmount;
-        } else {
-          totalRiel += rawAmount;
+      const payloadArray = validExpenses.map(exp => {
+        const activePayments = exp.payments.filter(r => (Number(r.amount) || 0) > 0);
+        
+        let combinedMethod = activePayments[0].method;
+        if (activePayments.length > 1) {
+          combinedMethod = activePayments.map(r => `${r.method}:${r.amount}`).join(',');
         }
-      }
 
-      const { error } = await supabase.from('expenses').insert([{
-        expense_date: expenseDate,
-        spender: spender,
-        payment_method: combinedMethod,
-        remarks: remarks,                     
-        amount_usd: totalUsd,              
-        amount_riel: totalRiel,         
-        description: activeTab.toUpperCase(), 
-      }]);
+        let totalUsd = 0;
+        let totalRiel = 0;
+
+        for (const row of activePayments) {
+          let rawAmount = Number(row.amount);
+          if (row.method.includes('$')) {
+            totalUsd += rawAmount;
+          } else {
+            totalRiel += rawAmount;
+          }
+        }
+
+        return {
+          expense_date: expenseDate,
+          spender: exp.spender,
+          payment_method: combinedMethod,
+          remarks: exp.remarks,                     
+          amount_usd: totalUsd,              
+          amount_riel: totalRiel,         
+          description: activeTab.toUpperCase(), 
+        };
+      });
+
+      // Insert keeping the order
+      const { error } = await supabase.from('expenses').insert(payloadArray.reverse()); // Reverse back to chronological order for the DB
 
       if (error) throw error;
 
-      showToast('success', 'Success', 'Expense recorded successfully!');
-      setRemarks('')
-      setPaymentRows([{ id: Date.now(), method: 'Cash ៛', amount: '' }]);
+      showToast('success', 'Success', `${validExpenses.length} expense(s) recorded successfully!`);
+      
+      // Reset the list cleanly
+      setActiveList([createNewExpense()]);
 
     } catch (err: any) {
       showToast('error', 'Save Failed', `Error saving entry: ${err.message}`);
@@ -334,7 +423,7 @@ export default function ExpenseDashboard() {
     return diffDays > 0 ? diffDays : 0;
   }
 
-  const hasPayments = paymentRows.some(r => Number(r.amount) > 0);
+  if (!isMounted) return null; // Prevents Local Storage Hydration mismatch
 
   return (
     <div className="main-wrapper">
@@ -361,92 +450,122 @@ export default function ExpenseDashboard() {
           </button>
         </div>
 
-        {/* EXPENSE TRANSACTION FORM (Shown for Personal & Business) */}
+        {/* --- DYNAMIC EXPENSE LEDGER (Shown for Personal & Business) --- */}
         {activeTab !== 'staff' && (
           <form onSubmit={handleSubmit} className="saas-card" style={{ padding: '30px' }}>
             
-            <div style={{ marginBottom: '20px' }}>
-              <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '8px' }}>Transaction Date</label>
-              <input type="date" value={expenseDate} onChange={(e) => setExpenseDate(e.target.value)} required className="saas-input" />
-            </div>
-
-            <div style={{ marginBottom: '20px' }}>
-              <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '8px' }}>Who Paid? / Purchaser</label>
-              <div className="saas-tab-container" style={{ margin: 0, padding: '4px', background: '#f1f5f9', border: 'none', boxShadow: 'none' }}>
-                {(['Pich', 'Jing', 'Both'] as const).map(person => (
-                  <button
-                    type="button"
-                    key={person}
-                    onClick={() => setSpender(person)}
-                    className={`saas-tab ${spender === person ? 'active' : ''}`}
-                    style={spender === person ? { background: '#0f172a', color: '#fff', flex: 1 } : { flex: 1 }}
-                  >
-                    {person}
-                  </button>
-                ))}
+            {/* 🔥 FIXED: Date and Add Expense button side-by-side! */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: '24px', gap: '12px', flexWrap: 'wrap' }}>
+              <div style={{ flex: 1, minWidth: '150px' }}>
+                <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '8px' }}>Date</label>
+                <input type="date" value={expenseDate} onChange={(e) => setExpenseDate(e.target.value)} required className="saas-input" style={{ width: '100%' }} />
               </div>
+              <button 
+                type="button" 
+                onClick={addNewExpense}
+                className="saas-btn saas-btn-primary" 
+                style={{ height: '42px', padding: '0 16px', fontWeight: 'bold', whiteSpace: 'nowrap' }}
+              >
+                + Add
+              </button>
             </div>
 
-            <div style={{ marginBottom: '20px' }}>
-              <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '8px' }}>Remarks / What did you buy?</label>
-              <input type="text" placeholder="Electricity Bill, Lunch..." value={remarks} onChange={(e) => setRemarks(e.target.value)} required className="saas-input" onBlur={() => { setTimeout(() => { window.scrollTo(0, 0); document.body.scrollTop = 0; }, 100); }} />
-            </div>
-
-            {/* DYNAMIC SPLIT PAYMENT METHOD FOR EXPENSES */}
-            <div style={{ background: '#f8fafc', padding: '16px', borderRadius: '12px', border: '1px solid #e2e8f0', marginTop: '8px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-                <label className="saas-card-title" style={{ margin: 0 }}>Payment Split</label>
-                <button type="button" onClick={() => setPaymentRows([...paymentRows, { id: Date.now(), method: 'Cash ៛', amount: '' }])} className="saas-btn saas-btn-secondary" style={{ padding: '6px 12px', fontSize: '12px' }}>
-                  + Add Split
-                </button>
-              </div>
-              
-              {paymentRows.map((row, index) => (
-                <div key={row.id} style={{ display: 'flex', gap: '8px', marginBottom: '12px', alignItems: 'center' }}>
-                  <select 
-                    value={row.method} 
-                    onChange={e => {
-                      const newRows = [...paymentRows];
-                      newRows[index].method = e.target.value;
-                      setPaymentRows(newRows);
-                    }}
-                    className="saas-input"
-                    style={{ width: '45%', cursor: 'pointer' }}
-                  >
-                    <option value="Cash ៛">💵 Cash ៛</option>
-                    <option value="Cash $">💵 Cash $</option>
-                    <option value="QR ៛">📱 QR ៛</option>
-                    <option value="QR $">📱 QR $</option>
-                  </select>
-                  
-                  <div style={{ flex: 1 }}>
-                    <CurrencyInput 
-                      placeholder="Amount..." 
-                      value={row.amount} 
-                      onChange={(val: any) => {
-                        const newRows = [...paymentRows];
-                        newRows[index].amount = val;
-                        setPaymentRows(newRows);
-                      }}
-                      className="saas-input"
-                      style={{ textAlign: 'right' }}
-                    />
-                  </div>
-                  
-                  {paymentRows.length > 1 && (
-                    <button type="button" onClick={() => setPaymentRows(paymentRows.filter(r => r.id !== row.id))} style={{ background: 'none', border: 'none', color: '#ef4444', fontSize: '20px', cursor: 'pointer', padding: '0 4px', fontWeight: 'bold' }}>✕</button>
+            {/* List of Pending Expenses */}
+            {getActiveList().map((exp, index) => (
+              <div key={exp.id} style={{ marginBottom: '24px', padding: '20px', background: '#ffffff', borderRadius: '12px', border: '1px solid #cbd5e1', position: 'relative', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.02)' }}>
+                
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                  {/* Dynamic counting to reverse match array indexing */}
+                  <label style={{ margin: 0, color: '#3b82f6', fontWeight: 'bold', fontSize: '14px' }}>{getActiveList().length - index}. Item Description</label>
+                  {getActiveList().length > 1 && (
+                    <button type="button" onClick={() => removeExpense(exp.id)} style={{ color: '#ef4444', background: '#fee2e2', borderRadius: '50%', width: '28px', height: '28px', border: 'none', cursor: 'pointer', fontSize: '12px', fontWeight: 'bold', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>✕</button>
                   )}
                 </div>
-              ))}
-            </div>
+                
+                {/* 1. Remarks (Full Width) */}
+                <input 
+                  type="text" 
+                  value={exp.remarks} 
+                  onChange={(e) => updateExpense(exp.id, 'remarks', e.target.value)} 
+                  required 
+                  className="saas-input" 
+                  style={{ marginBottom: '20px' }}
+                />
 
+                {/* 2. Indented Properties Container */}
+                <div style={{ marginLeft: '16px', paddingLeft: '20px', borderLeft: '3px solid #e2e8f0' }}>
+                  
+                  {/* Spender */}
+                  <div style={{ marginBottom: '20px' }}>
+                    <label style={{ display: 'block', fontSize: '11px', color: '#64748b', marginBottom: '8px', fontWeight: 'bold', textTransform: 'uppercase' }}>Spender</label>
+                    <div className="saas-tab-container" style={{ margin: 0, padding: '4px', background: '#f1f5f9', border: 'none', boxShadow: 'none' }}>
+                      {(['Pich', 'Jing', 'Both'] as const).map(person => (
+                        <button
+                          type="button"
+                          key={person}
+                          onClick={() => updateExpense(exp.id, 'spender', person)}
+                          className={`saas-tab ${exp.spender === person ? 'active' : ''}`}
+                          style={exp.spender === person ? { background: '#0f172a', color: '#fff', flex: 1, padding: '6px' } : { flex: 1, padding: '6px' }}
+                        >
+                          {person}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Payment Methods */}
+                  <div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                      <label style={{ fontSize: '11px', color: '#64748b', fontWeight: 'bold', margin: 0, textTransform: 'uppercase' }}>Payment Method(s)</label>
+                      <button type="button" onClick={() => addPaymentSplit(exp.id)} className="saas-btn" style={{ background: '#e0f2fe', color: '#0284c7', border: 'none', padding: '4px 10px', fontSize: '11px', fontWeight: 'bold' }}>
+                        + Add Split
+                      </button>
+                    </div>
+
+                    {exp.payments.map((row) => (
+                      <div key={row.id} style={{ display: 'flex', gap: '8px', marginBottom: '8px', alignItems: 'center' }}>
+                        {/* 🔥 FIXED: Explicit font size and margin to stop native OS weirdness */}
+                        <select 
+                          value={row.method} 
+                          onChange={e => updatePaymentSplit(exp.id, row.id, 'method', e.target.value)}
+                          className="saas-input"
+                          style={{ flex: '0 0 110px', cursor: 'pointer', fontSize: '14px', margin: 0, padding: '10px 8px' }}
+                        >
+                          <option value="Cash ៛">💵 Cash ៛</option>
+                          <option value="Cash $">💵 Cash $</option>
+                          <option value="QR ៛">📱 QR ៛</option>
+                          <option value="QR $">📱 QR $</option>
+                        </select>
+                        
+                        <div style={{ flex: 1 }}>
+                          <CurrencyInput 
+                            placeholder="Amount..." 
+                            value={row.amount} 
+                            onChange={(val: any) => updatePaymentSplit(exp.id, row.id, 'amount', val)}
+                            className="saas-input"
+                            style={{ textAlign: 'right', padding: '10px 8px' }}
+                          />
+                        </div>
+                        
+                        {exp.payments.length > 1 && (
+                          <button type="button" onClick={() => removePaymentSplit(exp.id, row.id)} style={{ background: 'none', border: 'none', color: '#ef4444', fontSize: '18px', cursor: 'pointer', padding: '0 4px', fontWeight: 'bold' }}>✕</button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+
+                </div>
+              </div>
+            ))}
+
+            {/* Final Submit Button */}
             <button 
               type="submit" 
-              disabled={loading || !hasPayments} 
-              className={`saas-btn ${loading || !hasPayments ? 'saas-btn-secondary' : 'saas-btn-primary'}`}
-              style={{ width: '100%', marginTop: '24px', padding: '16px', fontSize: '16px', opacity: (loading || !hasPayments) ? 0.7 : 1 }}
+              disabled={loading} 
+              className={`saas-btn ${loading ? 'saas-btn-secondary' : 'saas-btn-primary'}`}
+              style={{ width: '100%', padding: '16px', fontSize: '16px', opacity: loading ? 0.7 : 1 }}
             >
-              {loading ? 'Processing...' : `Log ${activeTab === 'business' ? 'Business' : 'Personal'} Expense`}
+              {loading ? 'Processing...' : `Log ${getActiveList().length} Expense(s)`}
             </button>
           </form>
         )}
