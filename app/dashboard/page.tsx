@@ -715,7 +715,8 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      <div className="saas-tab-container" style={{ width: 'fit-content' }}>
+      {/* 🔥 MAIN TAB CONTAINER: Forced nowrap and auto overflow for horizontal scrolling! */}
+      <div className="saas-tab-container hide-scrollbar" style={{ display: 'flex', flexWrap: 'nowrap', overflowX: 'auto', width: '100%', WebkitOverflowScrolling: 'touch', marginBottom: '24px' }}>
         <button onClick={() => setActiveTab('summary')} className={`saas-tab ${activeTab === 'summary' ? 'active' : ''}`}>📈 Business Summary</button>
         <button onClick={() => setActiveTab('wholesale')} className={`saas-tab ${activeTab === 'wholesale' ? 'active' : ''}`}>🌾 Wholesale Data</button>
         <button onClick={() => setActiveTab('retail')} className={`saas-tab ${activeTab === 'retail' ? 'active' : ''}`}>🛍️ Retail Data</button>
@@ -726,7 +727,8 @@ export default function DashboardPage() {
         
         {activeTab === 'asset' && (
           <div className="fade-in">
-            <div className="saas-tab-container" style={{ margin: '0 0 24px 0', padding: '4px', border: 'none', boxShadow: 'none', background: '#f1f5f9', flexWrap: 'wrap' }}>
+            {/* 🔥 ASSET SUB-TAB CONTAINER: Also perfectly scrollable horizontally */}
+            <div className="saas-tab-container hide-scrollbar" style={{ margin: '0 0 24px 0', padding: '4px', border: 'none', boxShadow: 'none', background: '#f1f5f9', display: 'flex', flexWrap: 'nowrap', overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
               {['today', 'yesterday', 'week', 'month', 'all'].map((f: any) => (
                 <button 
                   key={f} onClick={() => setAssetFilter(f)} 
@@ -1154,6 +1156,22 @@ export default function DashboardPage() {
       </div>
 
       <style jsx global>{`
+        /* 🔥 BULLETPROOF GLOBAL OVERRIDE FOR MOBILE TABS 🔥 */
+        .saas-tab-container {
+          flex-wrap: nowrap !important;
+          overflow-x: auto !important;
+          -webkit-overflow-scrolling: touch !important;
+          scrollbar-width: none !important;
+          max-width: 100%;
+        }
+        .saas-tab-container::-webkit-scrollbar {
+          display: none !important;
+        }
+        .saas-tab {
+          flex-shrink: 0 !important;
+          white-space: nowrap !important;
+        }
+
         .header-container { 
           display: flex;
           justify-content: flex-start;
