@@ -68,8 +68,11 @@ export default function ExpenseDashboard() {
   // --- Database Tab States ---
   const [dbExpenses, setDbExpenses] = useState<any[]>([])
   const [dbStaffDebt, setDbStaffDebt] = useState<any[]>([])
-  const [dbTab, setDbTab] = useState<'personal' | 'business' | 'staff_debt' | 'insight'>('personal')
-  const [dbTabOrder, setDbTabOrder] = useState(['personal', 'business', 'staff_debt', 'insight'])
+  
+  // 🔥 Set 'insight' as the default active tab, and put it first in the array
+  const [dbTab, setDbTab] = useState<'personal' | 'business' | 'staff_debt' | 'insight'>('insight')
+  const [dbTabOrder, setDbTabOrder] = useState(['insight', 'personal', 'business', 'staff_debt'])
+  
   const [dbSortConfig, setDbSortConfig] = useState<{key: string, direction: 'asc' | 'desc'} | null>(null)
   const [isFetchingDb, setIsFetchingDb] = useState(false)
 
@@ -546,13 +549,6 @@ export default function ExpenseDashboard() {
                 {getActiveList().map((exp, index) => (
                   <div key={exp.id} className="expense-entry-card" style={{ padding: '24px', background: '#ffffff', borderRadius: '12px', border: '1px solid #cbd5e1', position: 'relative', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.02)' }}>
                     
-                    {/* Clean Red X Button */}
-                    {getActiveList().length > 1 && (
-                      <button type="button" onClick={() => removeExpense(exp.id)} style={{ position: 'absolute', top: '12px', right: '12px', color: '#ef4444', background: 'transparent', border: 'none', cursor: 'pointer', fontSize: '20px', fontWeight: 'bold', padding: '4px', lineHeight: 1 }} title="Remove">
-                        ✕
-                      </button>
-                    )}
-                    
                     {/* 🔥 3-COLUMN GRID SETUP */}
                     <div className="expense-grid">
 
@@ -584,8 +580,14 @@ export default function ExpenseDashboard() {
                               value={exp.remarks} 
                               onChange={(e) => updateExpense(exp.id, 'remarks', e.target.value)} 
                               required 
-                              style={{ width: '100%', height: '100%', border: 'none', background: 'transparent', outline: 'none', fontSize: '16px', color: '#0f172a' }}
+                              style={{ flex: 1, minWidth: 0, height: '100%', border: 'none', background: 'transparent', outline: 'none', fontSize: '16px', color: '#0f172a' }}
                             />
+                            {/* 🔥 Mobile Red X aligned middle with remark row */}
+                            {getActiveList().length > 1 && (
+                              <button type="button" onClick={() => removeExpense(exp.id)} style={{ color: '#ef4444', background: 'transparent', border: 'none', cursor: 'pointer', fontSize: '20px', fontWeight: 'bold', padding: '0 0 0 12px', lineHeight: 1 }} title="Remove">
+                                ✕
+                              </button>
+                            )}
                           </div>
                         </div>
                       </>
@@ -593,13 +595,13 @@ export default function ExpenseDashboard() {
                       {/* Col 2: Spender (Refined Light Colors, Rounded Pill) */}
                       <div className="expense-col" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                         <label style={{ height: '16px', lineHeight: '16px', fontSize: '11px', color: '#64748b', fontWeight: 'bold', textTransform: 'uppercase', margin: 0 }}>Spender</label>
-                        <div className="saas-tab-container" style={{ margin: 0, padding: '4px', background: '#f1f5f9', border: 'none', boxShadow: 'none', height: '42px', display: 'flex', boxSizing: 'border-box', borderRadius: '8px' }}>
+                        <div className="saas-tab-container" style={{ margin: 0, padding: 0, background: '#f1f5f9', border: 'none', boxShadow: 'none', height: '42px', display: 'flex', boxSizing: 'border-box', borderRadius: '8px', overflow: 'hidden' }}>
                           {(['Pich', 'Jing', 'Both'] as const).map(person => (
                             <button
                               type="button"
                               key={person}
                               onClick={() => updateExpense(exp.id, 'spender', person)}
-                              style={exp.spender === person ? { background: '#e0f2fe', color: '#0284c7', fontWeight: '500', flex: 1, padding: 0, borderRadius: '6px', border: 'none', height: '100%', fontSize: '14px', cursor: 'pointer' } : { flex: 1, padding: 0, fontWeight: '500', color: '#94a3b8', background: 'transparent', border: 'none', height: '100%', fontSize: '14px', cursor: 'pointer' }}
+                              style={exp.spender === person ? { background: '#e0f2fe', color: '#0284c7', fontWeight: 'bold', flex: 1, padding: 0, borderRadius: 0, border: 'none', height: '100%', fontSize: '14px', cursor: 'pointer' } : { flex: 1, padding: 0, fontWeight: '500', color: '#94a3b8', background: 'transparent', border: 'none', height: '100%', fontSize: '14px', cursor: 'pointer' }}
                             >
                               {person}
                             </button>
@@ -610,10 +612,21 @@ export default function ExpenseDashboard() {
                       {/* Col 3: Payments */}
                       <div className="expense-col" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                         <div style={{ height: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                          <label style={{ lineHeight: '16px', fontSize: '11px', color: '#64748b', fontWeight: 'bold', margin: 0, textTransform: 'uppercase' }}>Payment Method(s)</label>
-                          <button type="button" onClick={() => addPaymentSplit(exp.id)} className="saas-btn" style={{ background: '#e0f2fe', color: '#0284c7', border: 'none', padding: '0 8px', fontSize: '11px', fontWeight: 'bold', height: '20px', display: 'flex', alignItems: 'center' }}>
-                            + Split
-                          </button>
+                          
+                          {/* 🔥 Left Side: Label and + Split button tightly grouped */}
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <label style={{ lineHeight: '16px', fontSize: '11px', color: '#64748b', fontWeight: 'bold', margin: 0, textTransform: 'uppercase' }}>Payment Method(s)</label>
+                            <button type="button" onClick={() => addPaymentSplit(exp.id)} className="saas-btn" style={{ background: '#e0f2fe', color: '#0284c7', border: 'none', padding: '0 8px', fontSize: '11px', fontWeight: 'bold', height: '20px', display: 'flex', alignItems: 'center', borderRadius: '4px' }}>
+                              + Split
+                            </button>
+                          </div>
+
+                          {/* 🔥 Right Side: Desktop Red X moved to far right where Split used to be */}
+                          {getActiveList().length > 1 && (
+                            <button type="button" onClick={() => removeExpense(exp.id)} className="desktop-only-flex" style={{ color: '#ef4444', background: 'transparent', border: 'none', cursor: 'pointer', fontSize: '18px', fontWeight: 'bold', padding: 0, lineHeight: 1 }} title="Remove Expense">
+                              ✕
+                            </button>
+                          )}
                         </div>
 
                         {exp.payments.map((row) => (
@@ -1203,9 +1216,15 @@ export default function ExpenseDashboard() {
           .top-action-row .date-wrapper {
             width: 100% !important;
             max-width: none !important;
+            display: block !important;
           }
+          /* 🔥 Fix for iPhone Safari: Force the date input to span full width */
           .top-action-row .date-wrapper input {
             width: 100% !important;
+            min-width: 100% !important;
+            display: block !important;
+            -webkit-appearance: none !important; 
+            appearance: none !important;
           }
           .top-action-row .button-wrapper {
             width: 100% !important;
@@ -1215,7 +1234,7 @@ export default function ExpenseDashboard() {
             justify-content: space-between !important;
           }
           .top-action-row .button-wrapper button {
-            flex: 1 !important; /* Forces both buttons to be equal 50% width */
+            flex: 1 !important; 
             padding: 0 !important;
             text-align: center !important;
             justify-content: center !important;
