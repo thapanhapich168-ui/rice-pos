@@ -474,7 +474,7 @@ export default function ExpenseDashboard() {
       <div style={{ position: 'sticky', top: 0, zIndex: 50, backgroundColor: '#f8fafc', flexShrink: 0, width: '100%', paddingBottom: '16px', paddingTop: '16px' }}>
         <div className="header-container">
           <div className="header-left">
-            <h1 className="saas-page-title">💸 Daily Expense & Payroll</h1>
+            <h1 className="saas-page-title" style={{ margin: 0, display: 'flex', alignItems: 'center', lineHeight: '1' }}>💸 Daily Expense & Payroll</h1>
           </div>
         </div>
 
@@ -1192,24 +1192,38 @@ export default function ExpenseDashboard() {
           .desktop-only-flex { display: none !important; }
           .mobile-only-flex { display: flex !important; }
 
-          /* 🔥 Mobile Safari Fix: Strict Grid to prevent Date Picker overlap */
+          /* 🔥 Mobile Safari Fix: Gives more horizontal room by reducing form padding */
+          form.saas-card {
+            padding: 16px !important;
+          }
+
+          /* Force buttons and date strictly onto one line without overflowing */
           .top-action-row {
-            display: grid !important;
-            grid-template-columns: minmax(0, 1fr) auto auto !important;
+            display: flex !important;
+            flex-direction: row !important;
+            flex-wrap: nowrap !important;
             align-items: flex-end !important;
             gap: 8px !important;
             width: 100% !important;
           }
           .top-action-row .date-wrapper {
+            flex: 1 1 0% !important;
+            min-width: 0 !important; /* CRITICAL to force iOS Safari to shrink */
+          }
+          .top-action-row .date-wrapper input {
+            min-width: 0 !important;
+            padding-left: 8px !important;
+            padding-right: 4px !important;
             width: 100% !important;
-            max-width: none !important;
           }
           .top-action-row .button-wrapper {
-            display: contents !important; /* Forces buttons to act as direct grid items */
+            flex: 0 0 auto !important;
+            display: flex !important;
+            gap: 6px !important;
           }
           .top-action-row .button-wrapper button {
-            padding: 0 14px !important;
-            width: auto !important;
+            padding: 0 12px !important;
+            font-size: 14px !important;
           }
 
           .content-container {
