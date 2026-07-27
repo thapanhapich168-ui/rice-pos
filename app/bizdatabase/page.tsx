@@ -3,19 +3,21 @@
 import { useState, useEffect, useRef } from 'react'
 import { supabase } from '@/lib/supabaseClient'
 import { useFocusRefresh } from '@/lib/useFocusRefresh'
-import { formatRiel, formatNumber, EXCHANGE_RATE } from '@/utils/formatters'
+import { formatRiel, formatUSD, formatNumber, EXCHANGE_RATE } from '@/utils/formatters'
 import { CurrencyInput } from '@/components/Inputs'
 import { useToast } from '@/components/ToastProvider'
 import { useDebounce } from '@/lib/useDebounce'
 import TableSkeleton from '@/components/TableSkeleton'
 import EmptyState from '@/components/EmptyState'
 
-// Formats 'total_sales' into 'Total Sales', 'qty' to 'Quantity'
+// Formats headers beautifully
 const formatHeader = (key: string) => {
   if (key === 'qty') return 'Quantity';
   if (key === 'cogs_price') return 'COGS Price';
   if (key === 'invoice_id') return 'Invoice ID';
   if (key === 'transaction_id') return 'Transaction ID';
+  if (key === 'amount_riel') return 'Amount (៛)';
+  if (key === 'amount_usd') return 'Amount ($)';
   return key.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
 }
 
@@ -52,14 +54,14 @@ type TimeFilter = 'Today' | 'This Week' | 'This Month' | 'All Time';
 const DEFAULT_WIDTHS: Record<string, number> = {
   invoice_id: 140, transaction_id: 140, created_at: 180, customer_name: 160, owner: 100,
   rice_types: 250, rice_type: 180, qty: 100, price_per_bag: 130, cogs_price: 130,
-  total_sales: 140, total_cogs: 140, total_profit: 140, description: 200, amount: 140,
-  category: 140, status: 120
+  total_sales: 140, total_cogs: 140, total_profit: 140, description: 200, 
+  amount_riel: 140, amount_usd: 140, category: 140, status: 120
 }
 
 const DEFAULT_SUMMARY_COLS = ['invoice_id', 'created_at', 'customer_name', 'owner', 'rice_types', 'total_sales', 'total_cogs', 'total_profit'];
 const DEFAULT_DAILY_COLS = ['invoice_id', 'created_at', 'customer_name', 'owner', 'rice_type', 'qty', 'price_per_bag', 'cogs_price', 'total_sales', 'total_cogs', 'total_profit'];
 const DEFAULT_RETAIL_COLS = ['transaction_id', 'created_at', 'rice_type', 'qty', 'price_per_bag', 'cogs_price', 'total_sales', 'total_cogs', 'total_profit'];
-const DEFAULT_EXPENSE_COLS = ['created_at', 'description', 'amount', 'category', 'status', 'owner'];
+const DEFAULT_EXPENSE_COLS = ['created_at', 'description', 'amount_riel', 'amount_usd', 'category', 'status', 'owner'];
 
 export default function BizDatabase() {
   const { showToast } = useToast();
@@ -118,7 +120,15 @@ export default function BizDatabase() {
       if (sumCols?.setting_value) setSummaryCols(sumCols.setting_value)
       if (dalCols?.setting_value) setDailyCols(dalCols.setting_value)
       if (retCols?.setting_value) setRetailCols(retCols.setting_value)
-      if (expCols?.setting_value) setExpenseCols(expCols.setting_value)
+      
+      if (expCols?.setting_value) {
+        let cols = expCols.setting_value;
+        // Auto-migration: if the user had the old single 'amount' column saved, split it into two
+        if (cols.includes('amount')) {
+          cols = cols.flatMap((c: string) => c === 'amount' ? ['amount_riel', 'amount_usd'] : c);
+        }
+        setExpenseCols(cols);
+      }
     }
   }
 
@@ -136,9 +146,6 @@ export default function BizDatabase() {
       console.warn("Retail table not found", e)
     }
 
-    // 🔥 OPTION A: ONE TABLE METHOD
-    // We only fetch from "expenses" ONE TIME. 
-    // No more 404 errors looking for personal_expenses or staff_debt tables!
     let allExpenses: any[] = []
     try {
       const { data, error } = await supabase.from('expenses').select('*')
@@ -230,13 +237,9 @@ export default function BizDatabase() {
       })
     }
 
-    // 🔥 SORTING THE "ONE TABLE" INTO 3 SEPARATE TABS
+    // 🔥 SORTING THE "ONE TABLE" INTO 3 SEPARATE TABS & SEPARATING RIEL VS USD
     if (allExpenses && allExpenses.length > 0) {
       allExpenses.forEach(e => {
-        const amtRiel = Number(e.amount_riel || 0);
-        const amtUsd = Number(e.amount_usd || 0);
-        const totalRielValue = amtRiel !== 0 ? Math.abs(amtRiel) : Math.abs(amtUsd) * EXCHANGE_RATE;
-
         let targetSource: TabType = 'Biz Expense';
         if (e.description === 'PERSONAL') targetSource = 'Personal Expense';
         else if (e.description === 'STAFF_DEBT') targetSource = 'Staff Debt';
@@ -248,7 +251,8 @@ export default function BizDatabase() {
           source: targetSource,
           created_at: e.created_at,
           description: e.remarks || `Expense #${e.id}`, // Maps UI Description -> DB Remarks
-          amount: totalRielValue,
+          amount_riel: Number(e.amount_riel || 0),
+          amount_usd: Number(e.amount_usd || 0),
           category: e.category || 'Uncategorized',     // Maps UI Category -> DB Category
           status: e.payment_method || e.status || 'cleared',
           owner: e.spender || e.owner || '-'
@@ -348,7 +352,6 @@ export default function BizDatabase() {
       if (dailyIds.length > 0) await supabase.from('sales').delete().in('id', dailyIds);
       if (retIds.length > 0) await supabase.from('retail_sales').delete().in('id', retIds);
       
-      // 🔥 DELETES ALL EXPENSES IN ONE SWOOP
       if (expenseIds.length > 0) await supabase.from('expenses').delete().in('id', expenseIds);
       
       if (sumIds.length > 0) await supabase.from('invoice_summaries').delete().in('id', sumIds);
@@ -432,17 +435,14 @@ export default function BizDatabase() {
       dbPayload.total_cogs = newQty * newCogs;
       dbPayload.total_profit = (newPrice - newCogs) * newQty;
     }
-    // 🔥 ALWAYS SAVES EDITS TO 'expenses' REGARDLESS OF TAB
     else if (baseTx.source === 'Biz Expense' || baseTx.source === 'Personal Expense' || baseTx.source === 'Staff Debt') {
       targetTable = 'expenses';
       if (payload.description !== undefined) dbPayload.remarks = payload.description; // UI Description saves to DB remarks
       if (payload.category !== undefined) dbPayload.category = payload.category; 
       if (payload.owner !== undefined) dbPayload.spender = payload.owner; 
       if (payload.status !== undefined) dbPayload.payment_method = payload.status; 
-      if (payload.amount !== undefined) {
-        dbPayload.amount_riel = payload.amount;
-        dbPayload.amount_usd = 0; 
-      }
+      if (payload.amount_riel !== undefined) dbPayload.amount_riel = payload.amount_riel;
+      if (payload.amount_usd !== undefined) dbPayload.amount_usd = payload.amount_usd;
     }
 
     if (Object.keys(dbPayload).length > 0) {
@@ -779,7 +779,7 @@ export default function BizDatabase() {
                             onClick={() => { if (!isUneditable) setEditingCell({ id: t.id, col: col }) }}
                           >
                             {isEditing ? (
-                              ['price_per_bag', 'cogs_price', 'total_sales', 'total_cogs', 'total_profit', 'amount'].includes(col) ? (
+                              ['price_per_bag', 'cogs_price', 'total_sales', 'total_cogs', 'total_profit', 'amount_riel', 'amount_usd'].includes(col) ? (
                                 <CurrencyInput 
                                   autoFocus 
                                   value={val} 
@@ -842,12 +842,12 @@ export default function BizDatabase() {
                                 {col === 'created_at' && formatDate(t.created_at)}
                                 {col === 'qty' && formatNumber(val || 0)}
 
-                                {['price_per_bag', 'cogs_price', 'total_sales', 'total_cogs', 'total_profit', 'amount'].includes(col) && (
+                                {['price_per_bag', 'cogs_price', 'total_sales', 'total_cogs', 'total_profit', 'amount_riel', 'amount_usd'].includes(col) && (
                                   <span style={{ 
                                     fontWeight: 'bold', 
-                                    color: (col === 'total_profit' && val < 0) || col === 'total_cogs' || col === 'cogs_price' || col === 'amount' ? '#ef4444' : '#10b981' 
+                                    color: (col === 'total_profit' && val < 0) || col === 'total_cogs' || col === 'cogs_price' || col === 'amount_riel' || col === 'amount_usd' ? '#ef4444' : '#10b981' 
                                   }}>
-                                    {formatRiel(val || 0)}
+                                    {col === 'amount_usd' ? formatUSD(val || 0) : formatRiel(val || 0)}
                                   </span>
                                 )}
                               </div>

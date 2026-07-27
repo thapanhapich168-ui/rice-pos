@@ -375,7 +375,7 @@ export default function ExpenseDashboard() {
           expense_date: expenseDate,
           spender: exp.spender,
           payment_method: combinedMethod,
-          remarks: exp.remarks,                     
+          remarks: exp.remarks,                    
           amount_usd: totalUsd,              
           amount_riel: totalRiel,         
           description: activeTab.toUpperCase(), 
@@ -619,34 +619,33 @@ export default function ExpenseDashboard() {
   return (
     <div className="main-wrapper" style={{ display: 'flex', flexDirection: 'column', height: '100dvh', overflow: 'hidden', backgroundColor: '#f8fafc' }}>
 
-      {/* STICKY FROZEN HEADER & TABS */}
-      <div style={{ position: 'sticky', top: 0, zIndex: 50, backgroundColor: '#f8fafc', flexShrink: 0, width: '100%', paddingBottom: '16px', paddingTop: '8px' }}>
-        <div className="header-container" style={{ margin: '0 auto 16px auto', display: 'flex', alignItems: 'center', minHeight: '48px' }}>
-          <div className="header-left" style={{ display: 'flex', alignItems: 'center', height: '100%' }}>
-            <h1 className="saas-page-title" style={{ margin: 0, padding: 0, display: 'flex', alignItems: 'center' }}>💸 Daily Expense & Payroll</h1>
-          </div>
+      {/* HEADER (Frozen, Uses Explicit Height to Align with Sidebar Menu) */}
+      <div className="header-container" style={{ flexShrink: 0 }}>
+        <div className="header-left">
+          <h1 className="saas-page-title" style={{ margin: 0, padding: 0, display: 'flex', alignItems: 'center' }}>💸 Daily Expense & Payroll</h1>
         </div>
+      </div>
 
-        <div className="content-container">
-          <div className="hide-scrollbar" style={{ display: 'flex', flexWrap: 'nowrap', overflowX: 'auto', WebkitOverflowScrolling: 'touch', gap: '8px', background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '12px', padding: '6px' }}>
-            <button type="button" onClick={() => setActiveTab('personal')} className={`saas-tab ${activeTab === 'personal' ? 'active' : ''}`} style={{ flexShrink: 0, padding: '10px 24px' }}>
-              🏡 Personal
-            </button>
-            <button type="button" onClick={() => setActiveTab('business')} className={`saas-tab ${activeTab === 'business' ? 'active' : ''}`} style={{ flexShrink: 0, padding: '10px 24px' }}>
-              🏢 Business
-            </button>
-            <button type="button" onClick={() => setActiveTab('staff')} className={`saas-tab ${activeTab === 'staff' ? 'active' : ''}`} style={{ flexShrink: 0, padding: '10px 24px' }}>
-              👥 Staff Payroll
-            </button>
-            <button type="button" onClick={() => setActiveTab('database')} className={`saas-tab ${activeTab === 'database' ? 'active' : ''}`} style={activeTab === 'database' ? { background: '#10b981', color: '#fff', flexShrink: 0, padding: '10px 24px' } : { flexShrink: 0, padding: '10px 24px' }}>
-              🗄️ Expense Database
-            </button>
-          </div>
+      {/* TABS (Frozen) */}
+      <div className="content-container" style={{ flexShrink: 0, paddingBottom: '16px' }}>
+        <div className="hide-scrollbar" style={{ display: 'flex', flexWrap: 'nowrap', overflowX: 'auto', WebkitOverflowScrolling: 'touch', gap: '8px', background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '12px', padding: '6px' }}>
+          <button type="button" onClick={() => setActiveTab('personal')} className={`saas-tab ${activeTab === 'personal' ? 'active' : ''}`} style={{ flexShrink: 0, padding: '10px 24px' }}>
+            🏡 Personal
+          </button>
+          <button type="button" onClick={() => setActiveTab('business')} className={`saas-tab ${activeTab === 'business' ? 'active' : ''}`} style={{ flexShrink: 0, padding: '10px 24px' }}>
+            🏢 Business
+          </button>
+          <button type="button" onClick={() => setActiveTab('staff')} className={`saas-tab ${activeTab === 'staff' ? 'active' : ''}`} style={{ flexShrink: 0, padding: '10px 24px' }}>
+            👥 Staff Payroll
+          </button>
+          <button type="button" onClick={() => setActiveTab('database')} className={`saas-tab ${activeTab === 'database' ? 'active' : ''}`} style={activeTab === 'database' ? { background: '#10b981', color: '#fff', flexShrink: 0, padding: '10px 24px' } : { flexShrink: 0, padding: '10px 24px' }}>
+            🗄️ Expense Database
+          </button>
         </div>
       </div>
 
       {/* SCROLLING CONTENT AREA */}
-      <div className="hide-scrollbar" style={{ flex: 1, overflowY: 'auto', paddingBottom: '60px', paddingTop: '8px' }}>
+      <div className="hide-scrollbar" style={{ flex: 1, overflowY: 'auto', paddingBottom: '60px' }}>
         <div className="content-container">
 
           {/* --- DYNAMIC EXPENSE LEDGER (Personal & Business) --- */}
@@ -1288,17 +1287,16 @@ export default function ExpenseDashboard() {
         }
         
         .header-container { 
-          width: 100%;
-          max-width: 1600px;
-          margin: 0 auto 16px auto !important; 
-          padding-left: 60px; 
-          padding-right: 0px;
           display: flex;
           justify-content: flex-start;
           align-items: center; 
+          margin-bottom: 16px; 
+          margin-top: 0; 
+          margin-left: 60px; 
           gap: 12px;
-          min-height: 48px !important; 
-          box-sizing: border-box;
+          height: 42px; 
+          width: calc(100% - 60px);
+          max-width: 1600px;
         }
 
         .header-left {
@@ -1381,19 +1379,21 @@ export default function ExpenseDashboard() {
           }
 
           .content-container {
-            padding-left: 16px !important;
-            padding-right: 16px !important;
+            padding-left: 0px !important;
+            padding-right: 0px !important;
           }
 
           .header-container { 
-            padding-left: 54px !important; 
-            padding-right: 16px !important;
+            margin-left: 54px !important; 
+            margin-right: 0 !important;
             margin-bottom: 24px !important; 
+            margin-top: 0 !important; 
             display: flex !important;
             flex-direction: row !important;
             justify-content: flex-start !important;
             align-items: center !important; 
-            min-height: 48px !important;
+            height: 44px !important;
+            width: calc(100% - 54px) !important;
           }
         }
       `}</style>
