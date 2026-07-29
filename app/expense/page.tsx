@@ -190,7 +190,7 @@ export default function ExpenseDashboard() {
     id: Date.now().toString() + Math.random().toString().slice(2, 6),
     remarks: '',
     spender: 'Pich',
-    payments: [{ id: Date.now(), method: 'Cash ៛', amount: '' }]
+    payments: [{ id: Date.now(), method: 'QR ៛', amount: '' }] // 🔥 Default set to QR ៛
   });
 
   const [pendingPersonal, setPendingPersonal] = useState<PendingExpense[]>([])
@@ -375,7 +375,7 @@ export default function ExpenseDashboard() {
           expense_date: expenseDate,
           spender: exp.spender,
           payment_method: combinedMethod,
-          remarks: exp.remarks,                    
+          remarks: exp.remarks,                     
           amount_usd: totalUsd,              
           amount_riel: totalRiel,         
           description: activeTab.toUpperCase(), 
@@ -699,6 +699,12 @@ export default function ExpenseDashboard() {
                             placeholder="Remarks"
                             value={exp.remarks} 
                             onChange={(e) => updateExpense(exp.id, 'remarks', e.target.value)} 
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                e.preventDefault();
+                                document.getElementById(`amount-wrapper-${exp.id}`)?.querySelector('input')?.focus();
+                              }
+                            }}
                             required 
                             className="saas-input" 
                             style={{ width: '100%', height: '42px', margin: 0, boxSizing: 'border-box' }}
@@ -716,6 +722,13 @@ export default function ExpenseDashboard() {
                               placeholder="Remarks"
                               value={exp.remarks} 
                               onChange={(e) => updateExpense(exp.id, 'remarks', e.target.value)} 
+                              onKeyDown={(e) => {
+                                // 🔥 Focus Jump: Moves straight to Amount input on Enter/Next
+                                if (e.key === 'Enter') {
+                                  e.preventDefault();
+                                  document.getElementById(`amount-wrapper-${exp.id}`)?.querySelector('input')?.focus();
+                                }
+                              }}
                               required 
                               style={{ flex: 1, minWidth: 0, height: '100%', border: 'none', background: 'transparent', outline: 'none', fontSize: '16px', color: '#0f172a' }}
                             />
@@ -729,24 +742,7 @@ export default function ExpenseDashboard() {
                         </div>
                       </>
 
-                      {/* Col 2: Spender (Light-blue Pill selection) */}
-                      <div className="expense-col" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                        <label style={{ height: '16px', lineHeight: '16px', fontSize: '11px', color: '#64748b', fontWeight: 'bold', textTransform: 'uppercase', margin: 0 }}>Spender</label>
-                        <div className="saas-tab-container" style={{ margin: 0, padding: 0, background: '#f1f5f9', border: 'none', boxShadow: 'none', height: '42px', display: 'flex', boxSizing: 'border-box', borderRadius: '8px', overflow: 'hidden' }}>
-                          {(['Pich', 'Jing', 'Both'] as const).map(person => (
-                            <button
-                              type="button"
-                              key={person}
-                              onClick={() => updateExpense(exp.id, 'spender', person)}
-                              style={exp.spender === person ? { background: '#e0f2fe', color: '#0284c7', fontWeight: 'bold', flex: 1, padding: 0, borderRadius: 0, border: 'none', height: '100%', fontSize: '14px', cursor: 'pointer' } : { flex: 1, padding: 0, fontWeight: '500', color: '#94a3b8', background: 'transparent', border: 'none', height: '100%', fontSize: '14px', cursor: 'pointer' }}
-                            >
-                              {person}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-
-                      {/* Col 3: Payments */}
+                      {/* 🔥 Col 2: Payments (Moved Up to directly follow Remarks) */}
                       <div className="expense-col" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                         <div style={{ height: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                           
@@ -766,7 +762,7 @@ export default function ExpenseDashboard() {
                           )}
                         </div>
 
-                        {exp.payments.map((row) => (
+                        {exp.payments.map((row, rIndex) => (
                           <div key={row.id} className="payment-row" style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
                             <select 
                               value={row.method} 
@@ -774,13 +770,13 @@ export default function ExpenseDashboard() {
                               className="saas-input"
                               style={{ flex: '0 0 110px', cursor: 'pointer', fontSize: '14px', margin: 0, height: '42px', padding: '0 8px', boxSizing: 'border-box' }}
                             >
+                              <option value="QR ៛">📱 QR ៛</option>
                               <option value="Cash ៛">💵 Cash ៛</option>
                               <option value="Cash $">💵 Cash $</option>
-                              <option value="QR ៛">📱 QR ៛</option>
                               <option value="QR $">📱 QR $</option>
                             </select>
                             
-                            <div style={{ flex: 1 }}>
+                            <div id={rIndex === 0 ? `amount-wrapper-${exp.id}` : undefined} style={{ flex: 1 }}>
                               <CurrencyInput 
                                 placeholder="0" 
                                 value={row.amount} 
@@ -795,6 +791,23 @@ export default function ExpenseDashboard() {
                             )}
                           </div>
                         ))}
+                      </div>
+
+                      {/* 🔥 Col 3: Spender (Moved Down to bottom to prevent keyboard bounce) */}
+                      <div className="expense-col" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                        <label style={{ height: '16px', lineHeight: '16px', fontSize: '11px', color: '#64748b', fontWeight: 'bold', textTransform: 'uppercase', margin: 0 }}>Spender</label>
+                        <div className="saas-tab-container" style={{ margin: 0, padding: 0, background: '#f1f5f9', border: 'none', boxShadow: 'none', height: '42px', display: 'flex', boxSizing: 'border-box', borderRadius: '8px', overflow: 'hidden' }}>
+                          {(['Pich', 'Jing', 'Both'] as const).map(person => (
+                            <button
+                              type="button"
+                              key={person}
+                              onClick={() => updateExpense(exp.id, 'spender', person)}
+                              style={exp.spender === person ? { background: '#e0f2fe', color: '#0284c7', fontWeight: 'bold', flex: 1, padding: 0, borderRadius: 0, border: 'none', height: '100%', fontSize: '14px', cursor: 'pointer' } : { flex: 1, padding: 0, fontWeight: '500', color: '#94a3b8', background: 'transparent', border: 'none', height: '100%', fontSize: '14px', cursor: 'pointer' }}
+                            >
+                              {person}
+                            </button>
+                          ))}
+                        </div>
                       </div>
 
                     </div>
