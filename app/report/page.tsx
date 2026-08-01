@@ -5,16 +5,12 @@ import { supabase } from '@/lib/supabaseClient'
 import { formatRiel, formatUSD, formatNumber, parseOwner, EXCHANGE_RATE } from '@/utils/formatters'
 import { useToast } from '@/components/ToastProvider'
 import TableSkeleton from '@/components/TableSkeleton'
+import { TELEGRAM_CONFIG } from '@/lib/telegramConfig'
 
 const formatUSDEquiv = (vRiel: number) => formatUSD(vRiel / EXCHANGE_RATE);
 
 export default function ReportControlPage() {
   const { showToast } = useToast()
-
-  // --- CREDENTIALS STATE ---
-  const [botToken, setBotToken] = useState('')
-  const [chatId, setChatId] = useState('')
-  const [isSavingCreds, setIsSavingCreds] = useState(false)
 
   // --- DATA STATE ---
   const [loading, setLoading] = useState(true)
@@ -29,47 +25,10 @@ export default function ReportControlPage() {
   const [invoicePayments, setInvoicePayments] = useState<any[]>([])
 
   useEffect(() => {
-    loadSettings()
     fetchReportData()
   }, [])
 
-  // --- 1. LOAD TELEGRAM CREDENTIALS ---
-  async function loadSettings() {
-    const { data } = await supabase
-      .from('app_settings')
-      .select('*')
-      .in('setting_key', ['telegram_bot_token', 'telegram_chat_id'])
-
-    if (data && data.length > 0) {
-      const tokenRow = data.find(d => d.setting_key === 'telegram_bot_token')
-      const chatRow = data.find(d => d.setting_key === 'telegram_chat_id')
-      if (tokenRow?.setting_value) setBotToken(tokenRow.setting_value)
-      if (chatRow?.setting_value) setChatId(chatRow.setting_value)
-    } else {
-      setBotToken(localStorage.getItem('telegram_bot_token') || '')
-      setChatId(localStorage.getItem('telegram_chat_id') || '')
-    }
-  }
-
-  async function saveCredentials() {
-    setIsSavingCreds(true)
-    try {
-      await supabase.from('app_settings').upsert([
-        { setting_key: 'telegram_bot_token', setting_value: botToken },
-        { setting_key: 'telegram_chat_id', setting_value: chatId }
-      ], { onConflict: 'setting_key' })
-
-      localStorage.setItem('telegram_bot_token', botToken)
-      localStorage.setItem('telegram_chat_id', chatId)
-      showToast('success', 'Saved', 'Telegram credentials saved successfully.')
-    } catch (e: any) {
-      showToast('error', 'Save Error', e.message)
-    } finally {
-      setIsSavingCreds(false)
-    }
-  }
-
-  // --- 2. FETCH SUPABASE DATA ---
+  // --- 1. FETCH SUPABASE DATA ---
   async function fetchReportData() {
     setLoading(true)
     try {
@@ -102,7 +61,7 @@ export default function ReportControlPage() {
     }
   }
 
-  // --- 3. DATE HELPER FUNCTIONS ---
+  // --- 2. DATE HELPER FUNCTIONS ---
   const now = new Date()
   const isToday = (dateStr: string) => {
     if (!dateStr) return false
@@ -125,7 +84,7 @@ export default function ReportControlPage() {
     return new Date(dateStr).getDate()
   }
 
-  // --- 4. TELEGRAM NUMBER CRUNCHING ENGINE ---
+  // --- 3. TELEGRAM NUMBER CRUNCHING ENGINE ---
   const reportMetrics = useMemo(() => {
     const calculateSlice = (invSlice: any[], retSlice: any[], expSlice: any[]) => {
       let totalSales = 0
@@ -201,7 +160,7 @@ export default function ReportControlPage() {
     return { month: monthSlice, today: todaySlice }
   }, [invoices, retailSales, expenses])
 
-  // --- 5. BUSINESS SUMMARY CALCULATIONS (FOR MONTHLY REPORT PAGE) ---
+  // --- 4. BUSINESS SUMMARY CALCULATIONS (FOR MONTHLY REPORT PAGE) ---
   const activeSalesData = useMemo(() => [...wholesaleSales, ...retailSales], [wholesaleSales, retailSales])
 
   function calculateMetrics(dataSet: any[], timeFilter: any) {
@@ -348,7 +307,7 @@ export default function ReportControlPage() {
   const thisMonthData = generateDailyArray(activeSalesData, isMTD)
   const lastMonthData = generateDailyArray(activeSalesData, isLastMonth)
 
-  // --- 6. TELEGRAM MESSAGE GENERATOR ---
+  // --- 5. TELEGRAM MESSAGE GENERATOR (DAILY) ---
   const generateTelegramMessage = () => {
     const { today, month } = reportMetrics
 
@@ -389,7 +348,7 @@ export default function ReportControlPage() {
     )
   }
 
-  // --- 7. AUTOMATED INSIGHTS GENERATOR ---
+  // --- 6. AUTOMATED INSIGHTS GENERATOR ---
   const monthlyInsights = useMemo(() => {
     const { month } = reportMetrics
     const totalExpenseRielEq = month.totalExpRiel + (month.totalExpUsd * EXCHANGE_RATE)
@@ -415,10 +374,16 @@ export default function ReportControlPage() {
     }
   }, [reportMetrics])
 
-  // --- 8. DISPATCH TO TELEGRAM ---
+  const { month } = reportMetrics
+  const currentMonthName = new Date().toLocaleDateString('en-GB', { month: 'long', year: 'numeric' })
+
+  // --- 7. SECURE DISPATCH TO TELEGRAM (DAILY TEXT) ---
   async function handleSendTelegram() {
-    if (!botToken || !chatId) {
-      showToast('error', 'Missing Info', 'Please enter your Telegram Bot Token and Chat ID first.')
+    const activeBotToken = TELEGRAM_CONFIG.botToken
+    const activeChatId = TELEGRAM_CONFIG.chatId
+
+    if (!activeBotToken || !activeChatId) {
+      showToast('error', 'Missing Info', 'Please add your credentials to lib/telegramConfig.ts first.')
       return
     }
 
@@ -426,11 +391,11 @@ export default function ReportControlPage() {
     const textToSend = generateTelegramMessage()
 
     try {
-      const response = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+      const response = await fetch(`https://api.telegram.org/bot${activeBotToken}/sendMessage`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          chat_id: chatId,
+          chat_id: activeChatId,
           text: textToSend
         })
       })
@@ -438,6 +403,62 @@ export default function ReportControlPage() {
       const result = await response.json()
       if (result.ok) {
         showToast('success', 'Sent to Telegram!', 'The daily business report has been dispatched.')
+      } else {
+        throw new Error(result.description || 'Telegram API rejected the request.')
+      }
+    } catch (e: any) {
+      showToast('error', 'Telegram Failed', e.message)
+    } finally {
+      setIsSending(false)
+    }
+  }
+
+  // --- 8. 🔥 NEW: SECURE DISPATCH TO TELEGRAM (MONTHLY 3-IMAGE ALBUM) ---
+  async function handleSendMonthlyTelegram() {
+    const activeBotToken = TELEGRAM_CONFIG.botToken
+    const activeChatId = TELEGRAM_CONFIG.chatId
+
+    if (!activeBotToken || !activeChatId) {
+      showToast('error', 'Missing Info', 'Please add your credentials to lib/telegramConfig.ts first.')
+      return
+    }
+
+    if (window.location.origin.includes('localhost')) {
+      showToast('error', 'Localhost Detected', 'Telegram cannot download images from localhost. Please deploy to Vercel to send images!')
+      return
+    }
+
+    setIsSending(true)
+
+    try {
+      const baseUrl = window.location.origin
+      const baseParams = `month=${encodeURIComponent(currentMonthName)}&sales=${month.totalSales}&profit=${month.totalProfit}&expRiel=${month.totalExpRiel}&expUsd=${month.totalExpUsd}`
+
+      const imgSummaryUrl = `${baseUrl}/api/og/monthly-report?card=summary&${baseParams}`
+      const imgOwnersUrl = `${baseUrl}/api/og/monthly-report?card=owners&${baseParams}&pichP=${month.profitByOwner.Pich}&jingP=${month.profitByOwner.Jing}&bothP=${month.profitByOwner.Both}`
+      const imgExpensesUrl = `${baseUrl}/api/og/monthly-report?card=expenses&${baseParams}&topCat=${encodeURIComponent(monthlyInsights.topCat)}&topCatAmt=${monthlyInsights.topCatAmount}`
+
+      const response = await fetch(`https://api.telegram.org/bot${activeBotToken}/sendMediaGroup`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chat_id: activeChatId,
+          media: [
+            {
+              type: 'photo',
+              media: imgSummaryUrl,
+              caption: `📊 *${currentMonthName.toUpperCase()} — EXECUTIVE BUSINESS SUMMARY*`,
+              parse_mode: 'Markdown'
+            },
+            { type: 'photo', media: imgOwnersUrl },
+            { type: 'photo', media: imgExpensesUrl }
+          ]
+        })
+      })
+
+      const result = await response.json()
+      if (result.ok) {
+        showToast('success', 'Album Sent!', 'The 3 monthly scorecard images have been dispatched to Telegram.')
       } else {
         throw new Error(result.description || 'Telegram API rejected the request.')
       }
@@ -458,9 +479,6 @@ export default function ReportControlPage() {
     window.print()
   }
 
-  const { month } = reportMetrics
-  const currentMonthName = new Date().toLocaleDateString('en-GB', { month: 'long', year: 'numeric' })
-
   return (
     <div className="main-wrapper" style={{ display: 'flex', flexDirection: 'column', height: '100dvh', overflow: 'hidden' }}>
       
@@ -478,51 +496,6 @@ export default function ReportControlPage() {
 
       {/* SCROLLING CONTENT AREA BELOW HEADER */}
       <div className="hide-scrollbar" style={{ flex: 1, overflowY: 'auto', paddingBottom: '60px' }}>
-        
-        {/* TELEGRAM CREDENTIALS CARD */}
-        <div className="saas-card no-print" style={{ padding: '20px', marginBottom: '24px' }}>
-          <h3 className="saas-card-title" style={{ marginBottom: '12px' }}>🔐 Telegram Bot Credentials</h3>
-          <p style={{ fontSize: '13px', color: '#64748b', marginBottom: '16px' }}>
-            Enter your Bot Token from @BotFather and your target Chat ID.
-          </p>
-
-          <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap', alignItems: 'flex-end' }}>
-            <div style={{ flex: '1 1 280px' }}>
-              <label style={{ display: 'block', fontSize: '11px', fontWeight: 'bold', color: '#64748b', marginBottom: '6px', textTransform: 'uppercase' }}>
-                Bot API Token
-              </label>
-              <input
-                type="password"
-                placeholder="123456789:ABCdefGHIjklMNO..."
-                value={botToken}
-                onChange={(e) => setBotToken(e.target.value)}
-                className="saas-input"
-              />
-            </div>
-
-            <div style={{ flex: '1 1 180px' }}>
-              <label style={{ display: 'block', fontSize: '11px', fontWeight: 'bold', color: '#64748b', marginBottom: '6px', textTransform: 'uppercase' }}>
-                Telegram Chat ID
-              </label>
-              <input
-                type="text"
-                placeholder="-100123456789 or ChatID"
-                value={chatId}
-                onChange={(e) => setChatId(e.target.value)}
-                className="saas-input"
-              />
-            </div>
-
-            <button
-              onClick={saveCredentials}
-              disabled={isSavingCreds}
-              className="saas-btn saas-btn-primary"
-              style={{ height: '42px', padding: '0 24px', fontWeight: 'bold' }}
-            >
-              {isSavingCreds ? 'Saving...' : 'Save Settings'}
-            </button>
-          </div>
-        </div>
 
         {/* REPORT DISPATCH CONTROLS */}
         <div className="saas-card no-print" style={{ padding: '24px', marginBottom: '24px' }}>
@@ -547,7 +520,8 @@ export default function ReportControlPage() {
               </button>
             </div>
 
-            <div style={{ display: 'flex', gap: '10px' }}>
+            {/* 🔥 UPDATED: DYNAMIC BUTTONS FOR BOTH TABS */}
+            <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
               {activeReportTab === 'daily' ? (
                 <>
                   <button
@@ -567,13 +541,23 @@ export default function ReportControlPage() {
                   </button>
                 </>
               ) : (
-                <button
-                  onClick={handlePrintA4}
-                  className="saas-btn saas-btn-primary"
-                  style={{ background: '#10b981', borderColor: '#059669', color: '#fff', fontWeight: 'bold', padding: '0 24px' }}
-                >
-                  📥 Download A4 PDF / Print
-                </button>
+                <>
+                  <button
+                    onClick={handlePrintA4}
+                    className="saas-btn saas-btn-secondary"
+                    style={{ fontWeight: 'bold' }}
+                  >
+                    📥 Download A4 PDF / Print
+                  </button>
+                  <button
+                    onClick={handleSendMonthlyTelegram}
+                    disabled={isSending || loading}
+                    className="saas-btn saas-btn-primary"
+                    style={{ background: '#0088cc', borderColor: '#0077b5', color: '#fff', fontWeight: 'bold', padding: '0 24px' }}
+                  >
+                    {isSending ? '🖼️ Sending Album...' : '🖼️ Send Monthly Album to Telegram'}
+                  </button>
+                </>
               )}
             </div>
           </div>

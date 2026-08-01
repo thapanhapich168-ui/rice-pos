@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { TELEGRAM_CONFIG } from '@/lib/telegramConfig'
 
-const EXCHANGE_RATE = 4100
+const EXCHANGE_RATE = 4000
 const formatRiel = (val: number) => `${Math.round(val || 0).toLocaleString()}៛`
 const formatUSD = (val: number) => `$${Number(val || 0).toFixed(2)}`
 
