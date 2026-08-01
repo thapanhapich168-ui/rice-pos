@@ -254,15 +254,30 @@ export default function ExpenseDashboard() {
     if (savedDbTabOrder) {
       try { setDbTabOrder(JSON.parse(savedDbTabOrder)); } catch(e){}
     }
+
+    // 🔥 NEW: Listen for background auto-sync so the form clears automatically
+    const handleAutoSynced = () => {
+      setPendingPersonal([createNewExpense()]);
+      setPendingBusiness([createNewExpense()]);
+      fetchDatabase();
+    };
+    window.addEventListener('expense_ledger_synced', handleAutoSynced);
+    return () => window.removeEventListener('expense_ledger_synced', handleAutoSynced);
   }, [])
 
   useEffect(() => {
-    if (isMounted) localStorage.setItem('expense_ledger_personal', JSON.stringify(pendingPersonal));
-  }, [pendingPersonal, isMounted])
+    if (isMounted) {
+      localStorage.setItem('expense_ledger_personal', JSON.stringify(pendingPersonal));
+      localStorage.setItem('expense_ledger_date', expenseDate || new Date().toISOString().split('T')[0]);
+    }
+  }, [pendingPersonal, expenseDate, isMounted])
 
   useEffect(() => {
-    if (isMounted) localStorage.setItem('expense_ledger_business', JSON.stringify(pendingBusiness));
-  }, [pendingBusiness, isMounted])
+    if (isMounted) {
+      localStorage.setItem('expense_ledger_business', JSON.stringify(pendingBusiness));
+      localStorage.setItem('expense_ledger_date', expenseDate || new Date().toISOString().split('T')[0]);
+    }
+  }, [pendingBusiness, expenseDate, isMounted])
 
   useEffect(() => {
     if (isMounted) localStorage.setItem('expense_db_tab_order', JSON.stringify(dbTabOrder));
@@ -375,7 +390,7 @@ export default function ExpenseDashboard() {
           expense_date: expenseDate,
           spender: exp.spender,
           payment_method: combinedMethod,
-          remarks: exp.remarks,                     
+          remarks: exp.remarks,                      
           amount_usd: totalUsd,              
           amount_riel: totalRiel,         
           description: activeTab.toUpperCase(), 

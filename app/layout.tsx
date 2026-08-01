@@ -3,6 +3,7 @@ import './globals.css'
 import Sidebar from '@/components/Sidebar'
 import SplashScreen from '@/components/SplashScreen'
 import { ToastProvider } from '@/components/ToastProvider'
+import AutoSyncHandler from '@/components/AutoSyncHandler' // 🔥 Added Import
 
 export const metadata: Metadata = {
   title: 'Angkor Radiant Rice POS',
@@ -33,6 +34,9 @@ export default function RootLayout({
       <body>
         <ToastProvider>
           <SplashScreen>
+            {/* 🔥 Runs silently on app launch across any page (including /pos) */}
+            <AutoSyncHandler />
+            
             {/* Changed 100dvh to 100% so it perfectly fits inside the pinned body */}
             <div style={{ display: 'flex', width: '100%', height: '100%', overflow: 'hidden' }}>
               
