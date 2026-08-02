@@ -381,9 +381,11 @@ export default function POSPage() {
     const { data: prodData } = await supabase.from('products').select('*').order('id', { ascending: true })
     if (prodData) setProducts(prodData)
     
+    // 🔥 FIXED: Changed .single() to .maybeSingle()
     const { data: setObj } = await supabase.from('app_settings').select('*').eq('setting_key', 'pos_product_order').maybeSingle()
     if (setObj && setObj.setting_value) setProductOrder(setObj.setting_value)
 
+    // 🔥 FIXED: Changed .single() to .maybeSingle()
     const { data: hiddenSet } = await supabase.from('app_settings').select('*').eq('setting_key', 'hidden_retail_ids').maybeSingle()
     if (hiddenSet && hiddenSet.setting_value) setHiddenRetailIds(hiddenSet.setting_value)
   }
@@ -984,10 +986,10 @@ export default function POSPage() {
         if (salesErr) throw new Error(`Failed to save to Sales table: ${salesErr.message}`);
 
         for (const [prodIdStr, newStock] of Object.entries(stockUpdates)) {
-            await supabase.from('products').update({ stock: newStock }).eq('id', Number(prodIdStr));
+           await supabase.from('products').update({ stock: newStock }).eq('id', Number(prodIdStr));
         }
         for (const [batchIdStr, newRemaining] of Object.entries(fifoUpdates)) {
-            await supabase.from('inventory_batches').update({ remaining_qty: newRemaining }).eq('id', Number(batchIdStr));
+           await supabase.from('inventory_batches').update({ remaining_qty: newRemaining }).eq('id', Number(batchIdStr));
         }
       }
 
@@ -1580,7 +1582,7 @@ export default function POSPage() {
       )}
 
       {isMobileCartOpen && (
-        <div className="mobile-cart-overlay" style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.4)', zIndex: 9999, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}>
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.4)', zIndex: 9999, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}>
           <div style={{ flex: 1 }} onClick={() => setIsMobileCartOpen(false)}></div>
           
           <div style={{ width: '100%', maxHeight: '85dvh', backgroundColor: '#ffffff', borderTopLeftRadius: '20px', borderTopRightRadius: '20px', display: 'flex', flexDirection: 'column', position: 'relative', boxShadow: '0 -10px 25px rgba(0,0,0,0.1)' }}>
@@ -2009,7 +2011,7 @@ export default function POSPage() {
         </div>
       </Modal>
 
-      {/* --- GLOBAL CSS (Includes forceful override for Mobile Tabs & Centered Modals) --- */}
+      {/* --- GLOBAL CSS (Includes forceful override for Mobile Tabs) --- */}
       <style jsx global>{`
         input, select, button, textarea {
           font-family: inherit;
@@ -2018,26 +2020,6 @@ export default function POSPage() {
         
         body {
           font-variant-numeric: tabular-nums lining-nums;
-        }
-
-        /* 🔥 FORCE ALL MODALS TO BE DEAD-CENTERED IN THE MIDDLE OF THE SCREEN 🔥 */
-        div[role="dialog"],
-        div[class*="modal"]:not(.mobile-cart-overlay):not(.mobile-fab),
-        div[class*="Modal"]:not(.mobile-cart-overlay):not(.mobile-fab),
-        div[style*="position: fixed"][style*="z-index"]:not(.mobile-cart-overlay):not(.mobile-fab):not(#invoice-capture-area) {
-          position: fixed !important;
-          top: 0 !important;
-          left: 0 !important;
-          right: 0 !important;
-          bottom: 0 !important;
-          width: 100vw !important;
-          height: 100dvh !important;
-          display: flex !important;
-          align-items: center !important;
-          justify-content: center !important;
-          padding: 16px !important;
-          box-sizing: border-box !important;
-          margin: 0 !important;
         }
 
         /* 🔥 BULLETPROOF GLOBAL OVERRIDE FOR MOBILE TABS 🔥 */
