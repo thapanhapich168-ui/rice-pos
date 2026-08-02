@@ -55,7 +55,7 @@ const MAIN_KEYWORDS = ['មិញ', 'ខុន', 'ខ្ញី', 'ម្លិ�
 
 const t: Record<'en' | 'kh', any> = {
   en: {
-    title: "Point of Sale",
+    title: "Point of Sal",
     retail: "🛍️ Retail (1kg)",
     wholesale: "🌾 Wholesale (50kg)",
     searchPlaceholder: "🔍 Search products...",
