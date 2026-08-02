@@ -145,9 +145,6 @@ export default function POSPage() {
   const [mobileQty, setMobileQty] = useState<number | ''>('')
   const [mobileName, setMobileName] = useState<string>('')
 
-  // 🔥 Fix 1: Tracks when user is typing inside a modal so it pushes to the top for the keyboard
-  const [isModalInputFocused, setIsModalInputFocused] = useState(false)
-
   const [exchangeModal, setExchangeModal] = useState<{ isOpen: boolean, product: Product | null, consumedKg: string | number }>({
     isOpen: false, product: null, consumedKg: ''
   })
@@ -221,7 +218,7 @@ export default function POSPage() {
     }
   }, [showInvoicePreview]);
 
-  // 🔥 Fix 1: Resets iOS Safari viewport scroll whenever any popup modal opens so it is dead-center
+  // Resets iOS Safari viewport scroll whenever any popup modal opens so it is dead-center
   useEffect(() => {
     const isAnyModalOpen = !!saleSummary || showInvoicePreview || !!selectedMobileProduct || exchangeModal.isOpen || autoOpenModal.isOpen || isCreateCustomerModalOpen;
     if (isAnyModalOpen) {
@@ -395,11 +392,9 @@ export default function POSPage() {
     const { data: prodData } = await supabase.from('products').select('*').order('id', { ascending: true })
     if (prodData) setProducts(prodData)
     
-    // 🔥 FIXED: Changed .single() to .maybeSingle()
     const { data: setObj } = await supabase.from('app_settings').select('*').eq('setting_key', 'pos_product_order').maybeSingle()
     if (setObj && setObj.setting_value) setProductOrder(setObj.setting_value)
 
-    // 🔥 FIXED: Changed .single() to .maybeSingle()
     const { data: hiddenSet } = await supabase.from('app_settings').select('*').eq('setting_key', 'hidden_retail_ids').maybeSingle()
     if (hiddenSet && hiddenSet.setting_value) setHiddenRetailIds(hiddenSet.setting_value)
   }
@@ -1256,8 +1251,7 @@ export default function POSPage() {
   }
 
   return (
-    // 🔥 Fix 1: Adds dynamic keyboard-push class whenever any modal input is focused
-    <div className={isModalInputFocused ? 'modal-keyboard-push' : ''} style={{ display: 'flex', width: '100%', height: '100dvh', overflow: 'hidden', backgroundColor: '#ffffff', boxSizing: 'border-box' }}>
+    <div style={{ display: 'flex', width: '100%', height: '100dvh', overflow: 'hidden', backgroundColor: '#ffffff', boxSizing: 'border-box' }}>
       
       {/* SELECTION ENGINE VIEW GRID PANEL */}
       <div className="hide-scrollbar" style={{ flex: 1, height: '100%', overflowY: 'auto', backgroundColor: '#f8fafc', minWidth: 0, WebkitOverflowScrolling: 'touch' }}>
@@ -1712,8 +1706,6 @@ export default function POSPage() {
             type="text" 
             value={newCustomerForm.name} 
             onChange={(e) => setNewCustomerForm({...newCustomerForm, name: e.target.value})} 
-            onFocus={() => setIsModalInputFocused(true)}
-            onBlur={() => setIsModalInputFocused(false)}
             className="saas-input" 
           />
         </div>
@@ -1746,8 +1738,6 @@ export default function POSPage() {
             type="text" 
             value={newCustomerForm.location} 
             onChange={(e) => setNewCustomerForm({...newCustomerForm, location: e.target.value})} 
-            onFocus={() => setIsModalInputFocused(true)}
-            onBlur={() => setIsModalInputFocused(false)}
             className="saas-input" 
           />
         </div>
@@ -1758,8 +1748,6 @@ export default function POSPage() {
             type="text" 
             value={newCustomerForm.phone} 
             onChange={(e) => setNewCustomerForm({...newCustomerForm, phone: e.target.value})} 
-            onFocus={() => setIsModalInputFocused(true)}
-            onBlur={() => setIsModalInputFocused(false)}
             className="saas-input" 
           />
         </div>
@@ -1779,14 +1767,12 @@ export default function POSPage() {
 
         <div style={{ marginBottom: '24px' }}>
           <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '8px' }}>How many kg were consumed?</label>
-          {/* 🔥 Fix 2: Tapping clears consumedKg to empty immediately */}
           <CurrencyInput
             autoFocus
             placeholder="e.g. 15"
             value={exchangeModal.consumedKg}
             onChange={(v: any) => setExchangeModal({ ...exchangeModal, consumedKg: v })}
-            onFocus={() => { setExchangeModal({ ...exchangeModal, consumedKg: '' }); setIsModalInputFocused(true); }}
-            onBlur={() => setIsModalInputFocused(false)}
+            onFocus={() => setExchangeModal({ ...exchangeModal, consumedKg: '' })}
             className="saas-input"
           />
           <p style={{ fontSize: '11px', color: '#94a3b8', marginTop: '6px', lineHeight: 1.4 }}>
@@ -1809,31 +1795,25 @@ export default function POSPage() {
             type="text" 
             value={mobileName} 
             onChange={(e) => setMobileName(e.target.value)} 
-            onFocus={() => setIsModalInputFocused(true)}
-            onBlur={() => setIsModalInputFocused(false)}
             className="saas-input" 
           />
         </div>
         <div style={{ display: 'flex', gap: '12px', marginBottom: '20px' }}>
           <div style={{ flex: 1 }}>
             <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '8px' }}>Quantity</label>
-            {/* 🔥 Fix 2: Tapping quantity clears box to empty + triggers keyboard top-push */}
             <CurrencyInput 
               value={mobileQty} 
               onChange={(v: any) => setMobileQty(v)} 
-              onFocus={() => { setMobileQty(''); setIsModalInputFocused(true); }}
-              onBlur={() => setIsModalInputFocused(false)}
+              onFocus={() => setMobileQty('')}
               className="saas-input" 
             />
           </div>
           <div style={{ flex: 1 }}>
             <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '8px' }}>Price (៛)</label>
-            {/* 🔥 Fix 2: Tapping price clears box to empty + triggers keyboard top-push */}
             <CurrencyInput 
               value={mobilePrice} 
               onChange={(v: any) => setMobilePrice(v)} 
-              onFocus={() => { setMobilePrice(''); setIsModalInputFocused(true); }}
-              onBlur={() => setIsModalInputFocused(false)}
+              onFocus={() => setMobilePrice('')}
               className="saas-input" 
             />
           </div>
@@ -2081,7 +2061,7 @@ export default function POSPage() {
           font-variant-numeric: tabular-nums lining-nums;
         }
 
-        /* 🔥 1. FORCE ALL MODALS TO CENTER IN THE MIDDLE OF THE SCREEN BY DEFAULT 🔥 */
+        /* 🔥 FORCE ALL MODALS TO ALWAYS CENTER IN THE MIDDLE & SIT ABOVE BURGER MENU (Z-INDEX 99999) 🔥 */
         div[role="dialog"],
         div[class*="modal"],
         div[class*="Modal"],
@@ -2089,27 +2069,13 @@ export default function POSPage() {
           display: flex !important;
           align-items: center !important;
           justify-content: center !important;
-          padding: 16px !important;
+          padding: 20px !important;
           box-sizing: border-box !important;
           top: 0 !important;
           left: 0 !important;
           right: 0 !important;
           bottom: 0 !important;
-        }
-
-        /* 🔥 2. WHEN TYPING IN A MODAL (KEYBOARD OPEN), PUSH MODAL TO THE TOP SO KEYBOARD DOESN'T HIDE INPUTS 🔥 */
-        @media (max-width: 1023px) {
-          .modal-keyboard-push div[role="dialog"],
-          .modal-keyboard-push div[class*="modal"],
-          .modal-keyboard-push div[class*="Modal"],
-          .modal-keyboard-push div[style*="position: fixed"][style*="z-index"]:not(.mobile-cart-overlay):not(.mobile-fab):not(#invoice-capture-area),
-          div[role="dialog"]:has(input:focus),
-          div[class*="modal"]:has(input:focus),
-          div[class*="Modal"]:has(input:focus),
-          div[style*="position: fixed"][style*="z-index"]:not(.mobile-cart-overlay):not(.mobile-fab):not(#invoice-capture-area):has(input:focus) {
-            align-items: flex-start !important;
-            padding-top: max(24px, env(safe-area-inset-top, 24px)) !important;
-          }
+          z-index: 99999 !important;
         }
 
         /* 🔥 BULLETPROOF GLOBAL OVERRIDE FOR MOBILE TABS 🔥 */
