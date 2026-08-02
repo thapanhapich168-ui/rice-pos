@@ -159,12 +159,6 @@ export default function POSPage() {
       modalFocusTimerRef.current = null;
     }
     setIsModalInputFocused(true);
-    
-    // 🔥 Wait 300ms for iOS keyboard slide animation to finish before resetting scroll
-    setTimeout(() => {
-      window.scrollTo(0, 0);
-    }, 300);
-
     if (callback) callback();
   };
 
@@ -2189,35 +2183,49 @@ export default function POSPage() {
           }
         }
 
-        /* 🔥 2. FORCE ALL MODALS TO TRUE FULL-SCREEN CENTER BY DEFAULT 🔥 */
-        div[role="dialog"],
-        div[class*="modal"],
-        div[class*="Modal"],
-        div[style*="position: fixed"][style*="z-index"]:not(.mobile-cart-overlay):not(.mobile-fab):not(#invoice-capture-area) {
-          position: fixed !important;
-          top: 0 !important;
-          left: 0 !important;
-          right: 0 !important;
-          bottom: 0 !important;
-          width: 100vw !important;
-          height: 100dvh !important;
-          display: flex !important;
-          align-items: center !important;
-          justify-content: center !important;
-          padding: 16px !important;
-          box-sizing: border-box !important;
-          margin: 0 !important;
+        /* 🔥 2. FORCE ALL MODALS ON MOBILE TO UPPER-TOP BY DEFAULT TO STOP BOUNCING 🔥 */
+        @media (max-width: 1023px) {
+          div[role="dialog"],
+          div[class*="modal"],
+          div[class*="Modal"],
+          div[style*="position: fixed"][style*="z-index"]:not(.mobile-cart-overlay):not(.mobile-fab):not(#invoice-capture-area) {
+            position: fixed !important;
+            top: 0 !important;
+            left: 0 !important;
+            right: 0 !important;
+            bottom: 0 !important;
+            width: 100vw !important;
+            height: 100dvh !important;
+            display: flex !important;
+            align-items: flex-start !important;
+            justify-content: center !important;
+            padding: 16px !important;
+            padding-top: 65px !important;
+            box-sizing: border-box !important;
+            margin: 0 !important;
+            overscroll-behavior: none !important;
+          }
         }
 
-        /* 🔥 3. WHEN TYPING, MOVES MODAL SAFELY BELOW BURGER ICON WITHOUT JERKING 🔥 */
-        @media (max-width: 1023px) {
-          .modal-keyboard-push div[role="dialog"],
-          .modal-keyboard-push div[class*="modal"],
-          .modal-keyboard-push div[class*="Modal"],
-          .modal-keyboard-push div[style*="position: fixed"][style*="z-index"]:not(.mobile-cart-overlay):not(.mobile-fab):not(#invoice-capture-area) {
-            align-items: flex-start !important;
-            padding-top: 45px !important;
-            overscroll-behavior: none !important;
+        /* DEFAULT MODAL CENTER ON DESKTOP */
+        @media (min-width: 1024px) {
+          div[role="dialog"],
+          div[class*="modal"],
+          div[class*="Modal"],
+          div[style*="position: fixed"][style*="z-index"]:not(.mobile-cart-overlay):not(.mobile-fab):not(#invoice-capture-area) {
+            position: fixed !important;
+            top: 0 !important;
+            left: 0 !important;
+            right: 0 !important;
+            bottom: 0 !important;
+            width: 100vw !important;
+            height: 100dvh !important;
+            display: flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            padding: 16px !important;
+            box-sizing: border-box !important;
+            margin: 0 !important;
           }
         }
 
