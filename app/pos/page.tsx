@@ -149,7 +149,7 @@ export default function POSPage() {
   const mobileQtyRef = useRef<HTMLInputElement>(null);
   const mobilePriceRef = useRef<HTMLInputElement>(null);
 
-  // 🔥 Debounced Keyboard State (Stops modal from jumping between Qty -> Price!)
+  // 🔥 Smart Keyboard State: Only fires scrollTo(0,0) on INITIAL focus so Price won't drop downward!
   const [isModalInputFocused, setIsModalInputFocused] = useState(false)
   const modalFocusTimerRef = useRef<any>(null)
 
@@ -158,13 +158,12 @@ export default function POSPage() {
       clearTimeout(modalFocusTimerRef.current);
       modalFocusTimerRef.current = null;
     }
-    setIsModalInputFocused(true);
-    
-    // 🔥 Prevent iOS Safari from jerking window scroll when switching inputs
-    requestAnimationFrame(() => {
-      window.scrollTo(0, 0);
-    });
-
+    if (!isModalInputFocused) {
+      setIsModalInputFocused(true);
+      requestAnimationFrame(() => {
+        window.scrollTo(0, 0);
+      });
+    }
     if (callback) callback();
   };
 
@@ -252,8 +251,7 @@ export default function POSPage() {
     }
   }, [showInvoicePreview]);
 
-  // 🔥 1. ABSOLUTE IOS BACKGROUND SCROLL LOCK
-  // This freezes the background page so Safari CANNOT push the hamburger icon or header upward!
+  // 🔥 ABSOLUTE IOS BACKGROUND SCROLL LOCK
   useEffect(() => {
     const isAnyModalOpen = !!saleSummary || showInvoicePreview || !!selectedMobileProduct || exchangeModal.isOpen || autoOpenModal.isOpen || isCreateCustomerModalOpen || outOfStockAlert.isOpen;
     if (isAnyModalOpen) {
@@ -1884,35 +1882,31 @@ export default function POSPage() {
         </div>
       </Modal>
 
-      {/* CLEAN & BALANCED MOBILE ITEM POPUP (REGULAR WEIGHT, MINIMAL COLORS) */}
+      {/* 🔥 ULTRA-COMPACT VERTICAL MOBILE PRODUCT ADD POPUP (MINIMIZED HEIGHT) */}
       <Modal isOpen={!!selectedMobileProduct} onClose={() => setSelectedMobileProduct(null)} title={currentT.mobileModalTitle} icon="✏️" maxWidth="400px">
-        
-        {/* Product Name Card */}
-        <div style={{ marginBottom: '16px' }}>
-          <label style={{ display: 'block', fontSize: '12px', color: '#64748b', marginBottom: '6px', fontWeight: 'normal' }}>
+        <div style={{ marginBottom: '10px' }}>
+          <label style={{ display: 'block', fontSize: '11px', color: '#64748b', marginBottom: '3px', fontWeight: 'normal' }}>
             Product Name
           </label>
-          <div style={{ display: 'flex', alignItems: 'center', background: '#f8fafc', border: '1px solid #cbd5e1', borderRadius: '8px', padding: '4px 12px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', background: '#f8fafc', border: '1px solid #cbd5e1', borderRadius: '6px', padding: '2px 10px' }}>
             <input 
               type="text" 
               value={mobileName} 
               onChange={(e) => setMobileName(e.target.value)} 
               onFocus={() => handleModalFocus()}
               onBlur={() => handleModalBlur()}
-              style={{ flex: 1, border: 'none', background: 'transparent', outline: 'none', padding: '8px 0', fontSize: '15px', color: '#334155', fontWeight: 'normal' }}
+              style={{ flex: 1, border: 'none', background: 'transparent', outline: 'none', padding: '6px 0', fontSize: '14px', color: '#334155', fontWeight: 'normal' }}
             />
           </div>
         </div>
 
-        {/* Vertical Stacked Inputs */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', marginBottom: '24px' }}>
-          
-          {/* Quantity Input Box */}
+        {/* Vertical Stacked Inputs ("Up & Below"), Minimized Height */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '16px' }}>
           <div style={{ width: '100%' }}>
-            <label style={{ display: 'block', fontSize: '12px', color: '#64748b', marginBottom: '6px', fontWeight: 'normal' }}>
+            <label style={{ display: 'block', fontSize: '11px', color: '#64748b', marginBottom: '3px', fontWeight: 'normal' }}>
               Quantity
             </label>
-            <div style={{ display: 'flex', alignItems: 'center', border: '1px solid #cbd5e1', borderRadius: '8px', padding: '4px 12px', background: '#ffffff' }}>
+            <div style={{ display: 'flex', alignItems: 'center', border: '1px solid #cbd5e1', borderRadius: '6px', padding: '2px 10px', background: '#ffffff' }}>
               <input
                 ref={mobileQtyRef}
                 type="text"
@@ -1927,20 +1921,19 @@ export default function POSPage() {
                 onKeyDown={handleMobileQtyKeyDown}
                 onFocus={() => handleModalFocus(() => setMobileQty(''))}
                 onBlur={() => handleModalBlur()}
-                style={{ flex: 1, border: 'none', background: 'transparent', outline: 'none', padding: '8px 0', fontSize: '16px', color: '#334155', fontWeight: 'normal' }}
+                style={{ flex: 1, border: 'none', background: 'transparent', outline: 'none', padding: '6px 0', fontSize: '15px', color: '#334155', fontWeight: 'normal' }}
               />
-              <span style={{ color: '#64748b', fontSize: '13px', paddingLeft: '8px', fontWeight: 'normal' }}>
+              <span style={{ color: '#64748b', fontSize: '12px', paddingLeft: '8px', fontWeight: 'normal' }}>
                 kg / bag
               </span>
             </div>
           </div>
 
-          {/* Price Input Box */}
           <div style={{ width: '100%' }}>
-            <label style={{ display: 'block', fontSize: '12px', color: '#64748b', marginBottom: '6px', fontWeight: 'normal' }}>
+            <label style={{ display: 'block', fontSize: '11px', color: '#64748b', marginBottom: '3px', fontWeight: 'normal' }}>
               Unit Price
             </label>
-            <div style={{ display: 'flex', alignItems: 'center', border: '1px solid #cbd5e1', borderRadius: '8px', padding: '4px 12px', background: '#ffffff' }}>
+            <div style={{ display: 'flex', alignItems: 'center', border: '1px solid #cbd5e1', borderRadius: '6px', padding: '2px 10px', background: '#ffffff' }}>
               <input
                 ref={mobilePriceRef}
                 type="text"
@@ -1954,34 +1947,32 @@ export default function POSPage() {
                 onKeyDown={handleMobilePriceKeyDown}
                 onFocus={() => handleModalFocus(() => setMobilePrice(''))}
                 onBlur={() => handleModalBlur()}
-                style={{ flex: 1, border: 'none', background: 'transparent', outline: 'none', padding: '8px 0', fontSize: '16px', color: '#334155', fontWeight: 'normal' }}
+                style={{ flex: 1, border: 'none', background: 'transparent', outline: 'none', padding: '6px 0', fontSize: '15px', color: '#334155', fontWeight: 'normal' }}
               />
-              <span style={{ color: '#64748b', fontSize: '13px', paddingLeft: '8px', fontWeight: 'normal' }}>
+              <span style={{ color: '#64748b', fontSize: '12px', paddingLeft: '8px', fontWeight: 'normal' }}>
                 ៛ Riel
               </span>
             </div>
           </div>
-
         </div>
 
         {/* Action Buttons */}
-        <div style={{ display: 'flex', gap: '10px' }}>
+        <div style={{ display: 'flex', gap: '8px' }}>
           <button 
             onClick={() => setSelectedMobileProduct(null)} 
             className="saas-btn saas-btn-secondary" 
-            style={{ flex: 1, padding: '12px', borderRadius: '8px', fontWeight: 'normal', fontSize: '15px' }}
+            style={{ flex: 1, padding: '10px', borderRadius: '6px', fontWeight: 'normal', fontSize: '14px' }}
           >
             {currentT.cancel}
           </button>
           <button 
             onClick={handleAddMobileProductToCart} 
             className="saas-btn saas-btn-primary" 
-            style={{ flex: 2, padding: '12px', borderRadius: '8px', fontWeight: 'normal', fontSize: '15px' }}
+            style={{ flex: 2, padding: '10px', borderRadius: '6px', fontWeight: 'normal', fontSize: '14px' }}
           >
             + {currentT.add}
           </button>
         </div>
-
       </Modal>
 
       {/* 💰 SALE SUMMARY MODAL */}
@@ -2248,14 +2239,14 @@ export default function POSPage() {
           margin: 0 !important;
         }
 
-        /* 🔥 3. WHEN TYPING, MOVES MODAL SAFELY BELOW BURGER ICON WITHOUT JERKING 🔥 */
+        /* 🔥 3. LOCKED 50px TOP PUSH — SAFELY PLACES BOTH VERTICAL INPUTS ABOVE KEYBOARD 🔥 */
         @media (max-width: 1023px) {
           .modal-keyboard-push div[role="dialog"],
           .modal-keyboard-push div[class*="modal"],
           .modal-keyboard-push div[class*="Modal"],
           .modal-keyboard-push div[style*="position: fixed"][style*="z-index"]:not(.mobile-cart-overlay):not(.mobile-fab):not(#invoice-capture-area) {
             align-items: flex-start !important;
-            padding-top: 90px !important;
+            padding-top: 50px !important;
             overscroll-behavior: none !important;
           }
         }
