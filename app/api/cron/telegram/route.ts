@@ -14,42 +14,81 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    // 2. Initialize Supabase Admin Client (still needed to fetch invoice & expense data)
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
-    const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    // 2. Validate Supabase Environment Variables (Prevents instant 500 crashes)
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
+    const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+
+    if (!supabaseUrl || !supabaseKey) {
+      return NextResponse.json(
+        { error: 'Missing NEXT_PUBLIC_SUPABASE_URL or NEXT_PUBLIC_SUPABASE_ANON_KEY in Vercel Environment Variables' },
+        { status: 500 }
+      )
+    }
+
     const supabase = createClient(supabaseUrl, supabaseKey)
 
-    // 3. Load Telegram Credentials directly from your imported config
+    // 3. Load Telegram Credentials directly from your config
     const botToken = TELEGRAM_CONFIG.botToken
     const chatId = TELEGRAM_CONFIG.chatId
     const sendDaily = TELEGRAM_CONFIG.autoSendDaily
     const sendMonthly = TELEGRAM_CONFIG.autoSendMonthly
 
     if (!botToken || !chatId) {
-      return NextResponse.json({ error: 'Missing Telegram credentials in lib/telegramConfig.ts' }, { status: 400 })
+      return NextResponse.json(
+        { error: 'Missing Telegram credentials in lib/telegramConfig.ts' },
+        { status: 400 }
+      )
     }
 
-    // 4. Determine Cambodia Date & Check if today is Last Day of the Month
-    const nowCambodia = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Phnom_Penh" }))
-    const todayStr = nowCambodia.toISOString().split('T')[0]
-    
-    // Tomorrow is day 1 of the next month if today is the last day
-    const tomorrowCambodia = new Date(nowCambodia)
-    tomorrowCambodia.setDate(nowCambodia.getDate() + 1)
-    const isLastDayOfMonth = tomorrowCambodia.getDate() === 1
+    // 4. 🔥 BULLETPROOF CAMBODIA DATE PARSING (No "Invalid Date" or RangeError crashes)
+    const now = new Date()
+
+    // Safely get Cambodia today string as "YYYY-MM-DD"
+    const todayStr = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Phnom_Penh',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit'
+    }).format(now)
+
+    // Safely get current Cambodia month name (e.g., "August 2026")
+    const currentMonthName = new Intl.DateTimeFormat('en-GB', {
+      timeZone: 'Asia/Phnom_Penh',
+      month: 'long',
+      year: 'numeric'
+    }).format(now)
+
+    // Check if tomorrow in Cambodia is Day 1 (to see if today is the Last Day of Month)
+    const tomorrowDate = new Date(now.getTime() + 86400000)
+    const tomorrowDayCambodia = Number(
+      new Intl.DateTimeFormat('en-US', {
+        timeZone: 'Asia/Phnom_Penh',
+        day: 'numeric'
+      }).format(tomorrowDate)
+    )
+    const isLastDayOfMonth = tomorrowDayCambodia === 1
+
+    // Construct start of month in Cambodia timezone safely (YYYY-MM-01T00:00:00+07:00)
+    const [yearStr, monthStr] = todayStr.split('-')
+    const startOfMonth = `${yearStr}-${monthStr}-01T00:00:00+07:00`
 
     // 5. Fetch Data from the start of the current month
-    const startOfMonth = new Date(nowCambodia.getFullYear(), nowCambodia.getMonth(), 1).toISOString()
-
     const [
-      { data: invData },
-      { data: retData },
-      { data: expData }
+      { data: invData, error: invError },
+      { data: retData, error: retError },
+      { data: expData, error: expError }
     ] = await Promise.all([
       supabase.from('invoice_summaries').select('*').gte('created_at', startOfMonth),
       supabase.from('retail_sales').select('*').gte('created_at', startOfMonth),
       supabase.from('expenses').select('*').gte('created_at', startOfMonth)
     ])
+
+    if (invError || retError || expError) {
+      return NextResponse.json(
+        { error: 'Database query failed', details: { invError, retError, expError } },
+        { status: 500 }
+      )
+    }
 
     const invoices = invData || []
     const retailSales = retData || []
@@ -152,17 +191,20 @@ export async function GET(request: Request) {
 🔵 Jing       \`${formatRiel(today.expenseBySpender.Jing.riel)} / ${formatUSD(today.expenseBySpender.Jing.usd)}\`
 🟡 Both       \`${formatRiel(today.expenseBySpender.Both.riel)} / ${formatUSD(today.expenseBySpender.Both.usd)}\``
 
-      await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+      const dailyRes = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ chat_id: chatId, text: dailyText, parse_mode: 'Markdown' })
       })
+
+      if (!dailyRes.ok) {
+        const errJson = await dailyRes.json()
+        console.error('Telegram Daily Send Error:', errJson)
+      }
     }
 
     // --- 8. DISPATCH MONTHLY REPORT (ALBUM OF 3 IMAGES) ON LAST DAY OF MONTH AT 7:00 PM ---
     if (isLastDayOfMonth && sendMonthly) {
-      const currentMonthName = nowCambodia.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' })
-      
       let topCat = 'None'
       let topCatAmount = 0
       Object.entries(month.categoryBreakdown).forEach(([cat, val]) => {
@@ -173,7 +215,6 @@ export async function GET(request: Request) {
         }
       })
 
-      // Ensure proper base URL for Vercel or local testing
       const baseUrl = process.env.NEXT_PUBLIC_SITE_URL || 
         (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000')
 
@@ -183,7 +224,7 @@ export async function GET(request: Request) {
       const imgOwnersUrl = `${baseUrl}/api/og/monthly-report?card=owners&${baseParams}&pichP=${month.profitByOwner.Pich}&jingP=${month.profitByOwner.Jing}&bothP=${month.profitByOwner.Both}`
       const imgExpensesUrl = `${baseUrl}/api/og/monthly-report?card=expenses&${baseParams}&topCat=${encodeURIComponent(topCat)}&topCatAmt=${topCatAmount}`
 
-      await fetch(`https://api.telegram.org/bot${botToken}/sendMediaGroup`, {
+      const monthlyRes = await fetch(`https://api.telegram.org/bot${botToken}/sendMediaGroup`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -206,15 +247,22 @@ export async function GET(request: Request) {
           ]
         })
       })
+
+      if (!monthlyRes.ok) {
+        const errJson = await monthlyRes.json()
+        console.error('Telegram Monthly Album Send Error:', errJson)
+      }
     }
 
     return NextResponse.json({
       success: true,
+      todayStr,
+      isLastDayOfMonth,
       dailySent: sendDaily,
       monthlySent: isLastDayOfMonth && sendMonthly
     })
   } catch (error: any) {
-    console.error('Telegram Cron Job Error:', error)
-    return NextResponse.json({ error: error.message }, { status: 500 })
+    console.error('Telegram Cron Job Uncaught Error:', error)
+    return NextResponse.json({ error: error.message || 'Internal Server Error' }, { status: 500 })
   }
 }
