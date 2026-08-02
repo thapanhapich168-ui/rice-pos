@@ -149,7 +149,7 @@ export default function POSPage() {
   const mobileQtyRef = useRef<HTMLInputElement>(null);
   const mobilePriceRef = useRef<HTMLInputElement>(null);
 
-  // 🔥 Safari Debounced Keyboard State (No scrollTo jerk when switching Qty -> Price!)
+  // 🔥 Debounced Keyboard State (Stops modal from jumping between Qty -> Price!)
   const [isModalInputFocused, setIsModalInputFocused] = useState(false)
   const modalFocusTimerRef = useRef<any>(null)
 
@@ -159,13 +159,19 @@ export default function POSPage() {
       modalFocusTimerRef.current = null;
     }
     setIsModalInputFocused(true);
+    
+    // 🔥 Prevent iOS Safari from jerking window scroll when switching inputs
+    requestAnimationFrame(() => {
+      window.scrollTo(0, 0);
+    });
+
     if (callback) callback();
   };
 
   const handleModalBlur = () => {
     modalFocusTimerRef.current = setTimeout(() => {
       setIsModalInputFocused(false);
-    }, 150);
+    }, 250);
   };
 
   // 🔥 Dedicated Centered Popup Modal for Out of Stock Warnings
@@ -246,14 +252,28 @@ export default function POSPage() {
     }
   }, [showInvoicePreview]);
 
-  // 🔥 Resets iOS Safari viewport scroll whenever any popup modal opens so it is dead-center
+  // 🔥 1. ABSOLUTE IOS BACKGROUND SCROLL LOCK
+  // This freezes the background page so Safari CANNOT push the hamburger icon or header upward!
   useEffect(() => {
     const isAnyModalOpen = !!saleSummary || showInvoicePreview || !!selectedMobileProduct || exchangeModal.isOpen || autoOpenModal.isOpen || isCreateCustomerModalOpen || outOfStockAlert.isOpen;
     if (isAnyModalOpen) {
-      if (document.activeElement instanceof HTMLElement) {
-        document.activeElement.blur();
-      }
-      window.scrollTo(0, 0);
+      const originalOverflow = document.body.style.overflow;
+      const originalPosition = document.body.style.position;
+      const originalTop = document.body.style.top;
+      const originalWidth = document.body.style.width;
+
+      document.body.style.overflow = 'hidden';
+      document.body.style.position = 'fixed';
+      document.body.style.top = '0px';
+      document.body.style.width = '100%';
+
+      return () => {
+        document.body.style.overflow = originalOverflow;
+        document.body.style.position = originalPosition;
+        document.body.style.top = originalTop;
+        document.body.style.width = originalWidth;
+        window.scrollTo(0, 0);
+      };
     }
   }, [saleSummary, showInvoicePreview, selectedMobileProduct, exchangeModal.isOpen, autoOpenModal.isOpen, isCreateCustomerModalOpen, outOfStockAlert.isOpen]);
 
@@ -775,7 +795,6 @@ export default function POSPage() {
                 const bagsNeeded = Math.ceil(Math.abs(finalStock) / 50);
                 itemsNeedingBags.push({ ...p, bags_needed: bagsNeeded });
             } else if (p && p.weight < 50 && !p.linked_wholesale_id) {
-                // 🔥 Replaced side-toast with Centered Popup Modal
                 setOutOfStockAlert({
                   isOpen: true,
                   title: 'Out of Stock 📦',
@@ -783,7 +802,6 @@ export default function POSPage() {
                 });
                 return;
             } else if (p && p.weight >= 50) {
-                // 🔥 Replaced side-toast with Centered Popup Modal
                 setOutOfStockAlert({
                   isOpen: true,
                   title: 'Out of Stock 📦',
@@ -798,7 +816,6 @@ export default function POSPage() {
         for (const p of itemsNeedingBags) {
             const wProd = products.find(w => w.id === p.linked_wholesale_id);
             if (!wProd || wProd.stock < p.bags_needed) {
-                // 🔥 Replaced side-toast with Centered Popup Modal
                 setOutOfStockAlert({
                   isOpen: true,
                   title: 'Out of Stock 📦',
@@ -1310,8 +1327,7 @@ export default function POSPage() {
   }
 
   return (
-    // 🔥 Added 'mobile-item-active' when item card is clicked so it starts at 105px immediately!
-    <div className={`${isModalInputFocused ? 'modal-keyboard-push' : ''} ${selectedMobileProduct ? 'mobile-item-active' : ''}`.trim()} style={{ display: 'flex', width: '100%', height: '100dvh', overflow: 'hidden', backgroundColor: '#ffffff', boxSizing: 'border-box' }}>
+    <div className={isModalInputFocused ? 'modal-keyboard-push' : ''} style={{ display: 'flex', width: '100%', height: '100dvh', overflow: 'hidden', backgroundColor: '#ffffff', boxSizing: 'border-box' }}>
       
       {/* SELECTION ENGINE VIEW GRID PANEL */}
       <div className="hide-scrollbar" style={{ flex: 1, height: '100%', overflowY: 'auto', backgroundColor: '#f8fafc', minWidth: 0, WebkitOverflowScrolling: 'touch' }}>
@@ -2193,19 +2209,14 @@ export default function POSPage() {
           margin: 0 !important;
         }
 
-        /* 🔥 3. LOCKS ITEM POPUP AT 105px IMMEDIATELY (STOPS ALL JUMPING BETWEEN QTY & PRICE) 🔥 */
+        /* 🔥 3. WHEN TYPING, MOVES MODAL SAFELY BELOW BURGER ICON WITHOUT JERKING 🔥 */
         @media (max-width: 1023px) {
-          .mobile-item-active div[role="dialog"],
-          .mobile-item-active div[class*="modal"],
-          .mobile-item-active div[class*="Modal"],
           .modal-keyboard-push div[role="dialog"],
           .modal-keyboard-push div[class*="modal"],
           .modal-keyboard-push div[class*="Modal"],
-          div[role="dialog"]:has(input:focus),
-          div[class*="modal"]:has(input:focus),
-          div[class*="Modal"]:has(input:focus) {
+          .modal-keyboard-push div[style*="position: fixed"][style*="z-index"]:not(.mobile-cart-overlay):not(.mobile-fab):not(#invoice-capture-area) {
             align-items: flex-start !important;
-            padding-top: 105px !important; /* Perfectly below hamburger menu button */
+            padding-top: 90px !important;
             overscroll-behavior: none !important;
           }
         }
