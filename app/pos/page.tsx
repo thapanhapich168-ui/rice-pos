@@ -145,6 +145,30 @@ export default function POSPage() {
   const [mobileQty, setMobileQty] = useState<number | ''>('')
   const [mobileName, setMobileName] = useState<string>('')
 
+  // 🔥 Fix 3: Safari Debounced Keyboard State (Stops the modal from bouncing down when tapping between Qty & Price)
+  const [isModalInputFocused, setIsModalInputFocused] = useState(false)
+  const modalFocusTimerRef = useRef<any>(null)
+
+  const handleModalFocus = (callback?: () => void) => {
+    if (modalFocusTimerRef.current) {
+      clearTimeout(modalFocusTimerRef.current);
+      modalFocusTimerRef.current = null;
+    }
+    setIsModalInputFocused(true);
+    if (callback) callback();
+  };
+
+  const handleModalBlur = () => {
+    modalFocusTimerRef.current = setTimeout(() => {
+      setIsModalInputFocused(false);
+    }, 150);
+  };
+
+  // 🔥 Fix 2: Dedicated Centered Popup Modal for Out of Stock Warnings (No more left-edge side toasts!)
+  const [outOfStockAlert, setOutOfStockAlert] = useState<{ isOpen: boolean, title: string, message: string }>({
+    isOpen: false, title: '', message: ''
+  });
+
   const [exchangeModal, setExchangeModal] = useState<{ isOpen: boolean, product: Product | null, consumedKg: string | number }>({
     isOpen: false, product: null, consumedKg: ''
   })
@@ -218,16 +242,16 @@ export default function POSPage() {
     }
   }, [showInvoicePreview]);
 
-  // Resets iOS Safari viewport scroll whenever any popup modal opens so it is dead-center
+  // 🔥 Resets iOS Safari viewport scroll whenever any popup modal opens so it is dead-center
   useEffect(() => {
-    const isAnyModalOpen = !!saleSummary || showInvoicePreview || !!selectedMobileProduct || exchangeModal.isOpen || autoOpenModal.isOpen || isCreateCustomerModalOpen;
+    const isAnyModalOpen = !!saleSummary || showInvoicePreview || !!selectedMobileProduct || exchangeModal.isOpen || autoOpenModal.isOpen || isCreateCustomerModalOpen || outOfStockAlert.isOpen;
     if (isAnyModalOpen) {
       if (document.activeElement instanceof HTMLElement) {
         document.activeElement.blur();
       }
       window.scrollTo(0, 0);
     }
-  }, [saleSummary, showInvoicePreview, selectedMobileProduct, exchangeModal.isOpen, autoOpenModal.isOpen, isCreateCustomerModalOpen]);
+  }, [saleSummary, showInvoicePreview, selectedMobileProduct, exchangeModal.isOpen, autoOpenModal.isOpen, isCreateCustomerModalOpen, outOfStockAlert.isOpen]);
 
   useEffect(() => {
     const checkDeviceType = () => {
@@ -731,10 +755,20 @@ export default function POSPage() {
                 const bagsNeeded = Math.ceil(Math.abs(finalStock) / 50);
                 itemsNeedingBags.push({ ...p, bags_needed: bagsNeeded });
             } else if (p && p.weight < 50 && !p.linked_wholesale_id) {
-                showToast('error', 'Out of Stock', `Not enough stock for ${p.name} and no linked wholesale bag to open!`);
+                // 🔥 Replaced side-toast with Centered Popup Modal
+                setOutOfStockAlert({
+                  isOpen: true,
+                  title: 'Out of Stock 📦',
+                  message: `Not enough stock for "${p.name}" and no linked wholesale bag to open!`
+                });
                 return;
             } else if (p && p.weight >= 50) {
-                showToast('error', 'Out of Stock', `Not enough stock for wholesale bag ${p.name}!`);
+                // 🔥 Replaced side-toast with Centered Popup Modal
+                setOutOfStockAlert({
+                  isOpen: true,
+                  title: 'Out of Stock 📦',
+                  message: `Not enough stock for wholesale bag "${p.name}"!`
+                });
                 return;
             }
         }
@@ -744,7 +778,12 @@ export default function POSPage() {
         for (const p of itemsNeedingBags) {
             const wProd = products.find(w => w.id === p.linked_wholesale_id);
             if (!wProd || wProd.stock < p.bags_needed) {
-                showToast('error', 'Out of Stock', `Cannot open a bag for ${p.name} because its wholesale bag (${wProd?.name || 'Unknown'}) is out of stock!`);
+                // 🔥 Replaced side-toast with Centered Popup Modal
+                setOutOfStockAlert({
+                  isOpen: true,
+                  title: 'Out of Stock 📦',
+                  message: `Cannot open a bag for "${p.name}" because its wholesale bag (${wProd?.name || 'Unknown'}) is out of stock!`
+                });
                 return;
             }
         }
@@ -1251,7 +1290,7 @@ export default function POSPage() {
   }
 
   return (
-    <div style={{ display: 'flex', width: '100%', height: '100dvh', overflow: 'hidden', backgroundColor: '#ffffff', boxSizing: 'border-box' }}>
+    <div className={isModalInputFocused ? 'modal-keyboard-push' : ''} style={{ display: 'flex', width: '100%', height: '100dvh', overflow: 'hidden', backgroundColor: '#ffffff', boxSizing: 'border-box' }}>
       
       {/* SELECTION ENGINE VIEW GRID PANEL */}
       <div className="hide-scrollbar" style={{ flex: 1, height: '100%', overflowY: 'auto', backgroundColor: '#f8fafc', minWidth: 0, WebkitOverflowScrolling: 'touch' }}>
@@ -1698,6 +1737,20 @@ export default function POSPage() {
         </div>
       </Modal>
 
+      {/* 🔥 Fix 2: OUT OF STOCK CENTERED POPUP MODAL (Replaces side toast) */}
+      <Modal isOpen={outOfStockAlert.isOpen} onClose={() => setOutOfStockAlert({ isOpen: false, title: '', message: '' })} title={outOfStockAlert.title} icon="📦" maxWidth="400px">
+        <div style={{ padding: '8px 0 20px 0', color: '#334155', fontSize: '14px', lineHeight: '1.5', textAlign: 'center' }}>
+          {outOfStockAlert.message}
+        </div>
+        <button 
+          onClick={() => setOutOfStockAlert({ isOpen: false, title: '', message: '' })} 
+          className="saas-btn saas-btn-primary" 
+          style={{ width: '100%', padding: '14px', fontSize: '15px', fontWeight: 'bold' }}
+        >
+          Understood / Close
+        </button>
+      </Modal>
+
       {/* CREATE NEW CUSTOMER MODAL */}
       <Modal isOpen={isCreateCustomerModalOpen} onClose={() => setIsCreateCustomerModalOpen(false)} title="Create New Customer" icon="👤" maxWidth="400px">
         <div style={{ marginBottom: '16px' }}>
@@ -1706,6 +1759,8 @@ export default function POSPage() {
             type="text" 
             value={newCustomerForm.name} 
             onChange={(e) => setNewCustomerForm({...newCustomerForm, name: e.target.value})} 
+            onFocus={() => handleModalFocus()}
+            onBlur={() => handleModalBlur()}
             className="saas-input" 
           />
         </div>
@@ -1738,6 +1793,8 @@ export default function POSPage() {
             type="text" 
             value={newCustomerForm.location} 
             onChange={(e) => setNewCustomerForm({...newCustomerForm, location: e.target.value})} 
+            onFocus={() => handleModalFocus()}
+            onBlur={() => handleModalBlur()}
             className="saas-input" 
           />
         </div>
@@ -1748,6 +1805,8 @@ export default function POSPage() {
             type="text" 
             value={newCustomerForm.phone} 
             onChange={(e) => setNewCustomerForm({...newCustomerForm, phone: e.target.value})} 
+            onFocus={() => handleModalFocus()}
+            onBlur={() => handleModalBlur()}
             className="saas-input" 
           />
         </div>
@@ -1772,7 +1831,8 @@ export default function POSPage() {
             placeholder="e.g. 15"
             value={exchangeModal.consumedKg}
             onChange={(v: any) => setExchangeModal({ ...exchangeModal, consumedKg: v })}
-            onFocus={() => setExchangeModal({ ...exchangeModal, consumedKg: '' })}
+            onFocus={() => handleModalFocus(() => setExchangeModal({ ...exchangeModal, consumedKg: '' }))}
+            onBlur={() => handleModalBlur()}
             className="saas-input"
           />
           <p style={{ fontSize: '11px', color: '#94a3b8', marginTop: '6px', lineHeight: 1.4 }}>
@@ -1787,40 +1847,47 @@ export default function POSPage() {
         </div>
       </Modal>
 
-      {/* MOBILE PRODUCT ADD POPUP */}
+      {/* 🔥 Fix 3: COMPACT MOBILE PRODUCT ADD POPUP (Sits safely above Safari URL bar & keyboard) */}
       <Modal isOpen={!!selectedMobileProduct} onClose={() => setSelectedMobileProduct(null)} title={currentT.mobileModalTitle} icon="✏️" maxWidth="400px">
-        <div style={{ marginBottom: '16px' }}>
-          <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '8px' }}>Product Identifier</label>
+        <div style={{ marginBottom: '10px' }}>
+          <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '6px' }}>Product Identifier</label>
           <input 
             type="text" 
             value={mobileName} 
             onChange={(e) => setMobileName(e.target.value)} 
+            onFocus={() => handleModalFocus()}
+            onBlur={() => handleModalBlur()}
             className="saas-input" 
+            style={{ padding: '10px' }}
           />
         </div>
-        <div style={{ display: 'flex', gap: '12px', marginBottom: '20px' }}>
+        <div style={{ display: 'flex', gap: '12px', marginBottom: '16px' }}>
           <div style={{ flex: 1 }}>
-            <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '8px' }}>Quantity</label>
+            <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '6px' }}>Quantity</label>
             <CurrencyInput 
               value={mobileQty} 
               onChange={(v: any) => setMobileQty(v)} 
-              onFocus={() => setMobileQty('')}
+              onFocus={() => handleModalFocus(() => setMobileQty(''))}
+              onBlur={() => handleModalBlur()}
               className="saas-input" 
+              style={{ padding: '10px' }}
             />
           </div>
           <div style={{ flex: 1 }}>
-            <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '8px' }}>Price (៛)</label>
+            <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '6px' }}>Price (៛)</label>
             <CurrencyInput 
               value={mobilePrice} 
               onChange={(v: any) => setMobilePrice(v)} 
-              onFocus={() => setMobilePrice('')}
+              onFocus={() => handleModalFocus(() => setMobilePrice(''))}
+              onBlur={() => handleModalBlur()}
               className="saas-input" 
+              style={{ padding: '10px' }}
             />
           </div>
         </div>
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
-          <button onClick={() => setSelectedMobileProduct(null)} className="saas-btn saas-btn-secondary">{currentT.cancel}</button>
-          <button onClick={handleAddMobileProductToCart} className="saas-btn saas-btn-primary">{currentT.add}</button>
+        <div style={{ display: 'flex', gap: '10px', marginTop: '4px' }}>
+          <button onClick={() => setSelectedMobileProduct(null)} className="saas-btn saas-btn-secondary" style={{ flex: 1, padding: '12px' }}>{currentT.cancel}</button>
+          <button onClick={handleAddMobileProductToCart} className="saas-btn saas-btn-primary" style={{ flex: 2, padding: '12px', fontWeight: 'bold' }}>{currentT.add}</button>
         </div>
       </Modal>
 
@@ -2050,7 +2117,7 @@ export default function POSPage() {
         </div>
       </Modal>
 
-      {/* --- GLOBAL CSS (Includes forceful override for Mobile Tabs & Centered Modals) --- */}
+      {/* --- GLOBAL CSS (Includes forceful override for Mobile Tabs & Safari Viewport Fixes) --- */}
       <style jsx global>{`
         input, select, button, textarea {
           font-family: inherit;
@@ -2061,7 +2128,14 @@ export default function POSPage() {
           font-variant-numeric: tabular-nums lining-nums;
         }
 
-        /* 🔥 FORCE ALL MODALS TO ALWAYS CENTER IN THE MIDDLE & SIT ABOVE BURGER MENU (Z-INDEX 99999) 🔥 */
+        /* 🔥 1. PREVENT SAFARI IOS AUTO-ZOOM & HORIZONTAL VIEWPORT SHIFT 🔥 */
+        @media (max-width: 1023px) {
+          input, select, textarea, .saas-input {
+            font-size: 16px !important;
+          }
+        }
+
+        /* 🔥 2. FORCE ALL MODALS TO CENTER IN THE MIDDLE OF THE SCREEN BY DEFAULT 🔥 */
         div[role="dialog"],
         div[class*="modal"],
         div[class*="Modal"],
@@ -2069,13 +2143,27 @@ export default function POSPage() {
           display: flex !important;
           align-items: center !important;
           justify-content: center !important;
-          padding: 20px !important;
+          padding: 16px !important;
           box-sizing: border-box !important;
           top: 0 !important;
           left: 0 !important;
           right: 0 !important;
           bottom: 0 !important;
-          z-index: 99999 !important;
+        }
+
+        /* 🔥 3. WHEN TYPING IN A MODAL, PUSH IT COMPACTLY TO TOP (STOPS URL BAR COLLISION) 🔥 */
+        @media (max-width: 1023px) {
+          .modal-keyboard-push div[role="dialog"],
+          .modal-keyboard-push div[class*="modal"],
+          .modal-keyboard-push div[class*="Modal"],
+          .modal-keyboard-push div[style*="position: fixed"][style*="z-index"]:not(.mobile-cart-overlay):not(.mobile-fab):not(#invoice-capture-area),
+          div[role="dialog"]:has(input:focus),
+          div[class*="modal"]:has(input:focus),
+          div[class*="Modal"]:has(input:focus),
+          div[style*="position: fixed"][style*="z-index"]:not(.mobile-cart-overlay):not(.mobile-fab):not(#invoice-capture-area):has(input:focus) {
+            align-items: flex-start !important;
+            padding-top: 12px !important;
+          }
         }
 
         /* 🔥 BULLETPROOF GLOBAL OVERRIDE FOR MOBILE TABS 🔥 */
