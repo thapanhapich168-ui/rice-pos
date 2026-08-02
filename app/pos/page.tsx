@@ -145,7 +145,11 @@ export default function POSPage() {
   const [mobileQty, setMobileQty] = useState<number | ''>('')
   const [mobileName, setMobileName] = useState<string>('')
 
-  // 🔥 Fix 3: Safari Debounced Keyboard State (Stops the modal from bouncing down when tapping between Qty & Price)
+  // 🔥 Fix 3: Refs for iOS "Next" button jumping smoothly between inputs
+  const mobileQtyRef = useRef<HTMLInputElement>(null);
+  const mobilePriceRef = useRef<HTMLInputElement>(null);
+
+  // 🔥 Fix 3: Safari Debounced Keyboard State
   const [isModalInputFocused, setIsModalInputFocused] = useState(false)
   const modalFocusTimerRef = useRef<any>(null)
 
@@ -164,7 +168,7 @@ export default function POSPage() {
     }, 150);
   };
 
-  // 🔥 Fix 2: Dedicated Centered Popup Modal for Out of Stock Warnings (No more left-edge side toasts!)
+  // 🔥 Fix 2: Dedicated Centered Popup Modal for Out of Stock Warnings
   const [outOfStockAlert, setOutOfStockAlert] = useState<{ isOpen: boolean, title: string, message: string }>({
     isOpen: false, title: '', message: ''
   });
@@ -522,6 +526,22 @@ export default function POSPage() {
     }
     setSelectedMobileProduct(null);
   }
+
+  // 🔥 Fix 3: Key down handler so Enter key on numeric keyboard moves to next input smoothly
+  const handleMobileQtyKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      mobilePriceRef.current?.focus();
+    }
+  };
+
+  const handleMobilePriceKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      e.currentTarget.blur();
+      handleAddMobileProductToCart();
+    }
+  };
 
   async function handleConfirmExchange() {
     if (!exchangeModal.product) return;
@@ -1737,7 +1757,7 @@ export default function POSPage() {
         </div>
       </Modal>
 
-      {/* 🔥 Fix 2: OUT OF STOCK CENTERED POPUP MODAL (Replaces side toast) */}
+      {/* 🔥 Fix 2: OUT OF STOCK CENTERED POPUP MODAL */}
       <Modal isOpen={outOfStockAlert.isOpen} onClose={() => setOutOfStockAlert({ isOpen: false, title: '', message: '' })} title={outOfStockAlert.title} icon="📦" maxWidth="400px">
         <div style={{ padding: '8px 0 20px 0', color: '#334155', fontSize: '14px', lineHeight: '1.5', textAlign: 'center' }}>
           {outOfStockAlert.message}
@@ -1847,7 +1867,7 @@ export default function POSPage() {
         </div>
       </Modal>
 
-      {/* 🔥 Fix 3: COMPACT MOBILE PRODUCT ADD POPUP (Sits safely above Safari URL bar & keyboard) */}
+      {/* 🔥 Fix 3: COMPACT MOBILE PRODUCT ADD POPUP WITH ENTER NAVIGATION */}
       <Modal isOpen={!!selectedMobileProduct} onClose={() => setSelectedMobileProduct(null)} title={currentT.mobileModalTitle} icon="✏️" maxWidth="400px">
         <div style={{ marginBottom: '10px' }}>
           <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '6px' }}>Product Identifier</label>
@@ -1864,24 +1884,41 @@ export default function POSPage() {
         <div style={{ display: 'flex', gap: '12px', marginBottom: '16px' }}>
           <div style={{ flex: 1 }}>
             <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '6px' }}>Quantity</label>
-            <CurrencyInput 
+            <input
+              ref={mobileQtyRef}
+              type="text"
+              inputMode="numeric"
+              enterKeyHint="next"
+              pattern="[0-9]*"
               value={mobileQty} 
-              onChange={(v: any) => setMobileQty(v)} 
+              onChange={(e) => {
+                const cleanVal = e.target.value.replace(/[^0-9]/g, '');
+                setMobileQty(cleanVal === '' ? '' : Number(cleanVal));
+              }}
+              onKeyDown={handleMobileQtyKeyDown}
               onFocus={() => handleModalFocus(() => setMobileQty(''))}
               onBlur={() => handleModalBlur()}
               className="saas-input" 
-              style={{ padding: '10px' }}
+              style={{ padding: '10px', width: '100%', fontSize: '16px' }}
             />
           </div>
           <div style={{ flex: 1 }}>
             <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '6px' }}>Price (៛)</label>
-            <CurrencyInput 
+            <input
+              ref={mobilePriceRef}
+              type="text"
+              inputMode="decimal"
+              enterKeyHint="done"
               value={mobilePrice} 
-              onChange={(v: any) => setMobilePrice(v)} 
+              onChange={(e) => {
+                const cleanVal = e.target.value.replace(/[^0-9.]/g, '');
+                setMobilePrice(cleanVal === '' ? '' : Number(cleanVal));
+              }}
+              onKeyDown={handleMobilePriceKeyDown}
               onFocus={() => handleModalFocus(() => setMobilePrice(''))}
               onBlur={() => handleModalBlur()}
               className="saas-input" 
-              style={{ padding: '10px' }}
+              style={{ padding: '10px', width: '100%', fontSize: '16px' }}
             />
           </div>
         </div>
