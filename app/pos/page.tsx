@@ -1884,35 +1884,35 @@ export default function POSPage() {
         </div>
       </Modal>
 
-      {/* ULTRA-COMPACT MOBILE ITEM POPUP (KEYBOARD-FRIENDLY) */}
+      {/* CLEAN & BALANCED MOBILE ITEM POPUP (REGULAR WEIGHT, MINIMAL COLORS) */}
       <Modal isOpen={!!selectedMobileProduct} onClose={() => setSelectedMobileProduct(null)} title={currentT.mobileModalTitle} icon="✏️" maxWidth="400px">
         
-        {/* Product Name (Compact Row) */}
-        <div style={{ marginBottom: '10px' }}>
-          <label style={{ display: 'block', fontSize: '11px', color: '#64748b', marginBottom: '4px', fontWeight: 'normal' }}>
+        {/* Product Name Card */}
+        <div style={{ marginBottom: '16px' }}>
+          <label style={{ display: 'block', fontSize: '12px', color: '#64748b', marginBottom: '6px', fontWeight: 'normal' }}>
             Product Name
           </label>
-          <div style={{ display: 'flex', alignItems: 'center', background: '#f8fafc', border: '1px solid #cbd5e1', borderRadius: '6px', padding: '2px 10px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', background: '#f8fafc', border: '1px solid #cbd5e1', borderRadius: '8px', padding: '4px 12px' }}>
             <input 
               type="text" 
               value={mobileName} 
               onChange={(e) => setMobileName(e.target.value)} 
               onFocus={() => handleModalFocus()}
               onBlur={() => handleModalBlur()}
-              style={{ flex: 1, border: 'none', background: 'transparent', outline: 'none', padding: '6px 0', fontSize: '14px', color: '#334155', fontWeight: 'normal' }}
+              style={{ flex: 1, border: 'none', background: 'transparent', outline: 'none', padding: '8px 0', fontSize: '15px', color: '#334155', fontWeight: 'normal' }}
             />
           </div>
         </div>
 
-        {/* Quantity & Price Side-by-Side (Saves 50% vertical space!) */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '16px' }}>
+        {/* Vertical Stacked Inputs */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', marginBottom: '24px' }}>
           
-          {/* Quantity Box */}
-          <div>
-            <label style={{ display: 'block', fontSize: '11px', color: '#64748b', marginBottom: '4px', fontWeight: 'normal' }}>
-              Quantity (kg)
+          {/* Quantity Input Box */}
+          <div style={{ width: '100%' }}>
+            <label style={{ display: 'block', fontSize: '12px', color: '#64748b', marginBottom: '6px', fontWeight: 'normal' }}>
+              Quantity
             </label>
-            <div style={{ display: 'flex', alignItems: 'center', border: '1px solid #cbd5e1', borderRadius: '6px', padding: '2px 10px', background: '#ffffff' }}>
+            <div style={{ display: 'flex', alignItems: 'center', border: '1px solid #cbd5e1', borderRadius: '8px', padding: '4px 12px', background: '#ffffff' }}>
               <input
                 ref={mobileQtyRef}
                 type="text"
@@ -1927,17 +1927,20 @@ export default function POSPage() {
                 onKeyDown={handleMobileQtyKeyDown}
                 onFocus={() => handleModalFocus(() => setMobileQty(''))}
                 onBlur={() => handleModalBlur()}
-                style={{ flex: 1, border: 'none', background: 'transparent', outline: 'none', padding: '6px 0', fontSize: '15px', color: '#334155', fontWeight: 'normal', width: '100%' }}
+                style={{ flex: 1, border: 'none', background: 'transparent', outline: 'none', padding: '8px 0', fontSize: '16px', color: '#334155', fontWeight: 'normal' }}
               />
+              <span style={{ color: '#64748b', fontSize: '13px', paddingLeft: '8px', fontWeight: 'normal' }}>
+                kg / bag
+              </span>
             </div>
           </div>
 
-          {/* Price Box */}
-          <div>
-            <label style={{ display: 'block', fontSize: '11px', color: '#64748b', marginBottom: '4px', fontWeight: 'normal' }}>
-              Unit Price (៛)
+          {/* Price Input Box */}
+          <div style={{ width: '100%' }}>
+            <label style={{ display: 'block', fontSize: '12px', color: '#64748b', marginBottom: '6px', fontWeight: 'normal' }}>
+              Unit Price
             </label>
-            <div style={{ display: 'flex', alignItems: 'center', border: '1px solid #cbd5e1', borderRadius: '6px', padding: '2px 10px', background: '#ffffff' }}>
+            <div style={{ display: 'flex', alignItems: 'center', border: '1px solid #cbd5e1', borderRadius: '8px', padding: '4px 12px', background: '#ffffff' }}>
               <input
                 ref={mobilePriceRef}
                 type="text"
@@ -1951,26 +1954,29 @@ export default function POSPage() {
                 onKeyDown={handleMobilePriceKeyDown}
                 onFocus={() => handleModalFocus(() => setMobilePrice(''))}
                 onBlur={() => handleModalBlur()}
-                style={{ flex: 1, border: 'none', background: 'transparent', outline: 'none', padding: '6px 0', fontSize: '15px', color: '#334155', fontWeight: 'normal', width: '100%' }}
+                style={{ flex: 1, border: 'none', background: 'transparent', outline: 'none', padding: '8px 0', fontSize: '16px', color: '#334155', fontWeight: 'normal' }}
               />
+              <span style={{ color: '#64748b', fontSize: '13px', paddingLeft: '8px', fontWeight: 'normal' }}>
+                ៛ Riel
+              </span>
             </div>
           </div>
 
         </div>
 
-        {/* Action Buttons (Compact Padding) */}
-        <div style={{ display: 'flex', gap: '8px' }}>
+        {/* Action Buttons */}
+        <div style={{ display: 'flex', gap: '10px' }}>
           <button 
             onClick={() => setSelectedMobileProduct(null)} 
             className="saas-btn saas-btn-secondary" 
-            style={{ flex: 1, padding: '10px', borderRadius: '6px', fontWeight: 'normal', fontSize: '14px' }}
+            style={{ flex: 1, padding: '12px', borderRadius: '8px', fontWeight: 'normal', fontSize: '15px' }}
           >
             {currentT.cancel}
           </button>
           <button 
             onClick={handleAddMobileProductToCart} 
             className="saas-btn saas-btn-primary" 
-            style={{ flex: 2, padding: '10px', borderRadius: '6px', fontWeight: 'normal', fontSize: '14px' }}
+            style={{ flex: 2, padding: '12px', borderRadius: '8px', fontWeight: 'normal', fontSize: '15px' }}
           >
             + {currentT.add}
           </button>
