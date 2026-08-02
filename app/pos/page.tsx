@@ -149,7 +149,7 @@ export default function POSPage() {
   const mobileQtyRef = useRef<HTMLInputElement>(null);
   const mobilePriceRef = useRef<HTMLInputElement>(null);
 
-  // 🔥 Safari Debounced Keyboard State
+  // 🔥 Safari Debounced Keyboard State + Anti-Jump Scroll Lock
   const [isModalInputFocused, setIsModalInputFocused] = useState(false)
   const modalFocusTimerRef = useRef<any>(null)
 
@@ -159,6 +159,12 @@ export default function POSPage() {
       modalFocusTimerRef.current = null;
     }
     setIsModalInputFocused(true);
+    
+    // 🔥 Prevent browser from auto-scrolling/jerking the page up when switching from Qty to Price
+    setTimeout(() => {
+      window.scrollTo(0, 0);
+    }, 10);
+
     if (callback) callback();
   };
 
@@ -2192,7 +2198,7 @@ export default function POSPage() {
           margin: 0 !important;
         }
 
-        /* 🔥 3. WHEN TYPING IN A MODAL, PUSH IT RIGHT BELOW THE HAMBURGER ICON (NOT BEHIND) 🔥 */
+        /* 🔥 3. WHEN TYPING IN A MODAL, PUSH IT COMFORTABLY BELOW HAMBURGER ICON (105px) 🔥 */
         @media (max-width: 1023px) {
           .modal-keyboard-push div[role="dialog"],
           .modal-keyboard-push div[class*="modal"],
@@ -2203,7 +2209,8 @@ export default function POSPage() {
           div[class*="Modal"]:has(input:focus),
           div[style*="position: fixed"][style*="z-index"]:not(.mobile-cart-overlay):not(.mobile-fab):not(#invoice-capture-area):has(input:focus) {
             align-items: flex-start !important;
-            padding-top: 64px !important; /* Right below the hamburger menu icon! */
+            padding-top: 105px !important; /* Plenty of breathing room below the hamburger button! */
+            overscroll-behavior: none !important;
           }
         }
 
