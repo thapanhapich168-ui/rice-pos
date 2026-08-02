@@ -265,19 +265,31 @@ export default function ExpenseDashboard() {
     return () => window.removeEventListener('expense_ledger_synced', handleAutoSynced);
   }, [])
 
+  // --- Updated LocalStorage Save Hooks (Prevents Overwriting Yesterday's Saved Date on Mount) ---
   useEffect(() => {
     if (isMounted) {
       localStorage.setItem('expense_ledger_personal', JSON.stringify(pendingPersonal));
-      localStorage.setItem('expense_ledger_date', expenseDate || new Date().toISOString().split('T')[0]);
+      
+      // 🔥 Only update expense_ledger_date if one doesn't exist yet, OR if the user is actively typing today
+      const existingDate = localStorage.getItem('expense_ledger_date');
+      if (!existingDate) {
+        const todayCambodia = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Phnom_Penh' });
+        localStorage.setItem('expense_ledger_date', expenseDate || todayCambodia);
+      }
     }
-  }, [pendingPersonal, expenseDate, isMounted])
+  }, [pendingPersonal, expenseDate, isMounted]);
 
   useEffect(() => {
     if (isMounted) {
       localStorage.setItem('expense_ledger_business', JSON.stringify(pendingBusiness));
-      localStorage.setItem('expense_ledger_date', expenseDate || new Date().toISOString().split('T')[0]);
+      
+      const existingDate = localStorage.getItem('expense_ledger_date');
+      if (!existingDate) {
+        const todayCambodia = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Phnom_Penh' });
+        localStorage.setItem('expense_ledger_date', expenseDate || todayCambodia);
+      }
     }
-  }, [pendingBusiness, expenseDate, isMounted])
+  }, [pendingBusiness, expenseDate, isMounted]);
 
   useEffect(() => {
     if (isMounted) localStorage.setItem('expense_db_tab_order', JSON.stringify(dbTabOrder));

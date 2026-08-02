@@ -4,119 +4,128 @@ import { useEffect } from 'react'
 import { supabase } from '@/lib/supabaseClient'
 import { useToast } from '@/components/ToastProvider'
 
+// Helper: Always get accurate YYYY-MM-DD in Cambodia Local Time (UTC+7)
+const getCambodiaDateStr = (dateObj = new Date()) => {
+  return dateObj.toLocaleDateString('en-CA', { timeZone: 'Asia/Phnom_Penh' })
+}
+
+// Helper: Get current hour (0 - 23) in Cambodia Local Time
+const getCambodiaHour = () => {
+  const hourStr = new Date().toLocaleTimeString('en-US', {
+    timeZone: 'Asia/Phnom_Penh',
+    hour12: false,
+    hour: '2-digit'
+  })
+  return parseInt(hourStr, 10)
+}
+
 export default function AutoSyncHandler() {
   const { showToast } = useToast()
 
   useEffect(() => {
-    checkAndSyncExpenses()
-    // Re-check whenever the user switches back to Safari from another app
-    window.addEventListener('focus', checkAndSyncExpenses)
-    return () => window.removeEventListener('focus', checkAndSyncExpenses)
-  }, [])
+    const checkAndSync = async () => {
+      try {
+        const savedDate = localStorage.getItem('expense_ledger_date')
+        if (!savedDate) return
 
-  async function checkAndSyncExpenses() {
-    try {
-      const savedPers = localStorage.getItem('expense_ledger_personal')
-      if (!savedPers) return // Nothing stored yet
+        const todayCambodia = getCambodiaDateStr()
+        const currentHour = getCambodiaHour()
 
-      const now = new Date()
-      const currentHour = now.getHours() // 0 - 23
-      const todayStr = now.toISOString().split('T')[0]
+        // 🔥 CRITERIA 1: Is the saved ledger from a PREVIOUS day? (e.g., opened next morning)
+        const isPreviousDay = savedDate < todayCambodia
 
-      // Read saved ledger date (defaults to today if not set)
-      const ledgerDate = localStorage.getItem('expense_ledger_date') || todayStr
+        // 🔥 CRITERIA 2: Is it TODAY and AFTER 10:00 PM (22:00)?
+        const isAfter10PM = savedDate === todayCambodia && currentHour >= 22
 
-      // Condition: Sync if ledger date is from a previous day OR if current hour >= 22 (10:00 PM)
-      const isPast10PM = currentHour >= 22
-      const isPreviousDay = ledgerDate !== todayStr
+        // If neither condition is met, do not auto-submit
+        if (!isPreviousDay && !isAfter10PM) return
 
-      if (!isPast10PM && !isPreviousDay) return
+        // Load saved personal & business queues from localStorage
+        const rawPers = localStorage.getItem('expense_ledger_personal')
+        const rawBiz = localStorage.getItem('expense_ledger_business')
 
-      // Parse stored personal and business queues
-      const pendingPers: any[] = JSON.parse(savedPers || '[]')
-      const pendingBiz: any[] = JSON.parse(
-        localStorage.getItem('expense_ledger_business') || '[]'
-      )
+        const persList: any[] = rawPers ? JSON.parse(rawPers) : []
+        const bizList: any[] = rawBiz ? JSON.parse(rawBiz) : []
 
-      // Filter out empty default rows (must have remarks and amount > 0)
-      const validPers = pendingPers.filter(
-        (exp) =>
-          exp?.remarks?.trim() !== '' &&
-          exp?.payments?.some((p: any) => Number(p.amount) > 0)
-      )
-      const validBiz = pendingBiz.filter(
-        (exp) =>
-          exp?.remarks?.trim() !== '' &&
-          exp?.payments?.some((p: any) => Number(p.amount) > 0)
-      )
+        // Filter out empty/placeholder rows
+        const validPers = persList.filter(
+          exp => exp.remarks?.trim() !== '' && exp.payments?.some((p: any) => Number(p.amount) > 0)
+        )
+        const validBiz = bizList.filter(
+          exp => exp.remarks?.trim() !== '' && exp.payments?.some((p: any) => Number(p.amount) > 0)
+        )
 
-      const totalValidCount = validPers.length + validBiz.length
-      if (totalValidCount === 0) return
+        const allValid = [
+          ...validPers.map(item => ({ ...item, tabType: 'PERSONAL' })),
+          ...validBiz.map(item => ({ ...item, tabType: 'BUSINESS' }))
+        ]
 
-      // Build payload for Personal expenses
-      const persPayload = validPers.map((exp) => formatExpensePayload(exp, 'PERSONAL', ledgerDate))
-      // Build payload for Business expenses
-      const bizPayload = validBiz.map((exp) => formatExpensePayload(exp, 'BUSINESS', ledgerDate))
+        // If there are no valid expenses waiting, just clean up old dates and exit
+        if (allValid.length === 0) {
+          if (isPreviousDay) {
+            localStorage.setItem('expense_ledger_date', todayCambodia)
+          }
+          return
+        }
 
-      const fullPayload = [...persPayload, ...bizPayload].reverse()
+        // Build payload for Supabase using the SAVED date (so yesterday's expenses stay on yesterday's date!)
+        const payloadArray = allValid.map(exp => {
+          const activePayments = exp.payments.filter((r: any) => (Number(r.amount) || 0) > 0)
 
-      // Insert into Supabase
-      const { error } = await supabase.from('expenses').insert(fullPayload)
+          let combinedMethod = activePayments[0].method
+          if (activePayments.length > 1) {
+            combinedMethod = activePayments.map((r: any) => `${r.method}:${r.amount}`).join(',')
+          }
 
-      if (error) {
-        console.error('Auto-sync failed:', error.message)
-        return
+          let totalUsd = 0
+          let totalRiel = 0
+
+          for (const row of activePayments) {
+            const rawAmount = Number(row.amount)
+            if (row.method.includes('$')) {
+              totalUsd += rawAmount
+            } else {
+              totalRiel += rawAmount
+            }
+          }
+
+          return {
+            expense_date: savedDate, // 🔥 Uses savedDate so next-day sync logs under yesterday!
+            spender: exp.spender,
+            payment_method: combinedMethod,
+            remarks: exp.remarks,
+            amount_usd: totalUsd,
+            amount_riel: totalRiel,
+            description: exp.tabType
+          }
+        })
+
+        // Insert into Supabase
+        const { error } = await supabase.from('expenses').insert(payloadArray.reverse())
+        if (error) throw error
+
+        // Clear local queues after successful sync
+        localStorage.removeItem('expense_ledger_personal')
+        localStorage.removeItem('expense_ledger_business')
+        localStorage.setItem('expense_ledger_date', todayCambodia)
+
+        // Notify user and trigger form reset in ExpenseDashboard
+        showToast(
+          'success',
+          '✅ Auto-Synced!',
+          `Automatically logged ${allValid.length} offline expense(s) for ${savedDate}.`
+        )
+
+        window.dispatchEvent(new Event('expense_ledger_synced'))
+      } catch (err: any) {
+        console.error('AutoSyncHandler Error:', err)
       }
-
-      // Clear local queues after successful sync
-      localStorage.removeItem('expense_ledger_personal')
-      localStorage.removeItem('expense_ledger_business')
-      localStorage.removeItem('expense_ledger_date')
-
-      // Notify open components to clear their UI forms
-      window.dispatchEvent(new Event('expense_ledger_synced'))
-
-      showToast(
-        'success',
-        '✅ Auto-Sync Complete!',
-        `Successfully submitted ${totalValidCount} queued expense(s) from ${ledgerDate} to Supabase.`
-      )
-    } catch (e) {
-      console.error('Local sync error:', e)
-    }
-  }
-
-  // Helper to format payment splits identically to your handleSubmit
-  function formatExpensePayload(exp: any, description: string, dateStr: string) {
-    const activePayments = (exp.payments || []).filter((r: any) => (Number(r.amount) || 0) > 0)
-
-    let combinedMethod = activePayments[0]?.method || 'Cash ៛'
-    if (activePayments.length > 1) {
-      combinedMethod = activePayments.map((r: any) => `${r.method}:${r.amount}`).join(',')
     }
 
-    let totalUsd = 0
-    let totalRiel = 0
-
-    for (const row of activePayments) {
-      const rawAmount = Number(row.amount) || 0
-      if (row.method.includes('$')) {
-        totalUsd += rawAmount
-      } else {
-        totalRiel += rawAmount
-      }
-    }
-
-    return {
-      expense_date: dateStr,
-      spender: exp.spender || 'Both',
-      payment_method: combinedMethod,
-      remarks: exp.remarks,
-      amount_usd: totalUsd,
-      amount_riel: totalRiel,
-      description: description,
-    }
-  }
+    // Run check 1 second after Safari loads to prevent race conditions
+    const timer = setTimeout(checkAndSync, 1000)
+    return () => clearTimeout(timer)
+  }, [showToast])
 
   return null
 }
