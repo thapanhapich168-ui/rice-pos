@@ -149,7 +149,7 @@ export default function POSPage() {
   const mobileQtyRef = useRef<HTMLInputElement>(null);
   const mobilePriceRef = useRef<HTMLInputElement>(null);
 
-  // 🔥 Safari Debounced Keyboard State + Anti-Jump Scroll Lock
+  // 🔥 Safari Debounced Keyboard State (No scrollTo jerk when switching Qty -> Price!)
   const [isModalInputFocused, setIsModalInputFocused] = useState(false)
   const modalFocusTimerRef = useRef<any>(null)
 
@@ -159,12 +159,6 @@ export default function POSPage() {
       modalFocusTimerRef.current = null;
     }
     setIsModalInputFocused(true);
-    
-    // 🔥 Prevent browser from auto-scrolling/jerking the page up when switching from Qty to Price
-    setTimeout(() => {
-      window.scrollTo(0, 0);
-    }, 10);
-
     if (callback) callback();
   };
 
@@ -1316,7 +1310,8 @@ export default function POSPage() {
   }
 
   return (
-    <div className={isModalInputFocused ? 'modal-keyboard-push' : ''} style={{ display: 'flex', width: '100%', height: '100dvh', overflow: 'hidden', backgroundColor: '#ffffff', boxSizing: 'border-box' }}>
+    // 🔥 Added 'mobile-item-active' when item card is clicked so it starts at 105px immediately!
+    <div className={`${isModalInputFocused ? 'modal-keyboard-push' : ''} ${selectedMobileProduct ? 'mobile-item-active' : ''}`.trim()} style={{ display: 'flex', width: '100%', height: '100dvh', overflow: 'hidden', backgroundColor: '#ffffff', boxSizing: 'border-box' }}>
       
       {/* SELECTION ENGINE VIEW GRID PANEL */}
       <div className="hide-scrollbar" style={{ flex: 1, height: '100%', overflowY: 'auto', backgroundColor: '#f8fafc', minWidth: 0, WebkitOverflowScrolling: 'touch' }}>
@@ -2198,18 +2193,19 @@ export default function POSPage() {
           margin: 0 !important;
         }
 
-        /* 🔥 3. WHEN TYPING IN A MODAL, PUSH IT COMFORTABLY BELOW HAMBURGER ICON (105px) 🔥 */
+        /* 🔥 3. LOCKS ITEM POPUP AT 105px IMMEDIATELY (STOPS ALL JUMPING BETWEEN QTY & PRICE) 🔥 */
         @media (max-width: 1023px) {
+          .mobile-item-active div[role="dialog"],
+          .mobile-item-active div[class*="modal"],
+          .mobile-item-active div[class*="Modal"],
           .modal-keyboard-push div[role="dialog"],
           .modal-keyboard-push div[class*="modal"],
           .modal-keyboard-push div[class*="Modal"],
-          .modal-keyboard-push div[style*="position: fixed"][style*="z-index"]:not(.mobile-cart-overlay):not(.mobile-fab):not(#invoice-capture-area),
           div[role="dialog"]:has(input:focus),
           div[class*="modal"]:has(input:focus),
-          div[class*="Modal"]:has(input:focus),
-          div[style*="position: fixed"][style*="z-index"]:not(.mobile-cart-overlay):not(.mobile-fab):not(#invoice-capture-area):has(input:focus) {
+          div[class*="Modal"]:has(input:focus) {
             align-items: flex-start !important;
-            padding-top: 105px !important; /* Plenty of breathing room below the hamburger button! */
+            padding-top: 105px !important; /* Perfectly below hamburger menu button */
             overscroll-behavior: none !important;
           }
         }
