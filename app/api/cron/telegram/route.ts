@@ -154,6 +154,9 @@ export async function GET(request: Request) {
       expenses.filter(e => (e.expense_date || e.created_at)?.startsWith(todayStr))
     )
 
+    let dailyTelegramResponse = null
+    let monthlyTelegramResponse = null
+
     // --- 7. DISPATCH DAILY REPORT (MARKDOWN TEXT) EVERY DAY AT 7:00 PM ---
     if (sendDaily) {
       const dailyText =
@@ -197,9 +200,9 @@ export async function GET(request: Request) {
         body: JSON.stringify({ chat_id: chatId, text: dailyText, parse_mode: 'Markdown' })
       })
 
+      dailyTelegramResponse = await dailyRes.json()
       if (!dailyRes.ok) {
-        const errJson = await dailyRes.json()
-        console.error('Telegram Daily Send Error:', errJson)
+        console.error('Telegram Daily Send Error:', dailyTelegramResponse)
       }
     }
 
@@ -215,8 +218,9 @@ export async function GET(request: Request) {
         }
       })
 
-      const baseUrl = process.env.NEXT_PUBLIC_SITE_URL || 
+      const rawBaseUrl = process.env.NEXT_PUBLIC_SITE_URL || 
         (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000')
+      const baseUrl = rawBaseUrl.replace(/\/$/, '') // Safe removal of trailing slash
 
       const baseParams = `month=${encodeURIComponent(currentMonthName)}&sales=${month.totalSales}&profit=${month.totalProfit}&expRiel=${month.totalExpRiel}&expUsd=${month.totalExpUsd}`
 
@@ -248,9 +252,9 @@ export async function GET(request: Request) {
         })
       })
 
+      monthlyTelegramResponse = await monthlyRes.json()
       if (!monthlyRes.ok) {
-        const errJson = await monthlyRes.json()
-        console.error('Telegram Monthly Album Send Error:', errJson)
+        console.error('Telegram Monthly Album Send Error:', monthlyTelegramResponse)
       }
     }
 
@@ -259,7 +263,11 @@ export async function GET(request: Request) {
       todayStr,
       isLastDayOfMonth,
       dailySent: sendDaily,
-      monthlySent: isLastDayOfMonth && sendMonthly
+      monthlySent: isLastDayOfMonth && sendMonthly,
+      telegramResults: {
+        daily: dailyTelegramResponse,
+        monthly: monthlyTelegramResponse
+      }
     })
   } catch (error: any) {
     console.error('Telegram Cron Job Uncaught Error:', error)
