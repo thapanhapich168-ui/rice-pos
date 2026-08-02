@@ -160,10 +160,10 @@ export default function POSPage() {
     }
     setIsModalInputFocused(true);
     
-    // 🔥 Prevent iOS Safari from jerking window scroll when switching inputs
-    requestAnimationFrame(() => {
+    // 🔥 Wait 300ms for iOS keyboard slide animation to finish before resetting scroll
+    setTimeout(() => {
       window.scrollTo(0, 0);
-    });
+    }, 300);
 
     if (callback) callback();
   };
@@ -2216,7 +2216,7 @@ export default function POSPage() {
           .modal-keyboard-push div[class*="Modal"],
           .modal-keyboard-push div[style*="position: fixed"][style*="z-index"]:not(.mobile-cart-overlay):not(.mobile-fab):not(#invoice-capture-area) {
             align-items: flex-start !important;
-            padding-top: 90px !important;
+            padding-top: 45px !important;
             overscroll-behavior: none !important;
           }
         }
