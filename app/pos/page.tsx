@@ -159,6 +159,12 @@ export default function POSPage() {
       modalFocusTimerRef.current = null;
     }
     setIsModalInputFocused(true);
+    
+    // 🔥 Prevent iOS Safari from jerking window scroll when switching inputs
+    requestAnimationFrame(() => {
+      window.scrollTo(0, 0);
+    });
+
     if (callback) callback();
   };
 
@@ -1878,65 +1884,104 @@ export default function POSPage() {
         </div>
       </Modal>
 
-      {/* 🔥 COMPACT MOBILE PRODUCT ADD POPUP WITH ENTER NAVIGATION */}
+      {/* CLEAN & BALANCED MOBILE ITEM POPUP (REGULAR WEIGHT, MINIMAL COLORS) */}
       <Modal isOpen={!!selectedMobileProduct} onClose={() => setSelectedMobileProduct(null)} title={currentT.mobileModalTitle} icon="✏️" maxWidth="400px">
-        <div style={{ marginBottom: '10px' }}>
-          <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '6px' }}>Product Identifier</label>
-          <input 
-            type="text" 
-            value={mobileName} 
-            onChange={(e) => setMobileName(e.target.value)} 
-            onFocus={() => handleModalFocus()}
-            onBlur={() => handleModalBlur()}
-            className="saas-input" 
-            style={{ padding: '10px' }}
-          />
-        </div>
-        <div style={{ display: 'flex', gap: '12px', marginBottom: '16px' }}>
-          <div style={{ flex: 1 }}>
-            <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '6px' }}>Quantity</label>
-            <input
-              ref={mobileQtyRef}
-              type="text"
-              inputMode="numeric"
-              enterKeyHint="next"
-              pattern="[0-9]*"
-              value={mobileQty} 
-              onChange={(e) => {
-                const cleanVal = e.target.value.replace(/[^0-9]/g, '');
-                setMobileQty(cleanVal === '' ? '' : Number(cleanVal));
-              }}
-              onKeyDown={handleMobileQtyKeyDown}
-              onFocus={() => handleModalFocus(() => setMobileQty(''))}
+        
+        {/* Product Name Card */}
+        <div style={{ marginBottom: '16px' }}>
+          <label style={{ display: 'block', fontSize: '12px', color: '#64748b', marginBottom: '6px', fontWeight: 'normal' }}>
+            Product Name
+          </label>
+          <div style={{ display: 'flex', alignItems: 'center', background: '#f8fafc', border: '1px solid #cbd5e1', borderRadius: '8px', padding: '4px 12px' }}>
+            <input 
+              type="text" 
+              value={mobileName} 
+              onChange={(e) => setMobileName(e.target.value)} 
+              onFocus={() => handleModalFocus()}
               onBlur={() => handleModalBlur()}
-              className="saas-input" 
-              style={{ padding: '10px', width: '100%', fontSize: '16px' }}
-            />
-          </div>
-          <div style={{ flex: 1 }}>
-            <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '6px' }}>Price (៛)</label>
-            <input
-              ref={mobilePriceRef}
-              type="text"
-              inputMode="decimal"
-              enterKeyHint="done"
-              value={mobilePrice} 
-              onChange={(e) => {
-                const cleanVal = e.target.value.replace(/[^0-9.]/g, '');
-                setMobilePrice(cleanVal === '' ? '' : Number(cleanVal));
-              }}
-              onKeyDown={handleMobilePriceKeyDown}
-              onFocus={() => handleModalFocus(() => setMobilePrice(''))}
-              onBlur={() => handleModalBlur()}
-              className="saas-input" 
-              style={{ padding: '10px', width: '100%', fontSize: '16px' }}
+              style={{ flex: 1, border: 'none', background: 'transparent', outline: 'none', padding: '8px 0', fontSize: '15px', color: '#334155', fontWeight: 'normal' }}
             />
           </div>
         </div>
-        <div style={{ display: 'flex', gap: '10px', marginTop: '4px' }}>
-          <button onClick={() => setSelectedMobileProduct(null)} className="saas-btn saas-btn-secondary" style={{ flex: 1, padding: '12px' }}>{currentT.cancel}</button>
-          <button onClick={handleAddMobileProductToCart} className="saas-btn saas-btn-primary" style={{ flex: 2, padding: '12px', fontWeight: 'bold' }}>{currentT.add}</button>
+
+        {/* Vertical Stacked Inputs */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', marginBottom: '24px' }}>
+          
+          {/* Quantity Input Box */}
+          <div style={{ width: '100%' }}>
+            <label style={{ display: 'block', fontSize: '12px', color: '#64748b', marginBottom: '6px', fontWeight: 'normal' }}>
+              Quantity
+            </label>
+            <div style={{ display: 'flex', alignItems: 'center', border: '1px solid #cbd5e1', borderRadius: '8px', padding: '4px 12px', background: '#ffffff' }}>
+              <input
+                ref={mobileQtyRef}
+                type="text"
+                inputMode="numeric"
+                enterKeyHint="next"
+                pattern="[0-9]*"
+                value={mobileQty} 
+                onChange={(e) => {
+                  const cleanVal = e.target.value.replace(/[^0-9]/g, '');
+                  setMobileQty(cleanVal === '' ? '' : Number(cleanVal));
+                }}
+                onKeyDown={handleMobileQtyKeyDown}
+                onFocus={() => handleModalFocus(() => setMobileQty(''))}
+                onBlur={() => handleModalBlur()}
+                style={{ flex: 1, border: 'none', background: 'transparent', outline: 'none', padding: '8px 0', fontSize: '16px', color: '#334155', fontWeight: 'normal' }}
+              />
+              <span style={{ color: '#64748b', fontSize: '13px', paddingLeft: '8px', fontWeight: 'normal' }}>
+                kg / bag
+              </span>
+            </div>
+          </div>
+
+          {/* Price Input Box */}
+          <div style={{ width: '100%' }}>
+            <label style={{ display: 'block', fontSize: '12px', color: '#64748b', marginBottom: '6px', fontWeight: 'normal' }}>
+              Unit Price
+            </label>
+            <div style={{ display: 'flex', alignItems: 'center', border: '1px solid #cbd5e1', borderRadius: '8px', padding: '4px 12px', background: '#ffffff' }}>
+              <input
+                ref={mobilePriceRef}
+                type="text"
+                inputMode="decimal"
+                enterKeyHint="done"
+                value={mobilePrice} 
+                onChange={(e) => {
+                  const cleanVal = e.target.value.replace(/[^0-9.]/g, '');
+                  setMobilePrice(cleanVal === '' ? '' : Number(cleanVal));
+                }}
+                onKeyDown={handleMobilePriceKeyDown}
+                onFocus={() => handleModalFocus(() => setMobilePrice(''))}
+                onBlur={() => handleModalBlur()}
+                style={{ flex: 1, border: 'none', background: 'transparent', outline: 'none', padding: '8px 0', fontSize: '16px', color: '#334155', fontWeight: 'normal' }}
+              />
+              <span style={{ color: '#64748b', fontSize: '13px', paddingLeft: '8px', fontWeight: 'normal' }}>
+                ៛ Riel
+              </span>
+            </div>
+          </div>
+
         </div>
+
+        {/* Action Buttons */}
+        <div style={{ display: 'flex', gap: '10px' }}>
+          <button 
+            onClick={() => setSelectedMobileProduct(null)} 
+            className="saas-btn saas-btn-secondary" 
+            style={{ flex: 1, padding: '12px', borderRadius: '8px', fontWeight: 'normal', fontSize: '15px' }}
+          >
+            {currentT.cancel}
+          </button>
+          <button 
+            onClick={handleAddMobileProductToCart} 
+            className="saas-btn saas-btn-primary" 
+            style={{ flex: 2, padding: '12px', borderRadius: '8px', fontWeight: 'normal', fontSize: '15px' }}
+          >
+            + {currentT.add}
+          </button>
+        </div>
+
       </Modal>
 
       {/* 💰 SALE SUMMARY MODAL */}
@@ -2183,49 +2228,35 @@ export default function POSPage() {
           }
         }
 
-        /* 🔥 2. FORCE ALL MODALS ON MOBILE TO UPPER-TOP BY DEFAULT TO STOP BOUNCING 🔥 */
-        @media (max-width: 1023px) {
-          div[role="dialog"],
-          div[class*="modal"],
-          div[class*="Modal"],
-          div[style*="position: fixed"][style*="z-index"]:not(.mobile-cart-overlay):not(.mobile-fab):not(#invoice-capture-area) {
-            position: fixed !important;
-            top: 0 !important;
-            left: 0 !important;
-            right: 0 !important;
-            bottom: 0 !important;
-            width: 100vw !important;
-            height: 100dvh !important;
-            display: flex !important;
-            align-items: flex-start !important;
-            justify-content: center !important;
-            padding: 16px !important;
-            padding-top: 65px !important;
-            box-sizing: border-box !important;
-            margin: 0 !important;
-            overscroll-behavior: none !important;
-          }
+        /* 🔥 2. FORCE ALL MODALS TO TRUE FULL-SCREEN CENTER BY DEFAULT 🔥 */
+        div[role="dialog"],
+        div[class*="modal"],
+        div[class*="Modal"],
+        div[style*="position: fixed"][style*="z-index"]:not(.mobile-cart-overlay):not(.mobile-fab):not(#invoice-capture-area) {
+          position: fixed !important;
+          top: 0 !important;
+          left: 0 !important;
+          right: 0 !important;
+          bottom: 0 !important;
+          width: 100vw !important;
+          height: 100dvh !important;
+          display: flex !important;
+          align-items: center !important;
+          justify-content: center !important;
+          padding: 16px !important;
+          box-sizing: border-box !important;
+          margin: 0 !important;
         }
 
-        /* DEFAULT MODAL CENTER ON DESKTOP */
-        @media (min-width: 1024px) {
-          div[role="dialog"],
-          div[class*="modal"],
-          div[class*="Modal"],
-          div[style*="position: fixed"][style*="z-index"]:not(.mobile-cart-overlay):not(.mobile-fab):not(#invoice-capture-area) {
-            position: fixed !important;
-            top: 0 !important;
-            left: 0 !important;
-            right: 0 !important;
-            bottom: 0 !important;
-            width: 100vw !important;
-            height: 100dvh !important;
-            display: flex !important;
-            align-items: center !important;
-            justify-content: center !important;
-            padding: 16px !important;
-            box-sizing: border-box !important;
-            margin: 0 !important;
+        /* 🔥 3. WHEN TYPING, MOVES MODAL SAFELY BELOW BURGER ICON WITHOUT JERKING 🔥 */
+        @media (max-width: 1023px) {
+          .modal-keyboard-push div[role="dialog"],
+          .modal-keyboard-push div[class*="modal"],
+          .modal-keyboard-push div[class*="Modal"],
+          .modal-keyboard-push div[style*="position: fixed"][style*="z-index"]:not(.mobile-cart-overlay):not(.mobile-fab):not(#invoice-capture-area) {
+            align-items: flex-start !important;
+            padding-top: 90px !important;
+            overscroll-behavior: none !important;
           }
         }
 
