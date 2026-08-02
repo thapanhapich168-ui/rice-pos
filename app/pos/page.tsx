@@ -145,11 +145,11 @@ export default function POSPage() {
   const [mobileQty, setMobileQty] = useState<number | ''>('')
   const [mobileName, setMobileName] = useState<string>('')
 
-  // 🔥 Fix 3: Refs for iOS "Next" button jumping smoothly between inputs
+  // 🔥 Refs for iOS "Next" button jumping smoothly between inputs
   const mobileQtyRef = useRef<HTMLInputElement>(null);
   const mobilePriceRef = useRef<HTMLInputElement>(null);
 
-  // 🔥 Fix 3: Safari Debounced Keyboard State
+  // 🔥 Safari Debounced Keyboard State
   const [isModalInputFocused, setIsModalInputFocused] = useState(false)
   const modalFocusTimerRef = useRef<any>(null)
 
@@ -168,7 +168,7 @@ export default function POSPage() {
     }, 150);
   };
 
-  // 🔥 Fix 2: Dedicated Centered Popup Modal for Out of Stock Warnings
+  // 🔥 Dedicated Centered Popup Modal for Out of Stock Warnings
   const [outOfStockAlert, setOutOfStockAlert] = useState<{ isOpen: boolean, title: string, message: string }>({
     isOpen: false, title: '', message: ''
   });
@@ -527,7 +527,7 @@ export default function POSPage() {
     setSelectedMobileProduct(null);
   }
 
-  // 🔥 Fix 3: Key down handler so Enter key on numeric keyboard moves to next input smoothly
+  // 🔥 Key down handler so Enter key on numeric keyboard moves to next input smoothly
   const handleMobileQtyKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') {
       e.preventDefault();
@@ -1757,7 +1757,7 @@ export default function POSPage() {
         </div>
       </Modal>
 
-      {/* 🔥 Fix 2: OUT OF STOCK CENTERED POPUP MODAL */}
+      {/* 🔥 OUT OF STOCK CENTERED POPUP MODAL */}
       <Modal isOpen={outOfStockAlert.isOpen} onClose={() => setOutOfStockAlert({ isOpen: false, title: '', message: '' })} title={outOfStockAlert.title} icon="📦" maxWidth="400px">
         <div style={{ padding: '8px 0 20px 0', color: '#334155', fontSize: '14px', lineHeight: '1.5', textAlign: 'center' }}>
           {outOfStockAlert.message}
@@ -1867,7 +1867,7 @@ export default function POSPage() {
         </div>
       </Modal>
 
-      {/* 🔥 Fix 3: COMPACT MOBILE PRODUCT ADD POPUP WITH ENTER NAVIGATION */}
+      {/* 🔥 COMPACT MOBILE PRODUCT ADD POPUP WITH ENTER NAVIGATION */}
       <Modal isOpen={!!selectedMobileProduct} onClose={() => setSelectedMobileProduct(null)} title={currentT.mobileModalTitle} icon="✏️" maxWidth="400px">
         <div style={{ marginBottom: '10px' }}>
           <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '6px' }}>Product Identifier</label>
@@ -2172,23 +2172,27 @@ export default function POSPage() {
           }
         }
 
-        /* 🔥 2. FORCE ALL MODALS TO CENTER IN THE MIDDLE OF THE SCREEN BY DEFAULT 🔥 */
+        /* 🔥 2. FORCE ALL MODALS TO TRUE FULL-SCREEN CENTER BY DEFAULT 🔥 */
         div[role="dialog"],
         div[class*="modal"],
         div[class*="Modal"],
         div[style*="position: fixed"][style*="z-index"]:not(.mobile-cart-overlay):not(.mobile-fab):not(#invoice-capture-area) {
+          position: fixed !important;
+          top: 0 !important;
+          left: 0 !important;
+          right: 0 !important;
+          bottom: 0 !important;
+          width: 100vw !important;
+          height: 100dvh !important;
           display: flex !important;
           align-items: center !important;
           justify-content: center !important;
           padding: 16px !important;
           box-sizing: border-box !important;
-          top: 0 !important;
-          left: 0 !important;
-          right: 0 !important;
-          bottom: 0 !important;
+          margin: 0 !important;
         }
 
-        /* 🔥 3. WHEN TYPING IN A MODAL, PUSH IT COMPACTLY TO TOP (STOPS URL BAR COLLISION) 🔥 */
+        /* 🔥 3. WHEN TYPING IN A MODAL, PUSH IT RIGHT BELOW THE HAMBURGER ICON (NOT BEHIND) 🔥 */
         @media (max-width: 1023px) {
           .modal-keyboard-push div[role="dialog"],
           .modal-keyboard-push div[class*="modal"],
@@ -2199,7 +2203,7 @@ export default function POSPage() {
           div[class*="Modal"]:has(input:focus),
           div[style*="position: fixed"][style*="z-index"]:not(.mobile-cart-overlay):not(.mobile-fab):not(#invoice-capture-area):has(input:focus) {
             align-items: flex-start !important;
-            padding-top: 12px !important;
+            padding-top: 64px !important; /* Right below the hamburger menu icon! */
           }
         }
 
