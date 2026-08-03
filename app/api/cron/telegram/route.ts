@@ -14,7 +14,7 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    // 2. Validate Supabase Environment Variables (Prevents instant 500 crashes)
+    // 2. Validate Supabase Environment Variables
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
     const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 
@@ -27,7 +27,7 @@ export async function GET(request: Request) {
 
     const supabase = createClient(supabaseUrl, supabaseKey)
 
-    // 3. Load Telegram Credentials directly from your config
+    // 3. Load Telegram Credentials
     const botToken = TELEGRAM_CONFIG.botToken
     const chatId = TELEGRAM_CONFIG.chatId
     const sendDaily = TELEGRAM_CONFIG.autoSendDaily
@@ -40,47 +40,49 @@ export async function GET(request: Request) {
       )
     }
 
-    // 4. 🔥 BULLETPROOF CAMBODIA DATE PARSING (No "Invalid Date" or RangeError crashes)
+    // 4. 🔥 SAFE DATE LOGIC (Identical to ReportControlPage - No string splitting bugs)
     const now = new Date()
+    const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString()
 
-    // Safely get Cambodia today string as "YYYY-MM-DD"
-    const todayStr = new Intl.DateTimeFormat('en-CA', {
-      timeZone: 'Asia/Phnom_Penh',
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit'
-    }).format(now)
-
-    // Safely get current Cambodia month name (e.g., "August 2026")
-    const currentMonthName = new Intl.DateTimeFormat('en-GB', {
-      timeZone: 'Asia/Phnom_Penh',
-      month: 'long',
-      year: 'numeric'
-    }).format(now)
-
-    // Check if tomorrow in Cambodia is Day 1 (to see if today is the Last Day of Month)
-    const tomorrowDate = new Date(now.getTime() + 86400000)
-    const tomorrowDayCambodia = Number(
-      new Intl.DateTimeFormat('en-US', {
+    // Cambodia Timezone comparison helpers (UTC+7)
+    const getCambodiaDateParts = (d: Date) => {
+      const parts = new Intl.DateTimeFormat('en-US', {
         timeZone: 'Asia/Phnom_Penh',
+        year: 'numeric',
+        month: 'numeric',
         day: 'numeric'
-      }).format(tomorrowDate)
-    )
-    const isLastDayOfMonth = tomorrowDayCambodia === 1
+      }).formatToParts(d)
+      const get = (type: string) => Number(parts.find(p => p.type === type)?.value || 0)
+      return { year: get('year'), month: get('month'), day: get('day') }
+    }
 
-    // Construct start of month in Cambodia timezone safely (YYYY-MM-01T00:00:00+07:00)
-    const [yearStr, monthStr] = todayStr.split('-')
-    const startOfMonth = `${yearStr}-${monthStr}-01T00:00:00+07:00`
+    const nowCam = getCambodiaDateParts(now)
 
-    // 5. Fetch Data from the start of the current month
+    const isToday = (dateStr: string) => {
+      if (!dateStr) return false
+      const d = getCambodiaDateParts(new Date(dateStr))
+      return d.day === nowCam.day && d.month === nowCam.month && d.year === nowCam.year
+    }
+
+    const isMTD = (dateStr: string) => {
+      if (!dateStr) return false
+      const d = getCambodiaDateParts(new Date(dateStr))
+      return d.month === nowCam.month && d.year === nowCam.year
+    }
+
+    // Check if tomorrow is Day 1 in Cambodia (Last day of month check)
+    const tomorrowCam = getCambodiaDateParts(new Date(now.getTime() + 86400000))
+    const isLastDayOfMonth = tomorrowCam.day === 1
+
+    // 5. Fetch Data from Supabase safely
     const [
       { data: invData, error: invError },
       { data: retData, error: retError },
       { data: expData, error: expError }
     ] = await Promise.all([
-      supabase.from('invoice_summaries').select('*').gte('created_at', startOfMonth),
-      supabase.from('retail_sales').select('*').gte('created_at', startOfMonth),
-      supabase.from('expenses').select('*').gte('created_at', startOfMonth)
+      supabase.from('invoice_summaries').select('*').gte('created_at', firstDayOfMonth),
+      supabase.from('retail_sales').select('*').gte('created_at', firstDayOfMonth),
+      supabase.from('expenses').select('*').gte('created_at', firstDayOfMonth)
     ])
 
     if (invError || retError || expError) {
@@ -147,17 +149,22 @@ export async function GET(request: Request) {
       return { totalSales, totalProfit, profitByOwner, expenseBySpender, totalExpRiel, totalExpUsd, categoryBreakdown }
     }
 
-    const month = calculateSlice(invoices, retailSales, expenses)
+    const month = calculateSlice(
+      invoices.filter(i => isMTD(i.created_at)),
+      retailSales.filter(r => isMTD(r.created_at)),
+      expenses.filter(e => isMTD(e.expense_date || e.created_at))
+    )
+
     const today = calculateSlice(
-      invoices.filter(i => i.created_at?.startsWith(todayStr)),
-      retailSales.filter(r => r.created_at?.startsWith(todayStr)),
-      expenses.filter(e => (e.expense_date || e.created_at)?.startsWith(todayStr))
+      invoices.filter(i => isToday(i.created_at)),
+      retailSales.filter(r => isToday(r.created_at)),
+      expenses.filter(e => isToday(e.expense_date || e.created_at))
     )
 
     let dailyTelegramResponse = null
     let monthlyTelegramResponse = null
 
-    // --- 7. DISPATCH DAILY REPORT (MARKDOWN TEXT) EVERY DAY AT 7:00 PM ---
+    // --- 7. DISPATCH DAILY REPORT ---
     if (sendDaily) {
       const dailyText =
 `📊 *RICE BUSINESS REPORT*
@@ -206,8 +213,14 @@ export async function GET(request: Request) {
       }
     }
 
-    // --- 8. DISPATCH MONTHLY REPORT (ALBUM OF 3 IMAGES) ON LAST DAY OF MONTH AT 7:00 PM ---
+    // --- 8. DISPATCH MONTHLY REPORT (LAST DAY OF MONTH) ---
     if (isLastDayOfMonth && sendMonthly) {
+      const currentMonthName = new Intl.DateTimeFormat('en-GB', {
+        timeZone: 'Asia/Phnom_Penh',
+        month: 'long',
+        year: 'numeric'
+      }).format(now)
+
       let topCat = 'None'
       let topCatAmount = 0
       Object.entries(month.categoryBreakdown).forEach(([cat, val]) => {
@@ -220,7 +233,7 @@ export async function GET(request: Request) {
 
       const rawBaseUrl = process.env.NEXT_PUBLIC_SITE_URL || 
         (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000')
-      const baseUrl = rawBaseUrl.replace(/\/$/, '') // Safe removal of trailing slash
+      const baseUrl = rawBaseUrl.replace(/\/$/, '')
 
       const baseParams = `month=${encodeURIComponent(currentMonthName)}&sales=${month.totalSales}&profit=${month.totalProfit}&expRiel=${month.totalExpRiel}&expUsd=${month.totalExpUsd}`
 
@@ -240,14 +253,8 @@ export async function GET(request: Request) {
               caption: `📊 *${currentMonthName.toUpperCase()} — EXECUTIVE BUSINESS SUMMARY*`,
               parse_mode: 'Markdown'
             },
-            {
-              type: 'photo',
-              media: imgOwnersUrl
-            },
-            {
-              type: 'photo',
-              media: imgExpensesUrl
-            }
+            { type: 'photo', media: imgOwnersUrl },
+            { type: 'photo', media: imgExpensesUrl }
           ]
         })
       })
@@ -260,8 +267,6 @@ export async function GET(request: Request) {
 
     return NextResponse.json({
       success: true,
-      todayStr,
-      isLastDayOfMonth,
       dailySent: sendDaily,
       monthlySent: isLastDayOfMonth && sendMonthly,
       telegramResults: {
