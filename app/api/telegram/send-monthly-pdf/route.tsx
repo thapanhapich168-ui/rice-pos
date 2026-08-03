@@ -21,7 +21,16 @@ export const runtime = 'nodejs'
 // 🔥 REGISTER KHMER + ENGLISH FONT TO PREVENT BROKEN RICE NAMES ("•Ò‰,")
 Font.register({
   family: 'Battambang',
-  src: 'https://fonts.gstatic.com/s/battambang/v20/uk-mE2r3nhefeWNq6E8uLh40-aE.ttf'
+  fonts: [
+    {
+      src: 'https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/battambang/Battambang-Regular.ttf',
+      fontWeight: 'normal'
+    },
+    {
+      src: 'https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/battambang/Battambang-Bold.ttf',
+      fontWeight: 'bold'
+    }
+  ]
 })
 
 const EXCHANGE_RATE = 4000
