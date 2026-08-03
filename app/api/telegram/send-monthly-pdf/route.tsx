@@ -12,22 +12,21 @@ import {
   Font,
   Svg,
   Line,
-  Polyline,
-  Circle
+  Polyline
 } from '@react-pdf/renderer'
 
 export const runtime = 'nodejs'
 
-// 🔥 REGISTER KHMER + ENGLISH FONT TO PREVENT BROKEN RICE NAMES ("•Ò‰,")
+// 🔥 1. REGISTER NOTO SANS KHMER (CLEAN MODERN ENGLISH NUMBERS/UI + KHMER SCRIPT)
 Font.register({
-  family: 'Battambang',
+  family: 'NotoSansKhmer',
   fonts: [
     {
-      src: 'https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/battambang/Battambang-Regular.ttf',
+      src: 'https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/notosanskhmer/NotoSansKhmer-Regular.ttf',
       fontWeight: 'normal'
     },
     {
-      src: 'https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/battambang/Battambang-Bold.ttf',
+      src: 'https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/notosanskhmer/NotoSansKhmer-Bold.ttf',
       fontWeight: 'bold'
     }
   ]
@@ -40,25 +39,78 @@ const formatNum = (val: number) => Number(val || 0).toLocaleString()
 
 // --- A4 CORPORATE & SAAS CARD STYLESHEET ---
 const styles = StyleSheet.create({
-  page: { padding: 35, fontFamily: 'Battambang', backgroundColor: '#ffffff', color: '#0f172a' },
-  header: { flexDirection: 'row', justifyContent: 'space-between', borderBottomWidth: 2, borderBottomColor: '#0f172a', paddingBottom: 10, marginBottom: 16 },
+  page: { 
+    padding: 35, 
+    paddingBottom: 45, 
+    fontFamily: 'NotoSansKhmer', 
+    backgroundColor: '#ffffff', 
+    color: '#0f172a' 
+  },
+  header: { 
+    flexDirection: 'row', 
+    justifyContent: 'space-between', 
+    borderBottomWidth: 2, 
+    borderBottomColor: '#0f172a', 
+    paddingBottom: 10, 
+    marginBottom: 16 
+  },
   brandTitle: { fontSize: 9, color: '#64748b', textTransform: 'uppercase' },
   docTitle: { fontSize: 18, fontWeight: 'bold', color: '#0f172a', marginTop: 2 },
   monthBadge: { fontSize: 13, fontWeight: 'bold', color: '#b58a3d' },
-  sectionTitle: { fontSize: 11, fontWeight: 'bold', color: '#334155', backgroundColor: '#f1f5f9', padding: 5, marginBottom: 10, marginTop: 14 },
+  sectionTitle: { 
+    fontSize: 11, 
+    fontWeight: 'bold', 
+    color: '#334155', 
+    backgroundColor: '#f1f5f9', 
+    padding: 6, 
+    marginBottom: 10, 
+    marginTop: 14 
+  },
   
   // Grid & SaaS Card Layouts
-  grid2: { flexDirection: 'row', justifyContent: 'space-between', gap: 10, marginBottom: 12 },
-  grid3: { flexDirection: 'row', justifyContent: 'space-between', gap: 8, marginBottom: 12 },
-  card: { flex: 1, padding: 10, borderRadius: 6, borderWidth: 1, borderColor: '#e2e8f0', backgroundColor: '#f8fafc' },
+  grid2: { flexDirection: 'row', justifyContent: 'space-between', gap: 10, marginBottom: 10 },
+  grid3: { flexDirection: 'row', justifyContent: 'space-between', gap: 8, marginBottom: 10 },
+  card: { 
+    flex: 1, 
+    padding: 10, 
+    borderRadius: 6, 
+    borderWidth: 1, 
+    borderColor: '#e2e8f0', 
+    backgroundColor: '#f8fafc' 
+  },
+  cardHighlight: { 
+    flex: 1, 
+    padding: 10, 
+    borderRadius: 6, 
+    borderWidth: 1, 
+    borderColor: '#e2e8f0', 
+    backgroundColor: '#f8fafc', 
+    borderLeftWidth: 4 
+  },
   cardLabel: { fontSize: 8, color: '#64748b', textTransform: 'uppercase', marginBottom: 3 },
   cardValue: { fontSize: 14, fontWeight: 'bold', color: '#0f172a' },
   cardSubValue: { fontSize: 8, color: '#94a3b8', marginBottom: 8 },
   
   // Pich / Jing / Both / Mom 4-box Subgrid
   subBoxGrid: { flexDirection: 'row', gap: 4, borderTopWidth: 1, borderTopColor: '#f1f5f9', paddingTop: 6 },
-  subBox: { flex: 1, padding: 4, borderRadius: 4, backgroundColor: '#ffffff', textAlign: 'center', borderWidth: 1, borderColor: '#e2e8f0' },
-  subBoxMom: { flex: 1, padding: 4, borderRadius: 4, backgroundColor: '#fefcf3', textAlign: 'center', borderWidth: 1, borderColor: '#fde047' },
+  subBox: { 
+    flex: 1, 
+    padding: 4, 
+    borderRadius: 4, 
+    backgroundColor: '#ffffff', 
+    textAlign: 'center', 
+    borderWidth: 1, 
+    borderColor: '#e2e8f0' 
+  },
+  subBoxMom: { 
+    flex: 1, 
+    padding: 4, 
+    borderRadius: 4, 
+    backgroundColor: '#fefcf3', 
+    textAlign: 'center', 
+    borderWidth: 1, 
+    borderColor: '#fde047' 
+  },
   subBoxLabel: { fontSize: 7, color: '#94a3b8', textTransform: 'uppercase' },
   subBoxVal: { fontSize: 8, color: '#334155', fontWeight: 'bold', marginTop: 1 },
 
@@ -68,22 +120,32 @@ const styles = StyleSheet.create({
   expSplitText: { fontSize: 8, color: '#64748b', marginBottom: 2 },
 
   // Tables & Rows
-  tableHeader: { flexDirection: 'row', backgroundColor: '#e2e8f0', paddingVertical: 5, paddingHorizontal: 6 },
+  tableHeader: { flexDirection: 'row', backgroundColor: '#e2e8f0', paddingVertical: 5, paddingHorizontal: 6, borderRadius: 4 },
   tableRow: { flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: '#f1f5f9', paddingVertical: 5, paddingHorizontal: 6 },
   colCat: { flex: 2, fontSize: 8, color: '#334155' },
   colAmt: { flex: 1, fontSize: 8, textAlign: 'right', fontWeight: 'bold', color: '#0f172a' },
   
   // Health Bar / Progress Bar
-  barContainer: { height: 6, backgroundColor: '#f1f5f9', borderRadius: 3, overflow: 'hidden', my: 4 },
+  barContainer: { height: 6, backgroundColor: '#f1f5f9', borderRadius: 3, overflow: 'hidden', marginVertical: 4 },
   barFill: { height: '100%', borderRadius: 3 },
 
-  footer: { position: 'absolute', bottom: 20, left: 35, right: 35, flexDirection: 'row', justifyContent: 'space-between', borderTopWidth: 1, borderTopColor: '#cbd5e1', paddingTop: 8 },
+  footer: { 
+    position: 'absolute', 
+    bottom: 18, 
+    left: 35, 
+    right: 35, 
+    flexDirection: 'row', 
+    justifyContent: 'space-between', 
+    borderTopWidth: 1, 
+    borderTopColor: '#cbd5e1', 
+    paddingTop: 8 
+  },
   footerText: { fontSize: 8, color: '#64748b' }
 })
 
 // --- HELPER COMPONENT: COMPLEX SAAS CARD WITH 4 OWNER SUB-BOXES ---
 const ComplexCardPDF = ({ title, total, pich = 0, jing = 0, both = 0, mom = 0, color = '#1e293b' }: any) => (
-  <View style={styles.card}>
+  <View style={styles.card} wrap={false}>
     <Text style={styles.cardLabel}>{title}</Text>
     <Text style={[styles.cardValue, { color }]}>{formatKHR(total)}</Text>
     <Text style={styles.cardSubValue}>{formatUSD(total / EXCHANGE_RATE)}</Text>
@@ -113,18 +175,30 @@ const ExpenseBreakdownCardPDF = ({ title, cR = 0, cU = 0, qR = 0, qU = 0, color 
   const totalRiel = cR + qR
   const totalUsd = cU + qU
   return (
-    <View style={styles.card}>
+    <View style={styles.card} wrap={false}>
       <Text style={styles.cardLabel}>{title}</Text>
       <Text style={[styles.cardValue, { color }]}>{formatKHR(totalRiel)}</Text>
-      {totalUsd > 0 ? <Text style={[styles.cardSubValue, { color, fontWeight: 'bold' }]}>{formatUSD(totalUsd)}</Text> : <Text style={styles.cardSubValue}>$0.00</Text>}
+      {totalUsd > 0 ? (
+        <Text style={[styles.cardSubValue, { color, fontWeight: 'bold' }]}>{formatUSD(totalUsd)}</Text>
+      ) : (
+        <Text style={styles.cardSubValue}>$0.00</Text>
+      )}
       <View style={styles.expSplitGrid}>
         <View style={styles.expSplitCol}>
-          <Text style={styles.expSplitText}>Cash: <Text style={{ color: '#334155', fontWeight: 'bold' }}>{formatKHR(cR)}</Text></Text>
-          <Text style={styles.expSplitText}>QR: <Text style={{ color: '#334155', fontWeight: 'bold' }}>{formatKHR(qR)}</Text></Text>
+          <Text style={styles.expSplitText}>
+            Cash: <Text style={{ color: '#334155', fontWeight: 'bold' }}>{formatKHR(cR)}</Text>
+          </Text>
+          <Text style={styles.expSplitText}>
+            QR: <Text style={{ color: '#334155', fontWeight: 'bold' }}>{formatKHR(qR)}</Text>
+          </Text>
         </View>
         <View style={styles.expSplitCol}>
-          <Text style={styles.expSplitText}>Cash: <Text style={{ color: '#334155', fontWeight: 'bold' }}>{formatUSD(cU)}</Text></Text>
-          <Text style={styles.expSplitText}>QR: <Text style={{ color: '#334155', fontWeight: 'bold' }}>{formatUSD(qU)}</Text></Text>
+          <Text style={styles.expSplitText}>
+            Cash: <Text style={{ color: '#334155', fontWeight: 'bold' }}>{formatUSD(cU)}</Text>
+          </Text>
+          <Text style={styles.expSplitText}>
+            QR: <Text style={{ color: '#334155', fontWeight: 'bold' }}>{formatUSD(qU)}</Text>
+          </Text>
         </View>
       </View>
     </View>
@@ -143,7 +217,7 @@ const HealthBarPDF = ({ title, current, target, color, reverseLogic = false }: a
     if (pct > 100) barColor = '#ef4444'; else if (pct < 80) barColor = '#10b981'
   }
   return (
-    <View style={[styles.card, { marginBottom: 8 }]}>
+    <View style={[styles.card, { marginBottom: 8 }]} wrap={false}>
       <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
         <Text style={{ fontSize: 9, fontWeight: 'bold', color: '#334155' }}>{title}</Text>
         <Text style={{ fontSize: 9, fontWeight: 'bold', color: barColor }}>{displayPct}%</Text>
@@ -152,8 +226,12 @@ const HealthBarPDF = ({ title, current, target, color, reverseLogic = false }: a
         <View style={[styles.barFill, { width: `${barWidth}%`, backgroundColor: barColor }]} />
       </View>
       <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 2 }}>
-        <Text style={{ fontSize: 7, color: '#64748b' }}>This MTD: <Text style={{ color: '#334155', fontWeight: 'bold' }}>{formatKHR(current)}</Text></Text>
-        <Text style={{ fontSize: 7, color: '#64748b' }}>Last Mth: <Text style={{ color: '#334155', fontWeight: 'bold' }}>{formatKHR(target)}</Text></Text>
+        <Text style={{ fontSize: 7, color: '#64748b' }}>
+          This MTD: <Text style={{ color: '#334155', fontWeight: 'bold' }}>{formatKHR(current)}</Text>
+        </Text>
+        <Text style={{ fontSize: 7, color: '#64748b' }}>
+          Last Mth: <Text style={{ color: '#334155', fontWeight: 'bold' }}>{formatKHR(target)}</Text>
+        </Text>
       </View>
     </View>
   )
@@ -167,7 +245,7 @@ const LineChartCardPDF = ({ title, dataCurrent, dataLast, color }: any) => {
   }).join(' ')
   
   return (
-    <View style={[styles.card, { marginBottom: 10 }]}>
+    <View style={[styles.card, { marginBottom: 10 }]} wrap={false}>
       <Text style={[styles.cardLabel, { marginBottom: 8 }]}>{title}</Text>
       <Svg viewBox="0 0 450 85" style={{ width: '100%', height: 65 }}>
         <Line x1="0" y1="20" x2="450" y2="20" stroke="#f1f5f9" strokeWidth="1" />
@@ -184,7 +262,7 @@ const LineChartCardPDF = ({ title, dataCurrent, dataLast, color }: any) => {
   )
 }
 
-// --- FULL MULTI-PAGE DOCUMENT COMPONENT (DYNAMIC PAGE COUNT) ---
+// --- FULL MULTI-PAGE DOCUMENT COMPONENT (DYNAMIC FLOW WITH NO CUT-OFFS) ---
 const MonthlyReportPDF = ({ monthName, mtd, lastMonth, wholesaleTop, retailTop, categoryBreakdown, charts }: any) => {
   const margin = mtd.totalSales > 0 ? ((mtd.totalProfit / mtd.totalSales) * 100).toFixed(1) : '0.0'
   const totalExpEq = mtd.totalExpRiel + (mtd.totalExpUsd * EXCHANGE_RATE)
@@ -211,21 +289,24 @@ const MonthlyReportPDF = ({ monthName, mtd, lastMonth, wholesaleTop, retailTop, 
 
         {/* SECTION 1: EXECUTIVE SUMMARY */}
         <Text style={styles.sectionTitle}>1. EXECUTIVE SUMMARY & KEY INSIGHTS</Text>
-        <View style={styles.grid3}>
-          <View style={[styles.card, { borderLeftWidth: 4, borderLeftColor: '#10b981' }]}>
+        <View style={styles.grid3} wrap={false}>
+          <View style={[styles.cardHighlight, { borderLeftColor: '#10b981' }]}>
             <Text style={styles.cardLabel}>Gross Profit Margin</Text>
             <Text style={[styles.cardValue, { color: '#10b981' }]}>{margin}%</Text>
+            <Text style={styles.cardSubValue}>Based on monthly gross sales</Text>
           </View>
-          <View style={[styles.card, { borderLeftWidth: 4, borderLeftColor: '#3b82f6' }]}>
+          <View style={[styles.cardHighlight, { borderLeftColor: '#3b82f6' }]}>
             <Text style={styles.cardLabel}>Net Retained Cash Flow</Text>
             <Text style={[styles.cardValue, { color: netCashFlow >= 0 ? '#2563eb' : '#dc2626' }]}>{formatKHR(netCashFlow)}</Text>
+            <Text style={styles.cardSubValue}>After operational & personal expenses</Text>
           </View>
-          <View style={[styles.card, { borderLeftWidth: 4, borderLeftColor: '#f59e0b' }]}>
+          <View style={[styles.cardHighlight, { borderLeftColor: '#f59e0b' }]}>
             <Text style={styles.cardLabel}>Total Outflow Expenses (Eq)</Text>
             <Text style={styles.cardValue}>{formatKHR(totalExpEq)}</Text>
+            <Text style={styles.cardSubValue}>Combined KHR and USD equivalent</Text>
           </View>
         </View>
-        <View style={[styles.card, { marginBottom: 14, backgroundColor: '#f8fafc' }]}>
+        <View style={[styles.card, { marginBottom: 14, backgroundColor: '#f8fafc' }]} wrap={false}>
           <Text style={{ fontSize: 8, color: '#334155', lineHeight: 1.5 }}>
             Operational Conclusion: During {monthName}, the business achieved total sales of {formatKHR(mtd.totalSales)} with a gross profit of {formatKHR(mtd.totalProfit)}. After accounting for all operational and personal expenses of {formatKHR(totalExpEq)} equivalent, the net retained cash flow stands at {formatKHR(netCashFlow)}.
           </Text>
@@ -233,11 +314,11 @@ const MonthlyReportPDF = ({ monthName, mtd, lastMonth, wholesaleTop, retailTop, 
 
         {/* SECTION 2: MONTH TO DATE (MTD) PERFORMANCE CARDS */}
         <Text style={styles.sectionTitle}>2. MONTH TO DATE (MTD) PERFORMANCE</Text>
-        <View style={styles.grid2}>
+        <View style={styles.grid2} wrap={false}>
           <ComplexCardPDF title="MTD Sales" total={mtd.totalSales} pich={mtd.pichSales} jing={mtd.jingSales} both={mtd.bothSales} mom={mtd.momSales} color="#2563eb" />
           <ComplexCardPDF title="MTD Profit" total={mtd.totalProfit} pich={mtd.pichProfit} jing={mtd.jingProfit} both={mtd.bothProfit} mom={mtd.momProfit} color="#10b981" />
         </View>
-        <View style={styles.grid3}>
+        <View style={styles.grid3} wrap={false}>
           <ExpenseBreakdownCardPDF title="Cash Collected (Direct)" cR={mtd.col.cR} cU={mtd.col.cU} qR={mtd.col.qR} qU={mtd.col.qU} color="#3b82f6" />
           <ExpenseBreakdownCardPDF title="MTD Biz Expenses" cR={mtd.bizCashRiel} cU={mtd.bizCashUsd} qR={mtd.bizQrRiel} qU={mtd.bizQrUsd} color="#b91c1c" />
           <ExpenseBreakdownCardPDF title="MTD Personal Exp" cR={mtd.persCashRiel} cU={mtd.persCashUsd} qR={mtd.persQrRiel} qU={mtd.persQrUsd} color="#f59e0b" />
@@ -245,10 +326,10 @@ const MonthlyReportPDF = ({ monthName, mtd, lastMonth, wholesaleTop, retailTop, 
 
         {/* SECTION 3: MTD TOP PERFORMERS (WHOLESALE & RETAIL) */}
         <Text style={styles.sectionTitle}>3. MTD TOP PERFORMERS (WHOLESALE & RETAIL)</Text>
-        <View style={styles.grid2}>
+        <View style={styles.grid2} wrap={false}>
           <View style={styles.card}>
-            <Text style={[styles.cardLabel, { marginBottom: 6, color: '#2563eb' }]}>🏆 Top 3 Wholesale (By Volume)</Text>
-            {wholesaleTop.topByQty.length === 0 ? <Text style={{ fontSize: 8, color: '#94a3b8' }}>No wholesale data.</Text> : (
+            <Text style={[styles.cardLabel, { marginBottom: 6, color: '#2563eb' }]}>TOP 3 WHOLESALE (BY VOLUME)</Text>
+            {wholesaleTop.topByQty.length === 0 ? <Text style={{ fontSize: 8, color: '#94a3b8' }}>No wholesale data available.</Text> : (
               wholesaleTop.topByQty.map((item: any, idx: number) => (
                 <View key={idx} style={{ flexDirection: 'row', justifyContent: 'space-between', borderBottomWidth: 1, borderBottomColor: '#f1f5f9', paddingVertical: 4 }}>
                   <Text style={{ fontSize: 8, fontWeight: 'bold' }}>{idx + 1}. {item.name}</Text>
@@ -258,8 +339,8 @@ const MonthlyReportPDF = ({ monthName, mtd, lastMonth, wholesaleTop, retailTop, 
             )}
           </View>
           <View style={styles.card}>
-            <Text style={[styles.cardLabel, { marginBottom: 6, color: '#10b981' }]}>🏆 Top 3 Retail (By Volume)</Text>
-            {retailTop.topByQty.length === 0 ? <Text style={{ fontSize: 8, color: '#94a3b8' }}>No retail data.</Text> : (
+            <Text style={[styles.cardLabel, { marginBottom: 6, color: '#10b981' }]}>TOP 3 RETAIL (BY VOLUME)</Text>
+            {retailTop.topByQty.length === 0 ? <Text style={{ fontSize: 8, color: '#94a3b8' }}>No retail data available.</Text> : (
               retailTop.topByQty.map((item: any, idx: number) => (
                 <View key={idx} style={{ flexDirection: 'row', justifyContent: 'space-between', borderBottomWidth: 1, borderBottomColor: '#f1f5f9', paddingVertical: 4 }}>
                   <Text style={{ fontSize: 8, fontWeight: 'bold' }}>{idx + 1}. {item.name}</Text>
@@ -272,43 +353,49 @@ const MonthlyReportPDF = ({ monthName, mtd, lastMonth, wholesaleTop, retailTop, 
 
         {/* SECTION 4: COMPARE MTD VS LAST MONTH */}
         <Text style={styles.sectionTitle}>4. COMPARE MTD VS LAST MONTH</Text>
-        <View style={styles.grid2}>
+        <View style={styles.grid2} wrap={false}>
           <HealthBarPDF title="Sales Comparison" current={mtd.totalSales} target={lastMonth.totalSales} color="#2563eb" />
           <HealthBarPDF title="Profit Comparison" current={mtd.totalProfit} target={lastMonth.totalProfit} color="#10b981" />
         </View>
-        <View style={styles.grid2}>
+        <View style={styles.grid2} wrap={false}>
           <HealthBarPDF title="Biz Expenses Comparison" current={mtd.bizCashRiel + mtd.bizQrRiel + (mtd.bizCashUsd * EXCHANGE_RATE)} target={lastMonth.bizCashRiel + lastMonth.bizQrRiel + (lastMonth.bizCashUsd * EXCHANGE_RATE)} color="#b91c1c" reverseLogic />
           <HealthBarPDF title="Personal Expenses Comparison" current={mtd.persCashRiel + mtd.persQrRiel + (mtd.persCashUsd * EXCHANGE_RATE)} target={lastMonth.persCashRiel + lastMonth.persQrRiel + (lastMonth.persCashUsd * EXCHANGE_RATE)} color="#f59e0b" reverseLogic />
         </View>
 
         {/* SECTION 5: TREND ANALYSIS CHARTS */}
         <Text style={styles.sectionTitle}>5. TREND ANALYSIS (DAY 1 - 31)</Text>
-        <View style={styles.grid2}>
+        <View style={styles.grid2} wrap={false}>
           <LineChartCardPDF title="Total Sales: This Month vs Last Month" dataCurrent={charts.thisMonthSales} dataLast={charts.lastMonthSales} color="#2563eb" />
           <LineChartCardPDF title="Total Profit: This Month vs Last Month" dataCurrent={charts.thisMonthProfit} dataLast={charts.lastMonthProfit} color="#10b981" />
         </View>
 
         {/* SECTION 6: ITEMIZED EXPENSES BY CATEGORY */}
         <Text style={styles.sectionTitle}>6. ITEMIZED EXPENSES BY CATEGORY</Text>
-        <View style={styles.tableHeader}>
-          <Text style={styles.colCat}>Category Name</Text>
-          <Text style={styles.colAmt}>Total (KHR)</Text>
-          <Text style={styles.colAmt}>Total (USD)</Text>
-        </View>
-        {categories.length === 0 ? (
-          <View style={styles.tableRow}><Text style={styles.colCat}>No recorded expenses.</Text><Text style={styles.colAmt}>0 KHR</Text><Text style={styles.colAmt}>$0.00</Text></View>
-        ) : (
-          categories.map(([cat, val]: any, idx: number) => (
-            <View key={idx} style={styles.tableRow}>
-              <Text style={styles.colCat}>{cat}</Text>
-              <Text style={[styles.colAmt, { color: '#dc2626' }]}>{formatKHR(val.riel)}</Text>
-              <Text style={[styles.colAmt, { color: '#dc2626' }]}>{formatUSD(val.usd)}</Text>
+        <View wrap={false}>
+          <View style={styles.tableHeader}>
+            <Text style={styles.colCat}>Category Name</Text>
+            <Text style={styles.colAmt}>Total (KHR)</Text>
+            <Text style={styles.colAmt}>Total (USD)</Text>
+          </View>
+          {categories.length === 0 ? (
+            <View style={styles.tableRow}>
+              <Text style={styles.colCat}>No recorded expenses.</Text>
+              <Text style={styles.colAmt}>0 KHR</Text>
+              <Text style={styles.colAmt}>$0.00</Text>
             </View>
-          ))
-        )}
+          ) : (
+            categories.map(([cat, val]: any, idx: number) => (
+              <View key={idx} style={styles.tableRow} wrap={false}>
+                <Text style={styles.colCat}>{cat}</Text>
+                <Text style={[styles.colAmt, { color: '#dc2626' }]}>{formatKHR(val.riel)}</Text>
+                <Text style={[styles.colAmt, { color: '#dc2626' }]}>{formatUSD(val.usd)}</Text>
+              </View>
+            ))
+          )}
+        </View>
 
         {/* SECTION 7: SIGN-OFF SIGNATURES */}
-        <View style={{ marginTop: 25, flexDirection: 'row', justifyContent: 'space-between', marginBottom: 30 }}>
+        <View style={{ marginTop: 25, flexDirection: 'row', justifyContent: 'space-between', marginBottom: 30 }} wrap={false}>
           <View style={{ width: '45%' }}>
             <Text style={{ fontSize: 8, color: '#334155', fontWeight: 'bold', marginBottom: 25 }}>Prepared By:</Text>
             <View style={{ borderBottomWidth: 1, borderBottomColor: '#94a3b8' }} />
@@ -321,7 +408,7 @@ const MonthlyReportPDF = ({ monthName, mtd, lastMonth, wholesaleTop, retailTop, 
           </View>
         </View>
 
-        {/* 🔥 DYNAMIC PAGE FOOTER ("Page X of Y" automatically calculated) */}
+        {/* DYNAMIC FOOTER ("Page X of Y" automatically calculated across all pages) */}
         <View style={styles.footer} fixed>
           <Text style={styles.footerText}>Rice POS System — Automated Executive Scorecard</Text>
           <Text style={styles.footerText} render={({ pageNumber, totalPages }) => `Page ${pageNumber} of ${totalPages}`} />
