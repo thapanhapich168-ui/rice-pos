@@ -40,11 +40,10 @@ export async function GET(request: Request) {
       )
     }
 
-    // 4. 🔥 SAFE DATE LOGIC (Identical to ReportControlPage - No string splitting bugs)
+    // 4. 🔥 CAMBODIA TIMEZONE DATE LOGIC (Asia/Phnom_Penh | UTC+7)
     const now = new Date()
-    const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString()
 
-    // Cambodia Timezone comparison helpers (UTC+7)
+    // Converts any Date object to Cambodia local year, month, day
     const getCambodiaDateParts = (d: Date) => {
       const parts = new Intl.DateTimeFormat('en-US', {
         timeZone: 'Asia/Phnom_Penh',
@@ -57,6 +56,9 @@ export async function GET(request: Request) {
     }
 
     const nowCam = getCambodiaDateParts(now)
+
+    // Force Supabase query to start from Day 1 at 00:00:00 Cambodia time (+07:00)
+    const startOfMonth = `${nowCam.year}-${String(nowCam.month).padStart(2, '0')}-01T00:00:00+07:00`
 
     const isToday = (dateStr: string) => {
       if (!dateStr) return false
@@ -74,15 +76,15 @@ export async function GET(request: Request) {
     const tomorrowCam = getCambodiaDateParts(new Date(now.getTime() + 86400000))
     const isLastDayOfMonth = tomorrowCam.day === 1
 
-    // 5. Fetch Data from Supabase safely
+    // 5. Fetch Data from Supabase safely using Cambodia startOfMonth
     const [
       { data: invData, error: invError },
       { data: retData, error: retError },
       { data: expData, error: expError }
     ] = await Promise.all([
-      supabase.from('invoice_summaries').select('*').gte('created_at', firstDayOfMonth),
-      supabase.from('retail_sales').select('*').gte('created_at', firstDayOfMonth),
-      supabase.from('expenses').select('*').gte('created_at', firstDayOfMonth)
+      supabase.from('invoice_summaries').select('*').gte('created_at', startOfMonth),
+      supabase.from('retail_sales').select('*').gte('created_at', startOfMonth),
+      supabase.from('expenses').select('*').gte('created_at', startOfMonth)
     ])
 
     if (invError || retError || expError) {
@@ -164,7 +166,7 @@ export async function GET(request: Request) {
     let dailyTelegramResponse = null
     let monthlyTelegramResponse = null
 
-    // --- 7. DISPATCH DAILY REPORT ---
+    // --- 7. DISPATCH DAILY REPORT (CLEAN REGULAR FONT) ---
     if (sendDaily) {
       const cleanUSD = (val: number) => (val === 0 ? '$0' : formatUSD(val))
 
@@ -174,7 +176,7 @@ export async function GET(request: Request) {
 📆 THIS MONTH
 💰 Sales      ${formatRiel(month.totalSales)}
 📈 Profit     ${formatRiel(month.totalProfit)}
-💸 Expense    ${formatRiel(month.totalExpRiel)} /${cleanUSD(month.totalExpUsd)}
+💸 Expense    ${formatRiel(month.totalExpRiel)} / ${cleanUSD(month.totalExpUsd)}
 
 👤 MONTH PROFIT
 🟢 Pich       ${formatRiel(month.profitByOwner.Pich)}
@@ -182,16 +184,16 @@ export async function GET(request: Request) {
 🟡 Both       ${formatRiel(month.profitByOwner.Both)}
 
 💸 MONTH EXPENSE
-🟢 Pich       ${formatRiel(month.expenseBySpender.Pich.riel)} /${cleanUSD(month.expenseBySpender.Pich.usd)}
-🔵 Jing       ${formatRiel(month.expenseBySpender.Jing.riel)} /${cleanUSD(month.expenseBySpender.Jing.usd)}
-🟡 Both       ${formatRiel(month.expenseBySpender.Both.riel)} /${cleanUSD(month.expenseBySpender.Both.usd)}
+🟢 Pich       ${formatRiel(month.expenseBySpender.Pich.riel)} / ${cleanUSD(month.expenseBySpender.Pich.usd)}
+🔵 Jing       ${formatRiel(month.expenseBySpender.Jing.riel)} / ${cleanUSD(month.expenseBySpender.Jing.usd)}
+🟡 Both       ${formatRiel(month.expenseBySpender.Both.riel)} / ${cleanUSD(month.expenseBySpender.Both.usd)}
 
 ━━━━━━━━━━━━━━━
 
 📅 TODAY
 💰 Sales      ${formatRiel(today.totalSales)}
 📈 Profit     ${formatRiel(today.totalProfit)}
-💸 Expense    ${formatRiel(today.totalExpRiel)} /${cleanUSD(today.totalExpUsd)}
+💸 Expense    ${formatRiel(today.totalExpRiel)} / ${cleanUSD(today.totalExpUsd)}
 
 👤 TODAY PROFIT
 🟢 Pich       ${formatRiel(today.profitByOwner.Pich)}
@@ -199,9 +201,9 @@ export async function GET(request: Request) {
 🟡 Both       ${formatRiel(today.profitByOwner.Both)}
 
 💸 TODAY EXPENSE
-🟢 Pich       ${formatRiel(today.expenseBySpender.Pich.riel)} /${cleanUSD(today.expenseBySpender.Pich.usd)}
-🔵 Jing       ${formatRiel(today.expenseBySpender.Jing.riel)} /${cleanUSD(today.expenseBySpender.Jing.usd)}
-🟡 Both       ${formatRiel(today.expenseBySpender.Both.riel)} /${cleanUSD(today.expenseBySpender.Both.usd)}`
+🟢 Pich       ${formatRiel(today.expenseBySpender.Pich.riel)} / ${cleanUSD(today.expenseBySpender.Pich.usd)}
+🔵 Jing       ${formatRiel(today.expenseBySpender.Jing.riel)} / ${cleanUSD(today.expenseBySpender.Jing.usd)}
+🟡 Both       ${formatRiel(today.expenseBySpender.Both.riel)} / ${cleanUSD(today.expenseBySpender.Both.usd)}`
 
       const dailyRes = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
         method: 'POST',
@@ -215,55 +217,20 @@ export async function GET(request: Request) {
       }
     }
 
-    // --- 8. DISPATCH MONTHLY REPORT (LAST DAY OF MONTH) ---
+    // --- 8. 🔥 DISPATCH FULL MONTHLY PDF REPORT ON LAST DAY OF MONTH ---
     if (isLastDayOfMonth && sendMonthly) {
-      const currentMonthName = new Intl.DateTimeFormat('en-GB', {
-        timeZone: 'Asia/Phnom_Penh',
-        month: 'long',
-        year: 'numeric'
-      }).format(now)
-
-      let topCat = 'None'
-      let topCatAmount = 0
-      Object.entries(month.categoryBreakdown).forEach(([cat, val]) => {
-        const eq = val.riel + (val.usd * EXCHANGE_RATE)
-        if (eq > topCatAmount) {
-          topCatAmount = eq
-          topCat = cat
-        }
-      })
-
       const rawBaseUrl = process.env.NEXT_PUBLIC_SITE_URL || 
         (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000')
       const baseUrl = rawBaseUrl.replace(/\/$/, '')
 
-      const baseParams = `month=${encodeURIComponent(currentMonthName)}&sales=${month.totalSales}&profit=${month.totalProfit}&expRiel=${month.totalExpRiel}&expUsd=${month.totalExpUsd}`
-
-      const imgSummaryUrl = `${baseUrl}/api/og/monthly-report?card=summary&${baseParams}`
-      const imgOwnersUrl = `${baseUrl}/api/og/monthly-report?card=owners&${baseParams}&pichP=${month.profitByOwner.Pich}&jingP=${month.profitByOwner.Jing}&bothP=${month.profitByOwner.Both}`
-      const imgExpensesUrl = `${baseUrl}/api/og/monthly-report?card=expenses&${baseParams}&topCat=${encodeURIComponent(topCat)}&topCatAmt=${topCatAmount}`
-
-      const monthlyRes = await fetch(`https://api.telegram.org/bot${botToken}/sendMediaGroup`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          chat_id: chatId,
-          media: [
-            {
-              type: 'photo',
-              media: imgSummaryUrl,
-              caption: `📊 *${currentMonthName.toUpperCase()} — EXECUTIVE BUSINESS SUMMARY*`,
-              parse_mode: 'Markdown'
-            },
-            { type: 'photo', media: imgOwnersUrl },
-            { type: 'photo', media: imgExpensesUrl }
-          ]
-        })
+      // Calls your multi-page PDF generation endpoint instead of the deleted 3-image OG cards
+      const monthlyRes = await fetch(`${baseUrl}/api/telegram/send-monthly-pdf`, {
+        method: 'POST'
       })
 
       monthlyTelegramResponse = await monthlyRes.json()
       if (!monthlyRes.ok) {
-        console.error('Telegram Monthly Album Send Error:', monthlyTelegramResponse)
+        console.error('Telegram Monthly PDF Cron Error:', monthlyTelegramResponse)
       }
     }
 
