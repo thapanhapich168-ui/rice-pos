@@ -419,7 +419,7 @@ export default function ReportControlPage() {
     }
   }
 
-  // --- 8. 🔥 NEW: DISPATCH MULTI-PAGE PDF DOCUMENT TO TELEGRAM ---
+  // --- 8. 🔥 FIXED: DISPATCH MULTI-PAGE PDF DOCUMENT TO TELEGRAM ---
   async function handleSendMonthlyTelegram() {
     setIsSending(true)
     try {
