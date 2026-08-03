@@ -166,45 +166,47 @@ export async function GET(request: Request) {
 
     // --- 7. DISPATCH DAILY REPORT ---
     if (sendDaily) {
+      const cleanUSD = (val: number) => (val === 0 ? '$0' : formatUSD(val))
+
       const dailyText =
-`📊 *RICE BUSINESS REPORT*
+`📊 RICE BUSINESS REPORT
 
-📆 *THIS MONTH*
-💰 *Sales*      \`${formatRiel(month.totalSales)}\`
-📈 *Profit*     \`${formatRiel(month.totalProfit)}\`
-💸 *Expense*    \`${formatRiel(month.totalExpRiel)} / ${formatUSD(month.totalExpUsd)}\`
+📆 THIS MONTH
+💰 Sales      ${formatRiel(month.totalSales)}
+📈 Profit     ${formatRiel(month.totalProfit)}
+💸 Expense    ${formatRiel(month.totalExpRiel)} /${cleanUSD(month.totalExpUsd)}
 
-👤 *MONTH PROFIT*
-🟢 Pich       \`${formatRiel(month.profitByOwner.Pich)}\`
-🔵 Jing       \`${formatRiel(month.profitByOwner.Jing)}\`
-🟡 Both       \`${formatRiel(month.profitByOwner.Both)}\`
+👤 MONTH PROFIT
+🟢 Pich       ${formatRiel(month.profitByOwner.Pich)}
+🔵 Jing       ${formatRiel(month.profitByOwner.Jing)}
+🟡 Both       ${formatRiel(month.profitByOwner.Both)}
 
-💸 *MONTH EXPENSE*
-🟢 Pich       \`${formatRiel(month.expenseBySpender.Pich.riel)} / ${formatUSD(month.expenseBySpender.Pich.usd)}\`
-🔵 Jing       \`${formatRiel(month.expenseBySpender.Jing.riel)} / ${formatUSD(month.expenseBySpender.Jing.usd)}\`
-🟡 Both       \`${formatRiel(month.expenseBySpender.Both.riel)} / ${formatUSD(month.expenseBySpender.Both.usd)}\`
+💸 MONTH EXPENSE
+🟢 Pich       ${formatRiel(month.expenseBySpender.Pich.riel)} /${cleanUSD(month.expenseBySpender.Pich.usd)}
+🔵 Jing       ${formatRiel(month.expenseBySpender.Jing.riel)} /${cleanUSD(month.expenseBySpender.Jing.usd)}
+🟡 Both       ${formatRiel(month.expenseBySpender.Both.riel)} /${cleanUSD(month.expenseBySpender.Both.usd)}
 
 ━━━━━━━━━━━━━━━
 
-📅 *TODAY*
-💰 *Sales*      \`${formatRiel(today.totalSales)}\`
-📈 *Profit*     \`${formatRiel(today.totalProfit)}\`
-💸 *Expense*    \`${formatRiel(today.totalExpRiel)} / ${formatUSD(today.totalExpUsd)}\`
+📅 TODAY
+💰 Sales      ${formatRiel(today.totalSales)}
+📈 Profit     ${formatRiel(today.totalProfit)}
+💸 Expense    ${formatRiel(today.totalExpRiel)} /${cleanUSD(today.totalExpUsd)}
 
-👤 *TODAY PROFIT*
-🟢 Pich       \`${formatRiel(today.profitByOwner.Pich)}\`
-🔵 Jing       \`${formatRiel(today.profitByOwner.Jing)}\`
-🟡 Both       \`${formatRiel(today.profitByOwner.Both)}\`
+👤 TODAY PROFIT
+🟢 Pich       ${formatRiel(today.profitByOwner.Pich)}
+🔵 Jing       ${formatRiel(today.profitByOwner.Jing)}
+🟡 Both       ${formatRiel(today.profitByOwner.Both)}
 
-💸 *TODAY EXPENSE*
-🟢 Pich       \`${formatRiel(today.expenseBySpender.Pich.riel)} / ${formatUSD(today.expenseBySpender.Pich.usd)}\`
-🔵 Jing       \`${formatRiel(today.expenseBySpender.Jing.riel)} / ${formatUSD(today.expenseBySpender.Jing.usd)}\`
-🟡 Both       \`${formatRiel(today.expenseBySpender.Both.riel)} / ${formatUSD(today.expenseBySpender.Both.usd)}\``
+💸 TODAY EXPENSE
+🟢 Pich       ${formatRiel(today.expenseBySpender.Pich.riel)} /${cleanUSD(today.expenseBySpender.Pich.usd)}
+🔵 Jing       ${formatRiel(today.expenseBySpender.Jing.riel)} /${cleanUSD(today.expenseBySpender.Jing.usd)}
+🟡 Both       ${formatRiel(today.expenseBySpender.Both.riel)} /${cleanUSD(today.expenseBySpender.Both.usd)}`
 
       const dailyRes = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ chat_id: chatId, text: dailyText, parse_mode: 'Markdown' })
+        body: JSON.stringify({ chat_id: chatId, text: dailyText })
       })
 
       dailyTelegramResponse = await dailyRes.json()
