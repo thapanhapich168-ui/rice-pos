@@ -46,7 +46,8 @@ export default function ReportControlPage() {
         supabase.from('invoice_summaries').select('*').gte('created_at', firstDayOfLastMonth),
         supabase.from('retail_sales').select('*').gte('created_at', firstDayOfLastMonth),
         supabase.from('expenses').select('*').gte('created_at', firstDayOfLastMonth),
-        supabase.from('invoice_payments').select('*').gte('created_at', firstDayOfLastMonth)
+        // 🔥 FIXED: payment_date instead of created_at to prevent 400 Bad Request
+        supabase.from('invoice_payments').select('*').gte('payment_date', firstDayOfLastMonth)
       ])
 
       setWholesaleSales(salesData || [])
@@ -150,7 +151,11 @@ export default function ReportControlPage() {
       }
     }
 
-    const monthSlice = calculateSlice(invoices.filter(i => isMTD(i.created_at)), retailSales.filter(r => isMTD(r.created_at)), expenses.filter(e => isMTD(e.expense_date || e.created_at)))
+    const monthSlice = calculateSlice(
+      invoices.filter(i => isMTD(i.created_at)),
+      retailSales.filter(r => isMTD(r.created_at)),
+      expenses.filter(e => isMTD(e.expense_date || e.created_at))
+    )
     const todaySlice = calculateSlice(
       invoices.filter(i => isToday(i.created_at)),
       retailSales.filter(r => isToday(r.created_at)),
@@ -307,9 +312,10 @@ export default function ReportControlPage() {
   const thisMonthData = generateDailyArray(activeSalesData, isMTD)
   const lastMonthData = generateDailyArray(activeSalesData, isLastMonth)
 
-  // --- 5. TELEGRAM MESSAGE GENERATOR (DAILY) ---
+  // --- 5. TELEGRAM MESSAGE GENERATOR (DAILY - CLEAN REGULAR FONT) ---
   const generateTelegramMessage = () => {
     const { today, month } = reportMetrics
+    const cleanUSD = (val: number) => (val === 0 ? '$0' : formatUSD(val))
 
     return (
 `📊 RICE BUSINESS REPORT
@@ -317,7 +323,7 @@ export default function ReportControlPage() {
 📆 THIS MONTH
 💰 Sales      ${formatRiel(month.totalSales)}
 📈 Profit     ${formatRiel(month.totalProfit)}
-💸 Expense    ${formatRiel(month.totalExpRiel)} / ${formatUSD(month.totalExpUsd)}
+💸 Expense    ${formatRiel(month.totalExpRiel)} / ${cleanUSD(month.totalExpUsd)}
 
 👤 MONTH PROFIT
 🟢 Pich       ${formatRiel(month.profitByOwner.Pich)}
@@ -325,16 +331,16 @@ export default function ReportControlPage() {
 🟡 Both       ${formatRiel(month.profitByOwner.Both)}
 
 💸 MONTH EXPENSE
-🟢 Pich       ${formatRiel(month.expenseBySpender.Pich.riel)} / ${formatUSD(month.expenseBySpender.Pich.usd)}
-🔵 Jing       ${formatRiel(month.expenseBySpender.Jing.riel)} / ${formatUSD(month.expenseBySpender.Jing.usd)}
-🟡 Both       ${formatRiel(month.expenseBySpender.Both.riel)} / ${formatUSD(month.expenseBySpender.Both.usd)}
+🟢 Pich       ${formatRiel(month.expenseBySpender.Pich.riel)} / ${cleanUSD(month.expenseBySpender.Pich.usd)}
+🔵 Jing       ${formatRiel(month.expenseBySpender.Jing.riel)} / ${cleanUSD(month.expenseBySpender.Jing.usd)}
+🟡 Both       ${formatRiel(month.expenseBySpender.Both.riel)} / ${cleanUSD(month.expenseBySpender.Both.usd)}
 
 ━━━━━━━━━━━━━━━
 
 📅 TODAY
 💰 Sales      ${formatRiel(today.totalSales)}
 📈 Profit     ${formatRiel(today.totalProfit)}
-💸 Expense    ${formatRiel(today.totalExpRiel)} / ${formatUSD(today.totalExpUsd)}
+💸 Expense    ${formatRiel(today.totalExpRiel)} / ${cleanUSD(today.totalExpUsd)}
 
 👤 TODAY PROFIT
 🟢 Pich       ${formatRiel(today.profitByOwner.Pich)}
@@ -342,9 +348,9 @@ export default function ReportControlPage() {
 🟡 Both       ${formatRiel(today.profitByOwner.Both)}
 
 💸 TODAY EXPENSE
-🟢 Pich       ${formatRiel(today.expenseBySpender.Pich.riel)} / ${formatUSD(today.expenseBySpender.Pich.usd)}
-🔵 Jing       ${formatRiel(today.expenseBySpender.Jing.riel)} / ${formatUSD(today.expenseBySpender.Jing.usd)}
-🟡 Both       ${formatRiel(today.expenseBySpender.Both.riel)} / ${formatUSD(today.expenseBySpender.Both.usd)}`
+🟢 Pich       ${formatRiel(today.expenseBySpender.Pich.riel)} / ${cleanUSD(today.expenseBySpender.Pich.usd)}
+🔵 Jing       ${formatRiel(today.expenseBySpender.Jing.riel)} / ${cleanUSD(today.expenseBySpender.Jing.usd)}
+🟡 Both       ${formatRiel(today.expenseBySpender.Both.riel)} / ${cleanUSD(today.expenseBySpender.Both.usd)}`
     )
   }
 
@@ -413,7 +419,7 @@ export default function ReportControlPage() {
     }
   }
 
-  // --- 8. 🔥 NEW: SECURE DISPATCH TO TELEGRAM (MONTHLY 3-IMAGE ALBUM) ---
+  // --- 8. SECURE DISPATCH TO TELEGRAM (MONTHLY 3-IMAGE ALBUM) ---
   async function handleSendMonthlyTelegram() {
     const activeBotToken = TELEGRAM_CONFIG.botToken
     const activeChatId = TELEGRAM_CONFIG.chatId
@@ -480,16 +486,18 @@ export default function ReportControlPage() {
   }
 
   return (
+    // 🔥 EXACT RICECONTROL LAYOUT: Flex Column + Overflow Hidden locks outer page
     <div className="main-wrapper" style={{ display: 'flex', flexDirection: 'column', height: '100dvh', overflow: 'hidden' }}>
       
-      {/* 🔥 FROZEN HEADER AT TOP (NO GREY BOX, ZERO OVERLAP) */}
+      {/* 🔥 FROZEN HEADER AT TOP: Same 60px/54px margin-left & alignment as RiceControl */}
       <div className="header-container no-print" style={{ flexShrink: 0 }}>
         <div className="header-left">
           <h1 className="saas-page-title">📲 Report Automation & Dispatch</h1>
         </div>
         <div className="header-actions">
-          <button onClick={fetchReportData} className="saas-btn saas-btn-secondary">
-            {loading ? '🔄 Loading...' : '🔄 Refresh Numbers'}
+          <button onClick={fetchReportData} className="saas-btn saas-btn-secondary" title="Refresh Numbers">
+            <span className="desktop-only-inline">{loading ? '🔄 Loading...' : '🔄 Refresh Numbers'}</span>
+            <span className="mobile-only-inline">{loading ? '⏳' : '🔄'}</span>
           </button>
         </div>
       </div>
@@ -497,72 +505,79 @@ export default function ReportControlPage() {
       {/* SCROLLING CONTENT AREA BELOW HEADER */}
       <div className="hide-scrollbar" style={{ flex: 1, overflowY: 'auto', paddingBottom: '60px' }}>
 
-        {/* REPORT DISPATCH CONTROLS */}
-        <div className="saas-card no-print" style={{ padding: '24px', marginBottom: '24px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px', borderBottom: '1px solid #e2e8f0', paddingBottom: '16px' }}>
+        {/* 🔥 BEAUTIFULLY ARRANGED REPORT DISPATCH CONTROLS */}
+        <div className="saas-card no-print" style={{ padding: '20px', marginBottom: '24px' }}>
+          <div className="controls-header">
             
-            <div className="saas-tab-container" style={{ margin: 0, padding: 0, border: 'none', background: '#f1f5f9' }}>
+            {/* SEGMENTED CONTROL TABS */}
+            <div className="saas-tab-container controls-tabs" style={{ margin: 0, padding: 0, border: 'none', background: '#f1f5f9' }}>
               <button
                 type="button"
                 onClick={() => setActiveReportTab('daily')}
                 className={`saas-tab ${activeReportTab === 'daily' ? 'active' : ''}`}
-                style={{ padding: '10px 24px', fontWeight: 'bold' }}
+                style={{ padding: '10px 20px', fontWeight: 'bold' }}
               >
-                📅 Daily Telegram Format
+                <span className="desktop-only-inline">📅 Daily Telegram Format</span>
+                <span className="mobile-only-inline">📅 Daily Format</span>
               </button>
               <button
                 type="button"
                 onClick={() => setActiveReportTab('monthly')}
                 className={`saas-tab ${activeReportTab === 'monthly' ? 'active' : ''}`}
-                style={{ padding: '10px 24px', fontWeight: 'bold' }}
+                style={{ padding: '10px 20px', fontWeight: 'bold' }}
               >
-                📄 Full Monthly Business Report
+                <span className="desktop-only-inline">📄 Full Monthly Business Report</span>
+                <span className="mobile-only-inline">📄 Monthly Report</span>
               </button>
             </div>
 
-            {/* 🔥 UPDATED: DYNAMIC BUTTONS FOR BOTH TABS */}
-            <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+            {/* DYNAMIC ACTION BUTTONS */}
+            <div className="controls-actions">
               {activeReportTab === 'daily' ? (
                 <>
                   <button
                     onClick={copyToClipboard}
-                    className="saas-btn saas-btn-secondary"
+                    className="saas-btn saas-btn-secondary controls-btn-secondary"
                     style={{ fontWeight: 'bold' }}
                   >
-                    📋 Copy Text
+                    <span className="desktop-only-inline">📋 Copy Text</span>
+                    <span className="mobile-only-inline">📋 Copy</span>
                   </button>
                   <button
                     onClick={handleSendTelegram}
                     disabled={isSending || loading}
-                    className="saas-btn saas-btn-primary"
-                    style={{ background: '#0088cc', borderColor: '#0077b5', color: '#fff', fontWeight: 'bold', padding: '0 24px' }}
+                    className="saas-btn saas-btn-primary controls-btn-primary"
+                    style={{ background: '#0088cc', borderColor: '#0077b5', color: '#fff', fontWeight: 'bold' }}
                   >
-                    {isSending ? '🚀 Dispatching...' : '🚀 Send Daily Report to Telegram'}
+                    <span className="desktop-only-inline">{isSending ? '🚀 Dispatching...' : '🚀 Send Daily Report to Telegram'}</span>
+                    <span className="mobile-only-inline">{isSending ? '🚀 Sending...' : '🚀 Send Daily'}</span>
                   </button>
                 </>
               ) : (
                 <>
                   <button
                     onClick={handlePrintA4}
-                    className="saas-btn saas-btn-secondary"
+                    className="saas-btn saas-btn-secondary controls-btn-secondary"
                     style={{ fontWeight: 'bold' }}
                   >
-                    📥 Download A4 PDF / Print
+                    <span className="desktop-only-inline">📥 Download A4 PDF / Print</span>
+                    <span className="mobile-only-inline">📥 PDF / Print</span>
                   </button>
                   <button
                     onClick={handleSendMonthlyTelegram}
                     disabled={isSending || loading}
-                    className="saas-btn saas-btn-primary"
-                    style={{ background: '#0088cc', borderColor: '#0077b5', color: '#fff', fontWeight: 'bold', padding: '0 24px' }}
+                    className="saas-btn saas-btn-primary controls-btn-primary"
+                    style={{ background: '#0088cc', borderColor: '#0077b5', color: '#fff', fontWeight: 'bold' }}
                   >
-                    {isSending ? '🖼️ Sending Album...' : '🖼️ Send Monthly Album to Telegram'}
+                    <span className="desktop-only-inline">{isSending ? '🖼️ Sending Album...' : '🖼️ Send Monthly Album to Telegram'}</span>
+                    <span className="mobile-only-inline">{isSending ? '🖼️ Sending...' : '🖼️ Send Album'}</span>
                   </button>
                 </>
               )}
             </div>
           </div>
 
-          {/* DAILY TELEGRAM MARKDOWN PREVIEW */}
+          {/* DAILY TELEGRAM PREVIEW */}
           {activeReportTab === 'daily' && (
             <div style={{ marginTop: '20px' }}>
               <label style={{ display: 'block', fontSize: '11px', fontWeight: 'bold', color: '#64748b', marginBottom: '8px', textTransform: 'uppercase' }}>
@@ -612,7 +627,7 @@ export default function ReportControlPage() {
           )}
         </div>
 
-        {/* --- 🔥 FULL MONTHLY REPORT (INCLUDES EVERY BUSINESS SUMMARY COMPONENT) --- */}
+        {/* --- FULL MONTHLY REPORT (INCLUDES EVERY BUSINESS SUMMARY COMPONENT) --- */}
         {activeReportTab === 'monthly' && (
           <div className="a4-report-container fade-in" style={{
             background: '#ffffff',
@@ -677,7 +692,7 @@ export default function ReportControlPage() {
               </p>
             </div>
 
-            {/* SECTION 2: TODAY'S PERFORMANCE (FROM BUSINESS SUMMARY) */}
+            {/* SECTION 2: TODAY'S PERFORMANCE */}
             <h2 className="section-divider" style={{ fontWeight: 'bold' }}>📅 TODAY'S PERFORMANCE</h2>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '16px', marginBottom: '32px' }}>
               <ComplexCard title="Today Sales" total={todayM.totalSales} pich={todayM.pichSales} jing={todayM.jingSales} both={todayM.bothSales} mom={todayM.momSales} color="#2563eb" hideUsdEquiv={true} />
@@ -687,7 +702,7 @@ export default function ReportControlPage() {
               <ExpenseBreakdownCard title="Today Personal Exp" cR={todayE.persCashRiel} cU={todayE.persCashUsd} qR={todayE.persQrRiel} qU={todayE.persQrUsd} color="#f59e0b" />
             </div>
 
-            {/* SECTION 3: MONTH TO DATE (MTD) PERFORMANCE (FROM BUSINESS SUMMARY) */}
+            {/* SECTION 3: MONTH TO DATE (MTD) PERFORMANCE */}
             <h2 className="section-divider" style={{ fontWeight: 'bold' }}>📈 MONTH TO DATE (MTD)</h2>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '16px', marginBottom: '32px' }}>
               <ComplexCard title="MTD Sales" total={mtdM.totalSales} pich={mtdM.pichSales} jing={mtdM.jingSales} both={mtdM.bothSales} mom={mtdM.momSales} color="#2563eb" />
@@ -697,7 +712,7 @@ export default function ReportControlPage() {
               <ExpenseBreakdownCard title="MTD Personal Exp" cR={mtdE.persCashRiel} cU={mtdE.persCashUsd} qR={mtdE.persQrRiel} qU={mtdE.persQrUsd} color="#f59e0b" />
             </div>
 
-            {/* SECTION 4: TOP PERFORMERS (FROM BUSINESS SUMMARY) */}
+            {/* SECTION 4: TOP PERFORMERS */}
             <h2 className="section-divider" style={{ fontWeight: 'bold' }}>🏆 MTD TOP PERFORMERS (WHOLESALE)</h2>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '16px', marginBottom: '32px' }}>
               <TopPerformersCard title="Top 3 Wholesale (By Volume)" data={wholesaleTopMTD.topByQty} type="qty" />
@@ -710,7 +725,7 @@ export default function ReportControlPage() {
               <TopPerformersCard title="Top 3 Retail (By Profit)" data={retailTopMTD.topByProfit} type="profit" />
             </div>
 
-            {/* SECTION 5: COMPARE MTD VS LAST MONTH (FROM BUSINESS SUMMARY) */}
+            {/* SECTION 5: COMPARE MTD VS LAST MONTH */}
             <h2 className="section-divider" style={{ fontWeight: 'bold' }}>⚖️ COMPARE MTD VS LAST MONTH</h2>
             <div className="saas-card" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '20px', marginBottom: '32px' }}>
               <HealthBar title="Sales" current={mtdM.totalSales} target={lastMonthM.totalSales} color="#2563eb" />
@@ -719,7 +734,7 @@ export default function ReportControlPage() {
               <HealthBar title="Personal Expenses" current={mtdE.persCashRiel + mtdE.persQrRiel + (mtdE.persCashUsd*EXCHANGE_RATE)} target={lastMonthE.persCashRiel + lastMonthE.persQrRiel + (lastMonthE.persCashUsd*EXCHANGE_RATE)} color="#f59e0b" reverseLogic />
             </div>
 
-            {/* SECTION 6: TREND ANALYSIS CHARTS (FROM BUSINESS SUMMARY) */}
+            {/* SECTION 6: TREND ANALYSIS CHARTS */}
             <h2 className="section-divider" style={{ fontWeight: 'bold' }}>📉 TREND ANALYSIS (Day 1 - 31)</h2>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '24px', marginBottom: '40px' }}>
               <LineChartCard title="Total Sales: This Month vs Last Month" dataCurrent={thisMonthData.dailySales} dataLast={lastMonthData.dailySales} color="#2563eb" />
@@ -778,20 +793,24 @@ export default function ReportControlPage() {
 
       </div>
 
-      {/* --- PAGE-SPECIFIC & PRINT CSS RULES --- */}
+      {/* --- 🔥 EXACT RICECONTROL HEADER & MODERN MOBILE CSS --- */}
       <style jsx global>{`
-        /* 🔥 HEADER MARGIN FIX: Clean transparent background, clears burger menu icon */
+        .fade-in { animation: fadeIn 0.3s ease-in-out; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+
+        /* 🔥 EXACT DESKTOP HEADER FROM REFERENCE: Middle vertical alignment, clears hamburger button */
         .header-container { 
           display: flex;
           justify-content: space-between;
           align-items: center; 
           margin-bottom: 24px; 
           margin-top: 0;
-          margin-left: 64px;
+          margin-left: 60px;
           gap: 12px;
-          min-height: 44px; 
-          width: calc(100% - 64px);
+          min-height: 48px; 
+          width: calc(100% - 60px);
           max-width: 1600px;
+          padding-right: 24px;
           box-sizing: border-box;
         }
 
@@ -799,6 +818,12 @@ export default function ReportControlPage() {
           display: flex;
           align-items: center;
           gap: 12px;
+        }
+
+        .header-actions {
+          display: flex;
+          gap: 10px;
+          margin-left: auto;
         }
 
         .section-divider { 
@@ -809,14 +834,35 @@ export default function ReportControlPage() {
           padding-bottom: 6px; 
         }
 
-        .fade-in { animation: fadeIn 0.3s ease-in-out; }
-        @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+        /* DESKTOP DISPATCH CONTROLS LAYOUT */
+        .controls-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          flex-wrap: wrap;
+          gap: 16px;
+          border-bottom: 1px solid #e2e8f0;
+          padding-bottom: 16px;
+        }
 
+        .controls-actions {
+          display: flex;
+          gap: 10px;
+          flex-wrap: wrap;
+        }
+
+        .desktop-only-inline { display: inline; }
+        .mobile-only-inline { display: none; }
+
+        /* 🔥 EXACT MOBILE HEADER (< 1024px): 54px left clears mobile menu icon cleanly */
         @media (max-width: 1023px) { 
+          .desktop-only-inline { display: none !important; }
+          .mobile-only-inline { display: inline !important; }
+
           .header-container { 
             margin-left: 54px !important;
             margin-right: 0 !important;
-            margin-bottom: 24px !important; 
+            margin-bottom: 20px !important; 
             margin-top: 0 !important;
             display: flex !important;
             flex-direction: row !important;
@@ -824,6 +870,7 @@ export default function ReportControlPage() {
             align-items: center !important; 
             min-height: 44px !important;
             width: calc(100% - 54px) !important;
+            padding-right: 16px !important;
           }
 
           .header-left {
@@ -832,15 +879,72 @@ export default function ReportControlPage() {
             align-items: center !important;
             gap: 12px !important;
           }
+
+          .saas-page-title {
+            font-size: 16px !important;
+            margin: 0 !important;
+          }
+
+          .header-actions {
+            margin-left: auto !important;
+          }
+
+          /* 🔥 MOBILE DISPATCH CARD: Segmented tabs & stretchy buttons */
+          .controls-header {
+            flex-direction: column !important;
+            align-items: stretch !important;
+            gap: 14px !important;
+          }
+
+          .controls-tabs {
+            display: flex !important;
+            width: 100% !important;
+          }
+
+          .controls-tabs .saas-tab {
+            flex: 1 !important;
+            text-align: center !important;
+            justify-content: center !important;
+            padding: 10px 12px !important;
+          }
+
+          .controls-actions {
+            display: flex !important;
+            width: 100% !important;
+            gap: 10px !important;
+          }
+
+          .controls-btn-secondary {
+            flex: 0 0 auto !important;
+            padding: 10px 16px !important;
+            text-align: center !important;
+          }
+
+          .controls-btn-primary {
+            flex: 1 !important;
+            padding: 10px 16px !important;
+            text-align: center !important;
+            justify-content: center !important;
+          }
+        }
+
+        @media (max-width: 480px) {
+          .saas-page-title {
+            font-size: 14px !important;
+          }
+          .saas-btn {
+            padding: 8px 12px !important;
+            font-size: 13px !important;
+          }
+          .saas-tab {
+            padding: 8px 10px !important;
+            font-size: 13px !important;
+          }
         }
 
         @media print {
-          body {
-            background: #ffffff !important;
-          }
-          .no-print {
-            display: none !important;
-          }
+          body { background: #ffffff !important; }
+          .no-print { display: none !important; }
           .main-wrapper {
             padding: 0 !important;
             margin: 0 !important;
