@@ -46,7 +46,7 @@ export default function ReportControlPage() {
         supabase.from('invoice_summaries').select('*').gte('created_at', firstDayOfLastMonth),
         supabase.from('retail_sales').select('*').gte('created_at', firstDayOfLastMonth),
         supabase.from('expenses').select('*').gte('created_at', firstDayOfLastMonth),
-        // 🔥 FIXED: payment_date instead of created_at to prevent 400 Bad Request
+        // 🔥 payment_date instead of created_at to prevent 400 Bad Request
         supabase.from('invoice_payments').select('*').gte('payment_date', firstDayOfLastMonth)
       ])
 
@@ -419,54 +419,19 @@ export default function ReportControlPage() {
     }
   }
 
-  // --- 8. SECURE DISPATCH TO TELEGRAM (MONTHLY 3-IMAGE ALBUM) ---
+  // --- 8. 🔥 NEW: DISPATCH MULTI-PAGE PDF DOCUMENT TO TELEGRAM ---
   async function handleSendMonthlyTelegram() {
-    const activeBotToken = TELEGRAM_CONFIG.botToken
-    const activeChatId = TELEGRAM_CONFIG.chatId
-
-    if (!activeBotToken || !activeChatId) {
-      showToast('error', 'Missing Info', 'Please add your credentials to lib/telegramConfig.ts first.')
-      return
-    }
-
-    if (window.location.origin.includes('localhost')) {
-      showToast('error', 'Localhost Detected', 'Telegram cannot download images from localhost. Please deploy to Vercel to send images!')
-      return
-    }
-
     setIsSending(true)
-
     try {
-      const baseUrl = window.location.origin
-      const baseParams = `month=${encodeURIComponent(currentMonthName)}&sales=${month.totalSales}&profit=${month.totalProfit}&expRiel=${month.totalExpRiel}&expUsd=${month.totalExpUsd}`
-
-      const imgSummaryUrl = `${baseUrl}/api/og/monthly-report?card=summary&${baseParams}`
-      const imgOwnersUrl = `${baseUrl}/api/og/monthly-report?card=owners&${baseParams}&pichP=${month.profitByOwner.Pich}&jingP=${month.profitByOwner.Jing}&bothP=${month.profitByOwner.Both}`
-      const imgExpensesUrl = `${baseUrl}/api/og/monthly-report?card=expenses&${baseParams}&topCat=${encodeURIComponent(monthlyInsights.topCat)}&topCatAmt=${monthlyInsights.topCatAmount}`
-
-      const response = await fetch(`https://api.telegram.org/bot${activeBotToken}/sendMediaGroup`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          chat_id: activeChatId,
-          media: [
-            {
-              type: 'photo',
-              media: imgSummaryUrl,
-              caption: `📊 *${currentMonthName.toUpperCase()} — EXECUTIVE BUSINESS SUMMARY*`,
-              parse_mode: 'Markdown'
-            },
-            { type: 'photo', media: imgOwnersUrl },
-            { type: 'photo', media: imgExpensesUrl }
-          ]
-        })
+      const response = await fetch('/api/telegram/send-monthly-pdf', {
+        method: 'POST'
       })
-
       const result = await response.json()
-      if (result.ok) {
-        showToast('success', 'Album Sent!', 'The 3 monthly scorecard images have been dispatched to Telegram.')
+
+      if (response.ok && result.success) {
+        showToast('success', 'PDF Sent!', 'The multi-page executive PDF report has been dispatched to Telegram.')
       } else {
-        throw new Error(result.description || 'Telegram API rejected the request.')
+        throw new Error(result.error || 'Failed to dispatch PDF.')
       }
     } catch (e: any) {
       showToast('error', 'Telegram Failed', e.message)
@@ -569,8 +534,8 @@ export default function ReportControlPage() {
                     className="saas-btn saas-btn-primary controls-btn-primary"
                     style={{ background: '#0088cc', borderColor: '#0077b5', color: '#fff', fontWeight: 'bold' }}
                   >
-                    <span className="desktop-only-inline">{isSending ? '🖼️ Sending Album...' : '🖼️ Send Monthly Album to Telegram'}</span>
-                    <span className="mobile-only-inline">{isSending ? '🖼️ Sending...' : '🖼️ Send Album'}</span>
+                    <span className="desktop-only-inline">{isSending ? '📄 Creating PDF...' : '📄 Send Monthly PDF to Telegram'}</span>
+                    <span className="mobile-only-inline">{isSending ? '📄 Sending...' : '📄 Send PDF'}</span>
                   </button>
                 </>
               )}
