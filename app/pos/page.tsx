@@ -2011,7 +2011,7 @@ export default function POSPage() {
         </div>
       </Modal>
 
-      {/* --- GLOBAL CSS (Includes forceful override for Mobile Tabs) --- */}
+      {/* --- GLOBAL CSS (Includes forceful override for Mobile Tabs & Modals) --- */}
       <style jsx global>{`
         input, select, button, textarea {
           font-family: inherit;
@@ -2129,6 +2129,22 @@ export default function POSPage() {
             box-shadow: 0 4px 12px rgba(0,0,0,0.2); 
             z-index: 998; 
             cursor: pointer;
+          }
+
+          /* 🔥 FIXED: Lock Modals to Upper-Top on Mobile to prevent keyboard jump when switching between Quantity & Price inputs 🔥 */
+          div[role="dialog"],
+          div[class*="modal"],
+          div[class*="Modal"],
+          div[style*="align-items: center"][style*="position: fixed"] {
+            align-items: flex-start !important;
+            padding-top: max(60px, 12dvh) !important;
+            padding-bottom: 20px !important;
+            overflow-y: auto !important;
+          }
+
+          input, select, textarea {
+            scroll-margin-top: 80px;
+            scroll-margin-bottom: 80px;
           }
         }
       `}</style>
