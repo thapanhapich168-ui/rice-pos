@@ -1761,7 +1761,7 @@ export default function POSPage() {
         </div>
       </Modal>
 
-      {/* 🟢 TOP-DOCKED MOBILE PRODUCT ADD POPUP (React Portal + 16px Anti-Zoom + Regular Fonts) */}
+      {/* 🟢 TOP-DOCKED MOBILE PRODUCT ADD POPUP (Option 1 Sizing + Portal + Regular Fonts + Emoji) */}
       {!!selectedMobileProduct && typeof document !== 'undefined' && createPortal(
         <div 
           style={{
@@ -1770,56 +1770,50 @@ export default function POSPage() {
             left: 0,
             right: 0,
             bottom: 0,
-            backgroundColor: 'rgba(15, 23, 42, 0.45)',
-            backdropFilter: 'blur(2px)',
-            zIndex: 2147483647, // 🟢 Maximum possible CSS z-index (overrides burger menu)
+            backgroundColor: 'rgba(0, 0, 0, 0.5)',
+            zIndex: 2147483647, // 🟢 Overrides burger menu on iPhone Safari
             display: 'flex',
             justifyContent: 'center',
             alignItems: 'flex-start',
-            paddingTop: 'max(16px, env(safe-area-inset-top, 16px))',
+            paddingTop: '16px', // 🟢 Option 1's 16px top dock
             paddingLeft: '16px',
             paddingRight: '16px'
           }}
           onMouseDown={(e) => {
             if (e.target === e.currentTarget) setSelectedMobileProduct(null);
           }}
-          onTouchMove={(e) => {
-            // 🟢 Prevents background scrolling while popup is open on iOS
-            if (e.target === e.currentTarget) e.preventDefault();
-          }}
         >
           <div 
             style={{
               backgroundColor: '#ffffff',
-              borderRadius: '20px',
-              padding: '20px',
+              borderRadius: '16px',
+              padding: '16px 20px', // 🟢 Option 1's compact padding (prevents iOS shift)
               width: '100%',
               maxWidth: '400px',
-              boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
-              border: '1px solid #f1f5f9',
-              animation: 'posPopupSlideDown 0.18s cubic-bezier(0.16, 1, 0.3, 1)'
+              boxShadow: '0 20px 40px rgba(0,0,0,0.2)',
+              border: '1px solid #e2e8f0',
+              animation: 'posPopupSlideDown 0.15s ease-out'
             }}
             onFocusCapture={() => {
-              // 🟢 Clamps iOS visual viewport if it attempts any remaining micro-shift
               setTimeout(() => {
                 window.scrollTo(0, 0);
                 document.body.scrollTop = 0;
               }, 30);
             }}
           >
-            {/* ✨ Header with Emoji Icon Badge (Regular font weight, no description) */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '18px', paddingBottom: '12px', borderBottom: '1px solid #f1f5f9' }}>
+            {/* ✨ Compact Emoji Header (Regular font, no subtitle) */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                 <div style={{
-                  width: '36px',
-                  height: '36px',
-                  borderRadius: '10px',
+                  width: '32px',
+                  height: '32px',
+                  borderRadius: '8px',
                   backgroundColor: '#fef3c7',
                   border: '1px solid #fde68a',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  fontSize: '18px',
+                  fontSize: '16px',
                   flexShrink: 0
                 }}>
                   ✏️
@@ -1828,31 +1822,17 @@ export default function POSPage() {
                   {currentT.mobileModalTitle}
                 </h3>
               </div>
-
               <button 
                 onClick={() => setSelectedMobileProduct(null)} 
-                style={{ 
-                  background: '#f8fafc', 
-                  border: '1px solid #e2e8f0', 
-                  width: '30px', 
-                  height: '30px', 
-                  borderRadius: '50%', 
-                  fontSize: '14px', 
-                  color: '#64748b', 
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  fontWeight: 'normal'
-                }}
+                style={{ background: 'none', border: 'none', fontSize: '18px', color: '#64748b', cursor: 'pointer', fontWeight: 'normal' }}
               >
                 ✕
               </button>
             </div>
 
-            {/* Product Name Input */}
-            <div style={{ marginBottom: '14px' }}>
-              <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', color: '#64748b', fontWeight: 'normal', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '6px' }}>
+            {/* Product Identifier Input */}
+            <div style={{ marginBottom: '16px' }}>
+              <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', fontWeight: 'normal', marginBottom: '8px' }}>
                 Product Identifier
               </label>
               <input 
@@ -1863,9 +1843,8 @@ export default function POSPage() {
                 style={{ 
                   width: '100%', 
                   boxSizing: 'border-box', 
-                  fontWeight: 'normal', 
-                  color: '#1e293b',
-                  fontSize: '16px' // 🟢 16px prevents iOS Safari auto-zoom/push
+                  fontWeight: 'normal',
+                  fontSize: '16px' 
                 }}
               />
             </div>
@@ -1873,7 +1852,7 @@ export default function POSPage() {
             {/* Quantity & Price Side-by-Side */}
             <div style={{ display: 'flex', gap: '12px', marginBottom: '20px' }}>
               <div style={{ flex: 1 }}>
-                <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', color: '#64748b', fontWeight: 'normal', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '6px' }}>
+                <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', fontWeight: 'normal', marginBottom: '8px' }}>
                   Quantity
                 </label>
                 <CurrencyInput 
@@ -1883,14 +1862,14 @@ export default function POSPage() {
                   style={{ 
                     width: '100%', 
                     boxSizing: 'border-box', 
-                    textAlign: 'center', 
+                    textAlign: 'center',
                     fontWeight: 'normal',
-                    fontSize: '16px' // 🟢 16px prevents iOS Safari auto-zoom/push
+                    fontSize: '16px' 
                   }}
                 />
               </div>
               <div style={{ flex: 1 }}>
-                <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', color: '#64748b', fontWeight: 'normal', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '6px' }}>
+                <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', fontWeight: 'normal', marginBottom: '8px' }}>
                   Price (៛)
                 </label>
                 <CurrencyInput 
@@ -1900,35 +1879,35 @@ export default function POSPage() {
                   style={{ 
                     width: '100%', 
                     boxSizing: 'border-box', 
-                    textAlign: 'center', 
-                    fontWeight: 'normal', 
+                    textAlign: 'center',
+                    fontWeight: 'normal',
                     color: '#b58a3d',
-                    fontSize: '16px' // 🟢 16px prevents iOS Safari auto-zoom/push
+                    fontSize: '16px' 
                   }}
                 />
               </div>
             </div>
 
             {/* Action Buttons */}
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
               <button 
                 onClick={() => setSelectedMobileProduct(null)} 
                 className="saas-btn saas-btn-secondary"
-                style={{ flex: 1, padding: '12px', fontWeight: 'normal' }}
+                style={{ fontWeight: 'normal' }}
               >
                 {currentT.cancel}
               </button>
               <button 
                 onClick={handleAddMobileProductToCart} 
                 className="saas-btn saas-btn-primary"
-                style={{ flex: 1, padding: '12px', fontWeight: 'normal' }}
+                style={{ fontWeight: 'normal' }}
               >
                 {currentT.add}
               </button>
             </div>
           </div>
         </div>,
-        document.body // 🟢 Teleports directly to <body> so it sits above the Burger Icon!
+        document.body // 🟢 Teleports to <body> so it covers the burger icon on real iPhones
       )}
 
       {/* 💰 SALE SUMMARY MODAL */}
