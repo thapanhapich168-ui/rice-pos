@@ -12,7 +12,7 @@ import {
   Font,
   Svg,
   Line,
-  Polyline
+  Path
 } from '@react-pdf/renderer'
 
 export const runtime = 'nodejs'
@@ -241,9 +241,8 @@ const HealthBarPDF = ({ title, current, target, color, reverseLogic = false }: a
   )
 }
 
-// --- HELPER COMPONENT: BULLETPROOF SVG TREND LINE CHART ---
+// --- HELPER COMPONENT: BULLETPROOF SVG TREND LINE CHART (<Path> INSTEAD OF Polyline) ---
 const LineChartCardPDF = ({ title, dataCurrent, dataLast, color }: any) => {
-  // 🔥 COMPLETELY GUARDS AGAINST NaN, INFINITY, AND xCoordinate PARSER CRASHES
   const safeCurrent = (Array.isArray(dataCurrent) && dataCurrent.length > 0)
     ? dataCurrent.map(v => Number(v) || 0)
     : new Array(31).fill(0)
@@ -253,18 +252,19 @@ const LineChartCardPDF = ({ title, dataCurrent, dataLast, color }: any) => {
 
   const maxVal = Math.max(...safeCurrent, ...safeLast, 1) || 1
 
-  const getSafePoints = (arr: number[]) =>
-    arr
-      .map((val, idx) => {
-        const numVal = Number(val) || 0
-        const x = Math.round((idx / 30) * 450)
-        const y = Math.round(80 - (numVal / maxVal) * 70)
-        return `${x},${y}`
-      })
-      .join(' ')
+  // 🔥 GENERATES AN SVG PATH COMMAND ("M 0 80 L 15 80 L 30 80...") THAT CAN NEVER THROW xCoordinate ERRORS
+  const getSafePath = (arr: number[]) => {
+    const coords = arr.map((val, idx) => {
+      const numVal = Number(val) || 0
+      const x = Math.round((idx / 30) * 450)
+      const y = Math.round(80 - (numVal / maxVal) * 70)
+      return `${x} ${y}`
+    })
+    return coords.map((pt, i) => `${i === 0 ? 'M' : 'L'} ${pt}`).join(' ')
+  }
 
-  const currentPoints = getSafePoints(safeCurrent)
-  const lastPoints = getSafePoints(safeLast)
+  const currentPath = getSafePath(safeCurrent)
+  const lastPath = getSafePath(safeLast)
 
   return (
     <View style={[styles.card, { marginBottom: 10 }]} wrap={false}>
@@ -273,8 +273,8 @@ const LineChartCardPDF = ({ title, dataCurrent, dataLast, color }: any) => {
         <Line x1="0" y1="20" x2="450" y2="20" stroke="#f1f5f9" strokeWidth="1" />
         <Line x1="0" y1="50" x2="450" y2="50" stroke="#f1f5f9" strokeWidth="1" />
         <Line x1="0" y1="80" x2="450" y2="80" stroke="#cbd5e1" strokeWidth="1" />
-        <Polyline points={lastPoints} fill="none" stroke="#cbd5e1" strokeWidth="1.5" strokeDasharray="3,3" />
-        <Polyline points={currentPoints} fill="none" stroke={color} strokeWidth="2" />
+        <Path d={lastPath} fill="none" stroke="#cbd5e1" strokeWidth="1.5" strokeDasharray="3,3" />
+        <Path d={currentPath} fill="none" stroke={color} strokeWidth="2" />
       </Svg>
       <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 2 }}>
         <Text style={{ fontSize: 7, color: color }}>━ This Month Trend</Text>
