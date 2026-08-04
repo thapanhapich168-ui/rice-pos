@@ -218,13 +218,12 @@ export default function POSPage() {
     }
   }, [showInvoicePreview]);
 
-  // 🔥 NEW: iOS Safari Visual Viewport Lock to stop input-switching jumps
+  // 🔥 NEW: iOS Safari Visual Viewport Lock to prevent native panning jumps
   useEffect(() => {
     if (typeof window === 'undefined' || !window.visualViewport) return;
 
     const handleViewportChange = () => {
       if (!window.visualViewport) return;
-      // Stops iOS Safari's native panning engine from jumping when switching from Quantity to Price
       if (window.visualViewport.offsetTop > 0) {
         window.scrollTo(0, 0);
       }
@@ -1786,23 +1785,47 @@ export default function POSPage() {
 
       {/* MOBILE PRODUCT ADD POPUP */}
       <Modal isOpen={!!selectedMobileProduct} onClose={() => setSelectedMobileProduct(null)} title={currentT.mobileModalTitle} icon="✏️" maxWidth="400px">
-        <div style={{ marginBottom: '16px' }}>
-          <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '8px' }}>Product Identifier</label>
-          <input type="text" value={mobileName} onChange={(e) => setMobileName(e.target.value)} className="saas-input" />
-        </div>
-        <div style={{ display: 'flex', gap: '12px', marginBottom: '20px' }}>
-          <div style={{ flex: 1 }}>
-            <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '8px' }}>Quantity</label>
-            <CurrencyInput value={mobileQty} onChange={(v: any) => setMobileQty(v)} className="saas-input" />
+        <div className="mobile-item-card-modal-content">
+          <div style={{ marginBottom: '16px' }}>
+            <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '8px' }}>Product Identifier</label>
+            <input type="text" value={mobileName} onChange={(e) => setMobileName(e.target.value)} className="saas-input" />
           </div>
-          <div style={{ flex: 1 }}>
-            <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '8px' }}>Price (៛)</label>
-            <CurrencyInput value={mobilePrice} onChange={(v: any) => setMobilePrice(v)} className="saas-input" />
+          <div style={{ display: 'flex', gap: '12px', marginBottom: '20px' }}>
+            <div style={{ flex: 1 }}>
+              <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '8px' }}>Quantity</label>
+              <CurrencyInput 
+                value={mobileQty} 
+                onChange={(v: any) => setMobileQty(v)} 
+                className="saas-input" 
+                type="text"
+                inputMode="text"
+                onKeyDown={(e: any) => {
+                  if (e.key === 'Enter') {
+                    e.currentTarget.blur();
+                  }
+                }}
+              />
+            </div>
+            <div style={{ flex: 1 }}>
+              <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '8px' }}>Price (៛)</label>
+              <CurrencyInput 
+                value={mobilePrice} 
+                onChange={(v: any) => setMobilePrice(v)} 
+                className="saas-input" 
+                type="text"
+                inputMode="text"
+                onKeyDown={(e: any) => {
+                  if (e.key === 'Enter') {
+                    e.currentTarget.blur();
+                  }
+                }}
+              />
+            </div>
           </div>
-        </div>
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
-          <button onClick={() => setSelectedMobileProduct(null)} className="saas-btn saas-btn-secondary">{currentT.cancel}</button>
-          <button onClick={handleAddMobileProductToCart} className="saas-btn saas-btn-primary">{currentT.add}</button>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
+            <button onClick={() => setSelectedMobileProduct(null)} className="saas-btn saas-btn-secondary">{currentT.cancel}</button>
+            <button onClick={handleAddMobileProductToCart} className="saas-btn saas-btn-primary">{currentT.add}</button>
+          </div>
         </div>
       </Modal>
 
@@ -2032,7 +2055,7 @@ export default function POSPage() {
         </div>
       </Modal>
 
-      {/* --- GLOBAL CSS (Includes clean centering without artificial gaps) --- */}
+      {/* --- GLOBAL CSS (Includes clean centering + focus hamburger-overlap lock) --- */}
       <style jsx global>{`
         input, select, button, textarea {
           font-family: inherit;
@@ -2152,7 +2175,7 @@ export default function POSPage() {
             cursor: pointer;
           }
 
-          /* Clean, centered mobile modal without artificial padding gaps */
+          /* 1. Default: All modals open dead-center in the middle of the screen */
           div[role="dialog"],
           div[class*="modal"],
           div[class*="Modal"] {
@@ -2161,6 +2184,20 @@ export default function POSPage() {
             justify-content: center !important;
             margin: 0 auto !important;
             padding: 16px !important;
+          }
+
+          /* 2. Overlap Lock: When ANY input inside the item card modal is focused, elevate to overlap hamburger icon */
+          div[role="dialog"]:has(.mobile-item-card-modal-content:focus-within),
+          div[class*="modal"]:has(.mobile-item-card-modal-content:focus-within),
+          div[class*="Modal"]:has(.mobile-item-card-modal-content:focus-within),
+          div[style*="position: fixed"]:has(.mobile-item-card-modal-content:focus-within) {
+            align-items: flex-start !important;
+            padding-top: 12px !important;
+          }
+
+          /* Stop iOS Safari from trying to auto-scroll inputs inside the modal */
+          .mobile-item-card-modal-content input {
+            scroll-margin: 0 !important;
           }
         }
       `}</style>
