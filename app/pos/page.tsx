@@ -145,6 +145,27 @@ export default function POSPage() {
   const [mobileQty, setMobileQty] = useState<number | ''>('')
   const [mobileName, setMobileName] = useState<string>('')
 
+  // 🔥 IOS SAFARI SMOOTH KEYBOARD SHIFT ENGINE (Zero Bounce/Jump)
+  const mobileQtyRef = useRef<HTMLInputElement>(null);
+  const mobilePriceRef = useRef<HTMLInputElement>(null);
+  const [isMobileInputActive, setIsMobileInputActive] = useState(false);
+  const focusTimerRef = useRef<any>(null);
+
+  const handleMobileFocus = () => {
+    if (focusTimerRef.current) {
+      clearTimeout(focusTimerRef.current);
+      focusTimerRef.current = null;
+    }
+    setIsMobileInputActive(true);
+  };
+
+  const handleMobileBlur = () => {
+    // 150ms debounce prevents bouncing when switching directly from Qty to Price
+    focusTimerRef.current = setTimeout(() => {
+      setIsMobileInputActive(false);
+    }, 150);
+  };
+
   const [exchangeModal, setExchangeModal] = useState<{ isOpen: boolean, product: Product | null, consumedKg: string | number }>({
     isOpen: false, product: null, consumedKg: ''
   })
@@ -217,26 +238,6 @@ export default function POSPage() {
       return () => clearTimeout(timer);
     }
   }, [showInvoicePreview]);
-
-  // 🔥 NEW: iOS Safari Visual Viewport Lock to prevent native panning jumps
-  useEffect(() => {
-    if (typeof window === 'undefined' || !window.visualViewport) return;
-
-    const handleViewportChange = () => {
-      if (!window.visualViewport) return;
-      if (window.visualViewport.offsetTop > 0) {
-        window.scrollTo(0, 0);
-      }
-    };
-
-    window.visualViewport.addEventListener('resize', handleViewportChange);
-    window.visualViewport.addEventListener('scroll', handleViewportChange);
-
-    return () => {
-      window.visualViewport?.removeEventListener('resize', handleViewportChange);
-      window.visualViewport?.removeEventListener('scroll', handleViewportChange);
-    };
-  }, []);
 
   useEffect(() => {
     const checkDeviceType = () => {
@@ -401,11 +402,9 @@ export default function POSPage() {
     const { data: prodData } = await supabase.from('products').select('*').order('id', { ascending: true })
     if (prodData) setProducts(prodData)
     
-    // 🔥 FIXED: Changed .single() to .maybeSingle()
     const { data: setObj } = await supabase.from('app_settings').select('*').eq('setting_key', 'pos_product_order').maybeSingle()
     if (setObj && setObj.setting_value) setProductOrder(setObj.setting_value)
 
-    // 🔥 FIXED: Changed .single() to .maybeSingle()
     const { data: hiddenSet } = await supabase.from('app_settings').select('*').eq('setting_key', 'hidden_retail_ids').maybeSingle()
     if (hiddenSet && hiddenSet.setting_value) setHiddenRetailIds(hiddenSet.setting_value)
   }
@@ -508,6 +507,7 @@ export default function POSPage() {
       }]);
     }
     setSelectedMobileProduct(null);
+    setIsMobileInputActive(false);
   }
 
   async function handleConfirmExchange() {
@@ -864,7 +864,6 @@ export default function POSPage() {
                    const currentBatch = wBatches.length > 0 ? [...wBatches].sort((a,b) => a.id - b.id)[0] : null;
                    const wholesaleBagCogs = currentBatch ? Number(currentBatch.cost_price) : Number(wholesaleProd.cost_price || 0);
                    
-                   // Declare the weight before dividing!
                    const wholesaleWeight = Number(wholesaleProd.weight) || 50;
                    retailCogsPerKg = wholesaleBagCogs / wholesaleWeight;
                 }
@@ -1006,10 +1005,10 @@ export default function POSPage() {
         if (salesErr) throw new Error(`Failed to save to Sales table: ${salesErr.message}`);
 
         for (const [prodIdStr, newStock] of Object.entries(stockUpdates)) {
-           await supabase.from('products').update({ stock: newStock }).eq('id', Number(prodIdStr));
+            await supabase.from('products').update({ stock: newStock }).eq('id', Number(prodIdStr));
         }
         for (const [batchIdStr, newRemaining] of Object.entries(fifoUpdates)) {
-           await supabase.from('inventory_batches').update({ remaining_qty: newRemaining }).eq('id', Number(batchIdStr));
+            await supabase.from('inventory_batches').update({ remaining_qty: newRemaining }).eq('id', Number(batchIdStr));
         }
       }
 
@@ -1602,7 +1601,7 @@ export default function POSPage() {
       )}
 
       {isMobileCartOpen && (
-        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.4)', zIndex: 9999, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}>
+        <div className="mobile-cart-overlay" style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.4)', zIndex: 9999, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}>
           <div style={{ flex: 1 }} onClick={() => setIsMobileCartOpen(false)}></div>
           
           <div style={{ width: '100%', maxHeight: '85dvh', backgroundColor: '#ffffff', borderTopLeftRadius: '20px', borderTopRightRadius: '20px', display: 'flex', flexDirection: 'column', position: 'relative', boxShadow: '0 -10px 25px rgba(0,0,0,0.1)' }}>
@@ -1783,48 +1782,107 @@ export default function POSPage() {
         </div>
       </Modal>
 
-      {/* MOBILE PRODUCT ADD POPUP */}
-      <Modal isOpen={!!selectedMobileProduct} onClose={() => setSelectedMobileProduct(null)} title={currentT.mobileModalTitle} icon="✏️" maxWidth="400px">
-        <div className="mobile-item-card-modal-content">
-          <div style={{ marginBottom: '16px' }}>
-            <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '8px' }}>Product Identifier</label>
-            <input type="text" value={mobileName} onChange={(e) => setMobileName(e.target.value)} className="saas-input" />
+      {/* 🔥 CLEAN MOBILE ITEM POPUP (Vertically Stacked, Centered, GPU Lift) */}
+      <Modal isOpen={!!selectedMobileProduct} onClose={() => { setSelectedMobileProduct(null); setIsMobileInputActive(false); }} title={currentT.mobileModalTitle} icon="✏️" maxWidth="400px">
+        <div 
+          className={`mobile-item-popup-wrapper ${isMobileInputActive ? 'keyboard-active' : ''}`}
+          style={{ display: 'flex', flexDirection: 'column', width: '100%', boxSizing: 'border-box' }}
+        >
+          {/* Product Name (Full Width Top Row) */}
+          <div style={{ marginBottom: '14px', display: 'flex', flexDirection: 'column', width: '100%' }}>
+            <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '6px', color: '#64748b' }}>
+              Product Identifier
+            </label>
+            <input 
+              type="text" 
+              value={mobileName} 
+              onChange={(e) => setMobileName(e.target.value)} 
+              className="saas-input" 
+              style={{ width: '100%', boxSizing: 'border-box' }}
+            />
           </div>
-          <div style={{ display: 'flex', gap: '12px', marginBottom: '20px' }}>
-            <div style={{ flex: 1 }}>
-              <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '8px' }}>Quantity</label>
-              <CurrencyInput 
+
+          {/* Quantity & Price (Two Clean Columns, Labels Stacked Directly Above Inputs) */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '20px', width: '100%' }}>
+            <div style={{ display: 'flex', flexDirection: 'column' }}>
+              <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '6px', color: '#64748b' }}>
+                Quantity (kg/bag)
+              </label>
+              <input
+                ref={mobileQtyRef}
+                type="text"
+                inputMode="decimal"
+                enterKeyHint="next"
                 value={mobileQty} 
-                onChange={(v: any) => setMobileQty(v)} 
-                className="saas-input" 
-                type="text"
-                inputMode="text"
-                onKeyDown={(e: any) => {
+                onChange={(e) => {
+                  const cleanVal = e.target.value.replace(/[^0-9.]/g, '');
+                  setMobileQty(cleanVal === '' ? '' : Number(cleanVal));
+                }}
+                onFocus={() => {
+                  handleMobileFocus();
+                  setMobileQty('');
+                }}
+                onBlur={handleMobileBlur}
+                onKeyDown={(e) => {
                   if (e.key === 'Enter') {
-                    e.currentTarget.blur();
+                    e.preventDefault();
+                    mobilePriceRef.current?.focus();
                   }
                 }}
+                className="saas-input"
+                style={{ width: '100%', textAlign: 'center', boxSizing: 'border-box' }}
               />
             </div>
-            <div style={{ flex: 1 }}>
-              <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '8px' }}>Price (៛)</label>
-              <CurrencyInput 
-                value={mobilePrice} 
-                onChange={(v: any) => setMobilePrice(v)} 
-                className="saas-input" 
+
+            <div style={{ display: 'flex', flexDirection: 'column' }}>
+              <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '6px', color: '#64748b' }}>
+                Price (៛)
+              </label>
+              <input
+                ref={mobilePriceRef}
                 type="text"
-                inputMode="text"
-                onKeyDown={(e: any) => {
+                inputMode="decimal"
+                enterKeyHint="done"
+                value={mobilePrice} 
+                onChange={(e) => {
+                  const cleanVal = e.target.value.replace(/[^0-9.]/g, '');
+                  setMobilePrice(cleanVal === '' ? '' : Number(cleanVal));
+                }}
+                onFocus={() => {
+                  handleMobileFocus();
+                  setMobilePrice('');
+                }}
+                onBlur={handleMobileBlur}
+                onKeyDown={(e) => {
                   if (e.key === 'Enter') {
+                    e.preventDefault();
                     e.currentTarget.blur();
+                    setIsMobileInputActive(false);
+                    handleAddMobileProductToCart();
                   }
                 }}
+                className="saas-input"
+                style={{ width: '100%', textAlign: 'center', boxSizing: 'border-box' }}
               />
             </div>
           </div>
-          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
-            <button onClick={() => setSelectedMobileProduct(null)} className="saas-btn saas-btn-secondary">{currentT.cancel}</button>
-            <button onClick={handleAddMobileProductToCart} className="saas-btn saas-btn-primary">{currentT.add}</button>
+
+          {/* Cancel & Add Buttons (Bottom Row) */}
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', width: '100%' }}>
+            <button 
+              onClick={() => { setSelectedMobileProduct(null); setIsMobileInputActive(false); }} 
+              className="saas-btn saas-btn-secondary"
+              style={{ flex: 1, padding: '12px', fontSize: '15px' }}
+            >
+              {currentT.cancel}
+            </button>
+            <button 
+              onClick={handleAddMobileProductToCart} 
+              className="saas-btn saas-btn-primary"
+              style={{ flex: 1.5, padding: '12px', fontSize: '15px', fontWeight: 'bold' }}
+            >
+              {currentT.add}
+            </button>
           </div>
         </div>
       </Modal>
@@ -2055,7 +2113,7 @@ export default function POSPage() {
         </div>
       </Modal>
 
-      {/* --- GLOBAL CSS (Includes clean centering + focus hamburger-overlap lock) --- */}
+      {/* --- GLOBAL CSS (Cleaned & Safe from Flex-Row Collisions) --- */}
       <style jsx global>{`
         input, select, button, textarea {
           font-family: inherit;
@@ -2079,6 +2137,32 @@ export default function POSPage() {
         .saas-tab {
           flex-shrink: 0 !important;
           white-space: nowrap !important;
+        }
+
+        /* 🔥 PREVENT SAFARI IOS AUTO-ZOOM 🔥 */
+        @media (max-width: 1023px) {
+          input, select, textarea, .saas-input {
+            font-size: 16px !important;
+          }
+        }
+
+        /* 🔥 SAFELY CENTER MODAL OVERLAYS ON SCREEN WITHOUT SMASHING INNER CONTENT 🔥 */
+        div[role="dialog"] {
+          display: flex !important;
+          flex-direction: column !important;
+          align-items: center !important;
+          justify-content: center !important;
+          box-sizing: border-box !important;
+        }
+
+        /* 🔥 GPU-ACCELERATED KEYBOARD SHIFT (Prevents Layout Thrashing & Bouncing) 🔥 */
+        .mobile-item-popup-wrapper {
+          width: 100%;
+          transition: transform 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+          transform: translateY(0);
+        }
+        .mobile-item-popup-wrapper.keyboard-active {
+          transform: translateY(-110px);
         }
 
         .main-wrapper { 
@@ -2173,31 +2257,6 @@ export default function POSPage() {
             box-shadow: 0 4px 12px rgba(0,0,0,0.2); 
             z-index: 998; 
             cursor: pointer;
-          }
-
-          /* 1. Default: All modals open dead-center in the middle of the screen */
-          div[role="dialog"],
-          div[class*="modal"],
-          div[class*="Modal"] {
-            display: flex !important;
-            align-items: center !important;
-            justify-content: center !important;
-            margin: 0 auto !important;
-            padding: 16px !important;
-          }
-
-          /* 2. Overlap Lock: When ANY input inside the item card modal is focused, elevate to overlap hamburger icon */
-          div[role="dialog"]:has(.mobile-item-card-modal-content:focus-within),
-          div[class*="modal"]:has(.mobile-item-card-modal-content:focus-within),
-          div[class*="Modal"]:has(.mobile-item-card-modal-content:focus-within),
-          div[style*="position: fixed"]:has(.mobile-item-card-modal-content:focus-within) {
-            align-items: flex-start !important;
-            padding-top: 12px !important;
-          }
-
-          /* Stop iOS Safari from trying to auto-scroll inputs inside the modal */
-          .mobile-item-card-modal-content input {
-            scroll-margin: 0 !important;
           }
         }
       `}</style>
