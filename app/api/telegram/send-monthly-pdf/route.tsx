@@ -11,21 +11,21 @@ import {
   renderToBuffer,
   Font,
   Svg,
-  Path // 🔥 REMOVED 'Line' completely to prevent xCoordinate null crashes
+  Path
 } from '@react-pdf/renderer'
 
 export const runtime = 'nodejs'
 
-// --- 1. REGISTER NOTO SANS KHMER (CLEAN ENGLISH UI NUMBERS + KHMER SCRIPT) ---
+// --- 1. REGISTER BATTAMBANG FONT (ALIASED AS 'NotoSansKhmer' TO PREVENT FONTKIT xCoordinate CRASHES) ---
 Font.register({
   family: 'NotoSansKhmer',
   fonts: [
     {
-      src: 'https://cdn.jsdelivr.net/gh/notofonts/notofonts.github.io/fonts/NotoSansKhmer/hinted/ttf/NotoSansKhmer-Regular.ttf',
+      src: 'https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/battambang/Battambang-Regular.ttf',
       fontWeight: 'normal'
     },
     {
-      src: 'https://cdn.jsdelivr.net/gh/notofonts/notofonts.github.io/fonts/NotoSansKhmer/hinted/ttf/NotoSansKhmer-Bold.ttf',
+      src: 'https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/battambang/Battambang-Bold.ttf',
       fontWeight: 'bold'
     }
   ]
@@ -251,7 +251,7 @@ const LineChartCardPDF = ({ title, dataCurrent, dataLast, color }: any) => {
 
   const maxVal = Math.max(...safeCurrent, ...safeLast, 1) || 1
 
-  // 🔥 GUARANTEED CRASH-PROOF SVG PATH GENERATOR
+  // SAFE PATH COMMAND GENERATOR
   const getSafePath = (arr: number[]) => {
     if (!arr || !Array.isArray(arr) || arr.length === 0) {
       return 'M 0 80 L 450 80'
@@ -272,9 +272,7 @@ const LineChartCardPDF = ({ title, dataCurrent, dataLast, color }: any) => {
   return (
     <View style={[styles.card, { marginBottom: 10 }]} wrap={false}>
       <Text style={[styles.cardLabel, { marginBottom: 8 }]}>{title}</Text>
-      {/* 🔥 Explicit width/height props added alongside viewBox to prevent Yoga layout xCoordinate nulls */}
       <Svg viewBox="0 0 450 85" width="450" height="65" style={{ width: '100%', height: 65 }}>
-        {/* 🔥 Replaced <Line /> with <Path /> so MoveTo (M) initializes coordinates safely */}
         <Path d="M 0 20 L 450 20" stroke="#f1f5f9" strokeWidth="1" />
         <Path d="M 0 50 L 450 50" stroke="#f1f5f9" strokeWidth="1" />
         <Path d="M 0 80 L 450 80" stroke="#cbd5e1" strokeWidth="1" />
@@ -455,7 +453,7 @@ const MonthlyReportPDF = ({ monthName, mtd, lastMonth, wholesaleTop, retailTop, 
           </View>
         </View>
 
-        {/* DYNAMIC FOOTER ("Page X of Y" automatically calculated across all pages) */}
+        {/* DYNAMIC FOOTER */}
         <View style={styles.footer} fixed>
           <Text style={styles.footerText}>Rice POS System — Automated Executive Scorecard</Text>
           <Text style={styles.footerText} render={({ pageNumber, totalPages }) => `Page ${pageNumber} of ${totalPages}`} />
@@ -522,7 +520,6 @@ export async function POST(request: Request) {
       return 'both'
     }
 
-    // Comprehensive SaaS Card Calculator
     const calculateSlice = (invSlice: any[], retSlice: any[], expSlice: any[], paySlice: any[]) => {
       let totalSales = 0, pichSales = 0, jingSales = 0, bothSales = 0, momSales = 0
       let totalProfit = 0, pichProfit = 0, jingProfit = 0, bothProfit = 0, momProfit = 0
@@ -543,7 +540,6 @@ export async function POST(request: Request) {
         totalSales += rev; totalProfit += prof; bothSales += rev; bothProfit += prof
       })
 
-      // Cash Collected Split
       let cR = 0, cU = 0, qR = 0, qU = 0
       paySlice.forEach((p: any) => {
         const methodStr = (p.payment_method || '').toLowerCase()
@@ -553,7 +549,6 @@ export async function POST(request: Request) {
         if (isQr) { if (isUsd) qU += amtU; else qR += amtR } else { if (isUsd) cU += amtU; else cR += amtR }
       })
 
-      // Expenses Split
       let totalExpRiel = 0, totalExpUsd = 0, bizCashRiel = 0, bizCashUsd = 0, bizQrRiel = 0, bizQrUsd = 0, persCashRiel = 0, persCashUsd = 0, persQrRiel = 0, persQrUsd = 0
       const categoryBreakdown: Record<string, { riel: number; usd: number }> = {}
 
@@ -610,7 +605,6 @@ export async function POST(request: Request) {
     const wholesaleTop = getTop(wholesaleSales)
     const retailTop = getTop(retailSales)
 
-    // Generate 31-day Trend Arrays
     const getDailyArr = (isTarget: any) => {
       const salesArr = new Array(31).fill(0); const profArr = new Array(31).fill(0)
       const allSales = [...wholesaleSales, ...retailSales].filter(s => isTarget(s.created_at) && parseOwnerSafe(s.owner) !== 'mom')
