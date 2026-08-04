@@ -2013,7 +2013,7 @@ export default function POSPage() {
         </div>
       </Modal>
 
-      {/* --- GLOBAL CSS (Includes forceful override for Mobile Tabs & Modals) --- */}
+      {/* --- GLOBAL CSS (Includes forceful override for Mobile Tabs & Item Card Modal) --- */}
       <style jsx global>{`
         input, select, button, textarea {
           font-family: inherit;
@@ -2144,15 +2144,17 @@ export default function POSPage() {
             overflow-y: auto !important;
           }
 
-          /* 🔥 Override: Force ONLY the Item Card modal to pop up dead center in the middle 🔥 */
+          /* 🔥 Override: Highest specificity (0, 3, 0) to force ONLY the Item Card Modal dead center in the middle 🔥 */
           div[role="dialog"]:has(.mobile-item-card-modal-content),
           div[class*="modal"]:has(.mobile-item-card-modal-content),
           div[class*="Modal"]:has(.mobile-item-card-modal-content),
-          div[style*="position: fixed"]:has(.mobile-item-card-modal-content) {
+          div[style*="position: fixed"]:has(.mobile-item-card-modal-content),
+          div[style*="align-items: center"][style*="position: fixed"]:has(.mobile-item-card-modal-content) {
             display: flex !important;
             align-items: center !important;
             justify-content: center !important;
             padding: 16px !important;
+            overflow: hidden !important; /* Blocks iOS Safari from scrolling the modal off the top of the screen */
           }
 
           input, select, textarea {
@@ -2162,7 +2164,7 @@ export default function POSPage() {
 
           /* Prevent input-switching bounce between Quantity and Price inside the item card modal */
           .mobile-item-card-modal-content input {
-            scroll-margin: 0 !important;
+            scroll-margin: 100px !important;
           }
         }
       `}</style>
