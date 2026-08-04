@@ -218,6 +218,27 @@ export default function POSPage() {
     }
   }, [showInvoicePreview]);
 
+  // 🔥 NEW: iOS Safari Visual Viewport Lock to stop input-switching jumps
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.visualViewport) return;
+
+    const handleViewportChange = () => {
+      if (!window.visualViewport) return;
+      // Stops iOS Safari's native panning engine from jumping when switching from Quantity to Price
+      if (window.visualViewport.offsetTop > 0) {
+        window.scrollTo(0, 0);
+      }
+    };
+
+    window.visualViewport.addEventListener('resize', handleViewportChange);
+    window.visualViewport.addEventListener('scroll', handleViewportChange);
+
+    return () => {
+      window.visualViewport?.removeEventListener('resize', handleViewportChange);
+      window.visualViewport?.removeEventListener('scroll', handleViewportChange);
+    };
+  }, []);
+
   useEffect(() => {
     const checkDeviceType = () => {
       const isMobileBrowser = /iPhone|iPad|iPod|Android|webOS|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
@@ -1765,25 +1786,23 @@ export default function POSPage() {
 
       {/* MOBILE PRODUCT ADD POPUP */}
       <Modal isOpen={!!selectedMobileProduct} onClose={() => setSelectedMobileProduct(null)} title={currentT.mobileModalTitle} icon="✏️" maxWidth="400px">
-        <div className="mobile-item-card-modal-content">
-          <div style={{ marginBottom: '16px' }}>
-            <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '8px' }}>Product Identifier</label>
-            <input type="text" value={mobileName} onChange={(e) => setMobileName(e.target.value)} className="saas-input" />
+        <div style={{ marginBottom: '16px' }}>
+          <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '8px' }}>Product Identifier</label>
+          <input type="text" value={mobileName} onChange={(e) => setMobileName(e.target.value)} className="saas-input" />
+        </div>
+        <div style={{ display: 'flex', gap: '12px', marginBottom: '20px' }}>
+          <div style={{ flex: 1 }}>
+            <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '8px' }}>Quantity</label>
+            <CurrencyInput value={mobileQty} onChange={(v: any) => setMobileQty(v)} className="saas-input" />
           </div>
-          <div style={{ display: 'flex', gap: '12px', marginBottom: '20px' }}>
-            <div style={{ flex: 1 }}>
-              <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '8px' }}>Quantity</label>
-              <CurrencyInput value={mobileQty} onChange={(v: any) => setMobileQty(v)} className="saas-input" />
-            </div>
-            <div style={{ flex: 1 }}>
-              <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '8px' }}>Price (៛)</label>
-              <CurrencyInput value={mobilePrice} onChange={(v: any) => setMobilePrice(v)} className="saas-input" />
-            </div>
+          <div style={{ flex: 1 }}>
+            <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '8px' }}>Price (៛)</label>
+            <CurrencyInput value={mobilePrice} onChange={(v: any) => setMobilePrice(v)} className="saas-input" />
           </div>
-          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
-            <button onClick={() => setSelectedMobileProduct(null)} className="saas-btn saas-btn-secondary">{currentT.cancel}</button>
-            <button onClick={handleAddMobileProductToCart} className="saas-btn saas-btn-primary">{currentT.add}</button>
-          </div>
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
+          <button onClick={() => setSelectedMobileProduct(null)} className="saas-btn saas-btn-secondary">{currentT.cancel}</button>
+          <button onClick={handleAddMobileProductToCart} className="saas-btn saas-btn-primary">{currentT.add}</button>
         </div>
       </Modal>
 
@@ -2013,7 +2032,7 @@ export default function POSPage() {
         </div>
       </Modal>
 
-      {/* --- GLOBAL CSS (Includes forceful override for Mobile Tabs & Modals) --- */}
+      {/* --- GLOBAL CSS (Includes clean centering without artificial gaps) --- */}
       <style jsx global>{`
         input, select, button, textarea {
           font-family: inherit;
@@ -2133,38 +2152,15 @@ export default function POSPage() {
             cursor: pointer;
           }
 
-          /* 🔥 Default: Keep general mobile modals anchored near top to avoid keyboard overlapping 🔥 */
+          /* Clean, centered mobile modal without artificial padding gaps */
           div[role="dialog"],
           div[class*="modal"],
-          div[class*="Modal"],
-          div[style*="align-items: center"][style*="position: fixed"] {
-            align-items: flex-start !important;
-            padding-top: max(60px, 12dvh) !important;
-            padding-bottom: 20px !important;
-            overflow-y: auto !important;
-          }
-
-          /* 🔥 Override: Highest specificity (0, 3, 0) to force ONLY the Item Card Modal dead center in the middle 🔥 */
-          div[role="dialog"]:has(.mobile-item-card-modal-content),
-          div[class*="modal"]:has(.mobile-item-card-modal-content),
-          div[class*="Modal"]:has(.mobile-item-card-modal-content),
-          div[style*="position: fixed"]:has(.mobile-item-card-modal-content),
-          div[style*="align-items: center"][style*="position: fixed"]:has(.mobile-item-card-modal-content) {
+          div[class*="Modal"] {
             display: flex !important;
             align-items: center !important;
             justify-content: center !important;
+            margin: 0 auto !important;
             padding: 16px !important;
-            overflow: hidden !important; /* Blocks iOS Safari from scrolling the modal off the top of the screen */
-          }
-
-          input, select, textarea {
-            scroll-margin-top: 80px;
-            scroll-margin-bottom: 80px;
-          }
-
-          /* Prevent input-switching bounce between Quantity and Price inside the item card modal */
-          .mobile-item-card-modal-content input {
-            scroll-margin: 100px !important;
           }
         }
       `}</style>
