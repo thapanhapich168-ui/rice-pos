@@ -22,11 +22,11 @@ Font.register({
   family: 'NotoSansKhmer',
   fonts: [
     {
-      src: 'https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/notosanskhmer/NotoSansKhmer-Regular.ttf',
+      src: 'https://cdn.jsdelivr.net/gh/notofonts/notofonts.github.io/fonts/NotoSansKhmer/hinted/ttf/NotoSansKhmer-Regular.ttf',
       fontWeight: 'normal'
     },
     {
-      src: 'https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/notosanskhmer/NotoSansKhmer-Bold.ttf',
+      src: 'https://cdn.jsdelivr.net/gh/notofonts/notofonts.github.io/fonts/NotoSansKhmer/hinted/ttf/NotoSansKhmer-Bold.ttf',
       fontWeight: 'bold'
     }
   ]
