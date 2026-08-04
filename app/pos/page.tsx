@@ -1760,7 +1760,7 @@ export default function POSPage() {
         </div>
       </Modal>
 
-      {/* 🟢 TOP-DOCKED MOBILE PRODUCT ADD POPUP (Overlays burger icon to stop iOS keyboard bump) */}
+      {/* 🟢 TOP-DOCKED MOBILE PRODUCT ADD POPUP (Regular Font Weights, Overlays Burger Icon) */}
       {!!selectedMobileProduct && (
         <div 
           style={{
@@ -1775,7 +1775,6 @@ export default function POSPage() {
             display: 'flex',
             justifyContent: 'center',
             alignItems: 'flex-start',
-            // 🟢 Hugs the very top edge, covering the burger icon so inputs never shift
             paddingTop: 'max(16px, env(safe-area-inset-top, 16px))',
             paddingLeft: '16px',
             paddingRight: '16px'
@@ -1795,12 +1794,11 @@ export default function POSPage() {
               border: '1px solid #f1f5f9',
               animation: 'posPopupSlideDown 0.18s cubic-bezier(0.16, 1, 0.3, 1)'
             }}
-            // 🟢 Locks iOS Safari viewport in place when switching inputs
             onFocusCapture={() => {
               setTimeout(() => window.scrollTo(0, 0), 30);
             }}
           >
-            {/* ✨ Clean Header with Emoji Icon Badge (No description below title) */}
+            {/* ✨ Header with Emoji Icon Badge (Regular font weight) */}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '18px', paddingBottom: '12px', borderBottom: '1px solid #f1f5f9' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                 <div style={{
@@ -1817,7 +1815,7 @@ export default function POSPage() {
                 }}>
                   ✏️
                 </div>
-                <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 'bold', color: '#0f172a' }}>
+                <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 'normal', color: '#0f172a' }}>
                   {currentT.mobileModalTitle}
                 </h3>
               </div>
@@ -1844,7 +1842,7 @@ export default function POSPage() {
 
             {/* Product Name Input */}
             <div style={{ marginBottom: '14px' }}>
-              <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', color: '#64748b', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '6px' }}>
+              <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', color: '#64748b', fontWeight: 'normal', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '6px' }}>
                 Product Identifier
               </label>
               <input 
@@ -1852,32 +1850,32 @@ export default function POSPage() {
                 value={mobileName} 
                 onChange={(e) => setMobileName(e.target.value)} 
                 className="saas-input" 
-                style={{ width: '100%', boxSizing: 'border-box', fontWeight: 'bold', color: '#1e293b' }}
+                style={{ width: '100%', boxSizing: 'border-box', fontWeight: 'normal', color: '#1e293b' }}
               />
             </div>
 
             {/* Quantity & Price Side-by-Side */}
             <div style={{ display: 'flex', gap: '12px', marginBottom: '20px' }}>
               <div style={{ flex: 1 }}>
-                <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', color: '#64748b', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '6px' }}>
+                <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', color: '#64748b', fontWeight: 'normal', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '6px' }}>
                   Quantity
                 </label>
                 <CurrencyInput 
                   value={mobileQty} 
                   onChange={(v: any) => setMobileQty(v)} 
                   className="saas-input" 
-                  style={{ width: '100%', boxSizing: 'border-box', textAlign: 'center', fontWeight: 'bold' }}
+                  style={{ width: '100%', boxSizing: 'border-box', textAlign: 'center', fontWeight: 'normal' }}
                 />
               </div>
               <div style={{ flex: 1 }}>
-                <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', color: '#64748b', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '6px' }}>
+                <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', color: '#64748b', fontWeight: 'normal', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '6px' }}>
                   Price (៛)
                 </label>
                 <CurrencyInput 
                   value={mobilePrice} 
                   onChange={(v: any) => setMobilePrice(v)} 
                   className="saas-input" 
-                  style={{ width: '100%', boxSizing: 'border-box', textAlign: 'center', fontWeight: 'bold', color: '#b58a3d' }}
+                  style={{ width: '100%', boxSizing: 'border-box', textAlign: 'center', fontWeight: 'normal', color: '#b58a3d' }}
                 />
               </div>
             </div>
@@ -1887,14 +1885,14 @@ export default function POSPage() {
               <button 
                 onClick={() => setSelectedMobileProduct(null)} 
                 className="saas-btn saas-btn-secondary"
-                style={{ flex: 1, padding: '12px' }}
+                style={{ flex: 1, padding: '12px', fontWeight: 'normal' }}
               >
                 {currentT.cancel}
               </button>
               <button 
                 onClick={handleAddMobileProductToCart} 
                 className="saas-btn saas-btn-primary"
-                style={{ flex: 1, padding: '12px', fontWeight: 'bold' }}
+                style={{ flex: 1, padding: '12px', fontWeight: 'normal' }}
               >
                 {currentT.add}
               </button>
