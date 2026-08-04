@@ -1760,7 +1760,7 @@ export default function POSPage() {
         </div>
       </Modal>
 
-      {/* 🟢 TOP-DOCKED MOBILE PRODUCT ADD POPUP (Fixes iOS Safari Keyboard Jump & Bounce) */}
+      {/* 🟢 TOP-DOCKED MOBILE PRODUCT ADD POPUP (Option 1: Ultra-Top Dock + Scroll Clamp) */}
       {!!selectedMobileProduct && (
         <div 
           style={{
@@ -1774,7 +1774,7 @@ export default function POSPage() {
             display: 'flex',
             justifyContent: 'center',
             alignItems: 'flex-start',
-            paddingTop: '80px',
+            paddingTop: '16px', // 🟢 Changed from 80px to 16px (hugs the top edge)
             paddingLeft: '16px',
             paddingRight: '16px'
           }}
@@ -1786,12 +1786,16 @@ export default function POSPage() {
             style={{
               backgroundColor: '#ffffff',
               borderRadius: '16px',
-              padding: '20px',
+              padding: '16px 20px',
               width: '100%',
               maxWidth: '400px',
               boxShadow: '0 20px 40px rgba(0,0,0,0.2)',
               border: '1px solid #e2e8f0',
               animation: 'posPopupSlideDown 0.15s ease-out'
+            }}
+            // 🟢 Clamps iOS scroll shift instantly when switching between Qty and Price
+            onFocusCapture={() => {
+              setTimeout(() => window.scrollTo(0, 0), 30);
             }}
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
