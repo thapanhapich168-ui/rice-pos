@@ -145,27 +145,6 @@ export default function POSPage() {
   const [mobileQty, setMobileQty] = useState<number | ''>('')
   const [mobileName, setMobileName] = useState<string>('')
 
-  // 🔥 IOS SAFARI SMOOTH KEYBOARD SHIFT ENGINE (Zero Bounce/Jump)
-  const mobileQtyRef = useRef<HTMLInputElement>(null);
-  const mobilePriceRef = useRef<HTMLInputElement>(null);
-  const [isMobileInputActive, setIsMobileInputActive] = useState(false);
-  const focusTimerRef = useRef<any>(null);
-
-  const handleMobileFocus = () => {
-    if (focusTimerRef.current) {
-      clearTimeout(focusTimerRef.current);
-      focusTimerRef.current = null;
-    }
-    setIsMobileInputActive(true);
-  };
-
-  const handleMobileBlur = () => {
-    // 150ms debounce prevents bouncing when switching directly from Qty to Price
-    focusTimerRef.current = setTimeout(() => {
-      setIsMobileInputActive(false);
-    }, 150);
-  };
-
   const [exchangeModal, setExchangeModal] = useState<{ isOpen: boolean, product: Product | null, consumedKg: string | number }>({
     isOpen: false, product: null, consumedKg: ''
   })
@@ -507,7 +486,6 @@ export default function POSPage() {
       }]);
     }
     setSelectedMobileProduct(null);
-    setIsMobileInputActive(false);
   }
 
   async function handleConfirmExchange() {
@@ -1005,10 +983,10 @@ export default function POSPage() {
         if (salesErr) throw new Error(`Failed to save to Sales table: ${salesErr.message}`);
 
         for (const [prodIdStr, newStock] of Object.entries(stockUpdates)) {
-            await supabase.from('products').update({ stock: newStock }).eq('id', Number(prodIdStr));
+           await supabase.from('products').update({ stock: newStock }).eq('id', Number(prodIdStr));
         }
         for (const [batchIdStr, newRemaining] of Object.entries(fifoUpdates)) {
-            await supabase.from('inventory_batches').update({ remaining_qty: newRemaining }).eq('id', Number(batchIdStr));
+           await supabase.from('inventory_batches').update({ remaining_qty: newRemaining }).eq('id', Number(batchIdStr));
         }
       }
 
@@ -1601,7 +1579,7 @@ export default function POSPage() {
       )}
 
       {isMobileCartOpen && (
-        <div className="mobile-cart-overlay" style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.4)', zIndex: 9999, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}>
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.4)', zIndex: 9999, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}>
           <div style={{ flex: 1 }} onClick={() => setIsMobileCartOpen(false)}></div>
           
           <div style={{ width: '100%', maxHeight: '85dvh', backgroundColor: '#ffffff', borderTopLeftRadius: '20px', borderTopRightRadius: '20px', display: 'flex', flexDirection: 'column', position: 'relative', boxShadow: '0 -10px 25px rgba(0,0,0,0.1)' }}>
@@ -1782,110 +1760,89 @@ export default function POSPage() {
         </div>
       </Modal>
 
-      {/* 🔥 CLEAN MOBILE ITEM POPUP (Vertically Stacked, Centered, GPU Lift) */}
-      <Modal isOpen={!!selectedMobileProduct} onClose={() => { setSelectedMobileProduct(null); setIsMobileInputActive(false); }} title={currentT.mobileModalTitle} icon="✏️" maxWidth="400px">
+      {/* 🟢 TOP-DOCKED MOBILE PRODUCT ADD POPUP (Fixes iOS Safari Keyboard Jump & Bounce) */}
+      {!!selectedMobileProduct && (
         <div 
-          className={`mobile-item-popup-wrapper ${isMobileInputActive ? 'keyboard-active' : ''}`}
-          style={{ display: 'flex', flexDirection: 'column', width: '100%', boxSizing: 'border-box' }}
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.5)',
+            zIndex: 9999,
+            display: 'flex',
+            justifyContent: 'center',
+            alignItems: 'flex-start',
+            paddingTop: '80px',
+            paddingLeft: '16px',
+            paddingRight: '16px'
+          }}
+          onMouseDown={(e) => {
+            if (e.target === e.currentTarget) setSelectedMobileProduct(null);
+          }}
         >
-          {/* Product Name (Full Width Top Row) */}
-          <div style={{ marginBottom: '14px', display: 'flex', flexDirection: 'column', width: '100%' }}>
-            <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '6px', color: '#64748b' }}>
-              Product Identifier
-            </label>
-            <input 
-              type="text" 
-              value={mobileName} 
-              onChange={(e) => setMobileName(e.target.value)} 
-              className="saas-input" 
-              style={{ width: '100%', boxSizing: 'border-box' }}
-            />
-          </div>
+          <div 
+            style={{
+              backgroundColor: '#ffffff',
+              borderRadius: '16px',
+              padding: '20px',
+              width: '100%',
+              maxWidth: '400px',
+              boxShadow: '0 20px 40px rgba(0,0,0,0.2)',
+              border: '1px solid #e2e8f0',
+              animation: 'posPopupSlideDown 0.15s ease-out'
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+              <h3 style={{ margin: 0, fontSize: '16px', color: '#0f172a' }}>{currentT.mobileModalTitle}</h3>
+              <button 
+                onClick={() => setSelectedMobileProduct(null)} 
+                style={{ background: 'none', border: 'none', fontSize: '18px', color: '#64748b', cursor: 'pointer' }}
+              >
+                ✕
+              </button>
+            </div>
 
-          {/* Quantity & Price (Two Clean Columns, Labels Stacked Directly Above Inputs) */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '20px', width: '100%' }}>
-            <div style={{ display: 'flex', flexDirection: 'column' }}>
-              <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '6px', color: '#64748b' }}>
-                Quantity (kg/bag)
-              </label>
-              <input
-                ref={mobileQtyRef}
-                type="text"
-                inputMode="decimal"
-                enterKeyHint="next"
-                value={mobileQty} 
-                onChange={(e) => {
-                  const cleanVal = e.target.value.replace(/[^0-9.]/g, '');
-                  setMobileQty(cleanVal === '' ? '' : Number(cleanVal));
-                }}
-                onFocus={() => {
-                  handleMobileFocus();
-                  setMobileQty('');
-                }}
-                onBlur={handleMobileBlur}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    e.preventDefault();
-                    mobilePriceRef.current?.focus();
-                  }
-                }}
-                className="saas-input"
-                style={{ width: '100%', textAlign: 'center', boxSizing: 'border-box' }}
+            <div style={{ marginBottom: '16px' }}>
+              <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '8px' }}>Product Identifier</label>
+              <input 
+                type="text" 
+                value={mobileName} 
+                onChange={(e) => setMobileName(e.target.value)} 
+                className="saas-input" 
+                style={{ width: '100%', boxSizing: 'border-box' }}
               />
             </div>
 
-            <div style={{ display: 'flex', flexDirection: 'column' }}>
-              <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '6px', color: '#64748b' }}>
-                Price (៛)
-              </label>
-              <input
-                ref={mobilePriceRef}
-                type="text"
-                inputMode="decimal"
-                enterKeyHint="done"
-                value={mobilePrice} 
-                onChange={(e) => {
-                  const cleanVal = e.target.value.replace(/[^0-9.]/g, '');
-                  setMobilePrice(cleanVal === '' ? '' : Number(cleanVal));
-                }}
-                onFocus={() => {
-                  handleMobileFocus();
-                  setMobilePrice('');
-                }}
-                onBlur={handleMobileBlur}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    e.preventDefault();
-                    e.currentTarget.blur();
-                    setIsMobileInputActive(false);
-                    handleAddMobileProductToCart();
-                  }
-                }}
-                className="saas-input"
-                style={{ width: '100%', textAlign: 'center', boxSizing: 'border-box' }}
-              />
+            <div style={{ display: 'flex', gap: '12px', marginBottom: '20px' }}>
+              <div style={{ flex: 1 }}>
+                <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '8px' }}>Quantity</label>
+                <CurrencyInput 
+                  value={mobileQty} 
+                  onChange={(v: any) => setMobileQty(v)} 
+                  className="saas-input" 
+                  style={{ width: '100%', boxSizing: 'border-box' }}
+                />
+              </div>
+              <div style={{ flex: 1 }}>
+                <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '8px' }}>Price (៛)</label>
+                <CurrencyInput 
+                  value={mobilePrice} 
+                  onChange={(v: any) => setMobilePrice(v)} 
+                  className="saas-input" 
+                  style={{ width: '100%', boxSizing: 'border-box' }}
+                />
+              </div>
             </div>
-          </div>
 
-          {/* Cancel & Add Buttons (Bottom Row) */}
-          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', width: '100%' }}>
-            <button 
-              onClick={() => { setSelectedMobileProduct(null); setIsMobileInputActive(false); }} 
-              className="saas-btn saas-btn-secondary"
-              style={{ flex: 1, padding: '12px', fontSize: '15px' }}
-            >
-              {currentT.cancel}
-            </button>
-            <button 
-              onClick={handleAddMobileProductToCart} 
-              className="saas-btn saas-btn-primary"
-              style={{ flex: 1.5, padding: '12px', fontSize: '15px', fontWeight: 'bold' }}
-            >
-              {currentT.add}
-            </button>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
+              <button onClick={() => setSelectedMobileProduct(null)} className="saas-btn saas-btn-secondary">{currentT.cancel}</button>
+              <button onClick={handleAddMobileProductToCart} className="saas-btn saas-btn-primary">{currentT.add}</button>
+            </div>
           </div>
         </div>
-      </Modal>
+      )}
 
       {/* 💰 SALE SUMMARY MODAL */}
       <Modal isOpen={!!saleSummary} onClose={() => { setSaleSummary(null); setCompletedSale(null); }} title={saleSummary?.isCashless ? 'Sale Recorded! ✅' : saleSummary?.isDebt ? 'Partial Payment Logged ⏳' : 'Sale Complete! ✅'} icon={saleSummary?.isDebt ? "⏳" : "💰"} maxWidth="400px">
@@ -2113,7 +2070,7 @@ export default function POSPage() {
         </div>
       </Modal>
 
-      {/* --- GLOBAL CSS (Cleaned & Safe from Flex-Row Collisions) --- */}
+      {/* --- GLOBAL CSS --- */}
       <style jsx global>{`
         input, select, button, textarea {
           font-family: inherit;
@@ -2122,6 +2079,11 @@ export default function POSPage() {
         
         body {
           font-variant-numeric: tabular-nums lining-nums;
+        }
+
+        @keyframes posPopupSlideDown {
+          from { opacity: 0; transform: translateY(-12px); }
+          to { opacity: 1; transform: translateY(0); }
         }
 
         /* 🔥 BULLETPROOF GLOBAL OVERRIDE FOR MOBILE TABS 🔥 */
@@ -2137,32 +2099,6 @@ export default function POSPage() {
         .saas-tab {
           flex-shrink: 0 !important;
           white-space: nowrap !important;
-        }
-
-        /* 🔥 PREVENT SAFARI IOS AUTO-ZOOM 🔥 */
-        @media (max-width: 1023px) {
-          input, select, textarea, .saas-input {
-            font-size: 16px !important;
-          }
-        }
-
-        /* 🔥 SAFELY CENTER MODAL OVERLAYS ON SCREEN WITHOUT SMASHING INNER CONTENT 🔥 */
-        div[role="dialog"] {
-          display: flex !important;
-          flex-direction: column !important;
-          align-items: center !important;
-          justify-content: center !important;
-          box-sizing: border-box !important;
-        }
-
-        /* 🔥 GPU-ACCELERATED KEYBOARD SHIFT (Prevents Layout Thrashing & Bouncing) 🔥 */
-        .mobile-item-popup-wrapper {
-          width: 100%;
-          transition: transform 0.28s cubic-bezier(0.4, 0, 0.2, 1);
-          transform: translateY(0);
-        }
-        .mobile-item-popup-wrapper.keyboard-active {
-          transform: translateY(-110px);
         }
 
         .main-wrapper { 
