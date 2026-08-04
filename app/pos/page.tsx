@@ -145,6 +145,27 @@ export default function POSPage() {
   const [mobileQty, setMobileQty] = useState<number | ''>('')
   const [mobileName, setMobileName] = useState<string>('')
 
+  // 🔥 RESTORED MISSING HANDLERS (Fixes VS Code handleModalFocus/handleModalBlur errors)
+  const [isModalInputFocused, setIsModalInputFocused] = useState(false)
+  const modalFocusTimerRef = useRef<any>(null)
+
+  const handleModalFocus = (callback?: () => void) => {
+    if (modalFocusTimerRef.current) {
+      clearTimeout(modalFocusTimerRef.current);
+      modalFocusTimerRef.current = null;
+    }
+    if (!isModalInputFocused) {
+      setIsModalInputFocused(true);
+    }
+    if (callback) callback();
+  };
+
+  const handleModalBlur = () => {
+    modalFocusTimerRef.current = setTimeout(() => {
+      setIsModalInputFocused(false);
+    }, 250);
+  };
+
   const [exchangeModal, setExchangeModal] = useState<{ isOpen: boolean, product: Product | null, consumedKg: string | number }>({
     isOpen: false, product: null, consumedKg: ''
   })
@@ -381,11 +402,9 @@ export default function POSPage() {
     const { data: prodData } = await supabase.from('products').select('*').order('id', { ascending: true })
     if (prodData) setProducts(prodData)
     
-    // 🔥 FIXED: Changed .single() to .maybeSingle()
     const { data: setObj } = await supabase.from('app_settings').select('*').eq('setting_key', 'pos_product_order').maybeSingle()
     if (setObj && setObj.setting_value) setProductOrder(setObj.setting_value)
 
-    // 🔥 FIXED: Changed .single() to .maybeSingle()
     const { data: hiddenSet } = await supabase.from('app_settings').select('*').eq('setting_key', 'hidden_retail_ids').maybeSingle()
     if (hiddenSet && hiddenSet.setting_value) setHiddenRetailIds(hiddenSet.setting_value)
   }
@@ -844,7 +863,6 @@ export default function POSPage() {
                    const currentBatch = wBatches.length > 0 ? [...wBatches].sort((a,b) => a.id - b.id)[0] : null;
                    const wholesaleBagCogs = currentBatch ? Number(currentBatch.cost_price) : Number(wholesaleProd.cost_price || 0);
                    
-                   // Declare the weight before dividing!
                    const wholesaleWeight = Number(wholesaleProd.weight) || 50;
                    retailCogsPerKg = wholesaleBagCogs / wholesaleWeight;
                 }
@@ -986,10 +1004,10 @@ export default function POSPage() {
         if (salesErr) throw new Error(`Failed to save to Sales table: ${salesErr.message}`);
 
         for (const [prodIdStr, newStock] of Object.entries(stockUpdates)) {
-           await supabase.from('products').update({ stock: newStock }).eq('id', Number(prodIdStr));
+            await supabase.from('products').update({ stock: newStock }).eq('id', Number(prodIdStr));
         }
         for (const [batchIdStr, newRemaining] of Object.entries(fifoUpdates)) {
-           await supabase.from('inventory_batches').update({ remaining_qty: newRemaining }).eq('id', Number(batchIdStr));
+            await supabase.from('inventory_batches').update({ remaining_qty: newRemaining }).eq('id', Number(batchIdStr));
         }
       }
 
@@ -1243,7 +1261,7 @@ export default function POSPage() {
   }
 
   return (
-    <div style={{ display: 'flex', width: '100%', height: '100dvh', overflow: 'hidden', backgroundColor: '#ffffff', boxSizing: 'border-box' }}>
+    <div className={isModalInputFocused ? 'modal-keyboard-push' : ''} style={{ display: 'flex', width: '100%', height: '100dvh', overflow: 'hidden', backgroundColor: '#ffffff', boxSizing: 'border-box' }}>
       
       {/* SELECTION ENGINE VIEW GRID PANEL */}
       <div className="hide-scrollbar" style={{ flex: 1, height: '100%', overflowY: 'auto', backgroundColor: '#f8fafc', minWidth: 0, WebkitOverflowScrolling: 'touch' }}>
@@ -1582,7 +1600,7 @@ export default function POSPage() {
       )}
 
       {isMobileCartOpen && (
-        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.4)', zIndex: 9999, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}>
+        <div className="mobile-cart-overlay" style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.4)', zIndex: 9999, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}>
           <div style={{ flex: 1 }} onClick={() => setIsMobileCartOpen(false)}></div>
           
           <div style={{ width: '100%', maxHeight: '85dvh', backgroundColor: '#ffffff', borderTopLeftRadius: '20px', borderTopRightRadius: '20px', display: 'flex', flexDirection: 'column', position: 'relative', boxShadow: '0 -10px 25px rgba(0,0,0,0.1)' }}>
@@ -1694,7 +1712,14 @@ export default function POSPage() {
       <Modal isOpen={isCreateCustomerModalOpen} onClose={() => setIsCreateCustomerModalOpen(false)} title="Create New Customer" icon="👤" maxWidth="400px">
         <div style={{ marginBottom: '16px' }}>
           <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '8px' }}>Name</label>
-          <input type="text" value={newCustomerForm.name} onChange={(e) => setNewCustomerForm({...newCustomerForm, name: e.target.value})} className="saas-input" />
+          <input 
+            type="text" 
+            value={newCustomerForm.name} 
+            onChange={(e) => setNewCustomerForm({...newCustomerForm, name: e.target.value})} 
+            onFocus={() => handleModalFocus()}
+            onBlur={() => handleModalBlur()}
+            className="saas-input" 
+          />
         </div>
 
         <div style={{ marginBottom: '16px' }}>
@@ -1721,12 +1746,26 @@ export default function POSPage() {
 
         <div style={{ marginBottom: '16px' }}>
           <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '8px' }}>Location</label>
-          <input type="text" value={newCustomerForm.location} onChange={(e) => setNewCustomerForm({...newCustomerForm, location: e.target.value})} className="saas-input" />
+          <input 
+            type="text" 
+            value={newCustomerForm.location} 
+            onChange={(e) => setNewCustomerForm({...newCustomerForm, location: e.target.value})} 
+            onFocus={() => handleModalFocus()}
+            onBlur={() => handleModalBlur()}
+            className="saas-input" 
+          />
         </div>
         
         <div style={{ marginBottom: '24px' }}>
           <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '8px' }}>Phone Number</label>
-          <input type="text" value={newCustomerForm.phone} onChange={(e) => setNewCustomerForm({...newCustomerForm, phone: e.target.value})} className="saas-input" />
+          <input 
+            type="text" 
+            value={newCustomerForm.phone} 
+            onChange={(e) => setNewCustomerForm({...newCustomerForm, phone: e.target.value})} 
+            onFocus={() => handleModalFocus()}
+            onBlur={() => handleModalBlur()}
+            className="saas-input" 
+          />
         </div>
         
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
@@ -1749,6 +1788,8 @@ export default function POSPage() {
             placeholder="e.g. 15"
             value={exchangeModal.consumedKg}
             onChange={(v: any) => setExchangeModal({ ...exchangeModal, consumedKg: v })}
+            onFocus={() => handleModalFocus(() => setExchangeModal({ ...exchangeModal, consumedKg: '' }))}
+            onBlur={() => handleModalBlur()}
             className="saas-input"
           />
           <p style={{ fontSize: '11px', color: '#94a3b8', marginTop: '6px', lineHeight: 1.4 }}>
@@ -1765,25 +1806,23 @@ export default function POSPage() {
 
       {/* MOBILE PRODUCT ADD POPUP */}
       <Modal isOpen={!!selectedMobileProduct} onClose={() => setSelectedMobileProduct(null)} title={currentT.mobileModalTitle} icon="✏️" maxWidth="400px">
-        <div className="mobile-item-card-modal-content">
-          <div style={{ marginBottom: '16px' }}>
-            <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '8px' }}>Product Identifier</label>
-            <input type="text" value={mobileName} onChange={(e) => setMobileName(e.target.value)} className="saas-input" />
+        <div style={{ marginBottom: '16px' }}>
+          <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '8px' }}>Product Identifier</label>
+          <input type="text" value={mobileName} onChange={(e) => setMobileName(e.target.value)} className="saas-input" />
+        </div>
+        <div style={{ display: 'flex', gap: '12px', marginBottom: '20px' }}>
+          <div style={{ flex: 1 }}>
+            <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '8px' }}>Quantity</label>
+            <CurrencyInput value={mobileQty} onChange={(v: any) => setMobileQty(v)} className="saas-input" />
           </div>
-          <div style={{ display: 'flex', gap: '12px', marginBottom: '20px' }}>
-            <div style={{ flex: 1 }}>
-              <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '8px' }}>Quantity</label>
-              <CurrencyInput value={mobileQty} onChange={(v: any) => setMobileQty(v)} className="saas-input" />
-            </div>
-            <div style={{ flex: 1 }}>
-              <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '8px' }}>Price (៛)</label>
-              <CurrencyInput value={mobilePrice} onChange={(v: any) => setMobilePrice(v)} className="saas-input" />
-            </div>
+          <div style={{ flex: 1 }}>
+            <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '8px' }}>Price (៛)</label>
+            <CurrencyInput value={mobilePrice} onChange={(v: any) => setMobilePrice(v)} className="saas-input" />
           </div>
-          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
-            <button onClick={() => setSelectedMobileProduct(null)} className="saas-btn saas-btn-secondary">{currentT.cancel}</button>
-            <button onClick={handleAddMobileProductToCart} className="saas-btn saas-btn-primary">{currentT.add}</button>
-          </div>
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
+          <button onClick={() => setSelectedMobileProduct(null)} className="saas-btn saas-btn-secondary">{currentT.cancel}</button>
+          <button onClick={handleCreateCustomer} className="saas-btn saas-btn-primary">{currentT.add}</button>
         </div>
       </Modal>
 
@@ -2013,7 +2052,7 @@ export default function POSPage() {
         </div>
       </Modal>
 
-      {/* --- GLOBAL CSS (Includes forceful override for Mobile Tabs & Item Card Modal) --- */}
+      {/* --- GLOBAL CSS (Includes forceful override for Mobile Tabs) --- */}
       <style jsx global>{`
         input, select, button, textarea {
           font-family: inherit;
@@ -2104,7 +2143,7 @@ export default function POSPage() {
             display: flex !important;
             flex-direction: row !important;
             justify-content: flex-start !important;
-            align-items: center !important; 
+            align-items: center; 
             min-height: 44px !important;
             width: calc(100% - 54px) !important;
           }
@@ -2131,21 +2170,6 @@ export default function POSPage() {
             box-shadow: 0 4px 12px rgba(0,0,0,0.2); 
             z-index: 998; 
             cursor: pointer;
-          }
-
-          /* 🔥 Target ONLY the Item Card modal to pop up in the middle of the screen 🔥 */
-          div[role="dialog"]:has(.mobile-item-card-modal-content),
-          div[class*="modal"]:has(.mobile-item-card-modal-content),
-          div[class*="Modal"]:has(.mobile-item-card-modal-content) {
-            display: flex !important;
-            align-items: center !important;
-            justify-content: center !important;
-            padding: 16px !important;
-          }
-
-          /* Prevent input-switching bounce between Quantity and Price inside the item card modal */
-          .mobile-item-card-modal-content input {
-            scroll-margin: 0 !important;
           }
         }
       `}</style>
