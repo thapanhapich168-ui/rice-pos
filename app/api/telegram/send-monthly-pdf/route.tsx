@@ -17,7 +17,7 @@ import {
 
 export const runtime = 'nodejs'
 
-// 🔥 1. REGISTER NOTO SANS KHMER (CLEAN MODERN ENGLISH NUMBERS/UI + KHMER SCRIPT)
+// --- 1. REGISTER NOTO SANS KHMER (CLEAN ENGLISH UI GLYPHS + KHMER SCRIPT) ---
 Font.register({
   family: 'NotoSansKhmer',
   fonts: [
@@ -37,82 +37,84 @@ const formatKHR = (val: number) => `${Math.round(val || 0).toLocaleString()} KHR
 const formatUSD = (val: number) => `$${Number(val || 0).toFixed(2)}`
 const formatNum = (val: number) => Number(val || 0).toLocaleString()
 
-// --- A4 CORPORATE & SAAS CARD STYLESHEET ---
+// --- 2. LIGHT, MODERN SAAS STYLESHEET (REDUCED BOLDING) ---
 const styles = StyleSheet.create({
-  page: { 
-    padding: 35, 
-    paddingBottom: 45, 
-    fontFamily: 'NotoSansKhmer', 
-    backgroundColor: '#ffffff', 
-    color: '#0f172a' 
+  page: {
+    padding: 35,
+    paddingBottom: 45,
+    fontFamily: 'NotoSansKhmer',
+    backgroundColor: '#ffffff',
+    color: '#0f172a'
   },
-  header: { 
-    flexDirection: 'row', 
-    justifyContent: 'space-between', 
-    borderBottomWidth: 2, 
-    borderBottomColor: '#0f172a', 
-    paddingBottom: 10, 
-    marginBottom: 16 
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    borderBottomWidth: 1,
+    borderBottomColor: '#cbd5e1',
+    paddingBottom: 10,
+    marginBottom: 16
   },
-  brandTitle: { fontSize: 9, color: '#64748b', textTransform: 'uppercase' },
-  docTitle: { fontSize: 18, fontWeight: 'bold', color: '#0f172a', marginTop: 2 },
-  monthBadge: { fontSize: 13, fontWeight: 'bold', color: '#b58a3d' },
-  sectionTitle: { 
-    fontSize: 11, 
-    fontWeight: 'bold', 
-    color: '#334155', 
-    backgroundColor: '#f1f5f9', 
-    padding: 6, 
-    marginBottom: 10, 
-    marginTop: 14 
+  brandTitle: { fontSize: 8, color: '#64748b', textTransform: 'uppercase' },
+  docTitle: { fontSize: 16, fontWeight: 'bold', color: '#0f172a', marginTop: 2 },
+  monthBadge: { fontSize: 12, fontWeight: 'bold', color: '#b58a3d' },
+  sectionTitle: {
+    fontSize: 10,
+    fontWeight: 'bold',
+    color: '#334155',
+    backgroundColor: '#f8fafc',
+    paddingVertical: 5,
+    paddingHorizontal: 8,
+    marginBottom: 10,
+    marginTop: 14,
+    borderRadius: 4
   },
-  
-  // Grid & SaaS Card Layouts
+
+  // Grid & Card Layouts
   grid2: { flexDirection: 'row', justifyContent: 'space-between', gap: 10, marginBottom: 10 },
   grid3: { flexDirection: 'row', justifyContent: 'space-between', gap: 8, marginBottom: 10 },
-  card: { 
-    flex: 1, 
-    padding: 10, 
-    borderRadius: 6, 
-    borderWidth: 1, 
-    borderColor: '#e2e8f0', 
-    backgroundColor: '#f8fafc' 
+  card: {
+    flex: 1,
+    padding: 10,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    backgroundColor: '#ffffff'
   },
-  cardHighlight: { 
-    flex: 1, 
-    padding: 10, 
-    borderRadius: 6, 
-    borderWidth: 1, 
-    borderColor: '#e2e8f0', 
-    backgroundColor: '#f8fafc', 
-    borderLeftWidth: 4 
+  cardHighlight: {
+    flex: 1,
+    padding: 10,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    backgroundColor: '#ffffff',
+    borderLeftWidth: 3
   },
-  cardLabel: { fontSize: 8, color: '#64748b', textTransform: 'uppercase', marginBottom: 3 },
-  cardValue: { fontSize: 14, fontWeight: 'bold', color: '#0f172a' },
-  cardSubValue: { fontSize: 8, color: '#94a3b8', marginBottom: 8 },
-  
+  cardLabel: { fontSize: 8, color: '#64748b', textTransform: 'uppercase', marginBottom: 4 },
+  cardValue: { fontSize: 13, fontWeight: 'bold', color: '#0f172a' },
+  cardSubValue: { fontSize: 8, color: '#64748b', marginBottom: 8 },
+
   // Pich / Jing / Both / Mom 4-box Subgrid
   subBoxGrid: { flexDirection: 'row', gap: 4, borderTopWidth: 1, borderTopColor: '#f1f5f9', paddingTop: 6 },
-  subBox: { 
-    flex: 1, 
-    padding: 4, 
-    borderRadius: 4, 
-    backgroundColor: '#ffffff', 
-    textAlign: 'center', 
-    borderWidth: 1, 
-    borderColor: '#e2e8f0' 
+  subBox: {
+    flex: 1,
+    padding: 4,
+    borderRadius: 4,
+    backgroundColor: '#f8fafc',
+    textAlign: 'center',
+    borderWidth: 1,
+    borderColor: '#e2e8f0'
   },
-  subBoxMom: { 
-    flex: 1, 
-    padding: 4, 
-    borderRadius: 4, 
-    backgroundColor: '#fefcf3', 
-    textAlign: 'center', 
-    borderWidth: 1, 
-    borderColor: '#fde047' 
+  subBoxMom: {
+    flex: 1,
+    padding: 4,
+    borderRadius: 4,
+    backgroundColor: '#fefcf3',
+    textAlign: 'center',
+    borderWidth: 1,
+    borderColor: '#fde047'
   },
-  subBoxLabel: { fontSize: 7, color: '#94a3b8', textTransform: 'uppercase' },
-  subBoxVal: { fontSize: 8, color: '#334155', fontWeight: 'bold', marginTop: 1 },
+  subBoxLabel: { fontSize: 7, color: '#64748b', textTransform: 'uppercase' },
+  subBoxVal: { fontSize: 8, color: '#334155', marginTop: 1 },
 
   // Expense Cash/QR Split Grid
   expSplitGrid: { flexDirection: 'row', justifyContent: 'space-between', borderTopWidth: 1, borderTopColor: '#f1f5f9', paddingTop: 6, marginTop: 4 },
@@ -120,27 +122,27 @@ const styles = StyleSheet.create({
   expSplitText: { fontSize: 8, color: '#64748b', marginBottom: 2 },
 
   // Tables & Rows
-  tableHeader: { flexDirection: 'row', backgroundColor: '#e2e8f0', paddingVertical: 5, paddingHorizontal: 6, borderRadius: 4 },
-  tableRow: { flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: '#f1f5f9', paddingVertical: 5, paddingHorizontal: 6 },
+  tableHeader: { flexDirection: 'row', backgroundColor: '#f8fafc', paddingVertical: 5, paddingHorizontal: 8, borderRadius: 4 },
+  tableRow: { flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: '#f1f5f9', paddingVertical: 5, paddingHorizontal: 8 },
   colCat: { flex: 2, fontSize: 8, color: '#334155' },
-  colAmt: { flex: 1, fontSize: 8, textAlign: 'right', fontWeight: 'bold', color: '#0f172a' },
-  
-  // Health Bar / Progress Bar
-  barContainer: { height: 6, backgroundColor: '#f1f5f9', borderRadius: 3, overflow: 'hidden', marginVertical: 4 },
+  colAmt: { flex: 1, fontSize: 8, textAlign: 'right', color: '#334155' },
+
+  // Health Bar Comparison
+  barContainer: { height: 5, backgroundColor: '#f1f5f9', borderRadius: 3, overflow: 'hidden', marginVertical: 5 },
   barFill: { height: '100%', borderRadius: 3 },
 
-  footer: { 
-    position: 'absolute', 
-    bottom: 18, 
-    left: 35, 
-    right: 35, 
-    flexDirection: 'row', 
-    justifyContent: 'space-between', 
-    borderTopWidth: 1, 
-    borderTopColor: '#cbd5e1', 
-    paddingTop: 8 
+  footer: {
+    position: 'absolute',
+    bottom: 15,
+    left: 35,
+    right: 35,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    borderTopWidth: 1,
+    borderTopColor: '#e2e8f0',
+    paddingTop: 8
   },
-  footerText: { fontSize: 8, color: '#64748b' }
+  footerText: { fontSize: 8, color: '#94a3b8' }
 })
 
 // --- HELPER COMPONENT: COMPLEX SAAS CARD WITH 4 OWNER SUB-BOXES ---
@@ -179,25 +181,25 @@ const ExpenseBreakdownCardPDF = ({ title, cR = 0, cU = 0, qR = 0, qU = 0, color 
       <Text style={styles.cardLabel}>{title}</Text>
       <Text style={[styles.cardValue, { color }]}>{formatKHR(totalRiel)}</Text>
       {totalUsd > 0 ? (
-        <Text style={[styles.cardSubValue, { color, fontWeight: 'bold' }]}>{formatUSD(totalUsd)}</Text>
+        <Text style={[styles.cardSubValue, { color }]}>{formatUSD(totalUsd)}</Text>
       ) : (
         <Text style={styles.cardSubValue}>$0.00</Text>
       )}
       <View style={styles.expSplitGrid}>
         <View style={styles.expSplitCol}>
           <Text style={styles.expSplitText}>
-            Cash: <Text style={{ color: '#334155', fontWeight: 'bold' }}>{formatKHR(cR)}</Text>
+            Cash: <Text style={{ color: '#334155' }}>{formatKHR(cR)}</Text>
           </Text>
           <Text style={styles.expSplitText}>
-            QR: <Text style={{ color: '#334155', fontWeight: 'bold' }}>{formatKHR(qR)}</Text>
+            QR: <Text style={{ color: '#334155' }}>{formatKHR(qR)}</Text>
           </Text>
         </View>
         <View style={styles.expSplitCol}>
           <Text style={styles.expSplitText}>
-            Cash: <Text style={{ color: '#334155', fontWeight: 'bold' }}>{formatUSD(cU)}</Text>
+            Cash: <Text style={{ color: '#334155' }}>{formatUSD(cU)}</Text>
           </Text>
           <Text style={styles.expSplitText}>
-            QR: <Text style={{ color: '#334155', fontWeight: 'bold' }}>{formatUSD(qU)}</Text>
+            QR: <Text style={{ color: '#334155' }}>{formatUSD(qU)}</Text>
           </Text>
         </View>
       </View>
@@ -207,9 +209,11 @@ const ExpenseBreakdownCardPDF = ({ title, cR = 0, cU = 0, qR = 0, qU = 0, color 
 
 // --- HELPER COMPONENT: HEALTH BAR COMPARISON ---
 const HealthBarPDF = ({ title, current, target, color, reverseLogic = false }: any) => {
-  let pct = target > 0 ? (current / target) * 100 : (current > 0 ? 100 : 0)
+  const safeTarget = Number(target) || 0
+  const safeCurrent = Number(current) || 0
+  let pct = safeTarget > 0 ? (safeCurrent / safeTarget) * 100 : (safeCurrent > 0 ? 100 : 0)
   let displayPct = pct.toFixed(1)
-  let barWidth = Math.min(100, Math.max(0, pct))
+  let barWidth = Math.min(100, Math.max(0, Math.round(pct)))
   let barColor = color
   if (!reverseLogic) {
     if (pct < 50) barColor = '#ef4444'; else if (pct >= 100) barColor = '#10b981'
@@ -219,31 +223,44 @@ const HealthBarPDF = ({ title, current, target, color, reverseLogic = false }: a
   return (
     <View style={[styles.card, { marginBottom: 8 }]} wrap={false}>
       <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-        <Text style={{ fontSize: 9, fontWeight: 'bold', color: '#334155' }}>{title}</Text>
-        <Text style={{ fontSize: 9, fontWeight: 'bold', color: barColor }}>{displayPct}%</Text>
+        <Text style={{ fontSize: 8, color: '#334155' }}>{title}</Text>
+        <Text style={{ fontSize: 8, color: barColor }}>{displayPct}%</Text>
       </View>
       <View style={styles.barContainer}>
         <View style={[styles.barFill, { width: `${barWidth}%`, backgroundColor: barColor }]} />
       </View>
       <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 2 }}>
         <Text style={{ fontSize: 7, color: '#64748b' }}>
-          This MTD: <Text style={{ color: '#334155', fontWeight: 'bold' }}>{formatKHR(current)}</Text>
+          This MTD: <Text style={{ color: '#334155' }}>{formatKHR(safeCurrent)}</Text>
         </Text>
         <Text style={{ fontSize: 7, color: '#64748b' }}>
-          Last Mth: <Text style={{ color: '#334155', fontWeight: 'bold' }}>{formatKHR(target)}</Text>
+          Last Mth: <Text style={{ color: '#334155' }}>{formatKHR(safeTarget)}</Text>
         </Text>
       </View>
     </View>
   )
 }
 
-// --- HELPER COMPONENT: SVG TREND LINE CHART ---
+// --- HELPER COMPONENT: BULLETPROOF SVG TREND LINE CHART ---
 const LineChartCardPDF = ({ title, dataCurrent, dataLast, color }: any) => {
-  const maxVal = Math.max(...dataCurrent, ...dataLast, 1)
-  const formatPoints = (arr: any[]) => arr.map((val: any, idx: number) => {
-    const x = (idx / 30) * 450; const y = 80 - ((val / maxVal) * 70); return `${x},${y}`
-  }).join(' ')
-  
+  const safeCurrent = Array.isArray(dataCurrent) && dataCurrent.length > 0 ? dataCurrent : new Array(31).fill(0)
+  const safeLast = Array.isArray(dataLast) && dataLast.length > 0 ? dataLast : new Array(31).fill(0)
+  const maxVal = Math.max(...safeCurrent, ...safeLast, 1) || 1
+
+  // 🔥 COMPLETELY GUARDS AGAINST NaN, INFINITY, AND xCoordinate PARSER CRASHES
+  const getSafePoints = (arr: number[]) =>
+    arr
+      .map((val, idx) => {
+        const numVal = Number(val) || 0
+        const x = Math.round((idx / 30) * 450)
+        const y = Math.round(80 - (numVal / maxVal) * 70)
+        return `${x},${y}`
+      })
+      .join(' ')
+
+  const currentPoints = getSafePoints(safeCurrent)
+  const lastPoints = getSafePoints(safeLast)
+
   return (
     <View style={[styles.card, { marginBottom: 10 }]} wrap={false}>
       <Text style={[styles.cardLabel, { marginBottom: 8 }]}>{title}</Text>
@@ -251,25 +268,29 @@ const LineChartCardPDF = ({ title, dataCurrent, dataLast, color }: any) => {
         <Line x1="0" y1="20" x2="450" y2="20" stroke="#f1f5f9" strokeWidth="1" />
         <Line x1="0" y1="50" x2="450" y2="50" stroke="#f1f5f9" strokeWidth="1" />
         <Line x1="0" y1="80" x2="450" y2="80" stroke="#cbd5e1" strokeWidth="1" />
-        <Polyline points={formatPoints(dataLast)} fill="none" stroke="#cbd5e1" strokeWidth="1.5" strokeDasharray="3,3" />
-        <Polyline points={formatPoints(dataCurrent)} fill="none" stroke={color} strokeWidth="2" />
+        <Polyline points={lastPoints} fill="none" stroke="#cbd5e1" strokeWidth="1.5" strokeDasharray="3,3" />
+        <Polyline points={currentPoints} fill="none" stroke={color} strokeWidth="2" />
       </Svg>
       <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 2 }}>
-        <Text style={{ fontSize: 7, color: color, fontWeight: 'bold' }}>━ This Month Trend</Text>
+        <Text style={{ fontSize: 7, color: color }}>━ This Month Trend</Text>
         <Text style={{ fontSize: 7, color: '#94a3b8' }}>- - Last Month Trend</Text>
       </View>
     </View>
   )
 }
 
-// --- FULL MULTI-PAGE DOCUMENT COMPONENT (DYNAMIC FLOW WITH NO CUT-OFFS) ---
+// --- FULL MULTI-PAGE DOCUMENT COMPONENT ---
 const MonthlyReportPDF = ({ monthName, mtd, lastMonth, wholesaleTop, retailTop, categoryBreakdown, charts }: any) => {
-  const margin = mtd.totalSales > 0 ? ((mtd.totalProfit / mtd.totalSales) * 100).toFixed(1) : '0.0'
-  const totalExpEq = mtd.totalExpRiel + (mtd.totalExpUsd * EXCHANGE_RATE)
-  const netCashFlow = mtd.totalProfit - totalExpEq
+  const safeSales = Number(mtd?.totalSales) || 0
+  const safeProfit = Number(mtd?.totalProfit) || 0
+  const margin = safeSales > 0 ? ((safeProfit / safeSales) * 100).toFixed(1) : '0.0'
+  const totalExpEq = (Number(mtd?.totalExpRiel) || 0) + ((Number(mtd?.totalExpUsd) || 0) * EXCHANGE_RATE)
+  const netCashFlow = safeProfit - totalExpEq
 
   const categories = Object.entries(categoryBreakdown || {}).sort(
-    (a: any, b: any) => (b[1].riel + b[1].usd * EXCHANGE_RATE) - (a[1].riel + a[1].usd * EXCHANGE_RATE)
+    (a: any, b: any) =>
+      ((Number(b[1]?.riel) || 0) + (Number(b[1]?.usd) || 0) * EXCHANGE_RATE) -
+      ((Number(a[1]?.riel) || 0) + (Number(a[1]?.usd) || 0) * EXCHANGE_RATE)
   )
 
   return (
@@ -279,7 +300,7 @@ const MonthlyReportPDF = ({ monthName, mtd, lastMonth, wholesaleTop, retailTop, 
         <View style={styles.header}>
           <View>
             <Text style={styles.brandTitle}>Rice Business Financial Report</Text>
-            <Text style={styles.docTitle}>Full Executive SaaS Scorecard</Text>
+            <Text style={styles.docTitle}>Executive Monthly Statement</Text>
           </View>
           <View style={{ alignItems: 'flex-end' }}>
             <Text style={styles.monthBadge}>{monthName}</Text>
@@ -308,20 +329,20 @@ const MonthlyReportPDF = ({ monthName, mtd, lastMonth, wholesaleTop, retailTop, 
         </View>
         <View style={[styles.card, { marginBottom: 14, backgroundColor: '#f8fafc' }]} wrap={false}>
           <Text style={{ fontSize: 8, color: '#334155', lineHeight: 1.5 }}>
-            Operational Conclusion: During {monthName}, the business achieved total sales of {formatKHR(mtd.totalSales)} with a gross profit of {formatKHR(mtd.totalProfit)}. After accounting for all operational and personal expenses of {formatKHR(totalExpEq)} equivalent, the net retained cash flow stands at {formatKHR(netCashFlow)}.
+            Operational Conclusion: During {monthName}, the business achieved total sales of {formatKHR(safeSales)} with a gross profit of {formatKHR(safeProfit)}. After accounting for all operational and personal expenses of {formatKHR(totalExpEq)} equivalent, the net retained cash flow stands at {formatKHR(netCashFlow)}.
           </Text>
         </View>
 
         {/* SECTION 2: MONTH TO DATE (MTD) PERFORMANCE CARDS */}
         <Text style={styles.sectionTitle}>2. MONTH TO DATE (MTD) PERFORMANCE</Text>
         <View style={styles.grid2} wrap={false}>
-          <ComplexCardPDF title="MTD Sales" total={mtd.totalSales} pich={mtd.pichSales} jing={mtd.jingSales} both={mtd.bothSales} mom={mtd.momSales} color="#2563eb" />
-          <ComplexCardPDF title="MTD Profit" total={mtd.totalProfit} pich={mtd.pichProfit} jing={mtd.jingProfit} both={mtd.bothProfit} mom={mtd.momProfit} color="#10b981" />
+          <ComplexCardPDF title="MTD Sales" total={safeSales} pich={mtd?.pichSales} jing={mtd?.jingSales} both={mtd?.bothSales} mom={mtd?.momSales} color="#2563eb" />
+          <ComplexCardPDF title="MTD Profit" total={safeProfit} pich={mtd?.pichProfit} jing={mtd?.jingProfit} both={mtd?.bothProfit} mom={mtd?.momProfit} color="#10b981" />
         </View>
         <View style={styles.grid3} wrap={false}>
-          <ExpenseBreakdownCardPDF title="Cash Collected (Direct)" cR={mtd.col.cR} cU={mtd.col.cU} qR={mtd.col.qR} qU={mtd.col.qU} color="#3b82f6" />
-          <ExpenseBreakdownCardPDF title="MTD Biz Expenses" cR={mtd.bizCashRiel} cU={mtd.bizCashUsd} qR={mtd.bizQrRiel} qU={mtd.bizQrUsd} color="#b91c1c" />
-          <ExpenseBreakdownCardPDF title="MTD Personal Exp" cR={mtd.persCashRiel} cU={mtd.persCashUsd} qR={mtd.persQrRiel} qU={mtd.persQrUsd} color="#f59e0b" />
+          <ExpenseBreakdownCardPDF title="Cash Collected (Direct)" cR={mtd?.col?.cR} cU={mtd?.col?.cU} qR={mtd?.col?.qR} qU={mtd?.col?.qU} color="#3b82f6" />
+          <ExpenseBreakdownCardPDF title="MTD Biz Expenses" cR={mtd?.bizCashRiel} cU={mtd?.bizCashUsd} qR={mtd?.bizQrRiel} qU={mtd?.bizQrUsd} color="#b91c1c" />
+          <ExpenseBreakdownCardPDF title="MTD Personal Exp" cR={mtd?.persCashRiel} cU={mtd?.persCashUsd} qR={mtd?.persQrRiel} qU={mtd?.persQrUsd} color="#f59e0b" />
         </View>
 
         {/* SECTION 3: MTD TOP PERFORMERS (WHOLESALE & RETAIL) */}
@@ -329,22 +350,26 @@ const MonthlyReportPDF = ({ monthName, mtd, lastMonth, wholesaleTop, retailTop, 
         <View style={styles.grid2} wrap={false}>
           <View style={styles.card}>
             <Text style={[styles.cardLabel, { marginBottom: 6, color: '#2563eb' }]}>TOP 3 WHOLESALE (BY VOLUME)</Text>
-            {wholesaleTop.topByQty.length === 0 ? <Text style={{ fontSize: 8, color: '#94a3b8' }}>No wholesale data available.</Text> : (
+            {(!wholesaleTop?.topByQty || wholesaleTop.topByQty.length === 0) ? (
+              <Text style={{ fontSize: 8, color: '#94a3b8' }}>No wholesale data available.</Text>
+            ) : (
               wholesaleTop.topByQty.map((item: any, idx: number) => (
                 <View key={idx} style={{ flexDirection: 'row', justifyContent: 'space-between', borderBottomWidth: 1, borderBottomColor: '#f1f5f9', paddingVertical: 4 }}>
-                  <Text style={{ fontSize: 8, fontWeight: 'bold' }}>{idx + 1}. {item.name}</Text>
-                  <Text style={{ fontSize: 8, color: '#2563eb', fontWeight: 'bold' }}>{formatNum(item.qty)} bags ({formatKHR(item.profit)})</Text>
+                  <Text style={{ fontSize: 8 }}>{idx + 1}. {item.name}</Text>
+                  <Text style={{ fontSize: 8, color: '#2563eb' }}>{formatNum(item.qty)} bags ({formatKHR(item.profit)})</Text>
                 </View>
               ))
             )}
           </View>
           <View style={styles.card}>
             <Text style={[styles.cardLabel, { marginBottom: 6, color: '#10b981' }]}>TOP 3 RETAIL (BY VOLUME)</Text>
-            {retailTop.topByQty.length === 0 ? <Text style={{ fontSize: 8, color: '#94a3b8' }}>No retail data available.</Text> : (
+            {(!retailTop?.topByQty || retailTop.topByQty.length === 0) ? (
+              <Text style={{ fontSize: 8, color: '#94a3b8' }}>No retail data available.</Text>
+            ) : (
               retailTop.topByQty.map((item: any, idx: number) => (
                 <View key={idx} style={{ flexDirection: 'row', justifyContent: 'space-between', borderBottomWidth: 1, borderBottomColor: '#f1f5f9', paddingVertical: 4 }}>
-                  <Text style={{ fontSize: 8, fontWeight: 'bold' }}>{idx + 1}. {item.name}</Text>
-                  <Text style={{ fontSize: 8, color: '#10b981', fontWeight: 'bold' }}>{formatNum(item.qty)} bags ({formatKHR(item.profit)})</Text>
+                  <Text style={{ fontSize: 8 }}>{idx + 1}. {item.name}</Text>
+                  <Text style={{ fontSize: 8, color: '#10b981' }}>{formatNum(item.qty)} bags ({formatKHR(item.profit)})</Text>
                 </View>
               ))
             )}
@@ -354,19 +379,31 @@ const MonthlyReportPDF = ({ monthName, mtd, lastMonth, wholesaleTop, retailTop, 
         {/* SECTION 4: COMPARE MTD VS LAST MONTH */}
         <Text style={styles.sectionTitle}>4. COMPARE MTD VS LAST MONTH</Text>
         <View style={styles.grid2} wrap={false}>
-          <HealthBarPDF title="Sales Comparison" current={mtd.totalSales} target={lastMonth.totalSales} color="#2563eb" />
-          <HealthBarPDF title="Profit Comparison" current={mtd.totalProfit} target={lastMonth.totalProfit} color="#10b981" />
+          <HealthBarPDF title="Sales Comparison" current={safeSales} target={lastMonth?.totalSales} color="#2563eb" />
+          <HealthBarPDF title="Profit Comparison" current={safeProfit} target={lastMonth?.totalProfit} color="#10b981" />
         </View>
         <View style={styles.grid2} wrap={false}>
-          <HealthBarPDF title="Biz Expenses Comparison" current={mtd.bizCashRiel + mtd.bizQrRiel + (mtd.bizCashUsd * EXCHANGE_RATE)} target={lastMonth.bizCashRiel + lastMonth.bizQrRiel + (lastMonth.bizCashUsd * EXCHANGE_RATE)} color="#b91c1c" reverseLogic />
-          <HealthBarPDF title="Personal Expenses Comparison" current={mtd.persCashRiel + mtd.persQrRiel + (mtd.persCashUsd * EXCHANGE_RATE)} target={lastMonth.persCashRiel + lastMonth.persQrRiel + (lastMonth.persCashUsd * EXCHANGE_RATE)} color="#f59e0b" reverseLogic />
+          <HealthBarPDF
+            title="Biz Expenses Comparison"
+            current={(Number(mtd?.bizCashRiel) || 0) + (Number(mtd?.bizQrRiel) || 0) + ((Number(mtd?.bizCashUsd) || 0) * EXCHANGE_RATE)}
+            target={(Number(lastMonth?.bizCashRiel) || 0) + (Number(lastMonth?.bizQrRiel) || 0) + ((Number(lastMonth?.bizCashUsd) || 0) * EXCHANGE_RATE)}
+            color="#b91c1c"
+            reverseLogic
+          />
+          <HealthBarPDF
+            title="Personal Expenses Comparison"
+            current={(Number(mtd?.persCashRiel) || 0) + (Number(mtd?.persQrRiel) || 0) + ((Number(mtd?.persCashUsd) || 0) * EXCHANGE_RATE)}
+            target={(Number(lastMonth?.persCashRiel) || 0) + (Number(lastMonth?.persQrRiel) || 0) + ((Number(lastMonth?.persCashUsd) || 0) * EXCHANGE_RATE)}
+            color="#f59e0b"
+            reverseLogic
+          />
         </View>
 
         {/* SECTION 5: TREND ANALYSIS CHARTS */}
         <Text style={styles.sectionTitle}>5. TREND ANALYSIS (DAY 1 - 31)</Text>
         <View style={styles.grid2} wrap={false}>
-          <LineChartCardPDF title="Total Sales: This Month vs Last Month" dataCurrent={charts.thisMonthSales} dataLast={charts.lastMonthSales} color="#2563eb" />
-          <LineChartCardPDF title="Total Profit: This Month vs Last Month" dataCurrent={charts.thisMonthProfit} dataLast={charts.lastMonthProfit} color="#10b981" />
+          <LineChartCardPDF title="Total Sales: This Month vs Last Month" dataCurrent={charts?.thisMonthSales} dataLast={charts?.lastMonthSales} color="#2563eb" />
+          <LineChartCardPDF title="Total Profit: This Month vs Last Month" dataCurrent={charts?.thisMonthProfit} dataLast={charts?.lastMonthProfit} color="#10b981" />
         </View>
 
         {/* SECTION 6: ITEMIZED EXPENSES BY CATEGORY */}
@@ -387,8 +424,8 @@ const MonthlyReportPDF = ({ monthName, mtd, lastMonth, wholesaleTop, retailTop, 
             categories.map(([cat, val]: any, idx: number) => (
               <View key={idx} style={styles.tableRow} wrap={false}>
                 <Text style={styles.colCat}>{cat}</Text>
-                <Text style={[styles.colAmt, { color: '#dc2626' }]}>{formatKHR(val.riel)}</Text>
-                <Text style={[styles.colAmt, { color: '#dc2626' }]}>{formatUSD(val.usd)}</Text>
+                <Text style={[styles.colAmt, { color: '#dc2626' }]}>{formatKHR(val?.riel)}</Text>
+                <Text style={[styles.colAmt, { color: '#dc2626' }]}>{formatUSD(val?.usd)}</Text>
               </View>
             ))
           )}
@@ -397,13 +434,13 @@ const MonthlyReportPDF = ({ monthName, mtd, lastMonth, wholesaleTop, retailTop, 
         {/* SECTION 7: SIGN-OFF SIGNATURES */}
         <View style={{ marginTop: 25, flexDirection: 'row', justifyContent: 'space-between', marginBottom: 30 }} wrap={false}>
           <View style={{ width: '45%' }}>
-            <Text style={{ fontSize: 8, color: '#334155', fontWeight: 'bold', marginBottom: 25 }}>Prepared By:</Text>
-            <View style={{ borderBottomWidth: 1, borderBottomColor: '#94a3b8' }} />
+            <Text style={{ fontSize: 8, fontWeight: 'bold', color: '#334155', marginBottom: 25 }}>Prepared By:</Text>
+            <View style={{ borderBottomWidth: 1, borderBottomColor: '#cbd5e1' }} />
             <Text style={{ fontSize: 7, color: '#64748b', marginTop: 3 }}>Accountant / POS System Operator</Text>
           </View>
           <View style={{ width: '45%' }}>
-            <Text style={{ fontSize: 8, color: '#334155', fontWeight: 'bold', marginBottom: 25 }}>Approved By:</Text>
-            <View style={{ borderBottomWidth: 1, borderBottomColor: '#94a3b8' }} />
+            <Text style={{ fontSize: 8, fontWeight: 'bold', color: '#334155', marginBottom: 25 }}>Approved By:</Text>
+            <View style={{ borderBottomWidth: 1, borderBottomColor: '#cbd5e1' }} />
             <Text style={{ fontSize: 7, color: '#64748b', marginTop: 3 }}>Business Ownership Sign-off</Text>
           </View>
         </View>
