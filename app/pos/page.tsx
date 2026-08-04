@@ -1,6 +1,7 @@
 'use client'
 
 import React, { useEffect, useState, useRef } from 'react'
+import { createPortal } from 'react-dom' // 🟢 ADD THIS IMPORT
 import { supabase } from '@/lib/supabaseClient'
 import * as htmlToImage from 'html-to-image'
 import { formatRiel, formatUSD, EXCHANGE_RATE } from '@/utils/formatters'
@@ -1760,8 +1761,8 @@ export default function POSPage() {
         </div>
       </Modal>
 
-      {/* 🟢 TOP-DOCKED MOBILE PRODUCT ADD POPUP (Regular Font Weights, Overlays Burger Icon) */}
-      {!!selectedMobileProduct && (
+      {/* 🟢 TOP-DOCKED MOBILE PRODUCT ADD POPUP (React Portal + 16px Anti-Zoom + Regular Fonts) */}
+      {!!selectedMobileProduct && typeof document !== 'undefined' && createPortal(
         <div 
           style={{
             position: 'fixed',
@@ -1771,7 +1772,7 @@ export default function POSPage() {
             bottom: 0,
             backgroundColor: 'rgba(15, 23, 42, 0.45)',
             backdropFilter: 'blur(2px)',
-            zIndex: 9999,
+            zIndex: 2147483647, // 🟢 Maximum possible CSS z-index (overrides burger menu)
             display: 'flex',
             justifyContent: 'center',
             alignItems: 'flex-start',
@@ -1781,6 +1782,10 @@ export default function POSPage() {
           }}
           onMouseDown={(e) => {
             if (e.target === e.currentTarget) setSelectedMobileProduct(null);
+          }}
+          onTouchMove={(e) => {
+            // 🟢 Prevents background scrolling while popup is open on iOS
+            if (e.target === e.currentTarget) e.preventDefault();
           }}
         >
           <div 
@@ -1795,10 +1800,14 @@ export default function POSPage() {
               animation: 'posPopupSlideDown 0.18s cubic-bezier(0.16, 1, 0.3, 1)'
             }}
             onFocusCapture={() => {
-              setTimeout(() => window.scrollTo(0, 0), 30);
+              // 🟢 Clamps iOS visual viewport if it attempts any remaining micro-shift
+              setTimeout(() => {
+                window.scrollTo(0, 0);
+                document.body.scrollTop = 0;
+              }, 30);
             }}
           >
-            {/* ✨ Header with Emoji Icon Badge (Regular font weight) */}
+            {/* ✨ Header with Emoji Icon Badge (Regular font weight, no description) */}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '18px', paddingBottom: '12px', borderBottom: '1px solid #f1f5f9' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                 <div style={{
@@ -1833,7 +1842,8 @@ export default function POSPage() {
                   cursor: 'pointer',
                   display: 'flex',
                   alignItems: 'center',
-                  justifyContent: 'center'
+                  justifyContent: 'center',
+                  fontWeight: 'normal'
                 }}
               >
                 ✕
@@ -1850,7 +1860,13 @@ export default function POSPage() {
                 value={mobileName} 
                 onChange={(e) => setMobileName(e.target.value)} 
                 className="saas-input" 
-                style={{ width: '100%', boxSizing: 'border-box', fontWeight: 'normal', color: '#1e293b' }}
+                style={{ 
+                  width: '100%', 
+                  boxSizing: 'border-box', 
+                  fontWeight: 'normal', 
+                  color: '#1e293b',
+                  fontSize: '16px' // 🟢 16px prevents iOS Safari auto-zoom/push
+                }}
               />
             </div>
 
@@ -1864,7 +1880,13 @@ export default function POSPage() {
                   value={mobileQty} 
                   onChange={(v: any) => setMobileQty(v)} 
                   className="saas-input" 
-                  style={{ width: '100%', boxSizing: 'border-box', textAlign: 'center', fontWeight: 'normal' }}
+                  style={{ 
+                    width: '100%', 
+                    boxSizing: 'border-box', 
+                    textAlign: 'center', 
+                    fontWeight: 'normal',
+                    fontSize: '16px' // 🟢 16px prevents iOS Safari auto-zoom/push
+                  }}
                 />
               </div>
               <div style={{ flex: 1 }}>
@@ -1875,7 +1897,14 @@ export default function POSPage() {
                   value={mobilePrice} 
                   onChange={(v: any) => setMobilePrice(v)} 
                   className="saas-input" 
-                  style={{ width: '100%', boxSizing: 'border-box', textAlign: 'center', fontWeight: 'normal', color: '#b58a3d' }}
+                  style={{ 
+                    width: '100%', 
+                    boxSizing: 'border-box', 
+                    textAlign: 'center', 
+                    fontWeight: 'normal', 
+                    color: '#b58a3d',
+                    fontSize: '16px' // 🟢 16px prevents iOS Safari auto-zoom/push
+                  }}
                 />
               </div>
             </div>
@@ -1898,7 +1927,8 @@ export default function POSPage() {
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body // 🟢 Teleports directly to <body> so it sits above the Burger Icon!
       )}
 
       {/* 💰 SALE SUMMARY MODAL */}
