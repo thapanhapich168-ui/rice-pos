@@ -11,8 +11,7 @@ import {
   renderToBuffer,
   Font,
   Svg,
-  Line,
-  Path
+  Path // 🔥 REMOVED 'Line' completely to prevent xCoordinate null crashes
 } from '@react-pdf/renderer'
 
 export const runtime = 'nodejs'
@@ -241,7 +240,7 @@ const HealthBarPDF = ({ title, current, target, color, reverseLogic = false }: a
   )
 }
 
-// --- HELPER COMPONENT: BULLETPROOF SVG TREND LINE CHART (<Path> INSTEAD OF Polyline) ---
+// --- HELPER COMPONENT: BULLETPROOF SVG TREND LINE CHART (<Path> ONLY) ---
 const LineChartCardPDF = ({ title, dataCurrent, dataLast, color }: any) => {
   const safeCurrent = (Array.isArray(dataCurrent) && dataCurrent.length > 0)
     ? dataCurrent.map(v => Number(v) || 0)
@@ -252,11 +251,15 @@ const LineChartCardPDF = ({ title, dataCurrent, dataLast, color }: any) => {
 
   const maxVal = Math.max(...safeCurrent, ...safeLast, 1) || 1
 
-  // 🔥 GENERATES AN SVG PATH COMMAND ("M 0 80 L 15 80 L 30 80...") THAT CAN NEVER THROW xCoordinate ERRORS
+  // 🔥 GUARANTEED CRASH-PROOF SVG PATH GENERATOR
   const getSafePath = (arr: number[]) => {
+    if (!arr || !Array.isArray(arr) || arr.length === 0) {
+      return 'M 0 80 L 450 80'
+    }
+    const len = Math.max(arr.length - 1, 1)
     const coords = arr.map((val, idx) => {
       const numVal = Number(val) || 0
-      const x = Math.round((idx / 30) * 450)
+      const x = Math.round((idx / len) * 450)
       const y = Math.round(80 - (numVal / maxVal) * 70)
       return `${x} ${y}`
     })
@@ -269,10 +272,12 @@ const LineChartCardPDF = ({ title, dataCurrent, dataLast, color }: any) => {
   return (
     <View style={[styles.card, { marginBottom: 10 }]} wrap={false}>
       <Text style={[styles.cardLabel, { marginBottom: 8 }]}>{title}</Text>
-      <Svg viewBox="0 0 450 85" style={{ width: '100%', height: 65 }}>
-        <Line x1="0" y1="20" x2="450" y2="20" stroke="#f1f5f9" strokeWidth="1" />
-        <Line x1="0" y1="50" x2="450" y2="50" stroke="#f1f5f9" strokeWidth="1" />
-        <Line x1="0" y1="80" x2="450" y2="80" stroke="#cbd5e1" strokeWidth="1" />
+      {/* 🔥 Explicit width/height props added alongside viewBox to prevent Yoga layout xCoordinate nulls */}
+      <Svg viewBox="0 0 450 85" width="450" height="65" style={{ width: '100%', height: 65 }}>
+        {/* 🔥 Replaced <Line /> with <Path /> so MoveTo (M) initializes coordinates safely */}
+        <Path d="M 0 20 L 450 20" stroke="#f1f5f9" strokeWidth="1" />
+        <Path d="M 0 50 L 450 50" stroke="#f1f5f9" strokeWidth="1" />
+        <Path d="M 0 80 L 450 80" stroke="#cbd5e1" strokeWidth="1" />
         <Path d={lastPath} fill="none" stroke="#cbd5e1" strokeWidth="1.5" strokeDasharray="3,3" />
         <Path d={currentPath} fill="none" stroke={color} strokeWidth="2" />
       </Svg>
