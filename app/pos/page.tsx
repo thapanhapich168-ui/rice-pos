@@ -1760,7 +1760,7 @@ export default function POSPage() {
         </div>
       </Modal>
 
-      {/* 🟢 TOP-DOCKED MOBILE PRODUCT ADD POPUP (Polished UI + Clears Burger Icon) */}
+      {/* 🟢 TOP-DOCKED MOBILE PRODUCT ADD POPUP (Overlays burger icon to stop iOS keyboard bump) */}
       {!!selectedMobileProduct && (
         <div 
           style={{
@@ -1775,8 +1775,8 @@ export default function POSPage() {
             display: 'flex',
             justifyContent: 'center',
             alignItems: 'flex-start',
-            // 🟢 Positions cleanly below the header & burger icon (~68px from top)
-            paddingTop: 'calc(max(20px, env(safe-area-inset-top, 20px)) + 48px)',
+            // 🟢 Hugs the very top edge, covering the burger icon so inputs never shift
+            paddingTop: 'max(16px, env(safe-area-inset-top, 16px))',
             paddingLeft: '16px',
             paddingRight: '16px'
           }}
@@ -1800,7 +1800,7 @@ export default function POSPage() {
               setTimeout(() => window.scrollTo(0, 0), 30);
             }}
           >
-            {/* ✨ Beautiful Header with Emoji Icon Badge */}
+            {/* ✨ Clean Header with Emoji Icon Badge (No description below title) */}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '18px', paddingBottom: '12px', borderBottom: '1px solid #f1f5f9' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                 <div style={{
@@ -1817,14 +1817,9 @@ export default function POSPage() {
                 }}>
                   ✏️
                 </div>
-                <div>
-                  <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 'bold', color: '#0f172a' }}>
-                    {currentT.mobileModalTitle}
-                  </h3>
-                  <span style={{ fontSize: '11px', color: '#64748b' }}>
-                    Set custom quantity & price
-                  </span>
-                </div>
+                <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 'bold', color: '#0f172a' }}>
+                  {currentT.mobileModalTitle}
+                </h3>
               </div>
 
               <button 
