@@ -1760,7 +1760,7 @@ export default function POSPage() {
         </div>
       </Modal>
 
-      {/* 🟢 TOP-DOCKED MOBILE PRODUCT ADD POPUP (Option 1: Ultra-Top Dock + Scroll Clamp) */}
+      {/* 🟢 TOP-DOCKED MOBILE PRODUCT ADD POPUP (Polished UI + Clears Burger Icon) */}
       {!!selectedMobileProduct && (
         <div 
           style={{
@@ -1769,12 +1769,14 @@ export default function POSPage() {
             left: 0,
             right: 0,
             bottom: 0,
-            backgroundColor: 'rgba(0, 0, 0, 0.5)',
+            backgroundColor: 'rgba(15, 23, 42, 0.45)',
+            backdropFilter: 'blur(2px)',
             zIndex: 9999,
             display: 'flex',
             justifyContent: 'center',
             alignItems: 'flex-start',
-            paddingTop: '16px', // 🟢 Changed from 80px to 16px (hugs the top edge)
+            // 🟢 Positions cleanly below the header & burger icon (~68px from top)
+            paddingTop: 'calc(max(20px, env(safe-area-inset-top, 20px)) + 48px)',
             paddingLeft: '16px',
             paddingRight: '16px'
           }}
@@ -1785,64 +1787,122 @@ export default function POSPage() {
           <div 
             style={{
               backgroundColor: '#ffffff',
-              borderRadius: '16px',
-              padding: '16px 20px',
+              borderRadius: '20px',
+              padding: '20px',
               width: '100%',
               maxWidth: '400px',
-              boxShadow: '0 20px 40px rgba(0,0,0,0.2)',
-              border: '1px solid #e2e8f0',
-              animation: 'posPopupSlideDown 0.15s ease-out'
+              boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
+              border: '1px solid #f1f5f9',
+              animation: 'posPopupSlideDown 0.18s cubic-bezier(0.16, 1, 0.3, 1)'
             }}
-            // 🟢 Clamps iOS scroll shift instantly when switching between Qty and Price
+            // 🟢 Locks iOS Safari viewport in place when switching inputs
             onFocusCapture={() => {
               setTimeout(() => window.scrollTo(0, 0), 30);
             }}
           >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-              <h3 style={{ margin: 0, fontSize: '16px', color: '#0f172a' }}>{currentT.mobileModalTitle}</h3>
+            {/* ✨ Beautiful Header with Emoji Icon Badge */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '18px', paddingBottom: '12px', borderBottom: '1px solid #f1f5f9' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <div style={{
+                  width: '36px',
+                  height: '36px',
+                  borderRadius: '10px',
+                  backgroundColor: '#fef3c7',
+                  border: '1px solid #fde68a',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: '18px',
+                  flexShrink: 0
+                }}>
+                  ✏️
+                </div>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 'bold', color: '#0f172a' }}>
+                    {currentT.mobileModalTitle}
+                  </h3>
+                  <span style={{ fontSize: '11px', color: '#64748b' }}>
+                    Set custom quantity & price
+                  </span>
+                </div>
+              </div>
+
               <button 
                 onClick={() => setSelectedMobileProduct(null)} 
-                style={{ background: 'none', border: 'none', fontSize: '18px', color: '#64748b', cursor: 'pointer' }}
+                style={{ 
+                  background: '#f8fafc', 
+                  border: '1px solid #e2e8f0', 
+                  width: '30px', 
+                  height: '30px', 
+                  borderRadius: '50%', 
+                  fontSize: '14px', 
+                  color: '#64748b', 
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }}
               >
                 ✕
               </button>
             </div>
 
-            <div style={{ marginBottom: '16px' }}>
-              <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '8px' }}>Product Identifier</label>
+            {/* Product Name Input */}
+            <div style={{ marginBottom: '14px' }}>
+              <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', color: '#64748b', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '6px' }}>
+                Product Identifier
+              </label>
               <input 
                 type="text" 
                 value={mobileName} 
                 onChange={(e) => setMobileName(e.target.value)} 
                 className="saas-input" 
-                style={{ width: '100%', boxSizing: 'border-box' }}
+                style={{ width: '100%', boxSizing: 'border-box', fontWeight: 'bold', color: '#1e293b' }}
               />
             </div>
 
+            {/* Quantity & Price Side-by-Side */}
             <div style={{ display: 'flex', gap: '12px', marginBottom: '20px' }}>
               <div style={{ flex: 1 }}>
-                <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '8px' }}>Quantity</label>
+                <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', color: '#64748b', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '6px' }}>
+                  Quantity
+                </label>
                 <CurrencyInput 
                   value={mobileQty} 
                   onChange={(v: any) => setMobileQty(v)} 
                   className="saas-input" 
-                  style={{ width: '100%', boxSizing: 'border-box' }}
+                  style={{ width: '100%', boxSizing: 'border-box', textAlign: 'center', fontWeight: 'bold' }}
                 />
               </div>
               <div style={{ flex: 1 }}>
-                <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '8px' }}>Price (៛)</label>
+                <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', color: '#64748b', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '6px' }}>
+                  Price (៛)
+                </label>
                 <CurrencyInput 
                   value={mobilePrice} 
                   onChange={(v: any) => setMobilePrice(v)} 
                   className="saas-input" 
-                  style={{ width: '100%', boxSizing: 'border-box' }}
+                  style={{ width: '100%', boxSizing: 'border-box', textAlign: 'center', fontWeight: 'bold', color: '#b58a3d' }}
                 />
               </div>
             </div>
 
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
-              <button onClick={() => setSelectedMobileProduct(null)} className="saas-btn saas-btn-secondary">{currentT.cancel}</button>
-              <button onClick={handleAddMobileProductToCart} className="saas-btn saas-btn-primary">{currentT.add}</button>
+            {/* Action Buttons */}
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+              <button 
+                onClick={() => setSelectedMobileProduct(null)} 
+                className="saas-btn saas-btn-secondary"
+                style={{ flex: 1, padding: '12px' }}
+              >
+                {currentT.cancel}
+              </button>
+              <button 
+                onClick={handleAddMobileProductToCart} 
+                className="saas-btn saas-btn-primary"
+                style={{ flex: 1, padding: '12px', fontWeight: 'bold' }}
+              >
+                {currentT.add}
+              </button>
             </div>
           </div>
         </div>
