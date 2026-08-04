@@ -17,7 +17,7 @@ import {
 
 export const runtime = 'nodejs'
 
-// --- 1. REGISTER NOTO SANS KHMER (CLEAN ENGLISH UI GLYPHS + KHMER SCRIPT) ---
+// --- 1. REGISTER NOTO SANS KHMER (CLEAN ENGLISH UI NUMBERS + KHMER SCRIPT) ---
 Font.register({
   family: 'NotoSansKhmer',
   fonts: [
@@ -37,7 +37,7 @@ const formatKHR = (val: number) => `${Math.round(val || 0).toLocaleString()} KHR
 const formatUSD = (val: number) => `$${Number(val || 0).toFixed(2)}`
 const formatNum = (val: number) => Number(val || 0).toLocaleString()
 
-// --- 2. LIGHT, MODERN SAAS STYLESHEET (REDUCED BOLDING) ---
+// --- 2. LIGHT, MODERN SAAS STYLESHEET ---
 const styles = StyleSheet.create({
   page: {
     padding: 35,
@@ -174,8 +174,8 @@ const ComplexCardPDF = ({ title, total, pich = 0, jing = 0, both = 0, mom = 0, c
 
 // --- HELPER COMPONENT: EXPENSE CARD WITH CASH / QR BREAKDOWN ---
 const ExpenseBreakdownCardPDF = ({ title, cR = 0, cU = 0, qR = 0, qU = 0, color = '#1e293b' }: any) => {
-  const totalRiel = cR + qR
-  const totalUsd = cU + qU
+  const totalRiel = (Number(cR) || 0) + (Number(qR) || 0)
+  const totalUsd = (Number(cU) || 0) + (Number(qU) || 0)
   return (
     <View style={styles.card} wrap={false}>
       <Text style={styles.cardLabel}>{title}</Text>
@@ -243,11 +243,16 @@ const HealthBarPDF = ({ title, current, target, color, reverseLogic = false }: a
 
 // --- HELPER COMPONENT: BULLETPROOF SVG TREND LINE CHART ---
 const LineChartCardPDF = ({ title, dataCurrent, dataLast, color }: any) => {
-  const safeCurrent = Array.isArray(dataCurrent) && dataCurrent.length > 0 ? dataCurrent : new Array(31).fill(0)
-  const safeLast = Array.isArray(dataLast) && dataLast.length > 0 ? dataLast : new Array(31).fill(0)
+  // 🔥 COMPLETELY GUARDS AGAINST NaN, INFINITY, AND xCoordinate PARSER CRASHES
+  const safeCurrent = (Array.isArray(dataCurrent) && dataCurrent.length > 0)
+    ? dataCurrent.map(v => Number(v) || 0)
+    : new Array(31).fill(0)
+  const safeLast = (Array.isArray(dataLast) && dataLast.length > 0)
+    ? dataLast.map(v => Number(v) || 0)
+    : new Array(31).fill(0)
+
   const maxVal = Math.max(...safeCurrent, ...safeLast, 1) || 1
 
-  // 🔥 COMPLETELY GUARDS AGAINST NaN, INFINITY, AND xCoordinate PARSER CRASHES
   const getSafePoints = (arr: number[]) =>
     arr
       .map((val, idx) => {
