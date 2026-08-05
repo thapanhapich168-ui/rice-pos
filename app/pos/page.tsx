@@ -702,6 +702,7 @@ export default function POSPage() {
       return;
     }
 
+    // 🟢 Auto-Open Bag Stock Simulation Check
     const simulatedStockUpdates: Record<number, number> = {};
     
     for (const item of cart) {
