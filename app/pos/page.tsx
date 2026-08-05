@@ -1766,7 +1766,7 @@ export default function POSPage() {
         </div>
       </Modal>
 
-      {/* 🟢 TOP-DOCKED MOBILE PRODUCT ADD POPUP (Option 1 Sizing + Portal + Regular Fonts + Emoji) */}
+      {/* 🟢 TOP-DOCKED MOBILE PRODUCT ADD POPUP (Option 1 Sizing + Portal + Regular Fonts) */}
       {!!selectedMobileProduct && typeof document !== 'undefined' && createPortal(
         <div 
           style={{
@@ -1776,15 +1776,13 @@ export default function POSPage() {
             right: 0,
             bottom: 0,
             backgroundColor: 'rgba(0, 0, 0, 0.5)',
-            zIndex: 2147483647, // 🟢 Overrides burger menu on iPhone Safari
+            zIndex: 2147483647,
             display: 'flex',
             justifyContent: 'center',
             alignItems: 'flex-start',
-            paddingTop: '16px', // 🟢 Option 1's 16px top dock
+            paddingTop: '16px',
             paddingLeft: '16px',
-            paddingRight: '16px',
-            overflow: 'hidden', // 🟢 Stops Safari from nudging the backdrop
-            height: '100%'      // 🟢 Locks container height against iOS URL-bar shifts
+            paddingRight: '16px'
           }}
           onMouseDown={(e) => {
             if (e.target === e.currentTarget) setSelectedMobileProduct(null);
@@ -1794,23 +1792,21 @@ export default function POSPage() {
             style={{
               backgroundColor: '#ffffff',
               borderRadius: '16px',
-              padding: '16px 20px', // 🟢 Option 1's compact padding (prevents iOS shift)
+              padding: '16px 20px',
               width: '100%',
               maxWidth: '400px',
               boxShadow: '0 20px 40px rgba(0,0,0,0.2)',
               border: '1px solid #e2e8f0',
               animation: 'posPopupSlideDown 0.15s ease-out'
             }}
-            // 🟢 Multi-stage clamp locks scroll across Safari's entire 250ms keyboard animation
             onFocusCapture={() => {
-              window.scrollTo(0, 0);
-              setTimeout(() => window.scrollTo(0, 0), 30);
-              setTimeout(() => window.scrollTo(0, 0), 100);
-              setTimeout(() => window.scrollTo(0, 0), 200);
-              setTimeout(() => window.scrollTo(0, 0), 300);
+              setTimeout(() => {
+                window.scrollTo(0, 0);
+                document.body.scrollTop = 0;
+              }, 30);
             }}
           >
-            {/* ✨ Compact Emoji Header (Regular font, no subtitle) */}
+            {/* Compact Emoji Header */}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                 <div style={{
@@ -1866,7 +1862,7 @@ export default function POSPage() {
                 </label>
                 <CurrencyInput 
                   ref={mobileQtyRef}
-                  autoFocus
+                  autoFocus={true}
                   value={mobileQty} 
                   onChange={(v: any) => setMobileQty(v)} 
                   className="saas-input" 
@@ -1918,7 +1914,7 @@ export default function POSPage() {
             </div>
           </div>
         </div>,
-        document.body // 🟢 Teleports to <body> so it covers the burger icon on real iPhones
+        document.body
       )}
 
       {/* 💰 SALE SUMMARY MODAL */}
