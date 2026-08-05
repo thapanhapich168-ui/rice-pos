@@ -1,6 +1,7 @@
 'use client'
 
 import React, { useEffect, useState, useRef } from 'react'
+import { createPortal } from 'react-dom'
 import { supabase } from '@/lib/supabaseClient'
 import * as htmlToImage from 'html-to-image'
 import { formatRiel, formatUSD, EXCHANGE_RATE } from '@/utils/formatters'
@@ -144,27 +145,7 @@ export default function POSPage() {
   const [mobilePrice, setMobilePrice] = useState<number | ''>('')
   const [mobileQty, setMobileQty] = useState<number | ''>('')
   const [mobileName, setMobileName] = useState<string>('')
-
-  // 🔥 RESTORED MISSING HANDLERS (Fixes VS Code handleModalFocus/handleModalBlur errors)
-  const [isModalInputFocused, setIsModalInputFocused] = useState(false)
-  const modalFocusTimerRef = useRef<any>(null)
-
-  const handleModalFocus = (callback?: () => void) => {
-    if (modalFocusTimerRef.current) {
-      clearTimeout(modalFocusTimerRef.current);
-      modalFocusTimerRef.current = null;
-    }
-    if (!isModalInputFocused) {
-      setIsModalInputFocused(true);
-    }
-    if (callback) callback();
-  };
-
-  const handleModalBlur = () => {
-    modalFocusTimerRef.current = setTimeout(() => {
-      setIsModalInputFocused(false);
-    }, 250);
-  };
+  const mobileQtyRef = useRef<any>(null) // 🟢 ADDED FOR AUTO-FOCUS
 
   const [exchangeModal, setExchangeModal] = useState<{ isOpen: boolean, product: Product | null, consumedKg: string | number }>({
     isOpen: false, product: null, consumedKg: ''
@@ -467,6 +448,10 @@ export default function POSPage() {
       setMobileName(product.name);
       setMobilePrice(activeTab === 'wholesale' ? 0 : Number(product.price));
       setMobileQty(defaultQty);
+      // 🟢 AUTO-FOCUS QUANTITY INPUT TO INSTANTLY OPEN KEYBOARD
+      setTimeout(() => {
+        mobileQtyRef.current?.focus();
+      }, 50);
     } else {
       addToCartDirect(product, defaultQty);
     }
@@ -1261,7 +1246,7 @@ export default function POSPage() {
   }
 
   return (
-    <div className={isModalInputFocused ? 'modal-keyboard-push' : ''} style={{ display: 'flex', width: '100%', height: '100dvh', overflow: 'hidden', backgroundColor: '#ffffff', boxSizing: 'border-box' }}>
+    <div style={{ display: 'flex', width: '100%', height: '100dvh', overflow: 'hidden', backgroundColor: '#ffffff', boxSizing: 'border-box' }}>
       
       {/* SELECTION ENGINE VIEW GRID PANEL */}
       <div className="hide-scrollbar" style={{ flex: 1, height: '100%', overflowY: 'auto', backgroundColor: '#f8fafc', minWidth: 0, WebkitOverflowScrolling: 'touch' }}>
@@ -1600,7 +1585,7 @@ export default function POSPage() {
       )}
 
       {isMobileCartOpen && (
-        <div className="mobile-cart-overlay" style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.4)', zIndex: 9999, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}>
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.4)', zIndex: 9999, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}>
           <div style={{ flex: 1 }} onClick={() => setIsMobileCartOpen(false)}></div>
           
           <div style={{ width: '100%', maxHeight: '85dvh', backgroundColor: '#ffffff', borderTopLeftRadius: '20px', borderTopRightRadius: '20px', display: 'flex', flexDirection: 'column', position: 'relative', boxShadow: '0 -10px 25px rgba(0,0,0,0.1)' }}>
@@ -1712,14 +1697,7 @@ export default function POSPage() {
       <Modal isOpen={isCreateCustomerModalOpen} onClose={() => setIsCreateCustomerModalOpen(false)} title="Create New Customer" icon="👤" maxWidth="400px">
         <div style={{ marginBottom: '16px' }}>
           <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '8px' }}>Name</label>
-          <input 
-            type="text" 
-            value={newCustomerForm.name} 
-            onChange={(e) => setNewCustomerForm({...newCustomerForm, name: e.target.value})} 
-            onFocus={() => handleModalFocus()}
-            onBlur={() => handleModalBlur()}
-            className="saas-input" 
-          />
+          <input type="text" value={newCustomerForm.name} onChange={(e) => setNewCustomerForm({...newCustomerForm, name: e.target.value})} className="saas-input" />
         </div>
 
         <div style={{ marginBottom: '16px' }}>
@@ -1746,26 +1724,12 @@ export default function POSPage() {
 
         <div style={{ marginBottom: '16px' }}>
           <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '8px' }}>Location</label>
-          <input 
-            type="text" 
-            value={newCustomerForm.location} 
-            onChange={(e) => setNewCustomerForm({...newCustomerForm, location: e.target.value})} 
-            onFocus={() => handleModalFocus()}
-            onBlur={() => handleModalBlur()}
-            className="saas-input" 
-          />
+          <input type="text" value={newCustomerForm.location} onChange={(e) => setNewCustomerForm({...newCustomerForm, location: e.target.value})} className="saas-input" />
         </div>
         
         <div style={{ marginBottom: '24px' }}>
           <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '8px' }}>Phone Number</label>
-          <input 
-            type="text" 
-            value={newCustomerForm.phone} 
-            onChange={(e) => setNewCustomerForm({...newCustomerForm, phone: e.target.value})} 
-            onFocus={() => handleModalFocus()}
-            onBlur={() => handleModalBlur()}
-            className="saas-input" 
-          />
+          <input type="text" value={newCustomerForm.phone} onChange={(e) => setNewCustomerForm({...newCustomerForm, phone: e.target.value})} className="saas-input" />
         </div>
         
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
@@ -1788,8 +1752,6 @@ export default function POSPage() {
             placeholder="e.g. 15"
             value={exchangeModal.consumedKg}
             onChange={(v: any) => setExchangeModal({ ...exchangeModal, consumedKg: v })}
-            onFocus={() => handleModalFocus(() => setExchangeModal({ ...exchangeModal, consumedKg: '' }))}
-            onBlur={() => handleModalBlur()}
             className="saas-input"
           />
           <p style={{ fontSize: '11px', color: '#94a3b8', marginTop: '6px', lineHeight: 1.4 }}>
@@ -1804,27 +1766,171 @@ export default function POSPage() {
         </div>
       </Modal>
 
-      {/* MOBILE PRODUCT ADD POPUP */}
-      <Modal isOpen={!!selectedMobileProduct} onClose={() => setSelectedMobileProduct(null)} title={currentT.mobileModalTitle} icon="✏️" maxWidth="400px">
-        <div style={{ marginBottom: '16px' }}>
-          <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '8px' }}>Product Identifier</label>
-          <input type="text" value={mobileName} onChange={(e) => setMobileName(e.target.value)} className="saas-input" />
-        </div>
-        <div style={{ display: 'flex', gap: '12px', marginBottom: '20px' }}>
-          <div style={{ flex: 1 }}>
-            <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '8px' }}>Quantity</label>
-            <CurrencyInput value={mobileQty} onChange={(v: any) => setMobileQty(v)} className="saas-input" />
-          </div>
-          <div style={{ flex: 1 }}>
-            <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '8px' }}>Price (៛)</label>
-            <CurrencyInput value={mobilePrice} onChange={(v: any) => setMobilePrice(v)} className="saas-input" />
-          </div>
-        </div>
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
-          <button onClick={() => setSelectedMobileProduct(null)} className="saas-btn saas-btn-secondary">{currentT.cancel}</button>
-          <button onClick={handleCreateCustomer} className="saas-btn saas-btn-primary">{currentT.add}</button>
-        </div>
-      </Modal>
+      {/* 🟢 TOP-DOCKED MOBILE PRODUCT ADD POPUP (Exact 13-Hours-Ago Stable Dock + Keypad Auto-Submit) */}
+      {!!selectedMobileProduct && typeof document !== 'undefined' && createPortal(
+        <div 
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.5)',
+            zIndex: 2147483647, // 🟢 Overrides burger menu on iPhone Safari
+            display: 'flex',
+            justifyContent: 'center',
+            alignItems: 'flex-start',
+            paddingTop: '10px', // 🟢 Exact 13-hours-ago 10px top dock (keeps inputs above Safari's nudge zone)
+            paddingLeft: '16px',
+            paddingRight: '16px'
+          }}
+          onMouseDown={(e) => {
+            if (e.target === e.currentTarget) setSelectedMobileProduct(null);
+          }}
+        >
+          <form 
+            onSubmit={(e) => {
+              e.preventDefault();
+              handleAddMobileProductToCart();
+            }}
+            style={{
+              backgroundColor: '#ffffff',
+              borderRadius: '16px',
+              padding: '14px 18px',
+              width: '100%',
+              maxWidth: '400px',
+              boxShadow: '0 20px 40px rgba(0,0,0,0.2)',
+              border: '1px solid #e2e8f0',
+              animation: 'posPopupSlideDown 0.15s ease-out'
+            }}
+            // 🟢 Correctly placed here as a form prop
+            onFocusCapture={() => {
+              window.scrollTo(0, 0);
+              setTimeout(() => window.scrollTo(0, 0), 50);
+              setTimeout(() => window.scrollTo(0, 0), 150);
+              setTimeout(() => window.scrollTo(0, 0), 300);
+            }}
+          >
+            {/* ✨ Compact Emoji Header */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <div style={{
+                  width: '30px',
+                  height: '30px',
+                  borderRadius: '8px',
+                  backgroundColor: '#fef3c7',
+                  border: '1px solid #fde68a',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: '15px',
+                  flexShrink: 0
+                }}>
+                  ✏️
+                </div>
+                <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 'normal', color: '#0f172a' }}>
+                  {currentT.mobileModalTitle}
+                </h3>
+              </div>
+              <button 
+                onClick={() => setSelectedMobileProduct(null)} 
+                style={{ background: 'none', border: 'none', fontSize: '18px', color: '#64748b', cursor: 'pointer', fontWeight: 'normal' }}
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Product Identifier Input */}
+            <div style={{ marginBottom: '14px' }}>
+              <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', fontWeight: 'normal', marginBottom: '6px' }}>
+                Product Identifier
+              </label>
+              <input 
+                type="text" 
+                value={mobileName} 
+                onChange={(e) => setMobileName(e.target.value)} 
+                className="saas-input" 
+                style={{ 
+                  width: '100%', 
+                  boxSizing: 'border-box', 
+                  fontWeight: 'normal',
+                  fontSize: '16px' 
+                }}
+              />
+            </div>
+
+            {/* Quantity & Price Side-by-Side */}
+            <div style={{ display: 'flex', gap: '12px', marginBottom: '18px' }}>
+              <div style={{ flex: 1 }}>
+                <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', fontWeight: 'normal', marginBottom: '6px' }}>
+                  Quantity
+                </label>
+                <CurrencyInput 
+                  ref={mobileQtyRef}
+                  autoFocus={true}
+                  enterKeyHint="next"
+                  value={mobileQty} 
+                  onChange={(v: any) => setMobileQty(v)} 
+                  className="saas-input" 
+                  style={{ 
+                    width: '100%', 
+                    boxSizing: 'border-box', 
+                    textAlign: 'center',
+                    fontWeight: 'normal',
+                    fontSize: '16px' 
+                  }}
+                />
+              </div>
+              <div style={{ flex: 1 }}>
+                <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', fontWeight: 'normal', marginBottom: '6px' }}>
+                  Price (៛)
+                </label>
+                {/* 🔥 AUTO-ADD TO CART ON KEYPAD TICK / DONE / ENTER */}
+                <CurrencyInput 
+                  enterKeyHint="done"
+                  value={mobilePrice} 
+                  onChange={(v: any) => setMobilePrice(v)} 
+                  onKeyDown={(e: any) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      e.currentTarget?.blur();
+                      handleAddMobileProductToCart();
+                    }
+                  }}
+                  className="saas-input" 
+                  style={{ 
+                    width: '100%', 
+                    boxSizing: 'border-box', 
+                    textAlign: 'center',
+                    fontWeight: 'normal',
+                    color: '#b58a3d',
+                    fontSize: '16px' 
+                  }}
+                />
+              </div>
+            </div>
+
+            {/* Action Buttons */}
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
+              <button 
+                onClick={() => setSelectedMobileProduct(null)} 
+                className="saas-btn saas-btn-secondary"
+                style={{ fontWeight: 'normal' }}
+              >
+                {currentT.cancel}
+              </button>
+              <button 
+                onClick={handleAddMobileProductToCart} 
+                className="saas-btn saas-btn-primary"
+                style={{ fontWeight: 'normal' }}
+              >
+                {currentT.add}
+              </button>
+            </div>
+          </form>
+        </div>,
+        document.body
+      )}
 
       {/* 💰 SALE SUMMARY MODAL */}
       <Modal isOpen={!!saleSummary} onClose={() => { setSaleSummary(null); setCompletedSale(null); }} title={saleSummary?.isCashless ? 'Sale Recorded! ✅' : saleSummary?.isDebt ? 'Partial Payment Logged ⏳' : 'Sale Complete! ✅'} icon={saleSummary?.isDebt ? "⏳" : "💰"} maxWidth="400px">
@@ -2052,7 +2158,7 @@ export default function POSPage() {
         </div>
       </Modal>
 
-      {/* --- GLOBAL CSS (Includes forceful override for Mobile Tabs) --- */}
+      {/* --- GLOBAL CSS --- */}
       <style jsx global>{`
         input, select, button, textarea {
           font-family: inherit;
@@ -2061,6 +2167,11 @@ export default function POSPage() {
         
         body {
           font-variant-numeric: tabular-nums lining-nums;
+        }
+
+        @keyframes posPopupSlideDown {
+          from { opacity: 0; transform: translateY(-12px); }
+          to { opacity: 1; transform: translateY(0); }
         }
 
         /* 🔥 BULLETPROOF GLOBAL OVERRIDE FOR MOBILE TABS 🔥 */
@@ -2143,7 +2254,7 @@ export default function POSPage() {
             display: flex !important;
             flex-direction: row !important;
             justify-content: flex-start !important;
-            align-items: center; 
+            align-items: center !important; 
             min-height: 44px !important;
             width: calc(100% - 54px) !important;
           }
