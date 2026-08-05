@@ -1766,7 +1766,7 @@ export default function POSPage() {
         </div>
       </Modal>
 
-      {/* 🟢 TOP-DOCKED MOBILE PRODUCT ADD POPUP (Option 1 Sizing + Portal + Regular Fonts) */}
+      {/* 🟢 TOP-DOCKED MOBILE PRODUCT ADD POPUP (Zero-Nudge Scroll Lock + Portal + Regular Fonts) */}
       {!!selectedMobileProduct && typeof document !== 'undefined' && createPortal(
         <div 
           style={{
@@ -1776,13 +1776,15 @@ export default function POSPage() {
             right: 0,
             bottom: 0,
             backgroundColor: 'rgba(0, 0, 0, 0.5)',
-            zIndex: 2147483647,
+            zIndex: 2147483647, // 🟢 Overrides burger menu on iPhone Safari
             display: 'flex',
             justifyContent: 'center',
             alignItems: 'flex-start',
             paddingTop: '16px',
             paddingLeft: '16px',
-            paddingRight: '16px'
+            paddingRight: '16px',
+            overflow: 'hidden',           // 🔥 Prevents Safari viewport nudge
+            overscrollBehavior: 'none'    // 🔥 Freezes iOS elastic scroll
           }}
           onMouseDown={(e) => {
             if (e.target === e.currentTarget) setSelectedMobileProduct(null);
@@ -1799,14 +1801,21 @@ export default function POSPage() {
               border: '1px solid #e2e8f0',
               animation: 'posPopupSlideDown 0.15s ease-out'
             }}
+            // 🔥 5-stage lock freezes screen across Safari's entire 250ms keyboard animation
             onFocusCapture={() => {
-              setTimeout(() => {
+              const lockScroll = () => {
                 window.scrollTo(0, 0);
-                document.body.scrollTop = 0;
-              }, 30);
+                if (document.body) document.body.scrollTop = 0;
+                if (document.documentElement) document.documentElement.scrollTop = 0;
+              };
+              lockScroll();
+              setTimeout(lockScroll, 30);
+              setTimeout(lockScroll, 100);
+              setTimeout(lockScroll, 200);
+              setTimeout(lockScroll, 300);
             }}
           >
-            {/* Compact Emoji Header */}
+            {/* ✨ Compact Emoji Header */}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                 <div style={{
