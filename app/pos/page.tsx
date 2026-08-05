@@ -1766,7 +1766,7 @@ export default function POSPage() {
         </div>
       </Modal>
 
-      {/* 🟢 TOP-DOCKED MOBILE PRODUCT ADD POPUP */}
+      {/* 🟢 TOP-DOCKED MOBILE PRODUCT ADD POPUP (Exact 13-Hours-Ago Stable Dock + Keypad Auto-Submit) */}
       {!!selectedMobileProduct && typeof document !== 'undefined' && createPortal(
         <div 
           style={{
@@ -1776,11 +1776,11 @@ export default function POSPage() {
             right: 0,
             bottom: 0,
             backgroundColor: 'rgba(0, 0, 0, 0.5)',
-            zIndex: 2147483647,
+            zIndex: 2147483647, // 🟢 Overrides burger menu on iPhone Safari
             display: 'flex',
             justifyContent: 'center',
             alignItems: 'flex-start',
-            paddingTop: '16px',
+            paddingTop: '10px', // 🟢 Exact 13-hours-ago 10px top dock (keeps inputs above Safari's nudge zone)
             paddingLeft: '16px',
             paddingRight: '16px'
           }}
@@ -1788,32 +1788,38 @@ export default function POSPage() {
             if (e.target === e.currentTarget) setSelectedMobileProduct(null);
           }}
         >
-          {/* 🔥 REMOVED onFocusCapture HERE SO SWITCHING INPUTS NEVER JUMPS */}
           <div 
             style={{
               backgroundColor: '#ffffff',
               borderRadius: '16px',
-              padding: '16px 20px',
+              padding: '14px 18px', // 🟢 Exact 13-hours-ago compact padding
               width: '100%',
               maxWidth: '400px',
               boxShadow: '0 20px 40px rgba(0,0,0,0.2)',
               border: '1px solid #e2e8f0',
               animation: 'posPopupSlideDown 0.15s ease-out'
             }}
+            // 🟢 Exact 13-hours-ago multi-stage clamp that kept your screen 100% still
+            onFocusCapture={() => {
+              window.scrollTo(0, 0);
+              setTimeout(() => window.scrollTo(0, 0), 50);
+              setTimeout(() => window.scrollTo(0, 0), 150);
+              setTimeout(() => window.scrollTo(0, 0), 300);
+            }}
           >
             {/* ✨ Compact Emoji Header */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                 <div style={{
-                  width: '32px',
-                  height: '32px',
+                  width: '30px',
+                  height: '30px',
                   borderRadius: '8px',
                   backgroundColor: '#fef3c7',
                   border: '1px solid #fde68a',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  fontSize: '16px',
+                  fontSize: '15px',
                   flexShrink: 0
                 }}>
                   ✏️
@@ -1831,8 +1837,8 @@ export default function POSPage() {
             </div>
 
             {/* Product Identifier Input */}
-            <div style={{ marginBottom: '16px' }}>
-              <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', fontWeight: 'normal', marginBottom: '8px' }}>
+            <div style={{ marginBottom: '14px' }}>
+              <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', fontWeight: 'normal', marginBottom: '6px' }}>
                 Product Identifier
               </label>
               <input 
@@ -1850,9 +1856,9 @@ export default function POSPage() {
             </div>
 
             {/* Quantity & Price Side-by-Side */}
-            <div style={{ display: 'flex', gap: '12px', marginBottom: '20px' }}>
+            <div style={{ display: 'flex', gap: '12px', marginBottom: '18px' }}>
               <div style={{ flex: 1 }}>
-                <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', fontWeight: 'normal', marginBottom: '8px' }}>
+                <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', fontWeight: 'normal', marginBottom: '6px' }}>
                   Quantity
                 </label>
                 <CurrencyInput 
@@ -1872,9 +1878,10 @@ export default function POSPage() {
                 />
               </div>
               <div style={{ flex: 1 }}>
-                <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', fontWeight: 'normal', marginBottom: '8px' }}>
+                <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', fontWeight: 'normal', marginBottom: '6px' }}>
                   Price (៛)
                 </label>
+                {/* 🔥 AUTO-ADD TO CART ON KEYPAD TICK / DONE / ENTER */}
                 <CurrencyInput 
                   enterKeyHint="done"
                   value={mobilePrice} 
