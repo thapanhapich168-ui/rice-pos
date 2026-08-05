@@ -1,7 +1,7 @@
 'use client'
 
 import React, { useEffect, useState, useRef } from 'react'
-import { createPortal } from 'react-dom' // 🟢 ADD THIS IMPORT
+import { createPortal } from 'react-dom'
 import { supabase } from '@/lib/supabaseClient'
 import * as htmlToImage from 'html-to-image'
 import { formatRiel, formatUSD, EXCHANGE_RATE } from '@/utils/formatters'
@@ -984,10 +984,10 @@ export default function POSPage() {
         if (salesErr) throw new Error(`Failed to save to Sales table: ${salesErr.message}`);
 
         for (const [prodIdStr, newStock] of Object.entries(stockUpdates)) {
-           await supabase.from('products').update({ stock: newStock }).eq('id', Number(prodIdStr));
+            await supabase.from('products').update({ stock: newStock }).eq('id', Number(prodIdStr));
         }
         for (const [batchIdStr, newRemaining] of Object.entries(fifoUpdates)) {
-           await supabase.from('inventory_batches').update({ remaining_qty: newRemaining }).eq('id', Number(batchIdStr));
+            await supabase.from('inventory_batches').update({ remaining_qty: newRemaining }).eq('id', Number(batchIdStr));
         }
       }
 
@@ -1761,7 +1761,7 @@ export default function POSPage() {
         </div>
       </Modal>
 
-      {/* 🟢 TOP-DOCKED MOBILE PRODUCT ADD POPUP (Zero-Nudge Sizing + 300ms Lock + Portal + Regular Fonts) */}
+      {/* 🟢 TOP-DOCKED MOBILE PRODUCT ADD POPUP (Option 1 Sizing + Portal + Regular Fonts + Emoji) */}
       {!!selectedMobileProduct && typeof document !== 'undefined' && createPortal(
         <div 
           style={{
@@ -1775,7 +1775,7 @@ export default function POSPage() {
             display: 'flex',
             justifyContent: 'center',
             alignItems: 'flex-start',
-            paddingTop: '10px', // 🟢 Tighter 10px top dock keeps inputs above Safari's nudge zone
+            paddingTop: '16px', // 🟢 Option 1's 16px top dock
             paddingLeft: '16px',
             paddingRight: '16px'
           }}
@@ -1787,34 +1787,33 @@ export default function POSPage() {
             style={{
               backgroundColor: '#ffffff',
               borderRadius: '16px',
-              padding: '14px 18px', // 🟢 Slightly tighter padding offsets the emoji badge height
+              padding: '16px 20px', // 🟢 Option 1's compact padding (prevents iOS shift)
               width: '100%',
               maxWidth: '400px',
               boxShadow: '0 20px 40px rgba(0,0,0,0.2)',
               border: '1px solid #e2e8f0',
               animation: 'posPopupSlideDown 0.15s ease-out'
             }}
-            // 🟢 Multi-stage clamp locks screen across iOS Safari's entire 250ms keyboard animation
             onFocusCapture={() => {
-              window.scrollTo(0, 0);
-              setTimeout(() => window.scrollTo(0, 0), 50);
-              setTimeout(() => window.scrollTo(0, 0), 150);
-              setTimeout(() => window.scrollTo(0, 0), 300);
+              setTimeout(() => {
+                window.scrollTo(0, 0);
+                document.body.scrollTop = 0;
+              }, 30);
             }}
           >
-            {/* ✨ Compact Emoji Header (Regular font weight) */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
+            {/* ✨ Compact Emoji Header (Regular font, no subtitle) */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                 <div style={{
-                  width: '30px',
-                  height: '30px',
+                  width: '32px',
+                  height: '32px',
                   borderRadius: '8px',
                   backgroundColor: '#fef3c7',
                   border: '1px solid #fde68a',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  fontSize: '15px',
+                  fontSize: '16px',
                   flexShrink: 0
                 }}>
                   ✏️
@@ -1832,8 +1831,8 @@ export default function POSPage() {
             </div>
 
             {/* Product Identifier Input */}
-            <div style={{ marginBottom: '14px' }}>
-              <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', fontWeight: 'normal', marginBottom: '6px' }}>
+            <div style={{ marginBottom: '16px' }}>
+              <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', fontWeight: 'normal', marginBottom: '8px' }}>
                 Product Identifier
               </label>
               <input 
@@ -1851,9 +1850,9 @@ export default function POSPage() {
             </div>
 
             {/* Quantity & Price Side-by-Side */}
-            <div style={{ display: 'flex', gap: '12px', marginBottom: '18px' }}>
+            <div style={{ display: 'flex', gap: '12px', marginBottom: '20px' }}>
               <div style={{ flex: 1 }}>
-                <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', fontWeight: 'normal', marginBottom: '6px' }}>
+                <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', fontWeight: 'normal', marginBottom: '8px' }}>
                   Quantity
                 </label>
                 <CurrencyInput 
@@ -1870,7 +1869,7 @@ export default function POSPage() {
                 />
               </div>
               <div style={{ flex: 1 }}>
-                <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', fontWeight: 'normal', marginBottom: '6px' }}>
+                <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', fontWeight: 'normal', marginBottom: '8px' }}>
                   Price (៛)
                 </label>
                 <CurrencyInput 
