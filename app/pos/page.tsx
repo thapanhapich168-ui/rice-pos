@@ -145,11 +145,26 @@ export default function POSPage() {
   const [mobilePrice, setMobilePrice] = useState<number | ''>('')
   const [mobileQty, setMobileQty] = useState<number | ''>('')
   const [mobileName, setMobileName] = useState<string>('')
-  const mobileQtyRef = useRef<any>(null) // 🟢 ADDED FOR AUTO-FOCUS
+  const mobileQtyRef = useRef<any>(null)
 
   const [exchangeModal, setExchangeModal] = useState<{ isOpen: boolean, product: Product | null, consumedKg: string | number }>({
     isOpen: false, product: null, consumedKg: ''
   })
+  
+  // 🟢 NEW: Cart Adjustments Modal State with "Covered by Depot" toggle
+  const [adjustmentModal, setAdjustmentModal] = useState<{
+    isOpen: boolean,
+    type: 'discount' | 'deposit' | 'bag' | null,
+    amount: number | string,
+    qty: number | string,
+    note: string,
+    isCoveredByDepot: boolean
+  }>({
+    isOpen: false, type: null, amount: '', qty: 1, note: '', isCoveredByDepot: false
+  });
+
+  // 🟢 NEW: State to toggle compact Adjustment dropdown menu in cart footer
+  const [showAdjustmentMenu, setShowAdjustmentMenu] = useState(false);
   
   const [autoOpenModal, setAutoOpenModal] = useState<{ isOpen: boolean, items: (Product & { bags_needed: number })[] }>({ isOpen: false, items: [] });
 
@@ -163,11 +178,15 @@ export default function POSPage() {
   const invoiceRef = useRef<HTMLDivElement>(null)
 
   const totalRiel = cart.reduce((sum, item) => {
-    const isReturn = item.custom_name.includes('ដូរ');
+    const isNegativeItem = 
+      item.custom_name.includes('ដូរ') || 
+      item.custom_name.includes('បញ្ចុះតម្លៃ') || 
+      item.custom_name.includes('កក់');
+      
     const price = Number(item.custom_price_riel) || 0;
     const qty = Number(item.quantity) || 0;
     const itemTotal = price * qty;
-    return isReturn ? sum - Math.abs(itemTotal) : sum + itemTotal;
+    return isNegativeItem ? sum - Math.abs(itemTotal) : sum + itemTotal;
   }, 0);
 
   const totalUSD = totalRiel / EXCHANGE_RATE; 
@@ -246,10 +265,12 @@ export default function POSPage() {
           const { data: saleRows } = await supabase.from('sales').select('*').eq('invoice_id', editId);
           if (saleRows && saleRows.length > 0) {
             const rebuiltCart = saleRows.map((row: any) => {
-              const isSpecialRow = (row.custom_rice_type || row.rice_type).includes('ដូរ') || (row.custom_rice_type || row.rice_type).includes('បានប្រើ');
+              const isSpecialRow = (row.custom_rice_type || row.rice_type).includes('ដូរ') || (row.custom_rice_type || row.rice_type).includes('បានប្រើ') || (row.custom_rice_type || row.rice_type).includes('បញ្ចុះតម្លៃ') || (row.custom_rice_type || row.rice_type).includes('កក់') || (row.custom_rice_type || row.rice_type).includes('ថ្លៃបាវ');
               let sortOrder = 0;
               if ((row.custom_rice_type || row.rice_type).includes('ដូរ')) sortOrder = 1;
               if ((row.custom_rice_type || row.rice_type).includes('បានប្រើ')) sortOrder = 2;
+              if ((row.custom_rice_type || row.rice_type).includes('ថ្លៃបាវ')) sortOrder = 3;
+              if ((row.custom_rice_type || row.rice_type).includes('បញ្ចុះតម្លៃ') || (row.custom_rice_type || row.rice_type).includes('កក់')) sortOrder = 99;
 
               return {
                 id: row.id,
@@ -264,7 +285,7 @@ export default function POSPage() {
                 price: Number(row.price_per_bag || 0),
                 weight: 50,
                 isSpecial: isSpecialRow,
-                bypass_stock: (row.custom_rice_type || row.rice_type).includes('បានប្រើ'),
+                bypass_stock: isSpecialRow,
                 sortOrder: sortOrder,
                 selected_batch_id: null
               };
@@ -448,7 +469,6 @@ export default function POSPage() {
       setMobileName(product.name);
       setMobilePrice(activeTab === 'wholesale' ? 0 : Number(product.price));
       setMobileQty(defaultQty);
-      // 🟢 AUTO-FOCUS QUANTITY INPUT TO INSTANTLY OPEN KEYBOARD
       setTimeout(() => {
         mobileQtyRef.current?.focus();
       }, 50);
@@ -492,6 +512,52 @@ export default function POSPage() {
       }]);
     }
     setSelectedMobileProduct(null);
+  }
+
+  // Handle Cart Adjustments with exact algebraic accounting rules
+  function handleAddCartAdjustment() {
+    if (!adjustmentModal.type) return;
+    const isCoveredBag = adjustmentModal.type === 'bag' && adjustmentModal.isCoveredByDepot;
+    const amountVal = isCoveredBag ? 0 : (Number(adjustmentModal.amount) || 0);
+    const qtyVal = Number(adjustmentModal.qty) || 1;
+    const noteVal = adjustmentModal.note.trim();
+    
+    if (!isCoveredBag && amountVal <= 0) {
+      showToast('error', 'Invalid Amount', 'Please enter an amount greater than 0.');
+      return;
+    }
+
+    let baseName = '';
+    if (adjustmentModal.type === 'discount') baseName = 'បញ្ចុះតម្លៃ';
+    if (adjustmentModal.type === 'deposit') baseName = 'កក់';
+    if (adjustmentModal.type === 'bag') baseName = isCoveredBag ? 'ថ្លៃបាវ (Covered by Depot)' : 'ថ្លៃបាវ';
+
+    const customName = noteVal ? `${baseName} (${noteVal})` : baseName;
+    const fallbackId = products[0]?.id || 1;
+
+    let cogsVal = 0;
+    if (adjustmentModal.type === 'bag') cogsVal = 1200;
+    if (adjustmentModal.type === 'deposit') cogsVal = Math.abs(amountVal);
+
+    const newAdjustmentItem: CartItem = {
+      id: Math.random(),
+      product_id: fallbackId,
+      name: baseName,
+      custom_name: customName,
+      custom_price_riel: Math.abs(amountVal),
+      price: Math.abs(amountVal),
+      cost_price: cogsVal,
+      quantity: qtyVal,
+      weight: 0,
+      stock: 0,
+      isSpecial: true,
+      bypass_stock: true,
+      sortOrder: adjustmentModal.type === 'bag' ? 3 : 99
+    };
+
+    setCart([...cart, newAdjustmentItem]);
+    setAdjustmentModal({ isOpen: false, type: null, amount: '', qty: 1, note: '', isCoveredByDepot: false });
+    setShowAdjustmentMenu(false);
   }
 
   async function handleConfirmExchange() {
@@ -702,7 +768,6 @@ export default function POSPage() {
       return;
     }
 
-    // 🟢 Auto-Open Bag Stock Simulation Check
     const simulatedStockUpdates: Record<number, number> = {};
     
     for (const item of cart) {
@@ -864,7 +929,9 @@ export default function POSPage() {
              payment_method: primaryMethodStr
            });
            
-           stockUpdates[item.product_id] = (stockUpdates[item.product_id] ?? latestProducts.find(p=>p.id === item.product_id)?.stock ?? 0) - Number(item.quantity);
+           if (!item.bypass_stock) {
+             stockUpdates[item.product_id] = (stockUpdates[item.product_id] ?? latestProducts.find(p=>p.id === item.product_id)?.stock ?? 0) - Number(item.quantity);
+           }
         }
 
         const { error: retailErr } = await supabase.from('retail_sales').insert(retailRows);
@@ -882,9 +949,14 @@ export default function POSPage() {
 
         for (const item of currentCart) {
           const isReturn = item.custom_name.includes('ដូរ');
+          const isNegativeItem = 
+            isReturn || 
+            item.custom_name.includes('បញ្ចុះតម្លៃ') || 
+            item.custom_name.includes('កក់');
+            
           const isCharge = item.custom_name.includes('បានប្រើ');
           const isBypass = item.bypass_stock || isCharge;
-          const finalQty = isReturn ? -Math.abs(Number(item.quantity)) : Number(item.quantity);
+          const finalQty = isNegativeItem ? -Math.abs(Number(item.quantity)) : Number(item.quantity);
 
           if (item.isReturnFullBag && !editingInvoiceId) {
              const { data: dbBatches } = await supabase.from('inventory_batches')
@@ -916,11 +988,16 @@ export default function POSPage() {
              stockUpdates[item.loose_retail_id] = (stockUpdates[item.loose_retail_id] ?? latestProducts.find(p => p.id === item.loose_retail_id)?.stock ?? 0) + item.add_loose_kg;
           }
           
-          if (isReturn || isBypass || editingInvoiceId) {
+          if (isNegativeItem || isBypass || editingInvoiceId) {
+            let effectiveCogs = Number(item.cost_price || 0);
+            if (item.custom_name.includes('កក់')) {
+              effectiveCogs = Number(item.custom_price_riel || 0);
+            }
+
             const newRow: any = {
               product_id: item.product_id, customer_name: finalCustomerName, rice_type: item.name,
               custom_rice_type: item.custom_name !== item.name ? item.custom_name : null, qty: finalQty, price_per_bag: item.custom_price_riel,
-              cogs_price: item.cost_price || 0, owner: finalOwner
+              cogs_price: effectiveCogs, owner: finalOwner
             };
             if (item.db_row_id) newRow.id = item.db_row_id;
             baseSaleRows.push(newRow);
@@ -1183,10 +1260,11 @@ export default function POSPage() {
     return [...normalItems, ...specialItems, ...negativeItems, ...serviceItems];
   }
 
+  // 🟢 IMPROVEMENT 3: Clean, flat payment section (removed nested border & grey box)
   const renderPaymentSection = (isMobileCart: boolean = false) => {
     if (!showPaymentSelector) return null;
     return (
-      <div style={{ marginBottom: '8px', background: '#f8fafc', padding: '10px', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
+      <div style={{ marginBottom: '10px', padding: '4px 0' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1 }}>
             <span style={{ fontSize: '11px', color: '#64748b', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Receive</span>
@@ -1245,6 +1323,42 @@ export default function POSPage() {
       </div>
     )
   }
+
+  // 🟢 IMPROVEMENT 1: Compact dropdown button instead of 3 bulky buttons
+  const renderCartAdjustmentsToolbar = () => (
+    <div style={{ position: 'relative', marginBottom: '12px' }}>
+      <button 
+        onClick={() => setShowAdjustmentMenu(!showAdjustmentMenu)} 
+        style={{ width: '100%', padding: '8px 12px', fontSize: '12px', fontWeight: 'bold', background: '#f1f5f9', border: '1px solid #cbd5e1', borderRadius: '8px', color: '#334155', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
+      >
+        <span>+ Add Adjustment / Fee</span>
+        <span>{showAdjustmentMenu ? '▲' : '▼'}</span>
+      </button>
+
+      {showAdjustmentMenu && (
+        <div style={{ position: 'absolute', bottom: '100%', left: 0, right: 0, marginBottom: '6px', background: '#ffffff', border: '1px solid #cbd5e1', borderRadius: '8px', boxShadow: '0 8px 20px rgba(0,0,0,0.15)', zIndex: 50, overflow: 'hidden' }}>
+          <button 
+            onClick={() => { setAdjustmentModal({ isOpen: true, type: 'discount', amount: '', qty: 1, note: '', isCoveredByDepot: false }); setShowAdjustmentMenu(false); }} 
+            style={{ width: '100%', padding: '10px 14px', textAlign: 'left', background: 'none', border: 'none', borderBottom: '1px solid #f1f5f9', fontSize: '13px', color: '#334155', cursor: 'pointer', display: 'block' }}
+          >
+            🏷️ Discount (បញ្ចុះតម្លៃ)
+          </button>
+          <button 
+            onClick={() => { setAdjustmentModal({ isOpen: true, type: 'deposit', amount: '', qty: 1, note: '', isCoveredByDepot: false }); setShowAdjustmentMenu(false); }} 
+            style={{ width: '100%', padding: '10px 14px', textAlign: 'left', background: 'none', border: 'none', borderBottom: '1px solid #f1f5f9', fontSize: '13px', color: '#334155', cursor: 'pointer', display: 'block' }}
+          >
+            💵 Deposit / Prepayment (កក់)
+          </button>
+          <button 
+            onClick={() => { setAdjustmentModal({ isOpen: true, type: 'bag', amount: 2000, qty: 1, note: '', isCoveredByDepot: false }); setShowAdjustmentMenu(false); }} 
+            style={{ width: '100%', padding: '10px 14px', textAlign: 'left', background: 'none', border: 'none', fontSize: '13px', color: '#334155', cursor: 'pointer', display: 'block' }}
+          >
+            🛍️ Bag Fee (ថ្លៃបាវ)
+          </button>
+        </div>
+      )}
+    </div>
+  )
 
   return (
     <div style={{ display: 'flex', width: '100%', height: '100dvh', overflow: 'hidden', backgroundColor: '#ffffff', boxSizing: 'border-box' }}>
@@ -1504,13 +1618,14 @@ export default function POSPage() {
             sortedCart.map((item) => {
               const isReturn = item.custom_name.includes('ដូរ');
               const isCharge = item.custom_name.includes('បានប្រើ');
-              const isSpecial = isReturn || isCharge;
+              const isSpecial = isReturn || isCharge || item.isSpecial;
 
               return (
-                <div key={item.id} style={{ backgroundColor: isReturn ? '#fef2f2' : isCharge ? '#fffbeb' : '#ffffff', borderRadius: '12px', padding: '12px', marginBottom: '10px', border: `1px solid ${isReturn ? '#fecaca' : isCharge ? '#fde68a' : '#e2e8f0'}`, position: 'relative', boxShadow: '0 2px 4px rgba(0,0,0,0.02)' }}>
-                  <button onClick={() => removeFromCart(item.id)} style={{ position: 'absolute', top: '10px', right: '10px', background: '#fee2e2', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: '12px', width: '24px', height: '24px', borderRadius: '50%', zIndex: 5, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>✕</button>
+                /* 🟢 IMPROVEMENT 2: Sleek, Low-Profile Item Card (Removed tall uppercase labels) */
+                <div key={item.id} style={{ backgroundColor: isReturn ? '#fef2f2' : isCharge ? '#fffbeb' : '#ffffff', borderRadius: '10px', padding: '10px 12px', marginBottom: '8px', border: `1px solid ${isReturn ? '#fecaca' : isCharge ? '#fde68a' : '#e2e8f0'}`, position: 'relative' }}>
+                  <button onClick={() => removeFromCart(item.id)} style={{ position: 'absolute', top: '8px', right: '8px', background: '#fee2e2', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: '11px', width: '22px', height: '22px', borderRadius: '50%', zIndex: 5, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>✕</button>
 
-                  <div style={{ display: 'flex', alignItems: 'center', marginBottom: '10px', paddingRight: '30px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', marginBottom: '6px', paddingRight: '28px' }}>
                     <input 
                       type="text" 
                       value={item.custom_name} 
@@ -1518,7 +1633,7 @@ export default function POSPage() {
                       placeholder="Item Name"
                       readOnly={isSpecial}
                       style={{ 
-                        fontSize: '14px', color: isReturn ? '#dc2626' : isCharge ? '#b45309' : '#334155', fontWeight: 'bold',
+                        fontSize: '14px', color: isReturn ? '#dc2626' : isCharge ? '#b45309' : '#334155', fontWeight: 'normal',
                         flex: 1, border: 'none', background: 'transparent', outline: 'none', padding: 0
                       }} 
                     />
@@ -1538,14 +1653,13 @@ export default function POSPage() {
                     )}
                   </div>
                   
-                  <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-end' }}>
-                    <div style={{ flex: 1 }}>
-                      <span style={{ display: 'block', fontSize: '10px', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '4px' }}>{currentT.quantity}</span>
-                      <CurrencyInput value={item.quantity} onChange={(v: any) => updateCartItem(item.id, 'quantity', v)} onFocus={() => updateCartItem(item.id, 'quantity', '')} className="saas-input" style={{ textAlign: 'center' }} />
+                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                    <div style={{ width: '75px' }}>
+                      <CurrencyInput value={item.quantity} onChange={(v: any) => updateCartItem(item.id, 'quantity', v)} onFocus={() => updateCartItem(item.id, 'quantity', '')} className="saas-input" style={{ textAlign: 'center', padding: '6px' }} />
                     </div>
+                    <span style={{ fontSize: '12px', color: '#94a3b8' }}>×</span>
                     <div style={{ flex: 1 }}>
-                      <span style={{ display: 'block', fontSize: '10px', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '4px' }}>{currentT.unitPrice} (៛)</span>
-                      <CurrencyInput value={item.custom_price_riel} onChange={(v: any) => updateCartItem(item.id, 'custom_price_riel', v)} onFocus={() => updateCartItem(item.id, 'custom_price_riel', '')} className="saas-input" style={{ textAlign: 'center' }} />
+                      <CurrencyInput value={item.custom_price_riel} onChange={(v: any) => updateCartItem(item.id, 'custom_price_riel', v)} onFocus={() => updateCartItem(item.id, 'custom_price_riel', '')} className="saas-input" style={{ textAlign: 'right', padding: '6px' }} />
                     </div>
                   </div>
                 </div>
@@ -1555,6 +1669,9 @@ export default function POSPage() {
         </div>
         
         <div style={{ position: 'sticky', bottom: 0, paddingTop: '12px', paddingRight: '20px', paddingBottom: '16px', paddingLeft: '20px', borderTop: '1px solid #e2e8f0', backgroundColor: '#f8fafc', flexShrink: 0, zIndex: 10, boxShadow: '0 -4px 10px rgba(0,0,0,0.02)' }}>
+          {/* 🟢 IMPROVEMENT 1: Clean Dropdown Menu for Adjustments */}
+          {renderCartAdjustmentsToolbar()}
+
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '4px' }}>
             <span style={{ fontSize: '13px', color: '#334155' }}>{currentT.totalKhmer}</span>
             <span style={{ fontSize: '20px', fontWeight: 'bold', color: totalRiel < 0 ? '#ef4444' : '#b58a3d' }}>{formatRielFromNative(totalRiel)}</span>
@@ -1615,13 +1732,14 @@ export default function POSPage() {
               {sortedCart.map((item) => {
                 const isReturn = item.custom_name.includes('ដូរ');
                 const isCharge = item.custom_name.includes('បានប្រើ');
-                const isSpecial = isReturn || isCharge;
+                const isSpecial = isReturn || isCharge || item.isSpecial;
 
                 return (
-                  <div key={item.id} style={{ backgroundColor: isReturn ? '#fef2f2' : isCharge ? '#fffbeb' : '#ffffff', borderRadius: '12px', padding: '12px', marginBottom: '10px', border: `1px solid ${isReturn ? '#fecaca' : isCharge ? '#fde68a' : '#e2e8f0'}`, position: 'relative', boxShadow: '0 2px 4px rgba(0,0,0,0.02)' }}>
-                    <button onClick={() => removeFromCart(item.id)} style={{ position: 'absolute', top: '10px', right: '10px', background: '#fee2e2', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: '12px', width: '24px', height: '24px', borderRadius: '50%', zIndex: 5, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>✕</button>
+                  /* 🟢 IMPROVEMENT 2: Sleek, Low-Profile Item Card for Mobile */
+                  <div key={item.id} style={{ backgroundColor: isReturn ? '#fef2f2' : isCharge ? '#fffbeb' : '#ffffff', borderRadius: '10px', padding: '10px 12px', marginBottom: '8px', border: `1px solid ${isReturn ? '#fecaca' : isCharge ? '#fde68a' : '#e2e8f0'}`, position: 'relative' }}>
+                    <button onClick={() => removeFromCart(item.id)} style={{ position: 'absolute', top: '8px', right: '8px', background: '#fee2e2', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: '11px', width: '22px', height: '22px', borderRadius: '50%', zIndex: 5, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>✕</button>
                     
-                    <div style={{ display: 'flex', alignItems: 'center', marginBottom: '10px', paddingRight: '30px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', marginBottom: '6px', paddingRight: '28px' }}>
                       <input 
                         type="text" 
                         value={item.custom_name} 
@@ -1629,20 +1747,19 @@ export default function POSPage() {
                         placeholder="Item Name"
                         readOnly={isSpecial}
                         style={{ 
-                          fontSize: '14px', color: isReturn ? '#dc2626' : isCharge ? '#b45309' : '#334155', fontWeight: 'bold',
+                          fontSize: '14px', color: isReturn ? '#dc2626' : isCharge ? '#b45309' : '#334155', fontWeight: 'normal',
                           flex: 1, border: 'none', background: 'transparent', outline: 'none', padding: 0
                         }} 
                       />
                     </div>
 
-                    <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-end' }}>
-                      <div style={{ flex: 1 }}>
-                        <span style={{ display: 'block', fontSize: '10px', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '4px' }}>{currentT.quantity}</span>
-                        <CurrencyInput value={item.quantity} onChange={(v: any) => updateCartItem(item.id, 'quantity', v)} onFocus={() => updateCartItem(item.id, 'quantity', '')} className="saas-input" style={{ textAlign: 'center' }} />
+                    <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                      <div style={{ width: '75px' }}>
+                        <CurrencyInput value={item.quantity} onChange={(v: any) => updateCartItem(item.id, 'quantity', v)} onFocus={() => updateCartItem(item.id, 'quantity', '')} className="saas-input" style={{ textAlign: 'center', padding: '6px' }} />
                       </div>
+                      <span style={{ fontSize: '12px', color: '#94a3b8' }}>×</span>
                       <div style={{ flex: 1 }}>
-                        <span style={{ display: 'block', fontSize: '10px', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '4px' }}>{currentT.unitPrice}</span>
-                        <CurrencyInput value={item.custom_price_riel} onChange={(v: any) => updateCartItem(item.id, 'custom_price_riel', v)} onFocus={() => updateCartItem(item.id, 'custom_price_riel', '')} className="saas-input" style={{ textAlign: 'center' }} />
+                        <CurrencyInput value={item.custom_price_riel} onChange={(v: any) => updateCartItem(item.id, 'custom_price_riel', v)} onFocus={() => updateCartItem(item.id, 'custom_price_riel', '')} className="saas-input" style={{ textAlign: 'right', padding: '6px' }} />
                       </div>
                     </div>
                   </div>
@@ -1651,6 +1768,9 @@ export default function POSPage() {
             </div>
             
             <div style={{ padding: '12px 20px calc(24px + env(safe-area-inset-bottom, 12px)) 20px', borderTop: '1px solid #e2e8f0', backgroundColor: '#f8fafc', boxShadow: '0 -4px 10px rgba(0,0,0,0.05)', flexShrink: 0 }}>
+              {/* 🟢 IMPROVEMENT 1: Clean Dropdown Menu for Adjustments */}
+              {renderCartAdjustmentsToolbar()}
+
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
                 <span style={{ fontSize: '14px', color: '#475569' }}>{currentT.totalKhmer}</span>
                 <span style={{ fontWeight: 'bold', color: totalRiel < 0 ? '#ef4444' : '#b58a3d', fontSize: '20px' }}>{formatRielFromNative(totalRiel)}</span>
@@ -1767,6 +1887,81 @@ export default function POSPage() {
         </div>
       </Modal>
 
+      {/* 🟢 NEW: CART ADJUSTMENTS MODAL (Discount, Deposit, Bag Fee with Covered-by-Depot Toggle) */}
+      <Modal 
+        isOpen={adjustmentModal.isOpen} 
+        onClose={() => setAdjustmentModal({ isOpen: false, type: null, amount: '', qty: 1, note: '', isCoveredByDepot: false })} 
+        title={
+          adjustmentModal.type === 'discount' ? "Add Discount (បញ្ចុះតម្លៃ)" :
+          adjustmentModal.type === 'deposit' ? "Add Deposit / Prepayment (កក់)" :
+          "Add Bag Fee (ថ្លៃបាវ)"
+        }
+        icon={adjustmentModal.type === 'discount' ? "🏷️" : adjustmentModal.type === 'deposit' ? "💵" : "🛍️"} 
+        maxWidth="400px"
+      >
+        {/* Covered by Depot Checkbox Toggle for Bags */}
+        {adjustmentModal.type === 'bag' && (
+          <div style={{ marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <input
+              type="checkbox"
+              id="coveredByDepot"
+              checked={adjustmentModal.isCoveredByDepot}
+              onChange={(e) => setAdjustmentModal({ ...adjustmentModal, isCoveredByDepot: e.target.checked })}
+              style={{ width: '16px', height: '16px', cursor: 'pointer' }}
+            />
+            <label htmlFor="coveredByDepot" style={{ fontSize: '13px', color: '#334155', cursor: 'pointer', fontWeight: 'bold' }}>
+              Covered by Depot (Free Bag for Customer)
+            </label>
+          </div>
+        )}
+
+        {/* Amount Input (Hidden automatically when bag is covered by depot) */}
+        {!adjustmentModal.isCoveredByDepot && (
+          <div style={{ marginBottom: '16px' }}>
+            <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '8px' }}>Amount / Price (៛)</label>
+            <CurrencyInput
+              autoFocus
+              placeholder="0"
+              value={adjustmentModal.amount}
+              onChange={(v: any) => setAdjustmentModal({ ...adjustmentModal, amount: v })}
+              className="saas-input"
+            />
+          </div>
+        )}
+
+        {adjustmentModal.type === 'bag' && (
+          <div style={{ marginBottom: '16px' }}>
+            <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '8px' }}>Quantity</label>
+            <CurrencyInput
+              placeholder="1"
+              value={adjustmentModal.qty}
+              onChange={(v: any) => setAdjustmentModal({ ...adjustmentModal, qty: v })}
+              className="saas-input"
+            />
+          </div>
+        )}
+
+        <div style={{ marginBottom: '24px' }}>
+          <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '8px' }}>Optional Note / Description</label>
+          <input
+            type="text"
+            placeholder={
+              adjustmentModal.type === 'discount' ? "e.g. VIP Member" : 
+              adjustmentModal.type === 'deposit' ? "e.g. Paid yesterday" : 
+              adjustmentModal.isCoveredByDepot ? "e.g. Depot absorbed bag replacement" : "e.g. Extra empty bag"
+            }
+            value={adjustmentModal.note}
+            onChange={(e) => setAdjustmentModal({ ...adjustmentModal, note: e.target.value })}
+            className="saas-input"
+          />
+        </div>
+
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
+          <button onClick={() => setAdjustmentModal({ isOpen: false, type: null, amount: '', qty: 1, note: '', isCoveredByDepot: false })} className="saas-btn saas-btn-secondary">Cancel</button>
+          <button onClick={handleAddCartAdjustment} className="saas-btn saas-btn-primary">Add to Cart</button>
+        </div>
+      </Modal>
+
       {/* 🟢 TOP-DOCKED MOBILE PRODUCT ADD POPUP (Exact 13-Hours-Ago Stable Dock + Keypad Auto-Submit) */}
       {!!selectedMobileProduct && typeof document !== 'undefined' && createPortal(
         <div 
@@ -1777,11 +1972,11 @@ export default function POSPage() {
             right: 0,
             bottom: 0,
             backgroundColor: 'rgba(0, 0, 0, 0.5)',
-            zIndex: 2147483647, // 🟢 Overrides burger menu on iPhone Safari
+            zIndex: 2147483647,
             display: 'flex',
             justifyContent: 'center',
             alignItems: 'flex-start',
-            paddingTop: '10px', // 🟢 Exact 13-hours-ago 10px top dock (keeps inputs above Safari's nudge zone)
+            paddingTop: '10px',
             paddingLeft: '16px',
             paddingRight: '16px'
           }}
@@ -1804,7 +1999,6 @@ export default function POSPage() {
               border: '1px solid #e2e8f0',
               animation: 'posPopupSlideDown 0.15s ease-out'
             }}
-            // 🟢 Correctly placed here as a form prop
             onFocusCapture={() => {
               window.scrollTo(0, 0);
               setTimeout(() => window.scrollTo(0, 0), 50);
