@@ -13,16 +13,18 @@ import EmptyState from '@/components/EmptyState'
 interface Invoice {
   id: string;
   invoice_id: string;
-  fileName: string;
   invoice_url: string;
   created_at: string;
   customer_name: string;
   total_sales: number;
   delivery_status: string;
+  rice_types?: string;
+  is_retail?: boolean;
 }
 
 type FilterTab = 'All' | 'Today' | 'This Week' | 'This Month';
-type StatusTab = 'Active' | 'Voided';
+type CategoryTab = 'All' | 'Wholesale' | 'WalkinWholesale' | 'WalkinRetail' | 'Voided';
+type VoidSubTab = 'All' | 'Wholesale' | 'WalkinWholesale' | 'WalkinRetail';
 
 export default function InvoiceGallery() {
   const { showToast } = useToast();
@@ -34,10 +36,11 @@ export default function InvoiceGallery() {
   
   const [selectedInvoices, setSelectedInvoices] = useState<Set<string>>(new Set())
   const [filterTab, setFilterTab] = useState<FilterTab>('All')
-  const [statusFilter, setStatusFilter] = useState<StatusTab>('Active')
+  const [categoryTab, setCategoryTab] = useState<CategoryTab>('All')
+  const [voidSubTab, setVoidSubTab] = useState<VoidSubTab>('All')
   
   const [searchQuery, setSearchQuery] = useState<string>('')
-  const debouncedSearch = useDebounce(searchQuery, 300) // 🚀 Lightning fast mobile search
+  const debouncedSearch = useDebounce(searchQuery, 300)
 
   const [viewMode, setViewMode] = useState<'grid' | 'table'>('grid')
 
@@ -46,19 +49,18 @@ export default function InvoiceGallery() {
     const isMobile = window.innerWidth < 1024 || /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
     setIsDeviceMobile(isMobile);
     fetchInvoices();
-  }, [filterTab])
+  }, [filterTab, categoryTab, voidSubTab])
 
-  // 🚀 NEW: Window Focus Auto-Refresh
+  // 🚀 Window Focus Auto-Refresh
   useFocusRefresh(fetchInvoices);
 
   async function fetchInvoices() {
     setIsLoading(true)
-    let query = supabase
-      .from('invoice_summaries')
-      .select('*')
-      .not('invoice_url', 'is', null)
-
     const now = new Date()
+
+    // --- 1. FETCH WHOLESALE & STANDARD INVOICES ---
+    let query = supabase.from('invoice_summaries').select('*')
+
     if (filterTab === 'Today') {
       const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString()
       query = query.gte('created_at', todayStart)
@@ -73,17 +75,79 @@ export default function InvoiceGallery() {
       query = query.gte('created_at', monthStart)
     }
 
-    const { data, error } = await query
-    if (error) {
-      console.error("Error fetching data from Supabase:", error.message)
+    const { data: summaryData, error: summaryError } = await query
+    if (summaryError) {
+      console.error("Error fetching invoice summaries:", summaryError.message)
     }
-    setInvoices(data || [])
-    setIsLoading(false)
+
+    // --- 2. FETCH WALK-IN RETAIL SALES (Grouped into single rows per transaction_id) ---
+    let retailQuery = supabase.from('retail_sales').select('*')
+    if (filterTab === 'Today') {
+      const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString()
+      retailQuery = retailQuery.gte('created_at', todayStart)
+    } else if (filterTab === 'This Week') {
+      const currentDay = now.getDay()
+      const dayDifference = now.getDate() - currentDay + (currentDay === 0 ? -6 : 1) 
+      const weekStart = new Date(now.getFullYear(), now.getMonth(), dayDifference)
+      weekStart.setHours(0, 0, 0, 0)
+      retailQuery = retailQuery.gte('created_at', weekStart.toISOString())
+    } else if (filterTab === 'This Month') {
+      const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString()
+      retailQuery = retailQuery.gte('created_at', monthStart)
+    }
+
+    const { data: retailData, error: retailError } = await retailQuery
+    if (retailError) {
+      console.error("Error fetching retail sales:", retailError.message)
+    }
+
+    // 🟢 AGGREGATE RETAIL LINE ITEMS INTO SINGLE TRANSACTION ROWS
+    const retailGrouped: Record<string, Invoice> = {};
+    if (retailData) {
+      retailData.forEach((row: any) => {
+        const txId = row.transaction_id || `RET-${row.id}`;
+        const itemSubtotal = Number(row.qty || 0) * Number(row.price_per_bag || 0);
+        const itemDesc = `${row.custom_rice_type || row.rice_type || 'Rice'} (x${row.qty})`;
+
+        if (!retailGrouped[txId]) {
+          retailGrouped[txId] = {
+            id: `ret-${row.id}`,
+            invoice_id: txId,
+            invoice_url: '',
+            created_at: row.created_at,
+            customer_name: 'Walk-in Retail',
+            total_sales: itemSubtotal,
+            delivery_status: row.status || 'Delivered',
+            rice_types: itemDesc,
+            is_retail: true
+          };
+        } else {
+          retailGrouped[txId].total_sales += itemSubtotal;
+          retailGrouped[txId].rice_types += `, ${itemDesc}`;
+        }
+      });
+    }
+
+    const wholesaleInvoices: Invoice[] = (summaryData || []).map((row: any) => ({
+      id: String(row.id),
+      invoice_id: row.invoice_id,
+      invoice_url: row.invoice_url || '',
+      created_at: row.created_at,
+      customer_name: row.customer_name || 'Walk-in',
+      total_sales: Number(row.total_sales || 0),
+      delivery_status: row.delivery_status || 'Delivered',
+      rice_types: row.rice_types || '-',
+      is_retail: false
+    }));
+
+    const allCombined = [...wholesaleInvoices, ...Object.values(retailGrouped)];
+    setInvoices(allCombined);
+    setIsLoading(false);
   }
 
   // --- SAFE VOID AUTOMATION ---
   const handleVoidInvoice = async (invoiceId: string) => {
-    if (!confirm(`🚨 Are you sure you want to VOID invoice ${invoiceId}?\n\nThis will instantly:\n1. Restore bags to your stock\n2. Reverse the profit/COGS math\n3. Delete all payment records\n4. Mark this invoice as voided permanently`)) return;
+    if (!confirm(`🚨 Are you sure you want to VOID transaction ${invoiceId}?\n\nThis will instantly:\n1. Restore bags/kg to your stock\n2. Reverse the profit/COGS math\n3. Delete all payment records\n4. Mark this transaction as voided permanently`)) return;
 
     setIsLoading(true);
     try {
@@ -158,20 +222,24 @@ export default function InvoiceGallery() {
       await supabase.from('invoice_payments').delete().eq('invoice_id', invoiceId);
 
       // 5. Update Master Invoice to Voided Status AND is_done: true
-      await supabase.from('invoice_summaries').update({ 
-        delivery_status: 'Voided',
-        balance_due: 0,
-        is_done: true
-      }).eq('invoice_id', invoiceId);
+      if (!isRetail) {
+        await supabase.from('invoice_summaries').update({ 
+          delivery_status: 'Voided',
+          balance_due: 0,
+          is_done: true
+        }).eq('invoice_id', invoiceId);
+      } else {
+        await supabase.from('retail_sales').update({ status: 'Voided' }).eq('transaction_id', invoiceId);
+      }
 
-      showToast('success', 'Invoice Voided', `Invoice ${invoiceId} was successfully voided!`);
+      showToast('success', 'Transaction Voided', `Transaction ${invoiceId} was successfully voided!`);
       
       setSelectedInvoices(new Set());
       await fetchInvoices();
 
     } catch (error: any) {
       console.error("Void failed:", error);
-      showToast('error', 'Void Failed', `Error voiding invoice: ${error.message}`);
+      showToast('error', 'Void Failed', `Error voiding transaction: ${error.message}`);
     } finally {
       setIsLoading(false);
     }
@@ -199,7 +267,7 @@ export default function InvoiceGallery() {
     const idsToUpdate = Array.from(selectedInvoices);
     
     const filesToDelete = invoices
-      .filter(inv => selectedInvoices.has(inv.invoice_id))
+      .filter(inv => selectedInvoices.has(inv.invoice_id) && inv.invoice_url)
       .map(inv => {
         const parts = inv.invoice_url.split('/');
         return parts[parts.length - 1]; 
@@ -246,6 +314,10 @@ export default function InvoiceGallery() {
   }
 
   const handleAction = async (url: string, id: string) => {
+    if (!url) {
+      showToast('error', 'No Image', 'No image exists for this walk-in transaction.');
+      return;
+    }
     if (isDeviceMobile && typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
       try {
         const res = await fetch(url);
@@ -265,7 +337,7 @@ export default function InvoiceGallery() {
   }
 
   const handleBulkAction = async () => {
-    const selectedData = invoices.filter(inv => selectedInvoices.has(inv.invoice_id));
+    const selectedData = invoices.filter(inv => selectedInvoices.has(inv.invoice_id) && inv.invoice_url);
 
     if (isDeviceMobile && typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
       try {
@@ -289,19 +361,45 @@ export default function InvoiceGallery() {
     }
   }
 
+  // 🟢 HELPER: Classify invoice into 3 main buckets
+  const getInvoiceCategory = (inv: Invoice): 'Wholesale' | 'WalkinWholesale' | 'WalkinRetail' => {
+    if (inv.is_retail) return 'WalkinRetail';
+    const name = (inv.customer_name || '').toLowerCase().trim();
+    if (name === 'walk-in' || name === 'walk in') {
+      return 'WalkinWholesale';
+    }
+    return 'Wholesale';
+  };
+
   // --- CLIENT-SIDE SEARCH & FILTER DYNAMICS ---
   const processedInvoices = invoices
     .filter(inv => {
       const isVoided = inv.delivery_status === 'Voided';
-      if (statusFilter === 'Active' && isVoided) return false;
-      if (statusFilter === 'Voided' && !isVoided) return false;
+      const cat = getInvoiceCategory(inv);
+
+      // 1. Hide voided items when viewing active category tabs
+      if (categoryTab !== 'Voided' && isVoided) return false;
+
+      // 2. Filter by active category tab
+      if (categoryTab === 'Wholesale' && cat !== 'Wholesale') return false;
+      if (categoryTab === 'WalkinWholesale' && cat !== 'WalkinWholesale') return false;
+      if (categoryTab === 'WalkinRetail' && cat !== 'WalkinRetail') return false;
+
+      // 3. Filter by sub-tabs when inside the 'Voided' tab
+      if (categoryTab === 'Voided') {
+        if (!isVoided) return false;
+        if (voidSubTab === 'Wholesale' && cat !== 'Wholesale') return false;
+        if (voidSubTab === 'WalkinWholesale' && cat !== 'WalkinWholesale') return false;
+        if (voidSubTab === 'WalkinRetail' && cat !== 'WalkinRetail') return false;
+      }
 
       // 🚀 Debounced fast search
       if (!debouncedSearch) return true;
       const term = debouncedSearch.toLowerCase().trim();
       return (
         inv.invoice_id?.toLowerCase().includes(term) ||
-        inv.customer_name?.toLowerCase().includes(term)
+        inv.customer_name?.toLowerCase().includes(term) ||
+        inv.rice_types?.toLowerCase().includes(term)
       );
     })
     .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
@@ -322,23 +420,78 @@ export default function InvoiceGallery() {
         </div>
       </div>
 
-      {/* NEW: STATUS FILTER TABS */}
-      <div className="saas-tab-container hide-scrollbar" style={{ width: 'fit-content', border: 'none', padding: 0, boxShadow: 'none', background: 'transparent', marginBottom: '16px' }}>
+      {/* 🟢 TOP TABS: WHOLESALE, WALK-IN WHOLESALE, WALK-IN RETAIL, VOIDED */}
+      <div className="saas-tab-container hide-scrollbar" style={{ width: 'fit-content', border: 'none', padding: 0, boxShadow: 'none', background: 'transparent', marginBottom: categoryTab === 'Voided' ? '8px' : '16px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
         <button 
-          onClick={() => { setStatusFilter('Active'); setSelectedInvoices(new Set()); }} 
-          className={`saas-tab ${statusFilter === 'Active' ? 'active' : ''}`}
-          style={statusFilter === 'Active' ? { background: '#10b981', color: '#fff' } : { border: '1px solid #cbd5e1', background: '#fff' }}
+          onClick={() => { setCategoryTab('All'); setSelectedInvoices(new Set()); }} 
+          className={`saas-tab ${categoryTab === 'All' ? 'active' : ''}`}
+          style={categoryTab === 'All' ? { background: '#10b981', color: '#fff' } : { border: '1px solid #cbd5e1', background: '#fff' }}
         >
-          ✅ Valid Invoices
+          ✅ All Active
         </button>
         <button 
-          onClick={() => { setStatusFilter('Voided'); setSelectedInvoices(new Set()); }} 
-          className={`saas-tab ${statusFilter === 'Voided' ? 'active' : ''}`}
-          style={statusFilter === 'Voided' ? { background: '#ef4444', color: '#fff' } : { border: '1px solid #cbd5e1', background: '#fff' }}
+          onClick={() => { setCategoryTab('Wholesale'); setSelectedInvoices(new Set()); }} 
+          className={`saas-tab ${categoryTab === 'Wholesale' ? 'active' : ''}`}
+          style={categoryTab === 'Wholesale' ? { background: '#10b981', color: '#fff' } : { border: '1px solid #cbd5e1', background: '#fff' }}
         >
-          ❌ Voided Invoices
+          🌾 Wholesale
+        </button>
+        <button 
+          onClick={() => { setCategoryTab('WalkinWholesale'); setSelectedInvoices(new Set()); }} 
+          className={`saas-tab ${categoryTab === 'WalkinWholesale' ? 'active' : ''}`}
+          style={categoryTab === 'WalkinWholesale' ? { background: '#10b981', color: '#fff' } : { border: '1px solid #cbd5e1', background: '#fff' }}
+        >
+          🏬 Walk-in Wholesale
+        </button>
+        <button 
+          onClick={() => { setCategoryTab('WalkinRetail'); setSelectedInvoices(new Set()); }} 
+          className={`saas-tab ${categoryTab === 'WalkinRetail' ? 'active' : ''}`}
+          style={categoryTab === 'WalkinRetail' ? { background: '#10b981', color: '#fff' } : { border: '1px solid #cbd5e1', background: '#fff' }}
+        >
+          🛍️ Walk-in Retail
+        </button>
+        <button 
+          onClick={() => { setCategoryTab('Voided'); setVoidSubTab('All'); setSelectedInvoices(new Set()); }} 
+          className={`saas-tab ${categoryTab === 'Voided' ? 'active' : ''}`}
+          style={categoryTab === 'Voided' ? { background: '#ef4444', color: '#fff' } : { border: '1px solid #cbd5e1', background: '#fff' }}
+        >
+          ❌ Voided
         </button>
       </div>
+
+      {/* 🟢 3 SUB-TABS WHEN INSIDE 'VOIDED' TAB */}
+      {categoryTab === 'Voided' && (
+        <div className="saas-tab-container hide-scrollbar" style={{ width: 'fit-content', border: 'none', padding: '4px 6px', boxShadow: 'none', background: '#fee2e2', borderRadius: '8px', marginBottom: '16px', display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+          <button 
+            onClick={() => setVoidSubTab('All')} 
+            className={`saas-tab ${voidSubTab === 'All' ? 'active' : ''}`}
+            style={voidSubTab === 'All' ? { background: '#dc2626', color: '#fff', fontSize: '12px', padding: '6px 12px' } : { background: 'transparent', color: '#991b1b', fontSize: '12px', padding: '6px 12px', border: 'none' }}
+          >
+            All Voided
+          </button>
+          <button 
+            onClick={() => setVoidSubTab('Wholesale')} 
+            className={`saas-tab ${voidSubTab === 'Wholesale' ? 'active' : ''}`}
+            style={voidSubTab === 'Wholesale' ? { background: '#dc2626', color: '#fff', fontSize: '12px', padding: '6px 12px' } : { background: 'transparent', color: '#991b1b', fontSize: '12px', padding: '6px 12px', border: 'none' }}
+          >
+            Wholesale
+          </button>
+          <button 
+            onClick={() => setVoidSubTab('WalkinWholesale')} 
+            className={`saas-tab ${voidSubTab === 'WalkinWholesale' ? 'active' : ''}`}
+            style={voidSubTab === 'WalkinWholesale' ? { background: '#dc2626', color: '#fff', fontSize: '12px', padding: '6px 12px' } : { background: 'transparent', color: '#991b1b', fontSize: '12px', padding: '6px 12px', border: 'none' }}
+          >
+            Walk-in Wholesale
+          </button>
+          <button 
+            onClick={() => setVoidSubTab('WalkinRetail')} 
+            className={`saas-tab ${voidSubTab === 'WalkinRetail' ? 'active' : ''}`}
+            style={voidSubTab === 'WalkinRetail' ? { background: '#dc2626', color: '#fff', fontSize: '12px', padding: '6px 12px' } : { background: 'transparent', color: '#991b1b', fontSize: '12px', padding: '6px 12px', border: 'none' }}
+          >
+            Walk-in Retail
+          </button>
+        </div>
+      )}
 
       {/* FILTER TABS & SEARCH CONTAINER */}
       <div className="saas-card" style={{ marginBottom: '24px', padding: '16px 20px' }}>
@@ -347,7 +500,7 @@ export default function InvoiceGallery() {
           <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', flex: 1 }}>
             <input 
               type="text"
-              placeholder="🔍 Search ID or Customer..."
+              placeholder="🔍 Search ID, Customer, or Rice..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
@@ -385,7 +538,7 @@ export default function InvoiceGallery() {
           {selectedInvoices.size > 0 && (
             <>
               <button onClick={deleteSelected} className="saas-btn saas-btn-danger">
-                Clear ({selectedInvoices.size})
+                Clear Images ({selectedInvoices.size})
               </button>
               <button onClick={handleBulkAction} className="saas-btn saas-btn-primary">
                 {isDeviceMobile ? `Share (${selectedInvoices.size})` : `Download (${selectedInvoices.size})`}
@@ -398,15 +551,15 @@ export default function InvoiceGallery() {
       {/* CONTENT AREA */}
       {isLoading ? (
         viewMode === 'table' ? (
-          <TableSkeleton columns={6} rows={6} />
+          <TableSkeleton columns={7} rows={6} />
         ) : (
           <div style={{ textAlign: 'center', padding: '40px', color: '#94a3b8' }}>Loading records...</div>
         )
       ) : processedInvoices.length === 0 ? (
         <EmptyState 
           icon="🖼️" 
-          title="No invoices found" 
-          message="Adjust your filters or date ranges to see more results." 
+          title="No records found" 
+          message="Adjust your tabs, search term, or date ranges to see more results." 
         />
       ) : viewMode === 'grid' ? (
         
@@ -422,7 +575,13 @@ export default function InvoiceGallery() {
                 <input type="checkbox" checked={isSelected} onChange={() => toggleSelect(inv.invoice_id)} className="card-checkbox" />
 
                 <div onClick={() => toggleSelect(inv.invoice_id)} className="card-image-box">
-                  <img src={inv.invoice_url} alt="Invoice Document" className={`card-img ${isSelected ? 'img-selected' : ''}`} />
+                  {inv.invoice_url ? (
+                    <img src={inv.invoice_url} alt="Invoice Document" className={`card-img ${isSelected ? 'img-selected' : ''}`} />
+                  ) : (
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#94a3b8', fontSize: '14px', background: '#f8fafc' }}>
+                      No Image (Retail Sale)
+                    </div>
+                  )}
                   {isVoided && (
                     <div className="void-overlay">
                       <span className="void-stamp">VOID</span>
@@ -433,18 +592,32 @@ export default function InvoiceGallery() {
                 <div style={{ padding: '16px', borderBottom: '1px solid #e2e8f0' }}>
                   <div className={`saas-card-title ${isVoided ? 'voided-text' : ''}`} style={{ fontSize: '15px', color: '#0f172a', margin: 0 }}>{inv.invoice_id}</div>
                   <div style={{ fontSize: '14px', color: '#475569', marginTop: '6px', fontWeight: 'bold' }}>Customer: {inv.customer_name}</div>
-                  <div style={{ fontSize: '16px', color: '#b58a3d', marginTop: '6px', fontWeight: 'bold' }}>💰 {formatRiel(inv.total_sales)}</div>
+                  <div style={{ fontSize: '13px', color: '#64748b', marginTop: '6px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={inv.rice_types}>
+                    🌾 {inv.rice_types}
+                  </div>
+                  <div style={{ fontSize: '16px', color: '#b58a3d', marginTop: '8px', fontWeight: 'bold' }}>💰 {formatRiel(inv.total_sales)}</div>
                 </div>
 
                 <div style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px', background: '#f8fafc', marginTop: 'auto' }}>
                   <div style={{ fontSize: '13px', color: '#64748b', textAlign: 'center', fontWeight: 'bold' }}>{formatDate(inv.created_at)}</div>
                   
                   <div style={{ display: 'flex', gap: '8px' }}>
-                    {!isVoided && <button onClick={() => window.location.href = `/pos?edit=${inv.invoice_id}`} className="saas-btn" style={{ flex: 1, padding: '8px 4px', background: '#fef3c7', color: '#b45309', border: '1px solid #fde047' }}>Edit</button>}
-                    {!isVoided && <button onClick={() => handleVoidInvoice(inv.invoice_id)} className="saas-btn" style={{ flex: 1, padding: '8px 4px', background: '#fee2e2', color: '#dc2626', border: '1px solid #fca5a5' }}>Void</button>}
-                    <button onClick={() => handleAction(inv.invoice_url, inv.invoice_id)} className="saas-btn saas-btn-secondary" style={{ flex: 1, padding: '8px 4px' }}>
-                      {isDeviceMobile ? 'Share' : 'Download'}
-                    </button>
+                    {/* 🚨 VOID BUTTON FIRST IN ACTION GROUP */}
+                    {!isVoided && (
+                      <button onClick={() => handleVoidInvoice(inv.invoice_id)} className="saas-btn" style={{ flex: 1, padding: '8px 4px', background: '#fee2e2', color: '#dc2626', border: '1px solid #fca5a5', fontWeight: 'bold' }}>
+                        🚨 Void
+                      </button>
+                    )}
+                    {!isVoided && !inv.is_retail && (
+                      <button onClick={() => window.location.href = `/pos?edit=${inv.invoice_id}`} className="saas-btn" style={{ flex: 1, padding: '8px 4px', background: '#fef3c7', color: '#b45309', border: '1px solid #fde047' }}>
+                        Edit
+                      </button>
+                    )}
+                    {inv.invoice_url && (
+                      <button onClick={() => handleAction(inv.invoice_url, inv.invoice_id)} className="saas-btn saas-btn-secondary" style={{ flex: 1, padding: '8px 4px' }}>
+                        {isDeviceMobile ? 'Share' : 'Download'}
+                      </button>
+                    )}
                   </div>
                 </div>
               </div>
@@ -460,11 +633,14 @@ export default function InvoiceGallery() {
             <table className="saas-table">
               <thead>
                 <tr>
-                  <th className="saas-th" style={{ width: '50px', textAlign: 'center' }}>
+                  <th className="saas-th" style={{ width: '40px', textAlign: 'center' }}>
                     <input type="checkbox" checked={selectedInvoices.size === processedInvoices.length && processedInvoices.length > 0} onChange={toggleSelectAll} style={{ cursor: 'pointer', width: '16px', height: '16px' }} />
                   </th>
+                  {/* 🚨 FIRST COLUMN: DEDICATED FOR VOID ONLY */}
+                  <th className="saas-th" style={{ width: '80px', textAlign: 'center' }}>Void</th>
                   <th className="saas-th">Invoice ID</th>
                   <th className="saas-th">Customer</th>
+                  <th className="saas-th">Items Sold</th>
                   <th className="saas-th" style={{ textAlign: 'right' }}>Total Amount</th>
                   <th className="saas-th">Date</th>
                   <th className="saas-th" style={{ textAlign: 'center' }}>Actions</th>
@@ -480,17 +656,35 @@ export default function InvoiceGallery() {
                       <td className="saas-td" style={{ textAlign: 'center' }}>
                         <input type="checkbox" checked={isSelected} onChange={() => toggleSelect(inv.invoice_id)} style={{ cursor: 'pointer', width: '16px', height: '16px' }} />
                       </td>
+                      
+                      {/* 🚨 FIRST COLUMN VOID BUTTON */}
+                      <td className="saas-td" style={{ textAlign: 'center' }}>
+                        {!isVoided ? (
+                          <button onClick={() => handleVoidInvoice(inv.invoice_id)} className="saas-btn" style={{ padding: '6px 10px', background: '#fee2e2', color: '#dc2626', border: '1px solid #fca5a5', fontWeight: 'bold', fontSize: '11px', borderRadius: '6px', cursor: 'pointer' }}>
+                            🚨 Void
+                          </button>
+                        ) : (
+                          <span style={{ fontSize: '12px', fontWeight: 'bold', color: '#991b1b' }}>VOIDED</span>
+                        )}
+                      </td>
+
                       <td className={`saas-td ${isVoided ? 'voided-text' : ''}`} style={{ fontWeight: 'bold' }}>{inv.invoice_id}</td>
                       <td className="saas-td" style={{ fontWeight: 'bold' }}>{inv.customer_name}</td>
+                      <td className="saas-td" style={{ maxWidth: '280px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: '#475569' }} title={inv.rice_types}>
+                        {inv.rice_types}
+                      </td>
                       <td className="saas-td" style={{ textAlign: 'right', fontWeight: 'bold', color: '#b58a3d' }}>{formatRiel(inv.total_sales)}</td>
                       <td className="saas-td" style={{ color: '#475569' }}>{formatDate(inv.created_at)}</td>
                       <td className="saas-td" style={{ textAlign: 'center' }}>
                         <div style={{ display: 'flex', gap: '8px', justifyContent: 'center' }}>
-                          {!isVoided && <button onClick={() => window.location.href = `/pos?edit=${inv.invoice_id}`} className="saas-btn" style={{ padding: '6px 12px', background: '#fef3c7', color: '#b45309', border: 'none', fontSize: '12px' }}>Edit</button>}
-                          {!isVoided && <button onClick={() => handleVoidInvoice(inv.invoice_id)} className="saas-btn" style={{ padding: '6px 12px', background: '#fee2e2', color: '#dc2626', border: 'none', fontSize: '12px' }}>Void</button>}
-                          <button onClick={() => handleAction(inv.invoice_url, inv.invoice_id)} className="saas-btn saas-btn-secondary" style={{ padding: '6px 12px', fontSize: '12px' }}>
-                            {isDeviceMobile ? 'Share' : 'Download'}
-                          </button>
+                          {!isVoided && !inv.is_retail && (
+                            <button onClick={() => window.location.href = `/pos?edit=${inv.invoice_id}`} className="saas-btn" style={{ padding: '6px 12px', background: '#fef3c7', color: '#b45309', border: 'none', fontSize: '12px' }}>Edit</button>
+                          )}
+                          {inv.invoice_url && (
+                            <button onClick={() => handleAction(inv.invoice_url, inv.invoice_id)} className="saas-btn saas-btn-secondary" style={{ padding: '6px 12px', fontSize: '12px' }}>
+                              {isDeviceMobile ? 'Share' : 'Download'}
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>

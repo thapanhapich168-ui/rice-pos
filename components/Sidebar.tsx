@@ -13,7 +13,7 @@ interface MenuItem {
 }
 
 const defaultMenuItems: MenuItem[] = [
-  { label: '📊 Dashboard', href: '/dashboard', adminOnly: true },
+  { label: '📊 Dashboard', href: '/dashboard', adminOnly: false },
   { label: '🛒 POS System', href: '/pos', adminOnly: false },
   { label: '🚚 Delivery & Credit', href: '/delivery', adminOnly: false },
   { label: '💵 Expense & Payroll', href: '/expense', adminOnly: false },
