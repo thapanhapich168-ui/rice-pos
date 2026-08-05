@@ -151,19 +151,28 @@ export default function POSPage() {
     isOpen: false, product: null, consumedKg: ''
   })
   
-  // 🟢 NEW: Cart Adjustments Modal State with "Covered by Depot" toggle
+  // 🟢 NEW: Cart Adjustments Modal State with white dropdown tray tracker
   const [adjustmentModal, setAdjustmentModal] = useState<{
     isOpen: boolean,
     type: 'discount' | 'deposit' | 'bag' | null,
     amount: number | string,
     qty: number | string,
     note: string,
-    isCoveredByDepot: boolean
+    isCoveredByDepot: boolean,
+    selectedBagName: string,
+    isBagMenuOpen?: boolean
   }>({
-    isOpen: false, type: null, amount: '', qty: 1, note: '', isCoveredByDepot: false
+    isOpen: false, 
+    type: null, 
+    amount: '', 
+    qty: 1, 
+    note: '', 
+    isCoveredByDepot: false, 
+    selectedBagName: 'ថ្លៃបាវ ប្រ៊េន',
+    isBagMenuOpen: false
   });
 
-  // 🟢 NEW: State to toggle compact Adjustment dropdown menu in cart footer
+  // State to toggle compact Adjustment dropdown menu in cart footer
   const [showAdjustmentMenu, setShowAdjustmentMenu] = useState(false);
   
   const [autoOpenModal, setAutoOpenModal] = useState<{ isOpen: boolean, items: (Product & { bags_needed: number })[] }>({ isOpen: false, items: [] });
@@ -265,11 +274,11 @@ export default function POSPage() {
           const { data: saleRows } = await supabase.from('sales').select('*').eq('invoice_id', editId);
           if (saleRows && saleRows.length > 0) {
             const rebuiltCart = saleRows.map((row: any) => {
-              const isSpecialRow = (row.custom_rice_type || row.rice_type).includes('ដូរ') || (row.custom_rice_type || row.rice_type).includes('បានប្រើ') || (row.custom_rice_type || row.rice_type).includes('បញ្ចុះតម្លៃ') || (row.custom_rice_type || row.rice_type).includes('កក់') || (row.custom_rice_type || row.rice_type).includes('ថ្លៃបាវ');
+              const isSpecialRow = (row.custom_rice_type || row.rice_type).includes('ដូរ') || (row.custom_rice_type || row.rice_type).includes('បានប្រើ') || (row.custom_rice_type || row.rice_type).includes('បញ្ចុះតម្លៃ') || (row.custom_rice_type || row.rice_type).includes('កក់') || (row.custom_rice_type || row.rice_type).includes('ថ្លៃបាវ') || (row.custom_rice_type || row.rice_type).includes('បាវ');
               let sortOrder = 0;
               if ((row.custom_rice_type || row.rice_type).includes('ដូរ')) sortOrder = 1;
               if ((row.custom_rice_type || row.rice_type).includes('បានប្រើ')) sortOrder = 2;
-              if ((row.custom_rice_type || row.rice_type).includes('ថ្លៃបាវ')) sortOrder = 3;
+              if ((row.custom_rice_type || row.rice_type).includes('ថ្លៃបាវ') || (row.custom_rice_type || row.rice_type).includes('បាវ')) sortOrder = 3;
               if ((row.custom_rice_type || row.rice_type).includes('បញ្ចុះតម្លៃ') || (row.custom_rice_type || row.rice_type).includes('កក់')) sortOrder = 99;
 
               return {
@@ -514,7 +523,7 @@ export default function POSPage() {
     setSelectedMobileProduct(null);
   }
 
-  // Handle Cart Adjustments with exact algebraic accounting rules
+  // 🟢 Handle Cart Adjustments with bag selector support
   function handleAddCartAdjustment() {
     if (!adjustmentModal.type) return;
     const isCoveredBag = adjustmentModal.type === 'bag' && adjustmentModal.isCoveredByDepot;
@@ -530,13 +539,19 @@ export default function POSPage() {
     let baseName = '';
     if (adjustmentModal.type === 'discount') baseName = 'បញ្ចុះតម្លៃ';
     if (adjustmentModal.type === 'deposit') baseName = 'កក់';
-    if (adjustmentModal.type === 'bag') baseName = isCoveredBag ? 'ថ្លៃបាវ (Covered by Depot)' : 'ថ្លៃបាវ';
+    if (adjustmentModal.type === 'bag') {
+      const bagTitle = adjustmentModal.selectedBagName || 'ថ្លៃបាវ ប្រ៊េន';
+      baseName = isCoveredBag ? `${bagTitle} (Covered by Depot)` : bagTitle;
+    }
 
     const customName = noteVal ? `${baseName} (${noteVal})` : baseName;
-    const fallbackId = products[0]?.id || 1;
+    const matchedBagProd = products.find(p => p.name === adjustmentModal.selectedBagName);
+    const fallbackId = matchedBagProd ? matchedBagProd.id : (products[0]?.id || 1);
 
     let cogsVal = 0;
-    if (adjustmentModal.type === 'bag') cogsVal = 1200;
+    if (adjustmentModal.type === 'bag') {
+      cogsVal = matchedBagProd ? Number(matchedBagProd.cost_price || 1200) : 1200;
+    }
     if (adjustmentModal.type === 'deposit') cogsVal = Math.abs(amountVal);
 
     const newAdjustmentItem: CartItem = {
@@ -556,7 +571,7 @@ export default function POSPage() {
     };
 
     setCart([...cart, newAdjustmentItem]);
-    setAdjustmentModal({ isOpen: false, type: null, amount: '', qty: 1, note: '', isCoveredByDepot: false });
+    setAdjustmentModal({ isOpen: false, type: null, amount: '', qty: 1, note: '', isCoveredByDepot: false, selectedBagName: 'ថ្លៃបាវ ប្រ៊េន', isBagMenuOpen: false });
     setShowAdjustmentMenu(false);
   }
 
@@ -1260,7 +1275,6 @@ export default function POSPage() {
     return [...normalItems, ...specialItems, ...negativeItems, ...serviceItems];
   }
 
-  // 🟢 IMPROVEMENT 3: Clean, flat payment section (removed nested border & grey box)
   const renderPaymentSection = (isMobileCart: boolean = false) => {
     if (!showPaymentSelector) return null;
     return (
@@ -1324,7 +1338,6 @@ export default function POSPage() {
     )
   }
 
-  // 🟢 IMPROVEMENT 1: Compact dropdown button instead of 3 bulky buttons
   const renderCartAdjustmentsToolbar = () => (
     <div style={{ position: 'relative', marginBottom: '12px' }}>
       <button 
@@ -1338,19 +1351,19 @@ export default function POSPage() {
       {showAdjustmentMenu && (
         <div style={{ position: 'absolute', bottom: '100%', left: 0, right: 0, marginBottom: '6px', background: '#ffffff', border: '1px solid #cbd5e1', borderRadius: '8px', boxShadow: '0 8px 20px rgba(0,0,0,0.15)', zIndex: 50, overflow: 'hidden' }}>
           <button 
-            onClick={() => { setAdjustmentModal({ isOpen: true, type: 'discount', amount: '', qty: 1, note: '', isCoveredByDepot: false }); setShowAdjustmentMenu(false); }} 
+            onClick={() => { setAdjustmentModal({ isOpen: true, type: 'discount', amount: '', qty: 1, note: '', isCoveredByDepot: false, selectedBagName: 'ថ្លៃបាវ ប្រ៊េន', isBagMenuOpen: false }); setShowAdjustmentMenu(false); }} 
             style={{ width: '100%', padding: '10px 14px', textAlign: 'left', background: 'none', border: 'none', borderBottom: '1px solid #f1f5f9', fontSize: '13px', color: '#334155', cursor: 'pointer', display: 'block' }}
           >
             🏷️ Discount (បញ្ចុះតម្លៃ)
           </button>
           <button 
-            onClick={() => { setAdjustmentModal({ isOpen: true, type: 'deposit', amount: '', qty: 1, note: '', isCoveredByDepot: false }); setShowAdjustmentMenu(false); }} 
+            onClick={() => { setAdjustmentModal({ isOpen: true, type: 'deposit', amount: '', qty: 1, note: '', isCoveredByDepot: false, selectedBagName: 'ថ្លៃបាវ ប្រ៊េន', isBagMenuOpen: false }); setShowAdjustmentMenu(false); }} 
             style={{ width: '100%', padding: '10px 14px', textAlign: 'left', background: 'none', border: 'none', borderBottom: '1px solid #f1f5f9', fontSize: '13px', color: '#334155', cursor: 'pointer', display: 'block' }}
           >
             💵 Deposit / Prepayment (កក់)
           </button>
           <button 
-            onClick={() => { setAdjustmentModal({ isOpen: true, type: 'bag', amount: 2000, qty: 1, note: '', isCoveredByDepot: false }); setShowAdjustmentMenu(false); }} 
+            onClick={() => { setAdjustmentModal({ isOpen: true, type: 'bag', amount: 1200, qty: 1, note: '', isCoveredByDepot: false, selectedBagName: 'ថ្លៃបាវ ប្រ៊េន', isBagMenuOpen: false }); setShowAdjustmentMenu(false); }} 
             style={{ width: '100%', padding: '10px 14px', textAlign: 'left', background: 'none', border: 'none', fontSize: '13px', color: '#334155', cursor: 'pointer', display: 'block' }}
           >
             🛍️ Bag Fee (ថ្លៃបាវ)
@@ -1367,79 +1380,85 @@ export default function POSPage() {
       <div className="hide-scrollbar" style={{ flex: 1, height: '100%', overflowY: 'auto', backgroundColor: '#f8fafc', minWidth: 0, WebkitOverflowScrolling: 'touch' }}>
         
         <div className="main-wrapper">
-          <div className="header-container">
-            <div className="header-left">
-              <h1 className="saas-page-title">{editingInvoiceId ? `✏️ Editing: ${editingInvoiceId}` : `🛒 ${currentT.title}`}</h1>
-              {editingInvoiceId && (
-                <button 
-                  onClick={cancelEditMode} 
-                  className="saas-btn saas-btn-danger"
-                  style={{ marginLeft: '16px', padding: '6px 12px', fontSize: '13px' }}
-                >
-                  ❌ Cancel
+          
+          {/* 🟢 STICKY HEADER WRAPPER AROUND TITLE & TABS */}
+          <div className="pos-sticky-header">
+            <div className="header-container" style={{ marginBottom: '16px' }}>
+              <div className="header-left">
+                <h1 className="saas-page-title">{editingInvoiceId ? `✏️ Editing: ${editingInvoiceId}` : `🛒 ${currentT.title}`}</h1>
+                {editingInvoiceId && (
+                  <button 
+                    onClick={cancelEditMode} 
+                    className="saas-btn saas-btn-danger"
+                    style={{ marginLeft: '16px', padding: '6px 12px', fontSize: '13px' }}
+                  >
+                    ❌ Cancel
+                  </button>
+                )}
+              </div>
+            </div>
+
+            <div style={{ marginBottom: '16px' }}>
+              <div className="saas-tab-container hide-scrollbar" style={{ display: 'flex', flexWrap: 'nowrap', overflowX: 'auto', marginBottom: activeTab === 'retail' ? '12px' : '0px', width: '100%' }}>
+                <button onClick={() => { 
+                  setActiveTab('retail'); 
+                  setSelectedCustomerId(''); 
+                  setCustomerSearchTerm(''); 
+                  loadProductsAndSettings();
+                  loadBatches();
+                }} className={`saas-tab ${activeTab === 'retail' ? 'active' : ''}`} style={{ flex: 1, minWidth: '120px', textAlign: 'center' }}>
+                  {currentT.retail}
                 </button>
+                
+                <button onClick={() => { 
+                  setActiveTab('wholesale');
+                  if (!selectedCustomerId) {
+                    const walkInCust = customers.find(c => c.name.toLowerCase() === 'walk-in' || c.name.toLowerCase() === 'walk in');
+                    if (walkInCust) setSelectedCustomerId(walkInCust.id.toString());
+                  }
+                  loadProductsAndSettings();
+                  loadBatches();
+                }} className={`saas-tab ${activeTab === 'wholesale' ? 'active' : ''}`} style={{ flex: 1, minWidth: '120px', textAlign: 'center' }}>
+                  {currentT.wholesale}
+                </button>
+              </div>
+
+              {activeTab === 'retail' && (
+                <div className="saas-tab-container hide-scrollbar" style={{ flexWrap: 'nowrap', overflowX: 'auto', marginBottom: '0px', background: '#f1f5f9', border: 'none', boxShadow: 'none' }}>
+                  <button 
+                    onClick={() => setRetailSubTab('active')} 
+                    onDragOver={(e) => e.preventDefault()} 
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      const pid = Number(e.dataTransfer.getData('product_id'));
+                      if (pid) toggleProductActiveStatus(pid, 'active');
+                    }}
+                    className={`saas-tab ${retailSubTab === 'active' ? 'active' : ''}`}
+                    style={{ minWidth: 'max-content' }}
+                  >
+                    Active ({products.filter(p => parseFloat(String(p.weight)) < 50 && !hiddenRetailIds.includes(p.id)).length})
+                  </button>
+                  
+                  <button 
+                    onClick={() => setRetailSubTab('inactive')} 
+                    onDragOver={(e) => e.preventDefault()} 
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      const pid = Number(e.dataTransfer.getData('product_id'));
+                      if (pid) toggleProductActiveStatus(pid, 'inactive');
+                    }}
+                    className={`saas-tab ${retailSubTab === 'inactive' ? 'active' : ''}`}
+                    style={retailSubTab === 'inactive' ? { background: '#ef4444', color: '#fff', minWidth: 'max-content' } : { minWidth: 'max-content' }}
+                  >
+                    Non-Active ({products.filter(p => parseFloat(String(p.weight)) < 50 && hiddenRetailIds.includes(p.id)).length})
+                  </button>
+                </div>
               )}
             </div>
           </div>
+          {/* 🟢 END STICKY HEADER WRAPPER */}
 
           <div style={{ marginBottom: '24px' }}>
-            <div className="saas-tab-container hide-scrollbar" style={{ display: 'flex', flexWrap: 'nowrap', overflowX: 'auto', marginBottom: '16px', width: '100%' }}>
-              <button onClick={() => { 
-                setActiveTab('retail'); 
-                setSelectedCustomerId(''); 
-                setCustomerSearchTerm(''); 
-                loadProductsAndSettings();
-                loadBatches();
-              }} className={`saas-tab ${activeTab === 'retail' ? 'active' : ''}`} style={{ flex: 1, minWidth: '120px', textAlign: 'center' }}>
-                {currentT.retail}
-              </button>
-              
-              <button onClick={() => { 
-                setActiveTab('wholesale');
-                if (!selectedCustomerId) {
-                  const walkInCust = customers.find(c => c.name.toLowerCase() === 'walk-in' || c.name.toLowerCase() === 'walk in');
-                  if (walkInCust) setSelectedCustomerId(walkInCust.id.toString());
-                }
-                loadProductsAndSettings();
-                loadBatches();
-              }} className={`saas-tab ${activeTab === 'wholesale' ? 'active' : ''}`} style={{ flex: 1, minWidth: '120px', textAlign: 'center' }}>
-                {currentT.wholesale}
-              </button>
-            </div>
-
-            {/* 🟢 Active vs Non-Active Drag-and-Drop Sub-tabs for Retail View */}
-            {activeTab === 'retail' && (
-              <div className="saas-tab-container hide-scrollbar" style={{ flexWrap: 'nowrap', overflowX: 'auto', marginBottom: '16px', background: '#f1f5f9', border: 'none', boxShadow: 'none' }}>
-                <button 
-                  onClick={() => setRetailSubTab('active')} 
-                  onDragOver={(e) => e.preventDefault()} 
-                  onDrop={(e) => {
-                    e.preventDefault();
-                    const pid = Number(e.dataTransfer.getData('product_id'));
-                    if (pid) toggleProductActiveStatus(pid, 'active');
-                  }}
-                  className={`saas-tab ${retailSubTab === 'active' ? 'active' : ''}`}
-                  style={{ minWidth: 'max-content' }}
-                >
-                  Active ({products.filter(p => parseFloat(String(p.weight)) < 50 && !hiddenRetailIds.includes(p.id)).length})
-                </button>
-                
-                <button 
-                  onClick={() => setRetailSubTab('inactive')} 
-                  onDragOver={(e) => e.preventDefault()} 
-                  onDrop={(e) => {
-                    e.preventDefault();
-                    const pid = Number(e.dataTransfer.getData('product_id'));
-                    if (pid) toggleProductActiveStatus(pid, 'inactive');
-                  }}
-                  className={`saas-tab ${retailSubTab === 'inactive' ? 'active' : ''}`}
-                  style={retailSubTab === 'inactive' ? { background: '#ef4444', color: '#fff', minWidth: 'max-content' } : { minWidth: 'max-content' }}
-                >
-                  Non-Active ({products.filter(p => parseFloat(String(p.weight)) < 50 && hiddenRetailIds.includes(p.id)).length})
-                </button>
-              </div>
-            )}
-
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px', alignItems: 'flex-start', width: '100%' }}>
               
               {/* PRODUCT SEARCH */}
@@ -1621,7 +1640,6 @@ export default function POSPage() {
               const isSpecial = isReturn || isCharge || item.isSpecial;
 
               return (
-                /* 🟢 IMPROVEMENT 2: Sleek, Low-Profile Item Card (Removed tall uppercase labels) */
                 <div key={item.id} style={{ backgroundColor: isReturn ? '#fef2f2' : isCharge ? '#fffbeb' : '#ffffff', borderRadius: '10px', padding: '10px 12px', marginBottom: '8px', border: `1px solid ${isReturn ? '#fecaca' : isCharge ? '#fde68a' : '#e2e8f0'}`, position: 'relative' }}>
                   <button onClick={() => removeFromCart(item.id)} style={{ position: 'absolute', top: '8px', right: '8px', background: '#fee2e2', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: '11px', width: '22px', height: '22px', borderRadius: '50%', zIndex: 5, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>✕</button>
 
@@ -1669,7 +1687,6 @@ export default function POSPage() {
         </div>
         
         <div style={{ position: 'sticky', bottom: 0, paddingTop: '12px', paddingRight: '20px', paddingBottom: '16px', paddingLeft: '20px', borderTop: '1px solid #e2e8f0', backgroundColor: '#f8fafc', flexShrink: 0, zIndex: 10, boxShadow: '0 -4px 10px rgba(0,0,0,0.02)' }}>
-          {/* 🟢 IMPROVEMENT 1: Clean Dropdown Menu for Adjustments */}
           {renderCartAdjustmentsToolbar()}
 
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '4px' }}>
@@ -1735,7 +1752,6 @@ export default function POSPage() {
                 const isSpecial = isReturn || isCharge || item.isSpecial;
 
                 return (
-                  /* 🟢 IMPROVEMENT 2: Sleek, Low-Profile Item Card for Mobile */
                   <div key={item.id} style={{ backgroundColor: isReturn ? '#fef2f2' : isCharge ? '#fffbeb' : '#ffffff', borderRadius: '10px', padding: '10px 12px', marginBottom: '8px', border: `1px solid ${isReturn ? '#fecaca' : isCharge ? '#fde68a' : '#e2e8f0'}`, position: 'relative' }}>
                     <button onClick={() => removeFromCart(item.id)} style={{ position: 'absolute', top: '8px', right: '8px', background: '#fee2e2', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: '11px', width: '22px', height: '22px', borderRadius: '50%', zIndex: 5, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>✕</button>
                     
@@ -1768,7 +1784,6 @@ export default function POSPage() {
             </div>
             
             <div style={{ padding: '12px 20px calc(24px + env(safe-area-inset-bottom, 12px)) 20px', borderTop: '1px solid #e2e8f0', backgroundColor: '#f8fafc', boxShadow: '0 -4px 10px rgba(0,0,0,0.05)', flexShrink: 0 }}>
-              {/* 🟢 IMPROVEMENT 1: Clean Dropdown Menu for Adjustments */}
               {renderCartAdjustmentsToolbar()}
 
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
@@ -1887,10 +1902,10 @@ export default function POSPage() {
         </div>
       </Modal>
 
-      {/* 🟢 NEW: CART ADJUSTMENTS MODAL (Discount, Deposit, Bag Fee with Covered-by-Depot Toggle) */}
+      {/* 🟢 CART ADJUSTMENTS MODAL (Discount, Deposit, Bag Fee with Sleek White Bag Selector & Covered-by-Depot Toggle) */}
       <Modal 
         isOpen={adjustmentModal.isOpen} 
-        onClose={() => setAdjustmentModal({ isOpen: false, type: null, amount: '', qty: 1, note: '', isCoveredByDepot: false })} 
+        onClose={() => setAdjustmentModal({ isOpen: false, type: null, amount: '', qty: 1, note: '', isCoveredByDepot: false, selectedBagName: 'ថ្លៃបាវ ប្រ៊េន', isBagMenuOpen: false })} 
         title={
           adjustmentModal.type === 'discount' ? "Add Discount (បញ្ចុះតម្លៃ)" :
           adjustmentModal.type === 'deposit' ? "Add Deposit / Prepayment (កក់)" :
@@ -1899,7 +1914,129 @@ export default function POSPage() {
         icon={adjustmentModal.type === 'discount' ? "🏷️" : adjustmentModal.type === 'deposit' ? "💵" : "🛍️"} 
         maxWidth="400px"
       >
-        {/* Covered by Depot Checkbox Toggle for Bags */}
+        {/* 🟢 SLEEK WHITE BAG TYPE DROPDOWN TRAY (With Price & COGS Display) */}
+        {adjustmentModal.type === 'bag' && (() => {
+          const defaultBagProd = products.find(p => p.name === 'ថ្លៃបាវ ប្រ៊េន');
+          const defaultPrice = defaultBagProd ? Number(defaultBagProd.price || 2000) : 2000;
+          const defaultCogs = defaultBagProd ? Number(defaultBagProd.cost_price || 1200) : 1200;
+
+          return (
+            <div style={{ marginBottom: '16px', position: 'relative', zIndex: 50 }}>
+              <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '8px' }}>
+                Choose Bag Type (ប្រភេទបាវ)
+              </label>
+              
+              <div style={{ position: 'relative' }}>
+                {/* Trigger Button */}
+                <div
+                  className="interactive-select-trigger"
+                  onClick={() => setAdjustmentModal({ ...adjustmentModal, isBagMenuOpen: !adjustmentModal.isBagMenuOpen })}
+                  style={{
+                    width: '100%',
+                    padding: '10px 14px',
+                    fontSize: '14px',
+                    backgroundColor: '#ffffff',
+                    border: '1px solid #cbd5e1',
+                    borderRadius: '8px',
+                    color: '#0f172a',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    boxSizing: 'border-box',
+                    cursor: 'pointer',
+                    margin: 0
+                  }}
+                >
+                  <span>{adjustmentModal.selectedBagName || 'ថ្លៃបាវ ប្រ៊េន'}</span>
+                  <span style={{ fontSize: '12px', color: '#64748b' }}>{adjustmentModal.isBagMenuOpen ? '▲' : '▼'}</span>
+                </div>
+
+                {/* Pure White Dropdown Tray */}
+                {adjustmentModal.isBagMenuOpen && (
+                  <div
+                    style={{
+                      position: 'absolute',
+                      top: 'calc(100% + 4px)',
+                      left: 0,
+                      right: 0,
+                      backgroundColor: '#ffffff',
+                      border: '1px solid #cbd5e1',
+                      borderRadius: '8px',
+                      boxShadow: '0 10px 25px rgba(0, 0, 0, 0.15)',
+                      zIndex: 100,
+                      overflow: 'hidden',
+                      margin: 0
+                    }}
+                  >
+                    {/* Default Option with Price & COGS */}
+                    <div
+                      onMouseDown={(e) => {
+                        e.stopPropagation();
+                        setAdjustmentModal({
+                          ...adjustmentModal,
+                          selectedBagName: 'ថ្លៃបាវ ប្រ៊េន',
+                          amount: defaultPrice,
+                          isBagMenuOpen: false
+                        });
+                      }}
+                      style={{
+                        padding: '10px 14px',
+                        fontSize: '14px',
+                        color: '#0f172a',
+                        cursor: 'pointer',
+                        borderBottom: '1px solid #f1f5f9',
+                        backgroundColor: adjustmentModal.selectedBagName === 'ថ្លៃបាវ ប្រ៊េន' ? '#f8fafc' : '#ffffff',
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center'
+                      }}
+                    >
+                      <span>ថ្លៃបាវ ប្រ៊េន (Default)</span>
+                      <span style={{ fontSize: '12px', color: '#64748b' }}>
+                        Price: <b>{new Intl.NumberFormat('en-US').format(defaultPrice)} ៛</b> | COGS: <b>{new Intl.NumberFormat('en-US').format(defaultCogs)} ៛</b>
+                      </span>
+                    </div>
+
+                    {/* Filtered Bag Products from Database with Price & COGS */}
+                    {products
+                      .filter(p => p.name?.includes('បាវ') && p.name !== 'ថ្លៃបាវ ប្រ៊េន')
+                      .map(p => (
+                        <div
+                          key={p.id}
+                          onMouseDown={(e) => {
+                            e.stopPropagation();
+                            setAdjustmentModal({
+                              ...adjustmentModal,
+                              selectedBagName: p.name,
+                              amount: Number(p.price || 0),
+                              isBagMenuOpen: false
+                            });
+                          }}
+                          style={{
+                            padding: '10px 14px',
+                            fontSize: '14px',
+                            color: '#0f172a',
+                            cursor: 'pointer',
+                            borderBottom: '1px solid #f1f5f9',
+                            backgroundColor: adjustmentModal.selectedBagName === p.name ? '#f8fafc' : '#ffffff',
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center'
+                          }}
+                        >
+                          <span>{p.name}</span>
+                          <span style={{ fontSize: '12px', color: '#64748b' }}>
+                            Price: <b>{new Intl.NumberFormat('en-US').format(Number(p.price || 0))} ៛</b> | COGS: <b>{new Intl.NumberFormat('en-US').format(Number(p.cost_price || 0))} ៛</b>
+                          </span>
+                        </div>
+                      ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })()}
+        {/* 🟢 2. COVERED BY DEPOT CHECKBOX TOGGLE */}
         {adjustmentModal.type === 'bag' && (
           <div style={{ marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
             <input
@@ -1915,7 +2052,7 @@ export default function POSPage() {
           </div>
         )}
 
-        {/* Amount Input (Hidden automatically when bag is covered by depot) */}
+        {/* 3. AMOUNT INPUT (Hidden automatically when bag is covered by depot) */}
         {!adjustmentModal.isCoveredByDepot && (
           <div style={{ marginBottom: '16px' }}>
             <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '8px' }}>Amount / Price (៛)</label>
@@ -1929,6 +2066,7 @@ export default function POSPage() {
           </div>
         )}
 
+        {/* 4. QUANTITY INPUT */}
         {adjustmentModal.type === 'bag' && (
           <div style={{ marginBottom: '16px' }}>
             <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '8px' }}>Quantity</label>
@@ -1941,6 +2079,7 @@ export default function POSPage() {
           </div>
         )}
 
+        {/* 5. OPTIONAL NOTE */}
         <div style={{ marginBottom: '24px' }}>
           <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '8px' }}>Optional Note / Description</label>
           <input
@@ -1957,12 +2096,12 @@ export default function POSPage() {
         </div>
 
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
-          <button onClick={() => setAdjustmentModal({ isOpen: false, type: null, amount: '', qty: 1, note: '', isCoveredByDepot: false })} className="saas-btn saas-btn-secondary">Cancel</button>
+          <button onClick={() => setAdjustmentModal({ isOpen: false, type: null, amount: '', qty: 1, note: '', isCoveredByDepot: false, selectedBagName: 'ថ្លៃបាវ ប្រ៊េន', isBagMenuOpen: false })} className="saas-btn saas-btn-secondary">Cancel</button>
           <button onClick={handleAddCartAdjustment} className="saas-btn saas-btn-primary">Add to Cart</button>
         </div>
       </Modal>
 
-      {/* 🟢 TOP-DOCKED MOBILE PRODUCT ADD POPUP (Exact 13-Hours-Ago Stable Dock + Keypad Auto-Submit) */}
+      {/* TOP-DOCKED MOBILE PRODUCT ADD POPUP */}
       {!!selectedMobileProduct && typeof document !== 'undefined' && createPortal(
         <div 
           style={{
@@ -2006,7 +2145,6 @@ export default function POSPage() {
               setTimeout(() => window.scrollTo(0, 0), 300);
             }}
           >
-            {/* ✨ Compact Emoji Header */}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                 <div style={{
@@ -2035,7 +2173,6 @@ export default function POSPage() {
               </button>
             </div>
 
-            {/* Product Identifier Input */}
             <div style={{ marginBottom: '14px' }}>
               <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', fontWeight: 'normal', marginBottom: '6px' }}>
                 Product Identifier
@@ -2054,7 +2191,6 @@ export default function POSPage() {
               />
             </div>
 
-            {/* Quantity & Price Side-by-Side */}
             <div style={{ display: 'flex', gap: '12px', marginBottom: '18px' }}>
               <div style={{ flex: 1 }}>
                 <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', fontWeight: 'normal', marginBottom: '6px' }}>
@@ -2080,7 +2216,6 @@ export default function POSPage() {
                 <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', fontWeight: 'normal', marginBottom: '6px' }}>
                   Price (៛)
                 </label>
-                {/* 🔥 AUTO-ADD TO CART ON KEYPAD TICK / DONE / ENTER */}
                 <CurrencyInput 
                   enterKeyHint="done"
                   value={mobilePrice} 
@@ -2105,7 +2240,6 @@ export default function POSPage() {
               </div>
             </div>
 
-            {/* Action Buttons */}
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
               <button 
                 onClick={() => setSelectedMobileProduct(null)} 
@@ -2127,7 +2261,7 @@ export default function POSPage() {
         document.body
       )}
 
-      {/* 💰 SALE SUMMARY MODAL */}
+      {/* SALE SUMMARY MODAL */}
       <Modal isOpen={!!saleSummary} onClose={() => { setSaleSummary(null); setCompletedSale(null); }} title={saleSummary?.isCashless ? 'Sale Recorded! ✅' : saleSummary?.isDebt ? 'Partial Payment Logged ⏳' : 'Sale Complete! ✅'} icon={saleSummary?.isDebt ? "⏳" : "💰"} maxWidth="400px">
         {saleSummary?.change ? (
           saleSummary.change > 0 && (
@@ -2367,6 +2501,18 @@ export default function POSPage() {
         @keyframes posPopupSlideDown {
           from { opacity: 0; transform: translateY(-12px); }
           to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* 🟢 STICKY HEADER CSS FOR FREEZING TITLE AND MAIN TABS */
+        .pos-sticky-header {
+          position: sticky;
+          top: 0;
+          z-index: 40;
+          background-color: #f8fafc;
+          padding-top: max(8px, env(safe-area-inset-top, 8px));
+          padding-bottom: 4px;
+          margin-bottom: 8px;
+          box-shadow: 0 4px 6px -1px rgba(248, 250, 252, 0.9);
         }
 
         /* 🔥 BULLETPROOF GLOBAL OVERRIDE FOR MOBILE TABS 🔥 */
