@@ -146,7 +146,7 @@ export default function POSPage() {
   const [mobileQty, setMobileQty] = useState<number | ''>('')
   const [mobileName, setMobileName] = useState<string>('')
   const mobileQtyRef = useRef<any>(null)
-  const mobilePriceRef = useRef<any>(null) // 🟢 Ref to jump focus from Qty to Price
+  const mobilePriceRef = useRef<any>(null) // 🟢 Ref to move focus from Qty to Price
 
   const [exchangeModal, setExchangeModal] = useState<{ isOpen: boolean, product: Product | null, consumedKg: string | number }>({
     isOpen: false, product: null, consumedKg: ''
@@ -2510,29 +2510,46 @@ export default function POSPage() {
           to { opacity: 1; transform: scale(1); }
         }
 
-        /* 🔥 BULLETPROOF SAFARI DEAD-CENTER FOR ALL MODALS & DIALOGS */
+        /* 🔥 FORCE ALL MODAL BACKDROPS & OVERLAYS TO DEAD-CENTER (Wipes out UI library top padding & flex-start) */
         [role="dialog"],
+        [role="alert"],
         div[class*="modal" i],
         div[class*="Modal" i],
         div[class*="backdrop" i],
-        div[class*="overlay" i] {
-          position: fixed !important;
-          inset: 0 !important;
-          display: grid !important;
-          place-items: center !important;
+        div[class*="overlay" i],
+        div[class*="Dialog" i],
+        div[class*="dialog" i],
+        div[style*="z-index"][style*="fixed"],
+        div[class*="fixed"][class*="inset-0"],
+        div[class*="fixed"][class*="z-"] {
+          display: flex !important;
+          align-items: center !important;
+          justify-content: center !important;
           padding: 16px !important;
           height: 100dvh !important;
           max-height: 100dvh !important;
           box-sizing: border-box !important;
         }
 
-        /* Reset rogue top/bottom margins from UI libraries that push cards off-center */
+        /* 🔥 WIPE OUT ROGUE TOP MARGINS / OFFSETS ON INNER MODAL CARDS */
         [role="dialog"] > div,
+        [role="alert"] > div,
         div[class*="modal" i] > div,
         div[class*="Modal" i] > div,
         div[class*="backdrop" i] > div,
-        div[class*="overlay" i] > div {
+        div[class*="overlay" i] > div,
+        div[class*="Dialog" i] > div,
+        div[class*="dialog" i] > div,
+        div[style*="z-index"][style*="fixed"] > div,
+        div[class*="fixed"][class*="inset-0"] > div,
+        div[class*="fixed"][class*="z-"] > div {
           margin: auto !important;
+          align-self: center !important;
+          top: auto !important;
+          bottom: auto !important;
+          transform: none !important;
+          max-height: 88dvh !important;
+          overflow-y: auto !important;
         }
 
         /* 🟢 STICKY HEADER CSS FOR FREEZING TITLE AND MAIN TABS */
