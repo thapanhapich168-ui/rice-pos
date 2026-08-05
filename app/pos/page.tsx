@@ -145,6 +145,7 @@ export default function POSPage() {
   const [mobilePrice, setMobilePrice] = useState<number | ''>('')
   const [mobileQty, setMobileQty] = useState<number | ''>('')
   const [mobileName, setMobileName] = useState<string>('')
+  const mobileQtyRef = useRef<any>(null) // 🟢 ADDED FOR AUTO-FOCUS
 
   const [exchangeModal, setExchangeModal] = useState<{ isOpen: boolean, product: Product | null, consumedKg: string | number }>({
     isOpen: false, product: null, consumedKg: ''
@@ -447,6 +448,10 @@ export default function POSPage() {
       setMobileName(product.name);
       setMobilePrice(activeTab === 'wholesale' ? 0 : Number(product.price));
       setMobileQty(defaultQty);
+      // 🟢 AUTO-FOCUS QUANTITY INPUT TO INSTANTLY OPEN KEYBOARD
+      setTimeout(() => {
+        mobileQtyRef.current?.focus();
+      }, 50);
     } else {
       addToCartDirect(product, defaultQty);
     }
@@ -1777,7 +1782,9 @@ export default function POSPage() {
             alignItems: 'flex-start',
             paddingTop: '16px', // 🟢 Option 1's 16px top dock
             paddingLeft: '16px',
-            paddingRight: '16px'
+            paddingRight: '16px',
+            overflow: 'hidden', // 🟢 Stops Safari from nudging the backdrop
+            height: '100%'      // 🟢 Locks container height against iOS URL-bar shifts
           }}
           onMouseDown={(e) => {
             if (e.target === e.currentTarget) setSelectedMobileProduct(null);
@@ -1794,11 +1801,13 @@ export default function POSPage() {
               border: '1px solid #e2e8f0',
               animation: 'posPopupSlideDown 0.15s ease-out'
             }}
+            // 🟢 Multi-stage clamp locks scroll across Safari's entire 250ms keyboard animation
             onFocusCapture={() => {
-              setTimeout(() => {
-                window.scrollTo(0, 0);
-                document.body.scrollTop = 0;
-              }, 30);
+              window.scrollTo(0, 0);
+              setTimeout(() => window.scrollTo(0, 0), 30);
+              setTimeout(() => window.scrollTo(0, 0), 100);
+              setTimeout(() => window.scrollTo(0, 0), 200);
+              setTimeout(() => window.scrollTo(0, 0), 300);
             }}
           >
             {/* ✨ Compact Emoji Header (Regular font, no subtitle) */}
@@ -1856,6 +1865,8 @@ export default function POSPage() {
                   Quantity
                 </label>
                 <CurrencyInput 
+                  ref={mobileQtyRef}
+                  autoFocus
                   value={mobileQty} 
                   onChange={(v: any) => setMobileQty(v)} 
                   className="saas-input" 
