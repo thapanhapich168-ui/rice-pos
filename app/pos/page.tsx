@@ -1766,7 +1766,7 @@ export default function POSPage() {
         </div>
       </Modal>
 
-      {/* 🟢 TOP-DOCKED MOBILE PRODUCT ADD POPUP (13-Hours-Ago Stable Dock + Keypad Auto-Submit) */}
+      {/* 🟢 TOP-DOCKED MOBILE PRODUCT ADD POPUP */}
       {!!selectedMobileProduct && typeof document !== 'undefined' && createPortal(
         <div 
           style={{
@@ -1776,11 +1776,11 @@ export default function POSPage() {
             right: 0,
             bottom: 0,
             backgroundColor: 'rgba(0, 0, 0, 0.5)',
-            zIndex: 2147483647, // 🟢 Overrides burger menu on iPhone Safari
+            zIndex: 2147483647,
             display: 'flex',
             justifyContent: 'center',
             alignItems: 'flex-start',
-            paddingTop: '16px', // 🟢 13-hours-ago exact 16px top dock
+            paddingTop: '16px',
             paddingLeft: '16px',
             paddingRight: '16px'
           }}
@@ -1788,23 +1788,17 @@ export default function POSPage() {
             if (e.target === e.currentTarget) setSelectedMobileProduct(null);
           }}
         >
+          {/* 🔥 REMOVED onFocusCapture HERE SO SWITCHING INPUTS NEVER JUMPS */}
           <div 
             style={{
               backgroundColor: '#ffffff',
               borderRadius: '16px',
-              padding: '16px 20px', // 🟢 13-hours-ago exact compact padding
+              padding: '16px 20px',
               width: '100%',
               maxWidth: '400px',
               boxShadow: '0 20px 40px rgba(0,0,0,0.2)',
               border: '1px solid #e2e8f0',
               animation: 'posPopupSlideDown 0.15s ease-out'
-            }}
-            // 🟢 13-hours-ago exact single-reset (No multi-stage timer fighting Safari)
-            onFocusCapture={() => {
-              setTimeout(() => {
-                window.scrollTo(0, 0);
-                document.body.scrollTop = 0;
-              }, 30);
             }}
           >
             {/* ✨ Compact Emoji Header */}
@@ -1881,7 +1875,6 @@ export default function POSPage() {
                 <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', fontWeight: 'normal', marginBottom: '8px' }}>
                   Price (៛)
                 </label>
-                {/* 🔥 AUTO-ADD TO CART ON KEYPAD TICK / DONE / ENTER */}
                 <CurrencyInput 
                   enterKeyHint="done"
                   value={mobilePrice} 
