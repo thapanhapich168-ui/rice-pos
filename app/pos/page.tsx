@@ -1788,18 +1788,22 @@ export default function POSPage() {
             if (e.target === e.currentTarget) setSelectedMobileProduct(null);
           }}
         >
-          <div 
+          <form 
+            onSubmit={(e) => {
+              e.preventDefault();
+              handleAddMobileProductToCart();
+            }}
             style={{
               backgroundColor: '#ffffff',
               borderRadius: '16px',
-              padding: '14px 18px', // 🟢 Exact 13-hours-ago compact padding
+              padding: '14px 18px',
               width: '100%',
               maxWidth: '400px',
               boxShadow: '0 20px 40px rgba(0,0,0,0.2)',
               border: '1px solid #e2e8f0',
               animation: 'posPopupSlideDown 0.15s ease-out'
             }}
-            // 🟢 Exact 13-hours-ago multi-stage clamp that kept your screen 100% still
+            // 🟢 Correctly placed here as a form prop
             onFocusCapture={() => {
               window.scrollTo(0, 0);
               setTimeout(() => window.scrollTo(0, 0), 50);
@@ -1923,7 +1927,7 @@ export default function POSPage() {
                 {currentT.add}
               </button>
             </div>
-          </div>
+          </form>
         </div>,
         document.body
       )}
