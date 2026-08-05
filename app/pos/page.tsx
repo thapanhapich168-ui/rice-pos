@@ -1766,7 +1766,7 @@ export default function POSPage() {
         </div>
       </Modal>
 
-      {/* 🟢 TOP-DOCKED MOBILE PRODUCT ADD POPUP (Rock-Solid Top Dock, Zero Scroll-Yank) */}
+      {/* 🟢 TOP-DOCKED MOBILE PRODUCT ADD POPUP (13-Hours-Ago Stable Dock + Keypad Auto-Submit) */}
       {!!selectedMobileProduct && typeof document !== 'undefined' && createPortal(
         <div 
           style={{
@@ -1780,7 +1780,7 @@ export default function POSPage() {
             display: 'flex',
             justifyContent: 'center',
             alignItems: 'flex-start',
-            paddingTop: '16px', // 🟢 16px top dock keeps inputs above Safari's keyboard zone
+            paddingTop: '16px', // 🟢 13-hours-ago exact 16px top dock
             paddingLeft: '16px',
             paddingRight: '16px'
           }}
@@ -1792,12 +1792,19 @@ export default function POSPage() {
             style={{
               backgroundColor: '#ffffff',
               borderRadius: '16px',
-              padding: '16px 20px',
+              padding: '16px 20px', // 🟢 13-hours-ago exact compact padding
               width: '100%',
               maxWidth: '400px',
               boxShadow: '0 20px 40px rgba(0,0,0,0.2)',
               border: '1px solid #e2e8f0',
               animation: 'posPopupSlideDown 0.15s ease-out'
+            }}
+            // 🟢 13-hours-ago exact single-reset (No multi-stage timer fighting Safari)
+            onFocusCapture={() => {
+              setTimeout(() => {
+                window.scrollTo(0, 0);
+                document.body.scrollTop = 0;
+              }, 30);
             }}
           >
             {/* ✨ Compact Emoji Header */}
@@ -1857,6 +1864,7 @@ export default function POSPage() {
                 <CurrencyInput 
                   ref={mobileQtyRef}
                   autoFocus={true}
+                  enterKeyHint="next"
                   value={mobileQty} 
                   onChange={(v: any) => setMobileQty(v)} 
                   className="saas-input" 
@@ -1873,9 +1881,18 @@ export default function POSPage() {
                 <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', fontWeight: 'normal', marginBottom: '8px' }}>
                   Price (៛)
                 </label>
+                {/* 🔥 AUTO-ADD TO CART ON KEYPAD TICK / DONE / ENTER */}
                 <CurrencyInput 
+                  enterKeyHint="done"
                   value={mobilePrice} 
                   onChange={(v: any) => setMobilePrice(v)} 
+                  onKeyDown={(e: any) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      e.currentTarget?.blur();
+                      handleAddMobileProductToCart();
+                    }
+                  }}
                   className="saas-input" 
                   style={{ 
                     width: '100%', 
