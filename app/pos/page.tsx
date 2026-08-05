@@ -2115,9 +2115,9 @@ export default function POSPage() {
             zIndex: 2147483647,
             display: 'flex',
             justifyContent: 'center',
-            alignItems: 'center', // 🟢 Floats centered horizontally & vertically
+            alignItems: 'center', // 🟢 PRO STANDARD: Floats centered horizontally & vertically
             padding: '16px',
-            paddingBottom: '15dvh' // 🟢 Safe offset so iOS keyboard never hides the buttons
+            paddingBottom: '12dvh' // 🟢 Safe offset so iOS keyboard never hides the buttons
           }}
           onMouseDown={(e) => {
             if (e.target === e.currentTarget) setSelectedMobileProduct(null);
@@ -2136,13 +2136,7 @@ export default function POSPage() {
               maxWidth: '400px',
               boxShadow: '0 20px 40px rgba(0,0,0,0.25)',
               border: '1px solid #e2e8f0',
-              animation: 'posPopupSlideDown 0.15s ease-out'
-            }}
-            onFocusCapture={() => {
-              window.scrollTo(0, 0);
-              setTimeout(() => window.scrollTo(0, 0), 50);
-              setTimeout(() => window.scrollTo(0, 0), 150);
-              setTimeout(() => window.scrollTo(0, 0), 300);
+              animation: 'posPopupFadeScale 0.15s ease-out'
             }}
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
@@ -2511,12 +2505,12 @@ export default function POSPage() {
           font-variant-numeric: tabular-nums lining-nums;
         }
 
-        @keyframes posPopupSlideDown {
-          from { opacity: 0; transform: translateY(-12px); }
-          to { opacity: 1; transform: translateY(0); }
+        @keyframes posPopupFadeScale {
+          from { opacity: 0; transform: scale(0.96); }
+          to { opacity: 1; transform: scale(1); }
         }
 
-        /* 🟢 FORCE VERTICAL & HORIZONTAL MIDDLE-CENTER FOR ALL MODALS, TOASTS & NOTIFICATIONS */
+        /* 🟢 FORCE VERTICAL & HORIZONTAL DEAD-CENTER FOR ALL MODALS, TOASTS & NOTIFICATIONS */
         [role="dialog"],
         [role="alert"],
         div[class*="modal" i],
