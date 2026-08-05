@@ -146,7 +146,7 @@ export default function POSPage() {
   const [mobileQty, setMobileQty] = useState<number | ''>('')
   const [mobileName, setMobileName] = useState<string>('')
   const mobileQtyRef = useRef<any>(null)
-  const mobilePriceRef = useRef<any>(null) // 🟢 Ref to move focus from Qty to Price
+  const mobilePriceRef = useRef<any>(null) // 🟢 Ref to jump focus from Qty to Price
 
   const [exchangeModal, setExchangeModal] = useState<{ isOpen: boolean, product: Product | null, consumedKg: string | number }>({
     isOpen: false, product: null, consumedKg: ''
@@ -2115,9 +2115,9 @@ export default function POSPage() {
             zIndex: 2147483647,
             display: 'flex',
             justifyContent: 'center',
-            alignItems: 'center', // 🟢 PRO STANDARD: Floats centered horizontally & vertically
+            alignItems: 'center', // 🟢 Floats centered horizontally & vertically
             padding: '16px',
-            paddingBottom: '12dvh' // 🟢 Safe offset so iOS keyboard never hides the buttons
+            paddingBottom: '15dvh' // 🟢 Safe offset so iOS keyboard never hides the buttons
           }}
           onMouseDown={(e) => {
             if (e.target === e.currentTarget) setSelectedMobileProduct(null);
@@ -2510,20 +2510,29 @@ export default function POSPage() {
           to { opacity: 1; transform: scale(1); }
         }
 
-        /* 🟢 FORCE VERTICAL & HORIZONTAL DEAD-CENTER FOR ALL MODALS, TOASTS & NOTIFICATIONS */
+        /* 🔥 BULLETPROOF SAFARI DEAD-CENTER FOR ALL MODALS & DIALOGS */
         [role="dialog"],
-        [role="alert"],
         div[class*="modal" i],
         div[class*="Modal" i],
         div[class*="backdrop" i],
-        div[class*="overlay" i],
-        div[class*="toast" i],
-        div[class*="Toast" i],
-        div[class*="notification" i],
-        div[class*="Notification" i] {
-          display: flex !important;
-          align-items: center !important;
-          justify-content: center !important;
+        div[class*="overlay" i] {
+          position: fixed !important;
+          inset: 0 !important;
+          display: grid !important;
+          place-items: center !important;
+          padding: 16px !important;
+          height: 100dvh !important;
+          max-height: 100dvh !important;
+          box-sizing: border-box !important;
+        }
+
+        /* Reset rogue top/bottom margins from UI libraries that push cards off-center */
+        [role="dialog"] > div,
+        div[class*="modal" i] > div,
+        div[class*="Modal" i] > div,
+        div[class*="backdrop" i] > div,
+        div[class*="overlay" i] > div {
+          margin: auto !important;
         }
 
         /* 🟢 STICKY HEADER CSS FOR FREEZING TITLE AND MAIN TABS */
