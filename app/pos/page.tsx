@@ -1766,7 +1766,7 @@ export default function POSPage() {
         </div>
       </Modal>
 
-      {/* 🟢 TOP-DOCKED MOBILE PRODUCT ADD POPUP (Zero-Nudge Scroll Lock + Portal + Regular Fonts) */}
+      {/* 🟢 TOP-DOCKED MOBILE PRODUCT ADD POPUP (Rock-Solid Top Dock, Zero Scroll-Yank) */}
       {!!selectedMobileProduct && typeof document !== 'undefined' && createPortal(
         <div 
           style={{
@@ -1780,11 +1780,9 @@ export default function POSPage() {
             display: 'flex',
             justifyContent: 'center',
             alignItems: 'flex-start',
-            paddingTop: '16px',
+            paddingTop: '16px', // 🟢 16px top dock keeps inputs above Safari's keyboard zone
             paddingLeft: '16px',
-            paddingRight: '16px',
-            overflow: 'hidden',           // 🔥 Prevents Safari viewport nudge
-            overscrollBehavior: 'none'    // 🔥 Freezes iOS elastic scroll
+            paddingRight: '16px'
           }}
           onMouseDown={(e) => {
             if (e.target === e.currentTarget) setSelectedMobileProduct(null);
@@ -1800,19 +1798,6 @@ export default function POSPage() {
               boxShadow: '0 20px 40px rgba(0,0,0,0.2)',
               border: '1px solid #e2e8f0',
               animation: 'posPopupSlideDown 0.15s ease-out'
-            }}
-            // 🔥 5-stage lock freezes screen across Safari's entire 250ms keyboard animation
-            onFocusCapture={() => {
-              const lockScroll = () => {
-                window.scrollTo(0, 0);
-                if (document.body) document.body.scrollTop = 0;
-                if (document.documentElement) document.documentElement.scrollTop = 0;
-              };
-              lockScroll();
-              setTimeout(lockScroll, 30);
-              setTimeout(lockScroll, 100);
-              setTimeout(lockScroll, 200);
-              setTimeout(lockScroll, 300);
             }}
           >
             {/* ✨ Compact Emoji Header */}
