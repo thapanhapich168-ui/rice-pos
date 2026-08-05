@@ -146,6 +146,7 @@ export default function POSPage() {
   const [mobileQty, setMobileQty] = useState<number | ''>('')
   const [mobileName, setMobileName] = useState<string>('')
   const mobileQtyRef = useRef<any>(null)
+  const mobilePriceRef = useRef<any>(null) // 🟢 Ref to move focus from Qty to Price
 
   const [exchangeModal, setExchangeModal] = useState<{ isOpen: boolean, product: Product | null, consumedKg: string | number }>({
     isOpen: false, product: null, consumedKg: ''
@@ -2101,7 +2102,7 @@ export default function POSPage() {
         </div>
       </Modal>
 
-      {/* TOP-DOCKED MOBILE PRODUCT ADD POPUP */}
+      {/* TOP-DOCKED MOBILE PRODUCT ADD POPUP (Pro POS Standard: Vertically Centered + Keyboard Safe + Regular Font Weights) */}
       {!!selectedMobileProduct && typeof document !== 'undefined' && createPortal(
         <div 
           style={{
@@ -2114,10 +2115,9 @@ export default function POSPage() {
             zIndex: 2147483647,
             display: 'flex',
             justifyContent: 'center',
-            alignItems: 'flex-start',
-            paddingTop: '10px',
-            paddingLeft: '16px',
-            paddingRight: '16px'
+            alignItems: 'center', // 🟢 Floats centered horizontally & vertically
+            padding: '16px',
+            paddingBottom: '15dvh' // 🟢 Safe offset so iOS keyboard never hides the buttons
           }}
           onMouseDown={(e) => {
             if (e.target === e.currentTarget) setSelectedMobileProduct(null);
@@ -2131,10 +2131,10 @@ export default function POSPage() {
             style={{
               backgroundColor: '#ffffff',
               borderRadius: '16px',
-              padding: '14px 18px',
+              padding: '16px 20px',
               width: '100%',
               maxWidth: '400px',
-              boxShadow: '0 20px 40px rgba(0,0,0,0.2)',
+              boxShadow: '0 20px 40px rgba(0,0,0,0.25)',
               border: '1px solid #e2e8f0',
               animation: 'posPopupSlideDown 0.15s ease-out'
             }}
@@ -2148,15 +2148,15 @@ export default function POSPage() {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                 <div style={{
-                  width: '30px',
-                  height: '30px',
+                  width: '32px',
+                  height: '32px',
                   borderRadius: '8px',
                   backgroundColor: '#fef3c7',
                   border: '1px solid #fde68a',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  fontSize: '15px',
+                  fontSize: '16px',
                   flexShrink: 0
                 }}>
                   ✏️
@@ -2166,15 +2166,16 @@ export default function POSPage() {
                 </h3>
               </div>
               <button 
+                type="button"
                 onClick={() => setSelectedMobileProduct(null)} 
-                style={{ background: 'none', border: 'none', fontSize: '18px', color: '#64748b', cursor: 'pointer', fontWeight: 'normal' }}
+                style={{ background: 'none', border: 'none', fontSize: '20px', color: '#64748b', cursor: 'pointer', fontWeight: 'normal', padding: '4px' }}
               >
                 ✕
               </button>
             </div>
 
             <div style={{ marginBottom: '14px' }}>
-              <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', fontWeight: 'normal', marginBottom: '6px' }}>
+              <label className="saas-card-title" style={{ display: 'block', fontSize: '12px', fontWeight: 'normal', marginBottom: '6px', color: '#475569' }}>
                 Product Identifier
               </label>
               <input 
@@ -2191,18 +2192,26 @@ export default function POSPage() {
               />
             </div>
 
-            <div style={{ display: 'flex', gap: '12px', marginBottom: '18px' }}>
+            <div style={{ display: 'flex', gap: '12px', marginBottom: '20px' }}>
               <div style={{ flex: 1 }}>
-                <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', fontWeight: 'normal', marginBottom: '6px' }}>
+                <label className="saas-card-title" style={{ display: 'block', fontSize: '12px', fontWeight: 'normal', marginBottom: '6px', color: '#475569' }}>
                   Quantity
                 </label>
-                <CurrencyInput 
+                {/* 🟢 Enter key jumps to Price input */}
+                <input 
                   ref={mobileQtyRef}
+                  type="number"
                   autoFocus={true}
                   enterKeyHint="next"
                   value={mobileQty} 
-                  onChange={(v: any) => setMobileQty(v)} 
-                  className="saas-input" 
+                  onChange={(e) => setMobileQty(e.target.value === '' ? '' : Number(e.target.value))} 
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      mobilePriceRef.current?.focus();
+                    }
+                  }}
+                  className="saas-input no-spinners" 
                   style={{ 
                     width: '100%', 
                     boxSizing: 'border-box', 
@@ -2213,21 +2222,24 @@ export default function POSPage() {
                 />
               </div>
               <div style={{ flex: 1 }}>
-                <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', fontWeight: 'normal', marginBottom: '6px' }}>
+                <label className="saas-card-title" style={{ display: 'block', fontSize: '12px', fontWeight: 'normal', marginBottom: '6px', color: '#475569' }}>
                   Price (៛)
                 </label>
-                <CurrencyInput 
+                {/* 🟢 Enter key submits cart item */}
+                <input 
+                  ref={mobilePriceRef}
+                  type="number"
                   enterKeyHint="done"
                   value={mobilePrice} 
-                  onChange={(v: any) => setMobilePrice(v)} 
-                  onKeyDown={(e: any) => {
+                  onChange={(e) => setMobilePrice(e.target.value === '' ? '' : Number(e.target.value))} 
+                  onKeyDown={(e) => {
                     if (e.key === 'Enter') {
                       e.preventDefault();
                       e.currentTarget?.blur();
                       handleAddMobileProductToCart();
                     }
                   }}
-                  className="saas-input" 
+                  className="saas-input no-spinners" 
                   style={{ 
                     width: '100%', 
                     boxSizing: 'border-box', 
@@ -2242,16 +2254,17 @@ export default function POSPage() {
 
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
               <button 
+                type="button"
                 onClick={() => setSelectedMobileProduct(null)} 
                 className="saas-btn saas-btn-secondary"
-                style={{ fontWeight: 'normal' }}
+                style={{ fontWeight: 'normal', flex: 1, padding: '12px' }}
               >
                 {currentT.cancel}
               </button>
               <button 
-                onClick={handleAddMobileProductToCart} 
+                type="submit"
                 className="saas-btn saas-btn-primary"
-                style={{ fontWeight: 'normal' }}
+                style={{ fontWeight: 'normal', flex: 1, padding: '12px' }}
               >
                 {currentT.add}
               </button>
@@ -2501,6 +2514,22 @@ export default function POSPage() {
         @keyframes posPopupSlideDown {
           from { opacity: 0; transform: translateY(-12px); }
           to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* 🟢 FORCE VERTICAL & HORIZONTAL MIDDLE-CENTER FOR ALL MODALS, TOASTS & NOTIFICATIONS */
+        [role="dialog"],
+        [role="alert"],
+        div[class*="modal" i],
+        div[class*="Modal" i],
+        div[class*="backdrop" i],
+        div[class*="overlay" i],
+        div[class*="toast" i],
+        div[class*="Toast" i],
+        div[class*="notification" i],
+        div[class*="Notification" i] {
+          display: flex !important;
+          align-items: center !important;
+          justify-content: center !important;
         }
 
         /* 🟢 STICKY HEADER CSS FOR FREEZING TITLE AND MAIN TABS */
