@@ -2509,10 +2509,10 @@ export default function POSPage() {
           top: 0;
           z-index: 40;
           background-color: #f8fafc;
-          padding-top: max(8px, env(safe-area-inset-top, 8px));
-          padding-bottom: 4px;
+          padding-top: max(20px, env(safe-area-inset-top, 20px));
+          padding-bottom: 8px;
           margin-bottom: 8px;
-          box-shadow: 0 4px 6px -1px rgba(248, 250, 252, 0.9);
+          box-shadow: 0 4px 10px -2px rgba(248, 250, 252, 1);
         }
 
         /* 🔥 BULLETPROOF GLOBAL OVERRIDE FOR MOBILE TABS 🔥 */
@@ -2531,7 +2531,7 @@ export default function POSPage() {
         }
 
         .main-wrapper { 
-          padding: max(20px, env(safe-area-inset-top, 20px)) 24px 24px 24px; 
+          padding: 0 24px 24px 24px; 
           font-family: Arial, sans-serif; 
           box-sizing: border-box; 
           width: 100%;
@@ -2584,7 +2584,7 @@ export default function POSPage() {
           .desktop-cart-panel { display: none !important; }
           
           .main-wrapper { 
-            padding: max(20px, env(safe-area-inset-top, 20px)) 16px 140px 16px !important; 
+            padding: 0 16px 140px 16px !important; 
           }
           
           .header-container { 
