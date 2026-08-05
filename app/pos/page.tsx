@@ -151,7 +151,7 @@ export default function POSPage() {
     isOpen: false, product: null, consumedKg: ''
   })
   
-  // 🟢 NEW: Cart Adjustments Modal State with white dropdown tray tracker
+  // 🟢 Cart Adjustments Modal State with white dropdown tray tracker
   const [adjustmentModal, setAdjustmentModal] = useState<{
     isOpen: boolean,
     type: 'discount' | 'deposit' | 'bag' | null,
@@ -1363,7 +1363,7 @@ export default function POSPage() {
             💵 Deposit / Prepayment (កក់)
           </button>
           <button 
-            onClick={() => { setAdjustmentModal({ isOpen: true, type: 'bag', amount: 1200, qty: 1, note: '', isCoveredByDepot: false, selectedBagName: 'ថ្លៃបាវ ប្រ៊េន', isBagMenuOpen: false }); setShowAdjustmentMenu(false); }} 
+            onClick={() => { setAdjustmentModal({ isOpen: true, type: 'bag', amount: 2000, qty: 1, note: '', isCoveredByDepot: false, selectedBagName: 'ថ្លៃបាវ ប្រ៊េន', isBagMenuOpen: false }); setShowAdjustmentMenu(false); }} 
             style={{ width: '100%', padding: '10px 14px', textAlign: 'left', background: 'none', border: 'none', fontSize: '13px', color: '#334155', cursor: 'pointer', display: 'block' }}
           >
             🛍️ Bag Fee (ថ្លៃបាវ)
