@@ -31,6 +31,7 @@ export default function InvoiceGallery() {
 
   const [invoices, setInvoices] = useState<Invoice[]>([])
   const [isLoading, setIsLoading] = useState<boolean>(true)
+  const [isProcessing, setIsProcessing] = useState<boolean>(false)
   const [isDeviceMobile, setIsDeviceMobile] = useState<boolean>(false)
   const [mounted, setMounted] = useState<boolean>(false)
   
@@ -151,77 +152,116 @@ export default function InvoiceGallery() {
 
     setIsLoading(true);
     try {
-      const isRetail = invoiceId.startsWith('RET-');
+      // 🟢 1. Detect if this is a retail sale using state fallback
+      const targetInvoice = invoices.find(inv => inv.invoice_id === invoiceId);
+      const isRetail = targetInvoice ? targetInvoice.is_retail : (invoiceId.startsWith('RET-') || invoiceId.startsWith('ret-'));
 
-      // 1. Fetch Line Items
-      const { data: items } = await supabase
+      // 🟢 2. Fetch ALL line items sharing this ID (even if there are 2+ rows!)
+      const { data: items, error: fetchErr } = await supabase
         .from(isRetail ? 'retail_sales' : 'sales')
         .select('*')
         .eq(isRetail ? 'transaction_id' : 'invoice_id', invoiceId);
 
-      // 2. Restore Stock & Batches
+      if (fetchErr) {
+        throw new Error(`Failed to fetch items: ${fetchErr.message}`);
+      }
+
+      // 🟢 3. Restore Stock & Batches for EVERY row found
       if (items && items.length > 0) {
         for (const item of items) {
+          // Skip if row is already voided to prevent double-restoring stock
+          if (item.status === 'Voided' || item.delivery_status === 'Voided') continue;
+
           const qty = Number(item.qty) || 0;
-          const isSpecial = (item.custom_rice_type || item.rice_type || '').includes('បានប្រើ') || 
-                            (item.custom_rice_type || item.rice_type || '').includes('សេវាដឹក');
+          const riceName = (item.custom_rice_type || item.rice_type || '').trim();
+          const isSpecial = riceName.includes('បានប្រើ') || riceName.includes('សេវាដឹក');
           
-          if (qty !== 0 && !isSpecial && item.product_id) {
-            // A. Restore Master Stock
-            const { data: prod } = await supabase.from('products').select('stock, cost_price').eq('id', item.product_id).single();
-            if (prod) {
-              await supabase.from('products').update({ stock: Number(prod.stock) + qty }).eq('id', item.product_id);
-            }
-
-            // B. Restore Inventory Batch
-            const { data: batchesInv } = await supabase.from('inventory_batches')
-              .select('*')
-              .eq('product_id', item.product_id)
-              .order('id', { ascending: false })
-              .limit(1); 
-            
-            if (batchesInv && batchesInv.length > 0) {
-              await supabase.from('inventory_batches')
-                .update({ remaining_qty: Number(batchesInv[0].remaining_qty) + qty })
-                .eq('id', batchesInv[0].id);
-            } else {
-              await supabase.from('inventory_batches').insert([{
-                product_id: item.product_id,
-                product_name: item.rice_type || item.custom_rice_type || 'Unknown Product',
-                cost_price: item.cogs_price || prod?.cost_price || 0,
-                remaining_qty: qty
-              }]);
-            }
-
-            // C. Reverse FIFO Batches (Subtract from sold_qty in price_history)
-            let remainingToReverse = qty;
-            const { data: batches } = await supabase.from('price_history')
-              .select('*')
-              .eq('product_id', item.product_id)
-              .gt('sold_qty', 0)
-              .order('created_at', { ascending: false }); 
-            
-            if (batches) {
-              for (const b of batches) {
-                if (remainingToReverse <= 0) break;
-                const possibleToReverse = Math.min(b.sold_qty, remainingToReverse);
-                await supabase.from('price_history')
-                  .update({ sold_qty: b.sold_qty - possibleToReverse })
-                  .eq('id', b.id);
-                remainingToReverse -= possibleToReverse;
+          if (qty !== 0 && !isSpecial) {
+            // 🟢 ROBUST ID RESOLUTION: Match by product_id OR rice_type name (case-insensitive)
+            let productId = item.product_id;
+            if (!productId && riceName) {
+              const { data: prodByName } = await supabase
+                .from('products')
+                .select('id')
+                .ilike('name', riceName)
+                .maybeSingle();
+              if (prodByName) {
+                productId = prodByName.id;
               }
+            }
+
+            if (productId) {
+              // A. Restore Master Stock (Works for retail kg AND wholesale bags!)
+              const { data: prod } = await supabase
+                .from('products')
+                .select('stock, cost_price')
+                .eq('id', productId)
+                .maybeSingle();
+
+              if (prod) {
+                const newStock = Number(prod.stock || 0) + qty;
+                await supabase
+                  .from('products')
+                  .update({ stock: newStock })
+                  .eq('id', productId);
+              } else {
+                console.warn(`Product not found for ID: ${productId}`);
+              }
+
+              // B. Restore Inventory Batch
+              const { data: batchesInv } = await supabase.from('inventory_batches')
+                .select('*')
+                .eq('product_id', productId)
+                .order('id', { ascending: false })
+                .limit(1); 
+              
+              if (batchesInv && batchesInv.length > 0) {
+                await supabase.from('inventory_batches')
+                  .update({ remaining_qty: Number(batchesInv[0].remaining_qty) + qty })
+                  .eq('id', batchesInv[0].id);
+              } else {
+                await supabase.from('inventory_batches').insert([{
+                  product_id: productId,
+                  product_name: riceName || 'Unknown Product',
+                  cost_price: item.cogs_price || prod?.cost_price || 0,
+                  remaining_qty: qty
+                }]);
+              }
+
+              // C. Reverse FIFO Batches (Subtract from sold_qty in price_history)
+              let remainingToReverse = qty;
+              const { data: batches } = await supabase.from('price_history')
+                .select('*')
+                .eq('product_id', productId)
+                .gt('sold_qty', 0)
+                .order('created_at', { ascending: false }); 
+              
+              if (batches) {
+                for (const b of batches) {
+                  if (remainingToReverse <= 0) break;
+                  const possibleToReverse = Math.min(b.sold_qty, remainingToReverse);
+                  await supabase.from('price_history')
+                    .update({ sold_qty: b.sold_qty - possibleToReverse })
+                    .eq('id', b.id);
+                  remainingToReverse -= possibleToReverse;
+                }
+              }
+            } else {
+              console.warn(`Could not resolve productId for item: ${riceName}`);
             }
           }
         }
       }
 
-      // 3. Delete Line Items
-      await supabase.from(isRetail ? 'retail_sales' : 'sales').delete().eq(isRetail ? 'transaction_id' : 'invoice_id', invoiceId);
+      // 🟢 4. Delete Line Items (ONLY delete from 'sales' for wholesale. Do NOT delete 'retail_sales' rows!)
+      if (!isRetail) {
+        await supabase.from('sales').delete().eq('invoice_id', invoiceId);
+      }
 
-      // 4. Delete Payments (Removes from Cash on Hand)
+      // 🟢 5. Delete Payments (Removes from Cash on Hand)
       await supabase.from('invoice_payments').delete().eq('invoice_id', invoiceId);
 
-      // 5. Update Master Invoice to Voided Status AND is_done: true
+      // 🟢 6. Update Master Status to Voided (Marks ALL rows with that ID as Voided)
       if (!isRetail) {
         await supabase.from('invoice_summaries').update({ 
           delivery_status: 'Voided',
@@ -229,6 +269,7 @@ export default function InvoiceGallery() {
           is_done: true
         }).eq('invoice_id', invoiceId);
       } else {
+        // Updates every row with this transaction_id in retail_sales to 'Voided'
         await supabase.from('retail_sales').update({ status: 'Voided' }).eq('transaction_id', invoiceId);
       }
 
@@ -604,7 +645,7 @@ export default function InvoiceGallery() {
                   <div style={{ display: 'flex', gap: '8px' }}>
                     {/* 🚨 VOID BUTTON FIRST IN ACTION GROUP */}
                     {!isVoided && (
-                      <button onClick={() => handleVoidInvoice(inv.invoice_id)} className="saas-btn" style={{ flex: 1, padding: '8px 4px', background: '#fee2e2', color: '#dc2626', border: '1px solid #fca5a5', fontWeight: 'bold' }}>
+                      <button onClick={() => handleVoidInvoice(inv.invoice_id)} disabled={isProcessing} className="saas-btn" style={{ flex: 1, padding: '8px 4px', background: '#fee2e2', color: '#dc2626', border: '1px solid #fca5a5', fontWeight: 'bold' }}>
                         🚨 Void
                       </button>
                     )}
@@ -660,7 +701,7 @@ export default function InvoiceGallery() {
                       {/* 🚨 FIRST COLUMN VOID BUTTON */}
                       <td className="saas-td" style={{ textAlign: 'center' }}>
                         {!isVoided ? (
-                          <button onClick={() => handleVoidInvoice(inv.invoice_id)} className="saas-btn" style={{ padding: '6px 10px', background: '#fee2e2', color: '#dc2626', border: '1px solid #fca5a5', fontWeight: 'bold', fontSize: '11px', borderRadius: '6px', cursor: 'pointer' }}>
+                          <button onClick={() => handleVoidInvoice(inv.invoice_id)} disabled={isProcessing} className="saas-btn" style={{ padding: '6px 10px', background: '#fee2e2', color: '#dc2626', border: '1px solid #fca5a5', fontWeight: 'bold', fontSize: '11px', borderRadius: '6px', cursor: 'pointer' }}>
                             🚨 Void
                           </button>
                         ) : (
