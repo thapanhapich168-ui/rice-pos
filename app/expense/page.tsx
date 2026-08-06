@@ -1,10 +1,11 @@
 'use client'
 
-import { useEffect, useState, useMemo } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { supabase } from '@/lib/supabaseClient'
+import { useFocusRefresh } from '@/lib/useFocusRefresh'
+import { useToast } from '@/components/ToastProvider'
 import { formatRiel, formatUSD, EXCHANGE_RATE } from '@/utils/formatters'
 import { CurrencyInput } from '@/components/Inputs'
-import { useToast } from '@/components/ToastProvider'
 import Modal from '@/components/Modal'
 import TableSkeleton from '@/components/TableSkeleton'
 import EmptyState from '@/components/EmptyState'
@@ -88,7 +89,6 @@ function CustomDatePicker({ value, onChange }: { value: string; onChange: (val: 
           {formatDisplay(value) || 'Select date'}
         </span>
         
-        {/* 🔥 Safari SVG Fix: Explicit flex-shrink and strict stroke color */}
         <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, minWidth: '16px', display: 'block' }}>
           <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
           <line x1="16" y1="2" x2="16" y2="6"></line>
@@ -190,7 +190,7 @@ export default function ExpenseDashboard() {
     id: Date.now().toString() + Math.random().toString().slice(2, 6),
     remarks: '',
     spender: 'Pich',
-    payments: [{ id: Date.now(), method: 'QR ៛', amount: '' }] // 🔥 Default set to QR ៛
+    payments: [{ id: Date.now(), method: 'QR ៛', amount: '' }]
   });
 
   const [pendingPersonal, setPendingPersonal] = useState<PendingExpense[]>([])
@@ -201,16 +201,23 @@ export default function ExpenseDashboard() {
   const [isFetchingStaff, setIsFetchingStaff] = useState(true)
   const [newStaffName, setNewStaffName] = useState('')
   const [newStaffSalary, setNewStaffSalary] = useState<number | ''>('')
+  const [newStaffQuota, setNewStaffQuota] = useState<number | ''>(12)
   
-  const [debtAdditions, setDebtAdditions] = useState<Record<number, number | ''>>({})
-  const [debtMethods, setDebtMethods] = useState<Record<number, string>>({})
-  
-  const [historyModal, setHistoryModal] = useState<{ isOpen: boolean, staff: any, history: any[] }>({
-    isOpen: false, staff: null, history: []
+  // 🟢 CLEAN MODAL STATES FOR COMPACT TABLE
+  const [advanceModal, setAdvanceModal] = useState<{ isOpen: boolean, staff: any, amount: number | '', method: string }>({
+    isOpen: false, staff: null, amount: '', method: 'Cash ៛'
+  })
+
+  const [leaveModal, setLeaveModal] = useState<{ isOpen: boolean, staff: any, quota: number | '', days: number | '', reason: string }>({
+    isOpen: false, staff: null, quota: '', days: 1, reason: ''
   })
 
   const [settleModal, setSettleModal] = useState<{ isOpen: boolean, staff: any, amount: number | '', method: string }>({
     isOpen: false, staff: null, amount: '', method: 'Cash ៛'
+  })
+
+  const [historyModal, setHistoryModal] = useState<{ isOpen: boolean, staff: any, activeTab: 'debt' | 'leave', debtHistory: any[], leaveHistory: any[] }>({
+    isOpen: false, staff: null, activeTab: 'debt', debtHistory: [], leaveHistory: []
   })
 
   const [editingCell, setEditingCell] = useState<{ id: number, field: string } | null>(null)
@@ -255,7 +262,6 @@ export default function ExpenseDashboard() {
       try { setDbTabOrder(JSON.parse(savedDbTabOrder)); } catch(e){}
     }
 
-    // 🔥 NEW: Listen for background auto-sync so the form clears automatically
     const handleAutoSynced = () => {
       setPendingPersonal([createNewExpense()]);
       setPendingBusiness([createNewExpense()]);
@@ -265,12 +271,9 @@ export default function ExpenseDashboard() {
     return () => window.removeEventListener('expense_ledger_synced', handleAutoSynced);
   }, [])
 
-  // --- Updated LocalStorage Save Hooks (Prevents Overwriting Yesterday's Saved Date on Mount) ---
   useEffect(() => {
     if (isMounted) {
       localStorage.setItem('expense_ledger_personal', JSON.stringify(pendingPersonal));
-      
-      // 🔥 Only update expense_ledger_date if one doesn't exist yet, OR if the user is actively typing today
       const existingDate = localStorage.getItem('expense_ledger_date');
       if (!existingDate) {
         const todayCambodia = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Phnom_Penh' });
@@ -282,7 +285,6 @@ export default function ExpenseDashboard() {
   useEffect(() => {
     if (isMounted) {
       localStorage.setItem('expense_ledger_business', JSON.stringify(pendingBusiness));
-      
       const existingDate = localStorage.getItem('expense_ledger_date');
       if (!existingDate) {
         const todayCambodia = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Phnom_Penh' });
@@ -294,7 +296,6 @@ export default function ExpenseDashboard() {
   useEffect(() => {
     if (isMounted) localStorage.setItem('expense_db_tab_order', JSON.stringify(dbTabOrder));
   }, [dbTabOrder, isMounted])
-
 
   // --- Helper: Dynamic Ledger Handlers ---
   const getActiveList = () => activeTab === 'personal' ? pendingPersonal : pendingBusiness;
@@ -431,35 +432,93 @@ export default function ExpenseDashboard() {
     setLoading(true)
     const today = new Date();
     const firstOfMonth = new Date(today.getFullYear(), today.getMonth(), 1).toISOString().split('T')[0];
-    const { error } = await supabase.from('staff').insert([{ name: newStaffName, salary: Number(newStaffSalary) || 0, total_debt_riel: 0, total_debt_usd: 0, start_date: firstOfMonth }])
+    
+    const { error } = await supabase.from('staff').insert([{ 
+      name: newStaffName, 
+      salary: Number(newStaffSalary) || 0, 
+      total_debt_riel: 0, 
+      total_debt_usd: 0, 
+      start_date: firstOfMonth,
+      leave_quota: Number(newStaffQuota) || 12,
+      leave_used: 0
+    }])
     setLoading(false)
     if (error) { showToast('error', 'Error', `Error adding staff: ${error.message}`); } else {
       showToast('success', 'Staff Added', `${newStaffName} has been registered.`);
-      setNewStaffName(''); setNewStaffSalary(''); fetchStaff();
+      setNewStaffName(''); setNewStaffSalary(''); setNewStaffQuota(12); fetchStaff();
     }
   }
 
-  async function handleAddDebt(staff: any) {
-    const rawAmount = Number(debtAdditions[staff.id])
-    if (!rawAmount || rawAmount === 0) return
-    const method = debtMethods[staff.id] || 'Cash ៛'
+  // 🟢 CLEAN MODAL HANDLER: STAFF ADVANCE
+  async function handleAdvanceSubmit() {
+    const staff = advanceModal.staff;
+    const rawAmount = Number(advanceModal.amount);
+    if (!rawAmount || rawAmount === 0) { showToast('error', 'Validation Error', 'Please enter a valid advance amount.'); return; }
+    
     let saveRiel = 0, saveUsd = 0;
-    let newTotalRiel = Number(staff.total_debt_riel || 0); let newTotalUsd = Number(staff.total_debt_usd || 0);
+    let newTotalRiel = Number(staff.total_debt_riel || 0); 
+    let newTotalUsd = Number(staff.total_debt_usd || 0);
 
-    if (method.includes('$')) { saveUsd = rawAmount; newTotalUsd += rawAmount; } else { saveRiel = rawAmount; newTotalRiel += rawAmount; }
+    if (advanceModal.method.includes('$')) { 
+      saveUsd = rawAmount; 
+      newTotalUsd += rawAmount; 
+    } else { 
+      saveRiel = rawAmount; 
+      newTotalRiel += rawAmount; 
+    }
 
     setStaffList(prev => prev.map(s => s.id === staff.id ? { ...s, total_debt_riel: newTotalRiel, total_debt_usd: newTotalUsd } : s));
-    setDebtAdditions(prev => ({ ...prev, [staff.id]: '' }))
+    setAdvanceModal({ isOpen: false, staff: null, amount: '', method: 'Cash ៛' });
 
-    const { error: staffErr } = await supabase.from('staff').update({ total_debt_riel: newTotalRiel, total_debt_usd: newTotalUsd }).eq('id', staff.id)
+    const { error: staffErr } = await supabase.from('staff').update({ total_debt_riel: newTotalRiel, total_debt_usd: newTotalUsd }).eq('id', staff.id);
     if (staffErr) { showToast('error', 'Update Failed', `Error updating debt: ${staffErr.message}`); fetchStaff(); return; }
 
-    await supabase.from('staff_debt_history').insert([{ staff_id: staff.id, amount: rawAmount, payment_method: method }])
-    await supabase.from('expenses').insert([{ expense_date: new Date().toISOString().split('T')[0], spender: 'Both', payment_method: method, remarks: `Staff Advance: ${staff.name}`, amount_usd: saveUsd, amount_riel: saveRiel, description: 'STAFF_ADVANCE' }])
+    await supabase.from('staff_debt_history').insert([{ staff_id: staff.id, amount: rawAmount, payment_method: advanceModal.method }]);
+    await supabase.from('expenses').insert([{ expense_date: new Date().toISOString().split('T')[0], spender: 'Both', payment_method: advanceModal.method, remarks: `Staff Advance: ${staff.name}`, amount_usd: saveUsd, amount_riel: saveRiel, description: 'STAFF_ADVANCE' }]);
+    
     showToast('success', 'Advance Added', `Advance added for ${staff.name}`);
     fetchDatabase();
   }
 
+  // 🟢 CLEAN MODAL HANDLER: LEAVE MANAGEMENT
+  async function handleLeaveSubmit() {
+    const staff = leaveModal.staff;
+    const days = Number(leaveModal.days) || 0;
+    const quota = Number(leaveModal.quota) || 12;
+    const reason = leaveModal.reason.trim() || 'Annual / Personal Leave';
+
+    if (days <= 0) {
+      showToast('error', 'Invalid Input', 'Please enter a valid number of leave days (e.g., 0.5 or 1).');
+      return;
+    }
+
+    const newUsed = Number(staff.leave_used || 0) + days;
+    const remaining = quota - newUsed;
+
+    if (remaining < 0) {
+      if (!confirm(`⚠️ Warning: Taking ${days} days will exceed their leave quota by ${Math.abs(remaining)} days. Continue anyway?`)) {
+        return;
+      }
+    }
+
+    setStaffList(prev => prev.map(s => s.id === staff.id ? { ...s, leave_quota: quota, leave_used: newUsed } : s));
+    setLeaveModal({ isOpen: false, staff: null, quota: '', days: 1, reason: '' });
+
+    // Update staff record
+    await supabase.from('staff').update({ leave_quota: quota, leave_used: newUsed }).eq('id', staff.id);
+
+    // Insert audit history
+    await supabase.from('staff_leave_history').insert([{
+      staff_id: staff.id,
+      days: days,
+      reason: reason
+    }]);
+
+    showToast('success', 'Leave Logged', `${days} day(s) leave recorded for ${staff.name}`);
+    fetchStaff();
+  }
+
+  // 🟢 CLEAN MODAL HANDLER: DEBT SETTLEMENT
   async function handleSettleSubmit() {
     const staff = settleModal.staff;
     const rawAmount = Number(settleModal.amount);
@@ -487,15 +546,28 @@ export default function ExpenseDashboard() {
     fetchDatabase();
   }
 
+  // 🟢 UNIFIED HISTORY MODAL (View both Debt and Leave History)
   async function handleViewHistory(staff: any) {
-    const { data, error } = await supabase.from('staff_debt_history').select('*').eq('staff_id', staff.id).order('created_at', { ascending: false })
-    if (!error) setHistoryModal({ isOpen: true, staff: staff, history: data || [] })
+    const [{ data: debtData }, { data: leaveData }] = await Promise.all([
+      supabase.from('staff_debt_history').select('*').eq('staff_id', staff.id).order('created_at', { ascending: false }),
+      supabase.from('staff_leave_history').select('*').eq('staff_id', staff.id).order('created_at', { ascending: false })
+    ]);
+    
+    setHistoryModal({ 
+      isOpen: true, 
+      staff: staff, 
+      activeTab: 'debt', 
+      debtHistory: debtData || [], 
+      leaveHistory: leaveData || [] 
+    });
   }
 
   async function saveInlineEdit(id: number, field: string) {
     if (!editValue && editValue !== '0' && field !== 'name') { setEditingCell(null); return; }
     let finalValue: any = editValue;
-    if (field === 'salary' || field === 'total_debt_riel' || field === 'total_debt_usd') { finalValue = Number(editValue.replace(/,/g, '')) || 0; }
+    if (field === 'salary' || field === 'total_debt_riel' || field === 'total_debt_usd' || field === 'leave_quota') { 
+      finalValue = Number(editValue.replace(/,/g, '')) || 0; 
+    }
     const staff = staffList.find(s => s.id === id);
     setStaffList(prev => prev.map(s => s.id === id ? { ...s, [field]: finalValue } : s));
     setEditingCell(null);
@@ -716,9 +788,8 @@ export default function ExpenseDashboard() {
                     {/* 3-COLUMN GRID SETUP */}
                     <div className="expense-grid">
 
-                      {/* Col 1: Remarks (Desktop: Boxed Label, Mobile: Inline Underline) */}
+                      {/* Col 1: Remarks */}
                       <>
-                        {/* Desktop Remarks */}
                         <div className="expense-col desktop-only-flex" style={{ flexDirection: 'column', gap: '8px' }}>
                           <label style={{ height: '16px', lineHeight: '16px', fontSize: '11px', color: '#64748b', fontWeight: 'bold', textTransform: 'uppercase', margin: 0 }}>Remarks</label>
                           <input 
@@ -738,7 +809,6 @@ export default function ExpenseDashboard() {
                           />
                         </div>
 
-                        {/* Mobile Remarks */}
                         <div className="expense-col mobile-only-flex" style={{ flexDirection: 'column', justifyContent: 'flex-end', gap: '8px' }}>
                           <div style={{ display: 'flex', alignItems: 'center', height: '42px', borderBottom: '1px dashed #cbd5e1', paddingBottom: '4px' }}>
                             <span style={{ color: '#3b82f6', fontWeight: 'bold', fontSize: '16px', marginRight: '8px' }}>
@@ -750,7 +820,6 @@ export default function ExpenseDashboard() {
                               value={exp.remarks} 
                               onChange={(e) => updateExpense(exp.id, 'remarks', e.target.value)} 
                               onKeyDown={(e) => {
-                                // 🔥 Focus Jump: Moves straight to Amount input on Enter/Next
                                 if (e.key === 'Enter') {
                                   e.preventDefault();
                                   document.getElementById(`amount-wrapper-${exp.id}`)?.querySelector('input')?.focus();
@@ -759,7 +828,6 @@ export default function ExpenseDashboard() {
                               required 
                               style={{ flex: 1, minWidth: 0, height: '100%', border: 'none', background: 'transparent', outline: 'none', fontSize: '16px', color: '#0f172a' }}
                             />
-                            {/* Mobile Red X aligned middle with remark row */}
                             {getActiveList().length > 1 && (
                               <button type="button" onClick={() => removeExpense(exp.id)} style={{ color: '#ef4444', background: 'transparent', border: 'none', cursor: 'pointer', fontSize: '20px', fontWeight: 'bold', padding: '0 0 0 12px', lineHeight: 1 }} title="Remove">
                                 ✕
@@ -769,11 +837,9 @@ export default function ExpenseDashboard() {
                         </div>
                       </>
 
-                      {/* 🔥 Col 2: Payments (Moved Up to directly follow Remarks) */}
+                      {/* Col 2: Payments */}
                       <div className="expense-col" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                         <div style={{ height: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                          
-                          {/* Left Side: Label and + Split button */}
                           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                             <label style={{ lineHeight: '16px', fontSize: '11px', color: '#64748b', fontWeight: 'bold', margin: 0, textTransform: 'uppercase' }}>Payment Method(s)</label>
                             <button type="button" onClick={() => addPaymentSplit(exp.id)} className="saas-btn" style={{ background: '#e0f2fe', color: '#0284c7', border: 'none', padding: '0 8px', fontSize: '11px', fontWeight: 'bold', height: '20px', display: 'flex', alignItems: 'center', borderRadius: '4px' }}>
@@ -781,7 +847,6 @@ export default function ExpenseDashboard() {
                             </button>
                           </div>
 
-                          {/* Right Side: Desktop Red X */}
                           {getActiveList().length > 1 && (
                             <button type="button" onClick={() => removeExpense(exp.id)} className="desktop-only-flex" style={{ color: '#ef4444', background: 'transparent', border: 'none', cursor: 'pointer', fontSize: '18px', fontWeight: 'bold', padding: 0, lineHeight: 1 }} title="Remove Expense">
                               ✕
@@ -820,7 +885,7 @@ export default function ExpenseDashboard() {
                         ))}
                       </div>
 
-                      {/* 🔥 Col 3: Spender (Moved Down to bottom to prevent keyboard bounce) */}
+                      {/* Col 3: Spender */}
                       <div className="expense-col" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                         <label style={{ height: '16px', lineHeight: '16px', fontSize: '11px', color: '#64748b', fontWeight: 'bold', textTransform: 'uppercase', margin: 0 }}>Spender</label>
                         <div className="saas-tab-container" style={{ margin: 0, padding: 0, background: '#f1f5f9', border: 'none', boxShadow: 'none', height: '42px', display: 'flex', boxSizing: 'border-box', borderRadius: '8px', overflow: 'hidden' }}>
@@ -844,7 +909,7 @@ export default function ExpenseDashboard() {
             </form>
           )}
 
-          {/* --- STAFF MANAGEMENT UI --- */}
+          {/* --- 🟢 UPGRADED STAFF MANAGEMENT UI --- */}
           {activeTab === 'staff' && (
             <div>
               <div className="saas-card" style={{ marginBottom: '24px', padding: '20px' }}>
@@ -858,32 +923,36 @@ export default function ExpenseDashboard() {
                     <label style={{ fontSize: '11px', fontWeight: 'bold', color: '#64748b', display: 'block', marginBottom: '8px', textTransform: 'uppercase' }}>Monthly Salary (៛)</label>
                     <CurrencyInput value={newStaffSalary} onChange={(v: any) => setNewStaffSalary(v)} className="saas-input" placeholder="1,200,000" />
                   </div>
+                  <div style={{ flex: '1 1 130px' }}>
+                    <label style={{ fontSize: '11px', fontWeight: 'bold', color: '#64748b', display: 'block', marginBottom: '8px', textTransform: 'uppercase' }}>Annual Leave Quota</label>
+                    <input type="number" value={newStaffQuota} onChange={e => setNewStaffQuota(e.target.value === '' ? '' : Number(e.target.value))} className="saas-input" placeholder="12" />
+                  </div>
                   <button type="submit" disabled={loading} className="saas-btn saas-btn-primary" style={{ padding: '12px 24px' }}>Add Staff</button>
                 </form>
               </div>
 
+              {/* COMPACT TABLE (Replaced Wide Inline Forms with Modals + Added Leave Quota Pill) */}
               <div className="saas-table-wrapper">
                 <div className="saas-table-responsive">
-                  <table className="saas-table" style={{ minWidth: '1050px' }}>
+                  <table className="saas-table" style={{ minWidth: '1000px' }}>
                     <thead>
                       <tr>
                         <th className="saas-th">Name</th>
                         <th className="saas-th">Start Date</th>
                         <th className="saas-th" style={{ textAlign: 'right' }}>Monthly Salary</th>
                         <th className="saas-th" style={{ textAlign: 'right', color: '#10b981' }}>Earned MTD</th>
-                        <th className="saas-th" style={{ textAlign: 'right', color: '#ef4444' }}>Debt (៛)</th>
-                        <th className="saas-th" style={{ textAlign: 'right', color: '#ef4444' }}>Debt ($)</th>
+                        <th className="saas-th" style={{ textAlign: 'right', color: '#ef4444' }}>Debt Balance</th>
+                        <th className="saas-th" style={{ textAlign: 'center', color: '#3b82f6' }}>Leave Balance</th>
                         <th className="saas-th" style={{ textAlign: 'right', color: '#3b82f6' }}>Net Payout</th>
-                        <th className="saas-th" style={{ textAlign: 'center', color: '#b58a3d', width: '280px' }}>➕ Add Advance</th>
-                        <th className="saas-th" style={{ textAlign: 'center', width: '100px' }}>Actions</th>
+                        <th className="saas-th" style={{ textAlign: 'center', width: '220px' }}>Quick Actions</th>
                       </tr>
                     </thead>
                     <tbody>
                       {isFetchingStaff ? (
-                        <TableSkeleton columns={9} rows={3} />
+                        <TableSkeleton columns={8} rows={3} />
                       ) : staffList.length === 0 ? (
                         <tr>
-                          <td colSpan={9} style={{ padding: 0 }}>
+                          <td colSpan={8} style={{ padding: 0 }}>
                             <EmptyState icon="👥" title="No staff found" message="Register your first staff member above." />
                           </td>
                         </tr>
@@ -896,6 +965,10 @@ export default function ExpenseDashboard() {
                           
                           const totalDebtRiel = Number(staff.total_debt_riel) || 0;
                           const totalDebtUsd = Number(staff.total_debt_usd) || 0;
+
+                          const leaveQuota = Number(staff.leave_quota) || 12;
+                          const leaveUsed = Number(staff.leave_used) || 0;
+                          const leaveRemaining = leaveQuota - leaveUsed;
 
                           const netPayout = totalEarned - totalDebtRiel - (totalDebtUsd * EXCHANGE_RATE);
                           const isNegativePayout = netPayout < 0;
@@ -920,47 +993,85 @@ export default function ExpenseDashboard() {
                                 ) : formatRiel(monthlySalary)}
                               </td>
                               <td className="saas-td" style={{ color: '#10b981', textAlign: 'right', fontWeight: 'bold' }}>{formatRiel(totalEarned)}</td>
+                              
+                              {/* Combined Debt Display */}
                               <td className="saas-td" style={{ textAlign: 'right' }}>
-                                 <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px' }}>
-                                    <div style={{ cursor: 'text', fontWeight: 'bold', color: '#ef4444' }} onClick={() => { setEditingCell({ id: staff.id, field: 'total_debt_riel' }); setEditValue(String(staff.total_debt_riel || 0)); }}>
-                                      {editingCell?.id === staff.id && editingCell?.field === 'total_debt_riel' ? (
-                                        <CurrencyInput autoFocus value={Number(editValue)} onChange={(v:any) => setEditValue(String(v))} onEnter={() => saveInlineEdit(staff.id, 'total_debt_riel')} className="saas-input" style={{ textAlign: 'right', color: '#ef4444', width: '100px' }} />
-                                      ) : formatRiel(totalDebtRiel)}
-                                    </div>
-                                 </div>
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', alignItems: 'flex-end' }}>
+                                  <span style={{ color: '#ef4444', fontWeight: 'bold' }}>{formatRiel(totalDebtRiel)}</span>
+                                  {totalDebtUsd > 0 && <span style={{ color: '#ef4444', fontSize: '12px' }}>{formatUSD(totalDebtUsd)}</span>}
+                                </div>
                               </td>
-                              <td className="saas-td" style={{ textAlign: 'right' }}>
-                                 <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px' }}>
-                                    <div style={{ cursor: 'text', fontWeight: 'bold', color: '#ef4444' }} onClick={() => { setEditingCell({ id: staff.id, field: 'total_debt_usd' }); setEditValue(String(staff.total_debt_usd || 0)); }}>
-                                      {editingCell?.id === staff.id && editingCell?.field === 'total_debt_usd' ? (
-                                        <CurrencyInput autoFocus value={Number(editValue)} onChange={(v:any) => setEditValue(String(v))} onEnter={() => saveInlineEdit(staff.id, 'total_debt_usd')} className="saas-input" style={{ textAlign: 'right', color: '#ef4444', width: '80px' }} />
-                                      ) : formatUSD(totalDebtUsd)}
-                                    </div>
-                                 </div>
+
+                              {/* 🟢 NEW: Compact Leave Balance Badge */}
+                              <td className="saas-td" style={{ textAlign: 'center' }}>
+                                <div 
+                                  onClick={() => setLeaveModal({ isOpen: true, staff: staff, quota: leaveQuota, days: 1, reason: '' })}
+                                  style={{
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '6px',
+                                    padding: '4px 10px',
+                                    borderRadius: '20px',
+                                    backgroundColor: leaveRemaining <= 2 ? '#fef2f2' : '#eff6ff',
+                                    color: leaveRemaining <= 2 ? '#dc2626' : '#2563eb',
+                                    fontWeight: 'bold',
+                                    fontSize: '12px',
+                                    cursor: 'pointer',
+                                    border: `1px solid ${leaveRemaining <= 2 ? '#fecaca' : '#bfdbfe'}`
+                                  }}
+                                >
+                                  <span>🏖️ {leaveRemaining} / {leaveQuota} Days</span>
+                                </div>
                               </td>
+
                               <td className="saas-td" style={{ color: isNegativePayout ? '#ef4444' : '#3b82f6', textAlign: 'right', fontWeight: 'bold', fontSize: '15px' }}>
                                 {isNegativePayout ? '-' : ''}{formatRiel(Math.abs(netPayout))}
                               </td>
+                              
+                              {/* 🟢 NEW: Compact Action Buttons */}
                               <td className="saas-td" style={{ textAlign: 'center' }}>
-                                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                                  <div style={{ display: 'flex', gap: '6px' }}>
-                                    <select value={debtMethods[staff.id] || 'Cash ៛'} onChange={e => setDebtMethods({ ...debtMethods, [staff.id]: e.target.value })} className="saas-input" style={{ width: '85px', padding: '6px' }}>
-                                      <option value="Cash ៛">Cash ៛</option><option value="Cash $">Cash $</option><option value="QR ៛">QR ៛</option><option value="QR $">QR $</option>
-                                    </select>
-                                    <CurrencyInput placeholder="0" value={debtAdditions[staff.id] || ''} onChange={(v:any) => setDebtAdditions({ ...debtAdditions, [staff.id]: v })} onEnter={() => handleAddDebt(staff)} className="saas-input" style={{ flex: 1, padding: '6px', textAlign: 'right' }} />
-                                    <button onClick={() => handleAddDebt(staff)} disabled={!debtAdditions[staff.id]} className={`saas-btn ${debtAdditions[staff.id] ? 'saas-btn-primary' : 'saas-btn-secondary'}`} style={{ padding: '6px 12px' }}>Add</button>
-                                  </div>
-                                  <div style={{ display: 'flex', justifyContent: 'center', gap: '8px' }}>
-                                    {(totalDebtRiel > 0 || totalDebtUsd > 0) && (
-                                      <button onClick={() => setSettleModal({ isOpen: true, staff: staff, amount: '', method: 'Cash ៛' })} className="saas-btn" style={{ background: '#ecfdf5', color: '#047857', border: '1px solid #a7f3d0', padding: '6px 12px', fontSize: '12px' }}>✅ Settle</button>
-                                    )}
-                                  </div>
-                                </div>
-                              </td>
-                              <td className="saas-td" style={{ textAlign: 'center' }}>
-                                <div style={{ display: 'flex', justifyContent: 'center', gap: '8px' }}>
-                                  <button onClick={() => handleViewHistory(staff)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '16px' }} title="View Debt History">🕒</button>
-                                  <button onClick={() => handleDeleteStaff(staff.id, staff.name)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '16px' }} title="Delete Staff">🗑️</button>
+                                <div style={{ display: 'flex', gap: '6px', justifyContent: 'center', flexWrap: 'wrap' }}>
+                                  <button 
+                                    onClick={() => setAdvanceModal({ isOpen: true, staff: staff, amount: '', method: 'Cash ៛' })}
+                                    className="saas-btn" 
+                                    style={{ background: '#fef3c7', color: '#b45309', border: '1px solid #fde047', padding: '4px 8px', fontSize: '11px', fontWeight: 'bold' }}
+                                  >
+                                    ➕ Advance
+                                  </button>
+
+                                  <button 
+                                    onClick={() => setLeaveModal({ isOpen: true, staff: staff, quota: leaveQuota, days: 1, reason: '' })}
+                                    className="saas-btn" 
+                                    style={{ background: '#eff6ff', color: '#2563eb', border: '1px solid #bfdbfe', padding: '4px 8px', fontSize: '11px', fontWeight: 'bold' }}
+                                  >
+                                    🏖️ Leave
+                                  </button>
+
+                                  {(totalDebtRiel > 0 || totalDebtUsd > 0) && (
+                                    <button 
+                                      onClick={() => setSettleModal({ isOpen: true, staff: staff, amount: '', method: 'Cash ៛' })} 
+                                      className="saas-btn" 
+                                      style={{ background: '#ecfdf5', color: '#047857', border: '1px solid #a7f3d0', padding: '4px 8px', fontSize: '11px', fontWeight: 'bold' }}
+                                    >
+                                      ✅ Settle
+                                    </button>
+                                  )}
+
+                                  <button 
+                                    onClick={() => handleViewHistory(staff)} 
+                                    style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '16px', padding: '0 4px' }} 
+                                    title="View Audit History"
+                                  >
+                                    🕒
+                                  </button>
+
+                                  <button 
+                                    onClick={() => handleDeleteStaff(staff.id, staff.name)} 
+                                    style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '16px', padding: '0 4px' }} 
+                                    title="Delete Staff"
+                                  >
+                                    🗑️
+                                  </button>
                                 </div>
                               </td>
                             </tr>
@@ -1017,10 +1128,9 @@ export default function ExpenseDashboard() {
                     ))}
                   </div>
 
-                  {/* 🔥 Upgraded Insights Date Filters */}
+                  {/* Custom Date Filters */}
                   {insightFilter === 'custom' && (
                     <div style={{ display: 'flex', gap: '12px', marginBottom: '24px', alignItems: 'center', flexWrap: 'nowrap', width: '100%' }}>
-                      
                       <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flex: 1, minWidth: 0 }}>
                         <label style={{ fontWeight: 'bold', fontSize: '12px', color: '#64748b' }}>From:</label>
                         <div style={{ flex: 1, minWidth: 0 }}>
@@ -1034,13 +1144,11 @@ export default function ExpenseDashboard() {
                           <CustomDatePicker value={insightTo} onChange={setInsightTo} />
                         </div>
                       </div>
-                      
                     </div>
                   )}
 
                   {/* Core Metrics */}
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '16px', marginBottom: '32px' }}>
-                    
                     <div className="saas-card">
                       <div className="saas-card-title">📉 Total Expenses</div>
                       <div style={{ display: 'flex', gap: '16px', marginTop: '16px' }}>
@@ -1100,7 +1208,6 @@ export default function ExpenseDashboard() {
                         </div>
                       </div>
                     </div>
-
                   </div>
 
                   {/* Top 5 Lists */}
@@ -1228,34 +1335,176 @@ export default function ExpenseDashboard() {
         </div>
       </div>
 
-      {/* STAFF DEBT HISTORY MODAL */}
-      <Modal isOpen={historyModal.isOpen} onClose={() => setHistoryModal({ isOpen: false, staff: null, history: [] })} title={`Debt History: ${historyModal.staff?.name}`} icon="🕒" maxWidth="500px">
-        {historyModal.history.length === 0 ? (
-          <p style={{ textAlign: 'center', color: '#94a3b8', fontSize: '14px', padding: '20px' }}>No debt history found.</p>
-        ) : (
-          <table className="saas-table" style={{ minWidth: '100%', marginBottom: '20px' }}>
-            <thead>
-              <tr>
-                <th className="saas-th" style={{ padding: '8px', fontSize: '11px' }}>Date</th>
-                <th className="saas-th" style={{ padding: '8px', fontSize: '11px' }}>Action Type</th>
-                <th className="saas-th" style={{ padding: '8px', fontSize: '11px', textAlign: 'right' }}>Amount</th>
-              </tr>
-            </thead>
-            <tbody>
-              {historyModal.history.map((record) => (
-                <tr key={record.id} className="saas-tr">
-                  <td className="saas-td" style={{ padding: '10px 8px', fontSize: '13px' }}>{new Date(record.created_at).toLocaleDateString()}</td>
-                  <td className="saas-td" style={{ padding: '10px 8px', fontSize: '13px' }}>{record.payment_method}</td>
-                  <td className="saas-td" style={{ padding: '10px 8px', fontSize: '13px', textAlign: 'right', color: '#ef4444', fontWeight: 'bold' }}>
-                    {record.payment_method.includes('$') ? formatUSD(record.amount) : formatRiel(record.amount)}
-                  </td>
+      {/* --- 🟢 NEW: ADVANCE MODAL --- */}
+      <Modal isOpen={advanceModal.isOpen} onClose={() => setAdvanceModal({ isOpen: false, staff: null, amount: '', method: 'Cash ៛' })} title={`Add Advance: ${advanceModal.staff?.name}`} icon="➕" maxWidth="400px">
+        <div style={{ marginBottom: '16px' }}>
+          <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '8px' }}>Advance Amount</label>
+          <CurrencyInput autoFocus value={advanceModal.amount} onChange={(v:any) => setAdvanceModal({...advanceModal, amount: v})} className="saas-input" placeholder="0" />
+        </div>
+
+        <div style={{ marginBottom: '24px' }}>
+          <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '8px' }}>Payment Method</label>
+          <select value={advanceModal.method} onChange={e => setAdvanceModal({...advanceModal, method: e.target.value})} className="saas-input" style={{ cursor: 'pointer' }}>
+            <option value="Cash ៛">💵 Cash ៛</option>
+            <option value="Cash $">💵 Cash $</option>
+            <option value="QR ៛">📱 QR ៛</option>
+            <option value="QR $">📱 QR $</option>
+          </select>
+        </div>
+
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
+          <button onClick={() => setAdvanceModal({ isOpen: false, staff: null, amount: '', method: 'Cash ៛' })} className="saas-btn saas-btn-secondary">Cancel</button>
+          <button onClick={handleAdvanceSubmit} className="saas-btn saas-btn-primary">Confirm Advance</button>
+        </div>
+      </Modal>
+
+      {/* --- 🟢 NEW: LEAVE MANAGEMENT MODAL (0.5, 1 Day, or Custom) --- */}
+      <Modal isOpen={leaveModal.isOpen} onClose={() => setLeaveModal({ isOpen: false, staff: null, quota: '', days: 1, reason: '' })} title={`Log Leave: ${leaveModal.staff?.name}`} icon="🏖️" maxWidth="420px">
+        <div style={{ background: '#f8fafc', padding: '12px', borderRadius: '8px', border: '1px solid #e2e8f0', marginBottom: '16px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', color: '#475569', marginBottom: '6px' }}>
+            <span>Annual Quota:</span>
+            <span style={{ fontWeight: 'bold', color: '#0f172a' }}>{leaveModal.quota || 12} Days</span>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', color: '#475569' }}>
+            <span>Remaining After Request:</span>
+            <span style={{ fontWeight: 'bold', color: ((Number(leaveModal.quota) || 12) - Number(leaveModal.staff?.leave_used || 0) - (Number(leaveModal.days) || 0)) < 0 ? '#ef4444' : '#2563eb' }}>
+              {((Number(leaveModal.quota) || 12) - Number(leaveModal.staff?.leave_used || 0) - (Number(leaveModal.days) || 0))} Days
+            </span>
+          </div>
+        </div>
+
+        <div style={{ marginBottom: '16px' }}>
+          <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '8px' }}>Total Annual Quota (Days)</label>
+          <input 
+            type="number" 
+            value={leaveModal.quota} 
+            onChange={(e) => setLeaveModal({ ...leaveModal, quota: e.target.value === '' ? '' : Number(e.target.value) })} 
+            className="saas-input" 
+            placeholder="12" 
+          />
+        </div>
+
+        <div style={{ marginBottom: '16px' }}>
+          <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '8px' }}>Leave Days to Take</label>
+          <div style={{ display: 'flex', gap: '6px', marginBottom: '8px' }}>
+            {[0.5, 1, 2].map((num) => (
+              <button
+                type="button"
+                key={num}
+                onClick={() => setLeaveModal({ ...leaveModal, days: num })}
+                className="saas-btn"
+                style={leaveModal.days === num ? { background: '#2563eb', color: '#fff', flex: 1, padding: '8px' } : { background: '#f1f5f9', color: '#334155', flex: 1, padding: '8px', border: 'none' }}
+              >
+                {num === 0.5 ? '0.5 (Half Day)' : `${num} Day${num > 1 ? 's' : ''}`}
+              </button>
+            ))}
+          </div>
+          <input 
+            type="number" 
+            step="0.5"
+            value={leaveModal.days} 
+            onChange={(e) => setLeaveModal({ ...leaveModal, days: e.target.value === '' ? '' : Number(e.target.value) })} 
+            className="saas-input" 
+            placeholder="1.0" 
+          />
+        </div>
+
+        <div style={{ marginBottom: '24px' }}>
+          <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '8px' }}>Reason / Note</label>
+          <input 
+            type="text" 
+            value={leaveModal.reason} 
+            onChange={(e) => setLeaveModal({ ...leaveModal, reason: e.target.value })} 
+            className="saas-input" 
+            placeholder="e.g., Sick leave, Family event" 
+          />
+        </div>
+
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
+          <button onClick={() => setLeaveModal({ isOpen: false, staff: null, quota: '', days: 1, reason: '' })} className="saas-btn saas-btn-secondary">Cancel</button>
+          <button onClick={handleLeaveSubmit} className="saas-btn saas-btn-primary">Confirm Leave</button>
+        </div>
+      </Modal>
+
+      {/* --- 🟢 NEW: UNIFIED HISTORY MODAL (Debt & Leave Tabs) --- */}
+      <Modal 
+        isOpen={historyModal.isOpen} 
+        onClose={() => setHistoryModal({ isOpen: false, staff: null, activeTab: 'debt', debtHistory: [], leaveHistory: [] })} 
+        title={`History: ${historyModal.staff?.name}`} 
+        icon="🕒" 
+        maxWidth="500px"
+      >
+        <div className="saas-tab-container" style={{ margin: '0 0 16px 0', padding: '4px', background: '#f1f5f9', display: 'flex', border: 'none', borderRadius: '8px' }}>
+          <button 
+            onClick={() => setHistoryModal({ ...historyModal, activeTab: 'debt' })}
+            className={`saas-tab ${historyModal.activeTab === 'debt' ? 'active' : ''}`}
+            style={historyModal.activeTab === 'debt' ? { background: '#0f172a', color: '#fff', flex: 1, padding: '6px' } : { flex: 1, padding: '6px' }}
+          >
+            💸 Debt History
+          </button>
+          <button 
+            onClick={() => setHistoryModal({ ...historyModal, activeTab: 'leave' })}
+            className={`saas-tab ${historyModal.activeTab === 'leave' ? 'active' : ''}`}
+            style={historyModal.activeTab === 'leave' ? { background: '#0f172a', color: '#fff', flex: 1, padding: '6px' } : { flex: 1, padding: '6px' }}
+          >
+            🏖️ Leave Audit
+          </button>
+        </div>
+
+        {historyModal.activeTab === 'debt' ? (
+          historyModal.debtHistory.length === 0 ? (
+            <p style={{ textAlign: 'center', color: '#94a3b8', fontSize: '14px', padding: '20px' }}>No debt history found.</p>
+          ) : (
+            <table className="saas-table" style={{ minWidth: '100%', marginBottom: '20px' }}>
+              <thead>
+                <tr>
+                  <th className="saas-th" style={{ padding: '8px', fontSize: '11px' }}>Date</th>
+                  <th className="saas-th" style={{ padding: '8px', fontSize: '11px' }}>Action Type</th>
+                  <th className="saas-th" style={{ padding: '8px', fontSize: '11px', textAlign: 'right' }}>Amount</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {historyModal.debtHistory.map((record) => (
+                  <tr key={record.id} className="saas-tr">
+                    <td className="saas-td" style={{ padding: '10px 8px', fontSize: '13px' }}>{new Date(record.created_at).toLocaleDateString()}</td>
+                    <td className="saas-td" style={{ padding: '10px 8px', fontSize: '13px' }}>{record.payment_method}</td>
+                    <td className="saas-td" style={{ padding: '10px 8px', fontSize: '13px', textAlign: 'right', color: '#ef4444', fontWeight: 'bold' }}>
+                      {record.payment_method.includes('$') ? formatUSD(record.amount) : formatRiel(record.amount)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )
+        ) : (
+          historyModal.leaveHistory.length === 0 ? (
+            <p style={{ textAlign: 'center', color: '#94a3b8', fontSize: '14px', padding: '20px' }}>No leave history logged yet.</p>
+          ) : (
+            <table className="saas-table" style={{ minWidth: '100%', marginBottom: '20px' }}>
+              <thead>
+                <tr>
+                  <th className="saas-th" style={{ padding: '8px', fontSize: '11px' }}>Date</th>
+                  <th className="saas-th" style={{ padding: '8px', fontSize: '11px' }}>Reason</th>
+                  <th className="saas-th" style={{ padding: '8px', fontSize: '11px', textAlign: 'right' }}>Days</th>
+                </tr>
+              </thead>
+              <tbody>
+                {historyModal.leaveHistory.map((record) => (
+                  <tr key={record.id} className="saas-tr">
+                    <td className="saas-td" style={{ padding: '10px 8px', fontSize: '13px' }}>{new Date(record.created_at).toLocaleDateString()}</td>
+                    <td className="saas-td" style={{ padding: '10px 8px', fontSize: '13px', color: '#475569' }}>{record.reason || 'Leave'}</td>
+                    <td className="saas-td" style={{ padding: '10px 8px', fontSize: '13px', textAlign: 'right', color: '#2563eb', fontWeight: 'bold' }}>
+                      -{record.days} Days
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )
         )}
+
         <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-          <button onClick={() => setHistoryModal({ isOpen: false, staff: null, history: [] })} className="saas-btn saas-btn-secondary">Close</button>
+          <button onClick={() => setHistoryModal({ isOpen: false, staff: null, activeTab: 'debt', debtHistory: [], leaveHistory: [] })} className="saas-btn saas-btn-secondary">Close</button>
         </div>
       </Modal>
 
@@ -1390,7 +1639,6 @@ export default function ExpenseDashboard() {
           .desktop-only-flex { display: none !important; }
           .mobile-only-flex { display: flex !important; }
 
-          /* Mobile Layout: Custom Date Input on Top, Buttons below */
           .top-action-row {
             display: flex !important;
             flex-direction: column !important;
