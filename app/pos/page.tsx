@@ -146,7 +146,6 @@ export default function POSPage() {
   const [mobileQty, setMobileQty] = useState<number | ''>('')
   const [mobileName, setMobileName] = useState<string>('')
   const mobileQtyRef = useRef<any>(null)
-  const mobilePriceRef = useRef<any>(null) // 🟢 Added mobilePriceRef
 
   const [exchangeModal, setExchangeModal] = useState<{ isOpen: boolean, product: Product | null, consumedKg: string | number }>({
     isOpen: false, product: null, consumedKg: ''
@@ -186,19 +185,6 @@ export default function POSPage() {
   const [editingInvoiceId, setEditingInvoiceId] = useState<string | null>(null)
   
   const invoiceRef = useRef<HTMLDivElement>(null)
-
-  // 🟢 iOS Safari Body Scroll Lock Effect (Prevents background from panning/moving when popup opens)
-  useEffect(() => {
-    if (selectedMobileProduct) {
-      document.body.style.overflow = 'hidden';
-      document.body.style.position = 'fixed';
-      document.body.style.width = '100%';
-    } else {
-      document.body.style.overflow = '';
-      document.body.style.position = '';
-      document.body.style.width = '';
-    }
-  }, [selectedMobileProduct]);
 
   const totalRiel = cart.reduce((sum, item) => {
     const isNegativeItem = 
@@ -2129,11 +2115,9 @@ export default function POSPage() {
             display: 'flex',
             justifyContent: 'center',
             alignItems: 'flex-start',
-            paddingTop: '75px',
+            paddingTop: '10px',
             paddingLeft: '16px',
-            paddingRight: '16px',
-            transform: 'translate3d(0, 0, 0)',
-            WebkitTransform: 'translate3d(0, 0, 0)'
+            paddingRight: '16px'
           }}
           onMouseDown={(e) => {
             if (e.target === e.currentTarget) setSelectedMobileProduct(null);
@@ -2150,18 +2134,15 @@ export default function POSPage() {
               padding: '14px 18px',
               width: '100%',
               maxWidth: '400px',
-              boxShadow: '0 20px 40px rgba(0,0,0,0.25)',
+              boxShadow: '0 20px 40px rgba(0,0,0,0.2)',
               border: '1px solid #e2e8f0',
               animation: 'posPopupSlideDown 0.15s ease-out'
             }}
             onFocusCapture={() => {
-              const lockScroll = () => window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
-              lockScroll();
-              setTimeout(lockScroll, 50);
-              setTimeout(lockScroll, 150);
-              setTimeout(lockScroll, 300);
-              setTimeout(lockScroll, 450);
-              setTimeout(lockScroll, 600);
+              window.scrollTo(0, 0);
+              setTimeout(() => window.scrollTo(0, 0), 50);
+              setTimeout(() => window.scrollTo(0, 0), 150);
+              setTimeout(() => window.scrollTo(0, 0), 300);
             }}
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
@@ -2185,7 +2166,6 @@ export default function POSPage() {
                 </h3>
               </div>
               <button 
-                type="button"
                 onClick={() => setSelectedMobileProduct(null)} 
                 style={{ background: 'none', border: 'none', fontSize: '18px', color: '#64748b', cursor: 'pointer', fontWeight: 'normal' }}
               >
@@ -2222,12 +2202,6 @@ export default function POSPage() {
                   enterKeyHint="next"
                   value={mobileQty} 
                   onChange={(v: any) => setMobileQty(v)} 
-                  onKeyDown={(e: any) => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault();
-                      mobilePriceRef.current?.focus({ preventScroll: true });
-                    }
-                  }}
                   className="saas-input" 
                   style={{ 
                     width: '100%', 
@@ -2243,7 +2217,6 @@ export default function POSPage() {
                   Price (៛)
                 </label>
                 <CurrencyInput 
-                  ref={mobilePriceRef}
                   enterKeyHint="done"
                   value={mobilePrice} 
                   onChange={(v: any) => setMobilePrice(v)} 
@@ -2269,7 +2242,6 @@ export default function POSPage() {
 
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
               <button 
-                type="button"
                 onClick={() => setSelectedMobileProduct(null)} 
                 className="saas-btn saas-btn-secondary"
                 style={{ fontWeight: 'normal' }}
@@ -2277,7 +2249,6 @@ export default function POSPage() {
                 {currentT.cancel}
               </button>
               <button 
-                type="button"
                 onClick={handleAddMobileProductToCart} 
                 className="saas-btn saas-btn-primary"
                 style={{ fontWeight: 'normal' }}
@@ -2533,6 +2504,7 @@ export default function POSPage() {
         }
 
         /* 🟢 100% SURGICAL MODAL BACKDROP CENTERING */
+        /* Only targets overlays that contain an h2, h3, or modal close button, completely ignoring Logo/Splash screens! */
         [role="dialog"],
         [role="alert"],
         div[class*="modal" i],
