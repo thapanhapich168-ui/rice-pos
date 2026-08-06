@@ -146,6 +146,7 @@ export default function POSPage() {
   const [mobileQty, setMobileQty] = useState<number | ''>('')
   const [mobileName, setMobileName] = useState<string>('')
   const mobileQtyRef = useRef<any>(null)
+  const mobilePriceRef = useRef<any>(null) // 🟢 Add this line here!
 
   const [exchangeModal, setExchangeModal] = useState<{ isOpen: boolean, product: Product | null, consumedKg: string | number }>({
     isOpen: false, product: null, consumedKg: ''
@@ -2101,7 +2102,7 @@ export default function POSPage() {
         </div>
       </Modal>
 
-      {/* 🟢 ITEM CARD POPUP (Retail → Active Tab) */}
+      {/* 🟢 TOP-DOCKED MOBILE PRODUCT ADD POPUP (Eye-level + Zero iOS Safari Creep) */}
       {!!selectedMobileProduct && typeof document !== 'undefined' && createPortal(
         <div 
           style={{
@@ -2115,10 +2116,12 @@ export default function POSPage() {
             display: 'flex',
             justifyContent: 'center',
             alignItems: 'flex-start',
-            // 🟢 75px positions the card at eye level just below the burger menu icon!
             paddingTop: '75px', 
             paddingLeft: '16px',
-            paddingRight: '16px'
+            paddingRight: '16px',
+            // 🟢 LAYER 1: Forces iOS Safari to pin this overlay to the GPU screen layer
+            transform: 'translate3d(0, 0, 0)',
+            WebkitTransform: 'translate3d(0, 0, 0)'
           }}
           onMouseDown={(e) => {
             if (e.target === e.currentTarget) setSelectedMobileProduct(null);
@@ -2139,11 +2142,15 @@ export default function POSPage() {
               border: '1px solid #e2e8f0',
               animation: 'posPopupSlideDown 0.15s ease-out'
             }}
-            // 🟢 Prevents Safari from micro-shifting the viewport when focusing inputs
+            // 🟢 LAYER 2: Covers the entire 400ms iOS Safari keyboard animation lifecycle
             onFocusCapture={() => {
-              window.scrollTo(0, 0);
-              setTimeout(() => window.scrollTo(0, 0), 50);
-              setTimeout(() => window.scrollTo(0, 0), 150);
+              const lockScroll = () => window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+              lockScroll();
+              setTimeout(lockScroll, 50);
+              setTimeout(lockScroll, 150);
+              setTimeout(lockScroll, 300);
+              setTimeout(lockScroll, 450);
+              setTimeout(lockScroll, 600);
             }}
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
@@ -2204,6 +2211,13 @@ export default function POSPage() {
                   enterKeyHint="next"
                   value={mobileQty} 
                   onChange={(v: any) => setMobileQty(v)} 
+                  onKeyDown={(e: any) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      // 🟢 LAYER 3: Tells iOS Safari NOT to scroll when jumping focus to Price
+                      mobilePriceRef.current?.focus({ preventScroll: true });
+                    }
+                  }}
                   className="saas-input" 
                   style={{ 
                     width: '100%', 
@@ -2219,6 +2233,7 @@ export default function POSPage() {
                   Price (៛)
                 </label>
                 <CurrencyInput 
+                  ref={mobilePriceRef}
                   enterKeyHint="done"
                   value={mobilePrice} 
                   onChange={(v: any) => setMobilePrice(v)} 
