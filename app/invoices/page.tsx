@@ -43,7 +43,8 @@ export default function InvoiceGallery() {
   const [searchQuery, setSearchQuery] = useState<string>('')
   const debouncedSearch = useDebounce(searchQuery, 300)
 
-  const [viewMode, setViewMode] = useState<'grid' | 'table'>('grid')
+  // 🟢 DEFAULT TO TABLE VIEW
+  const [viewMode, setViewMode] = useState<'grid' | 'table'>('table')
 
   useEffect(() => {
     setMounted(true);
@@ -464,35 +465,35 @@ export default function InvoiceGallery() {
       {/* 🟢 TOP TABS: WHOLESALE, WALK-IN WHOLESALE, WALK-IN RETAIL, VOIDED */}
       <div className="saas-tab-container hide-scrollbar" style={{ width: 'fit-content', border: 'none', padding: 0, boxShadow: 'none', background: 'transparent', marginBottom: categoryTab === 'Voided' ? '8px' : '16px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
         <button 
-          onClick={() => { setCategoryTab('All'); setSelectedInvoices(new Set()); }} 
+          onClick={() => { setCategoryTab('All'); setSelectedInvoices(new Set()); setViewMode('table'); }} 
           className={`saas-tab ${categoryTab === 'All' ? 'active' : ''}`}
           style={categoryTab === 'All' ? { background: '#10b981', color: '#fff' } : { border: '1px solid #cbd5e1', background: '#fff' }}
         >
           ✅ All Active
         </button>
         <button 
-          onClick={() => { setCategoryTab('Wholesale'); setSelectedInvoices(new Set()); }} 
+          onClick={() => { setCategoryTab('Wholesale'); setSelectedInvoices(new Set()); setViewMode('grid'); }} 
           className={`saas-tab ${categoryTab === 'Wholesale' ? 'active' : ''}`}
           style={categoryTab === 'Wholesale' ? { background: '#10b981', color: '#fff' } : { border: '1px solid #cbd5e1', background: '#fff' }}
         >
           🌾 Wholesale
         </button>
         <button 
-          onClick={() => { setCategoryTab('WalkinWholesale'); setSelectedInvoices(new Set()); }} 
+          onClick={() => { setCategoryTab('WalkinWholesale'); setSelectedInvoices(new Set()); setViewMode('table'); }} 
           className={`saas-tab ${categoryTab === 'WalkinWholesale' ? 'active' : ''}`}
           style={categoryTab === 'WalkinWholesale' ? { background: '#10b981', color: '#fff' } : { border: '1px solid #cbd5e1', background: '#fff' }}
         >
           🏬 Walk-in Wholesale
         </button>
         <button 
-          onClick={() => { setCategoryTab('WalkinRetail'); setSelectedInvoices(new Set()); }} 
+          onClick={() => { setCategoryTab('WalkinRetail'); setSelectedInvoices(new Set()); setViewMode('table'); }} 
           className={`saas-tab ${categoryTab === 'WalkinRetail' ? 'active' : ''}`}
           style={categoryTab === 'WalkinRetail' ? { background: '#10b981', color: '#fff' } : { border: '1px solid #cbd5e1', background: '#fff' }}
         >
           🛍️ Walk-in Retail
         </button>
         <button 
-          onClick={() => { setCategoryTab('Voided'); setVoidSubTab('All'); setSelectedInvoices(new Set()); }} 
+          onClick={() => { setCategoryTab('Voided'); setVoidSubTab('All'); setSelectedInvoices(new Set()); setViewMode('table'); }} 
           className={`saas-tab ${categoryTab === 'Voided' ? 'active' : ''}`}
           style={categoryTab === 'Voided' ? { background: '#ef4444', color: '#fff' } : { border: '1px solid #cbd5e1', background: '#fff' }}
         >
@@ -592,7 +593,15 @@ export default function InvoiceGallery() {
       {/* CONTENT AREA */}
       {isLoading ? (
         viewMode === 'table' ? (
-          <TableSkeleton columns={7} rows={6} />
+          <div className="saas-table-wrapper">
+            <div className="saas-table-responsive">
+              <table className="saas-table">
+                <tbody>
+                  <TableSkeleton columns={7} rows={6} />
+                </tbody>
+              </table>
+            </div>
+          </div>
         ) : (
           <div style={{ textAlign: 'center', padding: '40px', color: '#94a3b8' }}>Loading records...</div>
         )
