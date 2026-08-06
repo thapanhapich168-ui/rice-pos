@@ -20,7 +20,7 @@ const defaultMenuItems: MenuItem[] = [
   { label: '🌾 Rice Control', href: '/rice', adminOnly: false },
   { label: '🧮 Mix Calculator', href: '/calculator', adminOnly: false },
   { label: '🖼️ Invoice Gallery', href: '/invoices', adminOnly: false },
-  { label: '🧾 COGS Accounting', href: '/cogs-report', adminOnly: true },
+  { label: '🧾 COGS Accounting', href: '/cogs-report', adminOnly: false },
   { label: '🧑‍🌾 Customer Database', href: '/customerdatabase', adminOnly: false },
   { label: '🔐 Master Biz Database', href: '/bizdatabase', adminOnly: false },
   { label: '📲 Report', href: '/report', adminOnly: false },
