@@ -2101,7 +2101,7 @@ export default function POSPage() {
         </div>
       </Modal>
 
-      {/* TOP-DOCKED MOBILE PRODUCT ADD POPUP */}
+      {/* 🟢 ITEM CARD POPUP (Retail → Active Tab) */}
       {!!selectedMobileProduct && typeof document !== 'undefined' && createPortal(
         <div 
           style={{
@@ -2115,7 +2115,8 @@ export default function POSPage() {
             display: 'flex',
             justifyContent: 'center',
             alignItems: 'flex-start',
-            paddingTop: '10px',
+            // 🟢 75px positions the card at eye level just below the burger menu icon!
+            paddingTop: '75px', 
             paddingLeft: '16px',
             paddingRight: '16px'
           }}
@@ -2134,15 +2135,15 @@ export default function POSPage() {
               padding: '14px 18px',
               width: '100%',
               maxWidth: '400px',
-              boxShadow: '0 20px 40px rgba(0,0,0,0.2)',
+              boxShadow: '0 20px 40px rgba(0,0,0,0.25)',
               border: '1px solid #e2e8f0',
               animation: 'posPopupSlideDown 0.15s ease-out'
             }}
+            // 🟢 Prevents Safari from micro-shifting the viewport when focusing inputs
             onFocusCapture={() => {
               window.scrollTo(0, 0);
               setTimeout(() => window.scrollTo(0, 0), 50);
               setTimeout(() => window.scrollTo(0, 0), 150);
-              setTimeout(() => window.scrollTo(0, 0), 300);
             }}
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
@@ -2166,6 +2167,7 @@ export default function POSPage() {
                 </h3>
               </div>
               <button 
+                type="button"
                 onClick={() => setSelectedMobileProduct(null)} 
                 style={{ background: 'none', border: 'none', fontSize: '18px', color: '#64748b', cursor: 'pointer', fontWeight: 'normal' }}
               >
@@ -2242,6 +2244,7 @@ export default function POSPage() {
 
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
               <button 
+                type="button"
                 onClick={() => setSelectedMobileProduct(null)} 
                 className="saas-btn saas-btn-secondary"
                 style={{ fontWeight: 'normal' }}
@@ -2249,6 +2252,7 @@ export default function POSPage() {
                 {currentT.cancel}
               </button>
               <button 
+                type="button"
                 onClick={handleAddMobileProductToCart} 
                 className="saas-btn saas-btn-primary"
                 style={{ fontWeight: 'normal' }}
