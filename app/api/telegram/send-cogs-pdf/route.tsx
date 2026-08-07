@@ -8,7 +8,7 @@ import { parseOwner } from '@/utils/formatters';
 
 const formatRiel = (val: number) => `${Math.round(val || 0).toLocaleString()} ៛`;
 
-// --- 1. A4 STYLING (MATCHING FRONTEND TABLE COLUMNS) ---
+// --- 1. A4 STYLING ---
 const styles = StyleSheet.create({
   page: { padding: 35, fontFamily: 'Helvetica', fontSize: 10, color: '#0f172a' },
   headerContainer: { flexDirection: 'row', justifyContent: 'space-between', borderBottomWidth: 2, borderColor: '#15803d', paddingBottom: 12, marginBottom: 16 },
@@ -30,7 +30,7 @@ const styles = StyleSheet.create({
   footer: { position: 'absolute', bottom: 20, left: 35, right: 35, flexDirection: 'row', justifyContent: 'space-between', borderTopWidth: 0.5, borderColor: '#e2e8f0', paddingTop: 6, fontSize: 8, color: '#94a3b8' }
 });
 
-// --- 2. FRONTEND GROUPING MATH (`processSellerData`) ---
+// --- 2. FRONTEND GROUPING MATH ---
 function processSellerData(sellerSales: any[]) {
   const customerGroups: Record<string, any[]> = {};
 
@@ -107,7 +107,7 @@ const CogsReportDocument = ({ groupedBySeller, combinedGrandTotal, fromDate, toD
         </View>
       </View>
 
-      {/* Empty State Guard (Goal 2: Sends blank/0 report if no COGS) */}
+      {/* Empty State Guard */}
       {Object.keys(groupedBySeller).length === 0 ? (
         <View style={{ padding: 40, textAlign: 'center' }}>
           <Text style={{ color: '#64748b', fontSize: 14 }}>No COGS sales recorded for this date range.</Text>
@@ -118,10 +118,8 @@ const CogsReportDocument = ({ groupedBySeller, combinedGrandTotal, fromDate, toD
 
           return (
             <View key={seller} style={{ marginBottom: 15 }}>
-              {/* Seller Title */}
               <Text style={styles.sellerTitle}>OWNER: {seller.toUpperCase()}</Text>
 
-              {/* Table Header */}
               <View style={styles.tableHeader} wrap={false}>
                 <Text style={styles.colInv}>INV</Text>
                 <Text style={styles.colCustomer}>CUSTOMER</Text>
@@ -132,7 +130,6 @@ const CogsReportDocument = ({ groupedBySeller, combinedGrandTotal, fromDate, toD
                 <Text style={styles.colTotal}>TOTAL</Text>
               </View>
 
-              {/* Table Rows: wrap={false} NEVER cuts a row in half across page breaks! */}
               {rows.map((row: any, idx: number) => (
                 <View key={idx} style={styles.tableRow} wrap={false}>
                   <Text style={styles.colInv}>{row.invoice_id ? String(row.invoice_id).replace(/\D/g, '') : '-'}</Text>
@@ -147,7 +144,6 @@ const CogsReportDocument = ({ groupedBySeller, combinedGrandTotal, fromDate, toD
                 </View>
               ))}
 
-              {/* Seller Subtotal */}
               <View style={styles.sellerSubtotal} wrap={false}>
                 <Text>Subtotal ({seller})</Text>
                 <Text>{formatRiel(sellerGrandTotal)}</Text>
@@ -175,17 +171,10 @@ const CogsReportDocument = ({ groupedBySeller, combinedGrandTotal, fromDate, toD
 // --- 4. POST ROUTE HANDLER ---
 export async function POST(request: Request) {
   try {
-    const { fromDate, toDate, ownerTab } = await request.json();
+    const { fromDate, toDate, ownerTab, downloadOnly } = await request.json();
 
     if (!fromDate || !toDate) {
       return NextResponse.json({ error: 'Date range required' }, { status: 400 });
-    }
-
-    const botToken = TELEGRAM_CONFIG.botToken || process.env.TELEGRAM_BOT_TOKEN;
-    const chatId = TELEGRAM_CONFIG.chatId || process.env.TELEGRAM_CHAT_ID;
-
-    if (!botToken || !chatId) {
-      return NextResponse.json({ error: 'Telegram credentials missing' }, { status: 500 });
     }
 
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
@@ -208,7 +197,6 @@ export async function POST(request: Request) {
       return isMomTab ? isMomRow : !isMomRow;
     });
 
-    // Grouping by Seller (exact same logic as frontend)
     const groupedBySeller: Record<string, any[]> = {};
     let combinedGrandTotal = 0;
 
@@ -219,7 +207,6 @@ export async function POST(request: Request) {
       groupedBySeller[seller].push(s);
     });
 
-    // Calculate total across all sellers
     Object.keys(groupedBySeller).forEach((seller) => {
       const { sellerGrandTotal } = processSellerData(groupedBySeller[seller]);
       combinedGrandTotal += sellerGrandTotal;
@@ -238,9 +225,27 @@ export async function POST(request: Request) {
       />
     );
 
+    // 🔥 NEW: If downloadOnly is requested, return the binary PDF file directly!
+    if (downloadOnly) {
+      return new NextResponse(new Uint8Array(pdfBuffer), {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/pdf',
+          'Content-Disposition': `attachment; filename="COGS-${(ownerTab || 'REPORT').toUpperCase()}-${fromDate}.pdf"`
+        }
+      });
+    }
+
+    // Otherwise, upload to Telegram
+    const botToken = TELEGRAM_CONFIG.botToken || process.env.TELEGRAM_BOT_TOKEN;
+    const chatId = TELEGRAM_CONFIG.chatId || process.env.TELEGRAM_CHAT_ID;
+
+    if (!botToken || !chatId) {
+      return NextResponse.json({ error: 'Telegram credentials missing' }, { status: 500 });
+    }
+
     const pdfBlob = new Blob([new Uint8Array(pdfBuffer)], { type: 'application/pdf' });
 
-    // Send to Telegram as a .PDF document
     const tgFormData = new FormData();
     tgFormData.append('chat_id', chatId);
     tgFormData.append('document', pdfBlob, `COGS-${(ownerTab || 'REPORT').toUpperCase()}-${fromDate}.pdf`);

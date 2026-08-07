@@ -2,7 +2,6 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { supabase } from '@/lib/supabaseClient'
-import * as htmlToImage from 'html-to-image'
 import { useFocusRefresh } from '@/lib/useFocusRefresh'
 import { useToast } from '@/components/ToastProvider'
 import { formatRiel, parseOwner, EXCHANGE_RATE } from '@/utils/formatters'
@@ -176,63 +175,62 @@ export default function CogsReportPage() {
     setLoading(false)
   }
 
+  // 🟢 NEW: Downloads the real A4 PDF document directly from your API route
   const handleDownload = async () => {
-    if (!reportRef.current) return;
+    if (isCapturing || isSendingTelegram) return;
     setIsCapturing(true);
-    try {
-      await document.fonts.ready;
-      const dataUrl = await htmlToImage.toPng(reportRef.current, { pixelRatio: 2, backgroundColor: '#ffffff' });
-      const link = document.createElement('a');
-      link.download = `COGS-Report-${fromDate}.png`;
-      link.href = dataUrl;
-      link.click();
-    } catch (err) {
-      console.error('Failed to download image', err);
-    } finally {
-      setIsCapturing(false);
-    }
-  }
-
-  const handleMobileShare = async () => {
-    if (!reportRef.current) return;
-    setIsCapturing(true);
-    try {
-      await document.fonts.ready;
-      const dataUrl = await htmlToImage.toPng(reportRef.current, { pixelRatio: 2, backgroundColor: '#ffffff' });
-      const res = await fetch(dataUrl);
-      const blob = await res.blob();
-      const file = new File([blob], `COGS-Report-${fromDate}.png`, { type: 'image/png' });
-      
-      if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
-        await navigator.share({ files: [file], title: `COGS Report` });
-      } else {
-        const link = document.createElement('a');
-        link.download = `COGS-Report-${fromDate}.png`;
-        link.href = dataUrl;
-        link.click();
-      }
-    } catch (err) {
-      console.error('Failed to share image', err);
-    } finally {
-      setIsCapturing(false);
-    }
-  }
-
-  // 🟢 NEW: Send Current Tab's A4 Report Image to Telegram
-  const handleSendToTelegram = async () => {
-    if (isSendingTelegram) return;
-    setIsSendingTelegram(true);
-    showToast('info', 'Generating PDF...', 'Building A4 PDF report and sending to Telegram...');
+    showToast('info', 'Generating PDF...', 'Building and downloading exact A4 PDF report...');
 
     try {
-      // 🔥 UPDATED: Calls your new send-cogs-pdf route instead of send-photo!
       const res = await fetch('/api/telegram/send-cogs-pdf', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           fromDate,
           toDate,
-          ownerTab: activeOwnerTab // Sends 'mom' or 'others' dynamically
+          ownerTab: activeOwnerTab,
+          downloadOnly: true
+        })
+      });
+
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.error || 'Failed to generate PDF download');
+      }
+
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `COGS-${activeOwnerTab.toUpperCase()}-${fromDate}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+
+      showToast('success', 'PDF Downloaded!', 'Exact A4 PDF document downloaded successfully!');
+    } catch (err: any) {
+      console.error('Download Error:', err);
+      showToast('error', 'Download Failed', err.message || 'Could not download PDF');
+    } finally {
+      setIsCapturing(false);
+    }
+  };
+
+  // 🟢 Send Current Tab's A4 Report PDF to Telegram
+  const handleSendToTelegram = async () => {
+    if (isSendingTelegram || isCapturing) return;
+    setIsSendingTelegram(true);
+    showToast('info', 'Generating PDF...', 'Building A4 PDF report and sending to Telegram...');
+
+    try {
+      const res = await fetch('/api/telegram/send-cogs-pdf', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fromDate,
+          toDate,
+          ownerTab: activeOwnerTab
         })
       });
 
@@ -267,18 +265,20 @@ export default function CogsReportPage() {
     return true;
   }
 
+  // 🔥 FIXED: Uses .substring(0, 10) so today's timestamps are never filtered out
   const reportSales = [...sales, ...retailSales].filter(s => {
-    const d = s.created_at.split('T')[0];
+    if (!s.created_at) return false;
+    const d = s.created_at.substring(0, 10);
     return d >= fromDate && d <= toDate;
   }).filter(s => {
-    const owner = parseOwner(s.owner);
+    const owner = String(parseOwner(s.owner || s.customer_name)).toLowerCase();
     if (activeOwnerTab === 'mom') return owner === 'mom';
     else return owner !== 'mom';
   });
 
   const groupedBySeller: Record<string, any[]> = {};
   reportSales.forEach(s => {
-    let seller = parseOwner(s.owner);
+    let seller = parseOwner(s.owner || s.customer_name);
     seller = seller.charAt(0).toUpperCase() + seller.slice(1);
     if (!groupedBySeller[seller]) groupedBySeller[seller] = [];
     groupedBySeller[seller].push(s);
@@ -348,13 +348,13 @@ export default function CogsReportPage() {
   const dailyMap: Record<string, any> = {};
   
   [...sales, ...retailSales].forEach(s => {
-    const owner = parseOwner(s.owner);
+    const owner = String(parseOwner(s.owner || s.customer_name)).toLowerCase();
     const isMomTab = activeOwnerTab === 'mom';
     const isMomOwner = owner === 'mom';
     
     if (isMomTab !== isMomOwner) return;
 
-    const date = s.created_at.split('T')[0];
+    const date = s.created_at.substring(0, 10);
     const displayOwner = owner.charAt(0).toUpperCase() + owner.slice(1);
     const key = `${date}_${displayOwner}`;
 
@@ -553,10 +553,10 @@ export default function CogsReportPage() {
           <h1 className="saas-page-title">🌾 COGS Accounting</h1>
         </div>
         
-        <div style={{ display: 'flex', gap: '10px' }}>
+        <div style={{ display: 'flex', gap: '8px' }}>
           {activeMainTab === 'report' && (
             <>
-              {/* 🟢 NEW: Telegram Send Button (Works on BOTH Mom & Pich/Jing/Both tabs!) */}
+              {/* 🔥 FIXED: Icon-only on mobile to prevent header overflow */}
               <button 
                 onClick={handleSendToTelegram} 
                 disabled={isSendingTelegram || isCapturing} 
@@ -567,39 +567,42 @@ export default function CogsReportPage() {
                   display: 'flex', 
                   alignItems: 'center', 
                   gap: '6px',
-                  padding: isDeviceMobile ? '10px' : '10px 16px'
+                  padding: isDeviceMobile ? '8px 12px' : '10px 16px',
+                  fontSize: isDeviceMobile ? '16px' : '14px'
                 }}
                 title="Send to Telegram"
               >
                 {isSendingTelegram ? '⏳' : (
                   <>
                     <span>✈️</span>
-                    <span className="hide-on-mobile">Send to Telegram</span>
+                    {!isDeviceMobile && <span>Send to Telegram</span>}
                   </>
                 )}
               </button>
 
-              {isDeviceMobile ? (
-                <button 
-                  onClick={handleMobileShare} 
-                  disabled={isCapturing || isSendingTelegram} 
-                  className="saas-btn saas-btn-primary" 
-                  style={{ padding: '10px' }} 
-                  title="Download / Share"
-                >
-                  {isCapturing ? '⏳' : (
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                      <polyline points="7 10 12 15 17 10"></polyline>
-                      <line x1="12" y1="15" x2="12" y2="3"></line>
-                    </svg>
-                  )}
-                </button>
-              ) : (
-                <button onClick={handleDownload} disabled={isCapturing || isSendingTelegram} className="saas-btn" style={{ background: '#b58a3d', color: '#fff' }}>
-                  {isCapturing ? '⏳ Saving...' : '⬇️ Download A4'}
-                </button>
-              )}
+              {/* 🔥 FIXED: Generates exact A4 PDF file & Icon-only on mobile */}
+              <button 
+                onClick={handleDownload} 
+                disabled={isCapturing || isSendingTelegram} 
+                className="saas-btn" 
+                style={{ 
+                  background: '#b58a3d', 
+                  color: '#fff',
+                  display: 'flex', 
+                  alignItems: 'center', 
+                  gap: '6px',
+                  padding: isDeviceMobile ? '8px 12px' : '10px 16px',
+                  fontSize: isDeviceMobile ? '16px' : '14px'
+                }}
+                title="Download A4 PDF"
+              >
+                {isCapturing ? '⏳' : (
+                  <>
+                    <span>⬇️</span>
+                    {!isDeviceMobile && <span>Download A4</span>}
+                  </>
+                )}
+              </button>
             </>
           )}
         </div>
