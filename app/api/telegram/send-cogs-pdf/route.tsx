@@ -8,33 +8,95 @@ import { parseOwner } from '@/utils/formatters';
 
 const formatRiel = (val: number) => `${Math.round(val || 0).toLocaleString()} ៛`;
 
-// --- 1. DEFINE A4 PDF STYLES ---
+// --- 1. A4 STYLING (MATCHING FRONTEND TABLE COLUMNS) ---
 const styles = StyleSheet.create({
-  page: { padding: 40, fontFamily: 'Helvetica', fontSize: 10, color: '#0f172a' },
-  headerContainer: { flexDirection: 'row', justifyContent: 'space-between', borderBottomWidth: 2, borderColor: '#15803d', paddingBottom: 15, marginBottom: 20 },
-  title: { fontSize: 20, fontWeight: 'bold', color: '#15803d' },
+  page: { padding: 35, fontFamily: 'Helvetica', fontSize: 10, color: '#0f172a' },
+  headerContainer: { flexDirection: 'row', justifyContent: 'space-between', borderBottomWidth: 2, borderColor: '#15803d', paddingBottom: 12, marginBottom: 16 },
+  title: { fontSize: 18, fontWeight: 'bold', color: '#15803d' },
   subtitle: { fontSize: 10, color: '#64748b', marginTop: 4 },
-  dateText: { fontSize: 12, fontWeight: 'bold', textAlign: 'right' },
+  dateText: { fontSize: 11, fontWeight: 'bold', textAlign: 'right' },
+  sellerTitle: { fontSize: 12, fontWeight: 'bold', color: '#1e293b', marginTop: 14, marginBottom: 6, backgroundColor: '#f1f5f9', padding: 6 },
   tableHeader: { flexDirection: 'row', backgroundColor: '#fef9c3', borderBottomWidth: 1, borderColor: '#000000', paddingVertical: 6, paddingHorizontal: 4, fontWeight: 'bold' },
   tableRow: { flexDirection: 'row', borderBottomWidth: 0.5, borderColor: '#cbd5e1', paddingVertical: 6, paddingHorizontal: 4 },
   colInv: { width: '12%', textAlign: 'center' },
-  colCustomer: { width: '25%' },
-  colRice: { width: '28%' },
-  colQty: { width: '10%', textAlign: 'center' },
-  colPrice: { width: '12%', textAlign: 'right' },
-  colTotal: { width: '13%', textAlign: 'right', fontWeight: 'bold' },
-  totalBox: { flexDirection: 'row', justifyContent: 'space-between', backgroundColor: '#fef9c3', borderWidth: 1.5, borderColor: '#000000', padding: 12, marginTop: 25 },
-  totalLabel: { fontSize: 14, fontWeight: 'bold' },
-  totalValue: { fontSize: 16, fontWeight: 'bold', color: '#b58a3d' },
-  footer: { position: 'absolute', bottom: 25, left: 40, right: 40, flexDirection: 'row', justifyContent: 'space-between', borderTopWidth: 0.5, borderColor: '#e2e8f0', paddingTop: 8, fontSize: 8, color: '#94a3b8' }
+  colCustomer: { width: '22%' },
+  colRice: { width: '22%' },
+  colCustom: { width: '16%' },
+  colQty: { width: '8%', textAlign: 'center' },
+  colPrice: { width: '10%', textAlign: 'right' },
+  colTotal: { width: '10%', textAlign: 'right', fontWeight: 'bold' },
+  sellerSubtotal: { flexDirection: 'row', justifyContent: 'space-between', backgroundColor: '#fffacd', padding: 6, borderBottomWidth: 1, borderColor: '#000000', fontWeight: 'bold' },
+  grandTotalBox: { flexDirection: 'row', justifyContent: 'space-between', backgroundColor: '#fffacd', borderWidth: 1.5, borderColor: '#000000', padding: 10, marginTop: 20 },
+  footer: { position: 'absolute', bottom: 20, left: 35, right: 35, flexDirection: 'row', justifyContent: 'space-between', borderTopWidth: 0.5, borderColor: '#e2e8f0', paddingTop: 6, fontSize: 8, color: '#94a3b8' }
 });
 
-// --- 2. DEFINE THE REACT-PDF LAYOUT COMPONENT ---
-const CogsReportDocument = ({ rows, grandTotal, fromDate, toDate, tabLabel }: any) => (
+// --- 2. FRONTEND GROUPING MATH (`processSellerData`) ---
+function processSellerData(sellerSales: any[]) {
+  const customerGroups: Record<string, any[]> = {};
+
+  sellerSales.forEach((row) => {
+    const customer = row.customer_name || 'Walk-in';
+    if (!customerGroups[customer]) customerGroups[customer] = [];
+    customerGroups[customer].push(row);
+  });
+
+  const finalRows: any[] = [];
+  let sellerGrandTotal = 0;
+
+  Object.keys(customerGroups).forEach((customer) => {
+    const group = customerGroups[customer];
+    let normalRows: any[] = [];
+    let douRows: any[] = [];
+    let consumedRows: any[] = [];
+    let specialRows: any[] = [];
+
+    group.forEach((item) => {
+      const desc = item.custom_rice_type || item.rice_type || '';
+      const price = Number(item.cogs_price || 0);
+
+      if (desc.includes('សេវាដឹក')) return;
+      if (desc.includes('បាវ') && price === 0) return;
+
+      if (desc.includes('ដូរ') || desc.includes('បញ្ចុះតម្លៃ') || desc.includes('កក់')) douRows.push(item);
+      else if (desc.includes('បានប្រើ') || desc.includes('អង្ករខ្វះ')) consumedRows.push(item);
+      else if (desc.includes('ថ្លៃបាវ')) specialRows.push(item);
+      else normalRows.push(item);
+    });
+
+    specialRows.sort((a, b) => (a.rice_type || '').localeCompare(b.rice_type || ''));
+    const sortedGroup = [...normalRows, ...specialRows, ...douRows, ...consumedRows];
+
+    sortedGroup.forEach((item, index) => {
+      const qty = Number(item.qty || 0);
+      const price = Number(item.cogs_price || 0);
+      let amount = qty * price;
+
+      const descForMath = item.custom_rice_type || item.rice_type || '';
+      const isNegative = descForMath.includes('ដូរ') || descForMath.includes('បញ្ចុះតម្លៃ') || descForMath.includes('កក់');
+
+      if (isNegative) amount = -Math.abs(amount);
+      else amount = Math.abs(amount);
+
+      sellerGrandTotal += amount;
+
+      finalRows.push({
+        ...item,
+        calculatedAmount: amount,
+        isNegative,
+        isFirstOfCustomer: index === 0
+      });
+    });
+  });
+
+  return { rows: finalRows, sellerGrandTotal };
+}
+
+// --- 3. EXACT FRONTEND PDF DOCUMENT LAYOUT ---
+const CogsReportDocument = ({ groupedBySeller, combinedGrandTotal, fromDate, toDate, tabLabel }: any) => (
   <Document>
     <Page size="A4" style={styles.page}>
       {/* Header */}
-      <View style={styles.headerContainer}>
+      <View style={styles.headerContainer} wrap={false}>
         <View>
           <Text style={styles.title}>🌾 COGS ACCOUNTING SHEET</Text>
           <Text style={styles.subtitle}>{tabLabel} Breakdown Report</Text>
@@ -45,46 +107,72 @@ const CogsReportDocument = ({ rows, grandTotal, fromDate, toDate, tabLabel }: an
         </View>
       </View>
 
-      {/* Table Header */}
-      <View style={styles.tableHeader}>
-        <Text style={styles.colInv}>INV</Text>
-        <Text style={styles.colCustomer}>CUSTOMER</Text>
-        <Text style={styles.colRice}>RICE TYPE</Text>
-        <Text style={styles.colQty}>QTY</Text>
-        <Text style={styles.colPrice}>PRICE</Text>
-        <Text style={styles.colTotal}>TOTAL (KHR)</Text>
-      </View>
-
-      {/* Table Rows */}
-      {rows.map((row: any, idx: number) => (
-        <View key={idx} style={styles.tableRow} wrap={false}>
-          <Text style={styles.colInv}>{row.invoice_id ? String(row.invoice_id).replace(/\D/g, '') : '-'}</Text>
-          <Text style={styles.colCustomer}>{row.customer_name || 'Walk-in'}</Text>
-          <Text style={styles.colRice}>{row.rice_type || row.custom_rice_type || '-'}</Text>
-          <Text style={styles.colQty}>{Number(row.qty || 0).toLocaleString()}</Text>
-          <Text style={styles.colPrice}>{Number(row.cogs_price || 0).toLocaleString()}</Text>
-          <Text style={[styles.colTotal, row.isNegative ? { color: '#dc2626' } : {}]}>
-            {Math.round(row.calculatedAmount || 0).toLocaleString()}
-          </Text>
+      {/* Empty State Guard (Goal 2: Sends blank/0 report if no COGS) */}
+      {Object.keys(groupedBySeller).length === 0 ? (
+        <View style={{ padding: 40, textAlign: 'center' }}>
+          <Text style={{ color: '#64748b', fontSize: 14 }}>No COGS sales recorded for this date range.</Text>
         </View>
-      ))}
+      ) : (
+        Object.keys(groupedBySeller).map((seller) => {
+          const { rows, sellerGrandTotal } = processSellerData(groupedBySeller[seller]);
 
-      {/* Grand Total Box */}
-      <View style={styles.totalBox} wrap={false}>
-        <Text style={styles.totalLabel}>TOTAL COGS DUE:</Text>
-        <Text style={styles.totalValue}>{formatRiel(grandTotal)}</Text>
+          return (
+            <View key={seller} style={{ marginBottom: 15 }}>
+              {/* Seller Title */}
+              <Text style={styles.sellerTitle}>OWNER: {seller.toUpperCase()}</Text>
+
+              {/* Table Header */}
+              <View style={styles.tableHeader} wrap={false}>
+                <Text style={styles.colInv}>INV</Text>
+                <Text style={styles.colCustomer}>CUSTOMER</Text>
+                <Text style={styles.colRice}>RICE TYPE</Text>
+                <Text style={styles.colCustom}>NAME (BILL)</Text>
+                <Text style={styles.colQty}>QTY</Text>
+                <Text style={styles.colPrice}>PRICE</Text>
+                <Text style={styles.colTotal}>TOTAL</Text>
+              </View>
+
+              {/* Table Rows: wrap={false} NEVER cuts a row in half across page breaks! */}
+              {rows.map((row: any, idx: number) => (
+                <View key={idx} style={styles.tableRow} wrap={false}>
+                  <Text style={styles.colInv}>{row.invoice_id ? String(row.invoice_id).replace(/\D/g, '') : '-'}</Text>
+                  <Text style={styles.colCustomer}>{row.customer_name || 'Walk-in'}</Text>
+                  <Text style={styles.colRice}>{row.rice_type || '-'}</Text>
+                  <Text style={styles.colCustom}>{row.custom_rice_type || '-'}</Text>
+                  <Text style={styles.colQty}>{Number(row.qty || 0).toLocaleString()}</Text>
+                  <Text style={styles.colPrice}>{Number(row.cogs_price || 0).toLocaleString()}</Text>
+                  <Text style={[styles.colTotal, row.isNegative ? { color: '#dc2626' } : {}]}>
+                    {Math.round(row.calculatedAmount || 0).toLocaleString()}
+                  </Text>
+                </View>
+              ))}
+
+              {/* Seller Subtotal */}
+              <View style={styles.sellerSubtotal} wrap={false}>
+                <Text>Subtotal ({seller})</Text>
+                <Text>{formatRiel(sellerGrandTotal)}</Text>
+              </View>
+            </View>
+          );
+        })
+      )}
+
+      {/* Combined Grand Total Box */}
+      <View style={styles.grandTotalBox} wrap={false}>
+        <Text style={{ fontWeight: 'bold', fontSize: 13 }}>TOTAL COGS DUE:</Text>
+        <Text style={{ fontWeight: 'bold', fontSize: 15, color: '#b58a3d' }}>{formatRiel(combinedGrandTotal)}</Text>
       </View>
 
       {/* Footer Watermark */}
       <View style={styles.footer} fixed>
-        <Text>Generated by COGS Automated Engine • Verified A4 PDF Document</Text>
+        <Text>Generated by COGS Automated Engine • Exact Frontend Layout Clone</Text>
         <Text render={({ pageNumber, totalPages }) => `Page ${pageNumber} of ${totalPages}`} />
       </View>
     </Page>
   </Document>
 );
 
-// --- 3. POST API ROUTE HANDLER ---
+// --- 4. POST ROUTE HANDLER ---
 export async function POST(request: Request) {
   try {
     const { fromDate, toDate, ownerTab } = await request.json();
@@ -104,17 +192,13 @@ export async function POST(request: Request) {
     const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    // 🔥 Query exact date range boundaries directly in Supabase
     const startIso = `${fromDate}T00:00:00`;
     const endIso = `${toDate}T23:59:59`;
 
-    const [{ data: sales, error: salesErr }, { data: retailSales, error: retailErr }] = await Promise.all([
+    const [{ data: sales }, { data: retailSales }] = await Promise.all([
       supabase.from('sales').select('*').gte('created_at', startIso).lte('created_at', endIso),
       supabase.from('retail_sales').select('*').gte('created_at', startIso).lte('created_at', endIso)
     ]);
-
-    if (salesErr) console.error('Sales Query Error:', salesErr);
-    if (retailErr) console.error('Retail Sales Query Error:', retailErr);
 
     const isMomTab = (ownerTab || '').toLowerCase() === 'mom';
 
@@ -124,35 +208,30 @@ export async function POST(request: Request) {
       return isMomTab ? isMomRow : !isMomRow;
     });
 
-    if (rawSales.length === 0) {
-      return NextResponse.json({ error: 'No COGS records found for this selection' }, { status: 404 });
-    }
+    // Grouping by Seller (exact same logic as frontend)
+    const groupedBySeller: Record<string, any[]> = {};
+    let combinedGrandTotal = 0;
 
-    let grandTotal = 0;
-    const cleanRows: any[] = [];
+    rawSales.forEach((s) => {
+      let seller = parseOwner(s.owner);
+      seller = seller.charAt(0).toUpperCase() + seller.slice(1);
+      if (!groupedBySeller[seller]) groupedBySeller[seller] = [];
+      groupedBySeller[seller].push(s);
+    });
 
-    rawSales.forEach((item) => {
-      const desc = item.custom_rice_type || item.rice_type || '';
-      const price = Number(item.cogs_price || 0);
-      const qty = Number(item.qty || 0);
-
-      if (desc.includes('សេវាដឹក') || (desc.includes('បាវ') && price === 0)) return;
-
-      let amount = Math.abs(qty * price);
-      const isNegative = desc.includes('ដូរ') || desc.includes('បញ្ចុះតម្លៃ') || desc.includes('កក់');
-      if (isNegative) amount = -amount;
-
-      grandTotal += amount;
-      cleanRows.push({ ...item, calculatedAmount: amount, isNegative });
+    // Calculate total across all sellers
+    Object.keys(groupedBySeller).forEach((seller) => {
+      const { sellerGrandTotal } = processSellerData(groupedBySeller[seller]);
+      combinedGrandTotal += sellerGrandTotal;
     });
 
     const tabLabel = isMomTab ? 'Mom COGS' : 'Pich / Jing / Both COGS';
 
-    // Compile JSX to PDF Buffer
+    // Compile A4 PDF Buffer
     const pdfBuffer = await renderToBuffer(
       <CogsReportDocument
-        rows={cleanRows}
-        grandTotal={grandTotal}
+        groupedBySeller={groupedBySeller}
+        combinedGrandTotal={combinedGrandTotal}
         fromDate={fromDate}
         toDate={toDate}
         tabLabel={tabLabel}
@@ -161,13 +240,13 @@ export async function POST(request: Request) {
 
     const pdfBlob = new Blob([new Uint8Array(pdfBuffer)], { type: 'application/pdf' });
 
-    // Send as PDF attachment via `/sendDocument`
+    // Send to Telegram as a .PDF document
     const tgFormData = new FormData();
     tgFormData.append('chat_id', chatId);
     tgFormData.append('document', pdfBlob, `COGS-${(ownerTab || 'REPORT').toUpperCase()}-${fromDate}.pdf`);
     tgFormData.append(
       'caption',
-      `🌾 <b>${tabLabel} A4 REPORT</b>\n📅 Date: <b>${fromDate} to ${toDate}</b>\n💰 Total Due: <b>${formatRiel(grandTotal)}</b>\n✅ Attached: Multi-page A4 PDF`
+      `🌾 <b>${tabLabel} A4 REPORT</b>\n📅 Date: <b>${fromDate} to ${toDate}</b>\n💰 Total Due: <b>${formatRiel(combinedGrandTotal)}</b>\n✅ Attached: Multi-page A4 PDF`
     );
     tgFormData.append('parse_mode', 'HTML');
 

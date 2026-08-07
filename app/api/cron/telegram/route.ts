@@ -234,6 +234,29 @@ export async function GET(request: Request) {
       }
     }
 
+    // --- 9. 🔥 DISPATCH COGS A4 PDF REPORTS (MOM & PICH/JING/BOTH) AT 7 PM ---
+    if (sendDaily) {
+      const rawBaseUrl = process.env.NEXT_PUBLIC_SITE_URL || 
+        (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000')
+      const baseUrl = rawBaseUrl.replace(/\/$/, '')
+
+      const todayIsoStr = `${nowCam.year}-${String(nowCam.month).padStart(2, '0')}-${String(nowCam.day).padStart(2, '0')}`
+
+      // 1. Send Mom COGS PDF
+      await fetch(`${baseUrl}/api/telegram/send-cogs-pdf`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fromDate: todayIsoStr, toDate: todayIsoStr, ownerTab: 'mom' })
+      })
+
+      // 2. Send Pich / Jing / Both COGS PDF
+      await fetch(`${baseUrl}/api/telegram/send-cogs-pdf`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fromDate: todayIsoStr, toDate: todayIsoStr, ownerTab: 'others' })
+      })
+    }
+
     return NextResponse.json({
       success: true,
       dailySent: sendDaily,
