@@ -31,6 +31,7 @@ export default function CogsReportPage() {
   
   const [isDeviceMobile, setIsDeviceMobile] = useState(false)
   const [isCapturing, setIsCapturing] = useState(false)
+  const [isSendingTelegram, setIsSendingTelegram] = useState(false)
   
   const reportRef = useRef<HTMLDivElement>(null)
 
@@ -216,6 +217,47 @@ export default function CogsReportPage() {
       setIsCapturing(false);
     }
   }
+
+  // 🟢 NEW: Send Current Tab's A4 Report Image to Telegram
+  const handleSendToTelegram = async () => {
+    if (!reportRef.current || isSendingTelegram) return;
+    setIsSendingTelegram(true);
+    showToast('info', 'Telegram', 'Capturing report image...');
+
+    try {
+      await document.fonts.ready;
+      const dataUrl = await htmlToImage.toPng(reportRef.current, { pixelRatio: 2, backgroundColor: '#ffffff' });
+      const res = await fetch(dataUrl);
+      const blob = await res.blob();
+      const tabLabel = activeOwnerTab === 'mom' ? 'Mom COGS' : 'Pich / Jing / Both COGS';
+      const file = new File([blob], `COGS-${tabLabel}-${fromDate}.png`, { type: 'image/png' });
+
+      const formData = new FormData();
+      formData.append('photo', file);
+      formData.append(
+        'caption',
+        `🌾 <b>${tabLabel} Report</b>\n📅 Date: <b>${fromDate}</b> to <b>${toDate}</b>\n💰 Total: <b>${Math.round(combinedGrandTotal).toLocaleString('en-US')} ៛</b>`
+      );
+
+      const apiRes = await fetch('/api/telegram/send-photo', {
+        method: 'POST',
+        body: formData,
+      });
+
+      const apiData = await apiRes.json();
+
+      if (!apiRes.ok) {
+        throw new Error(apiData.error || 'Failed to send to Telegram');
+      }
+
+      showToast('success', 'Sent to Telegram', `${tabLabel} report image posted to Telegram!`);
+    } catch (err: any) {
+      console.error('Telegram Send Error:', err);
+      showToast('error', 'Send Failed', err.message || 'Could not send image to Telegram');
+    } finally {
+      setIsSendingTelegram(false);
+    }
+  };
 
   const now = new Date()
   const isWithinTimeFilter = (dateStr: string, filter: string) => {
@@ -522,11 +564,33 @@ export default function CogsReportPage() {
         <div style={{ display: 'flex', gap: '10px' }}>
           {activeMainTab === 'report' && (
             <>
+              {/* 🟢 NEW: Telegram Send Button (Works on BOTH Mom & Pich/Jing/Both tabs!) */}
+              <button 
+                onClick={handleSendToTelegram} 
+                disabled={isSendingTelegram || isCapturing} 
+                className="saas-btn" 
+                style={{ 
+                  background: '#229ED9', 
+                  color: '#fff', 
+                  display: 'flex', 
+                  alignItems: 'center', 
+                  gap: '6px',
+                  padding: isDeviceMobile ? '10px' : '10px 16px'
+                }}
+                title="Send to Telegram"
+              >
+                {isSendingTelegram ? '⏳' : (
+                  <>
+                    <span>✈️</span>
+                    <span className="hide-on-mobile">Send to Telegram</span>
+                  </>
+                )}
+              </button>
+
               {isDeviceMobile ? (
-                // 🔥 FIXED: Mobile Button is now a compact blue download icon
                 <button 
                   onClick={handleMobileShare} 
-                  disabled={isCapturing} 
+                  disabled={isCapturing || isSendingTelegram} 
                   className="saas-btn saas-btn-primary" 
                   style={{ padding: '10px' }} 
                   title="Download / Share"
@@ -540,7 +604,7 @@ export default function CogsReportPage() {
                   )}
                 </button>
               ) : (
-                <button onClick={handleDownload} disabled={isCapturing} className="saas-btn" style={{ background: '#b58a3d', color: '#fff' }}>
+                <button onClick={handleDownload} disabled={isCapturing || isSendingTelegram} className="saas-btn" style={{ background: '#b58a3d', color: '#fff' }}>
                   {isCapturing ? '⏳ Saving...' : '⬇️ Download A4'}
                 </button>
               )}
@@ -577,7 +641,6 @@ export default function CogsReportPage() {
       {/* FILTERS CARD (Frozen) */}
       <div className="saas-card filter-card-layout" style={{ padding: '16px 20px', marginBottom: '16px', flexShrink: 0 }}>
         {activeMainTab === 'report' ? (
-          // 🔥 FIXED: Forced 'nowrap' so From and To ALWAYS stay on one single horizontal line!
           <div className="hide-scrollbar" style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'nowrap', maxWidth: '100%', overflowX: 'auto' }}>
             <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexShrink: 0 }}>
               <label style={{ fontWeight: 'bold', fontSize: '13px', color: '#64748b' }}>From:</label>
