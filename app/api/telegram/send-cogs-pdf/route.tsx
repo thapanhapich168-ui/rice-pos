@@ -111,24 +111,26 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Telegram credentials missing' }, { status: 500 });
     }
 
-    // 🔥 FIXED: Includes Service Role Key fallback to prevent RLS read blocks
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
     const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    // 🔥 FIXED: Added Cambodia Timezone (+07:00) so Postgres doesn't shift by 7 hours
+    // 🔥 FIXED: Query recent descending records exactly like your frontend does (no SQL timezone traps!)
     const [{ data: sales }, { data: retailSales }] = await Promise.all([
-      supabase.from('sales').select('*').gte('created_at', `${fromDate}T00:00:00+07:00`).lte('created_at', `${toDate}T23:59:59+07:00`),
-      supabase.from('retail_sales').select('*').gte('created_at', `${fromDate}T00:00:00+07:00`).lte('created_at', `${toDate}T23:59:59+07:00`)
+      supabase.from('sales').select('*').order('created_at', { ascending: false }).limit(2000),
+      supabase.from('retail_sales').select('*').order('created_at', { ascending: false }).limit(2000)
     ]);
 
     // 🔥 FIXED: Mirrors your Frontend's exact .split('T')[0] matching logic
+    const isMomTab = (ownerTab || '').toLowerCase() === 'mom';
+
     const rawSales = [...(sales || []), ...(retailSales || [])].filter((s) => {
       if (!s.created_at) return false;
       const d = s.created_at.split('T')[0];
       const matchesDate = d >= fromDate && d <= toDate;
       const owner = parseOwner(s.owner);
-      const matchesOwner = ownerTab === 'mom' ? owner === 'Mom' : owner !== 'Mom';
+      const isMomRow = owner === 'Mom';
+      const matchesOwner = isMomTab ? isMomRow : !isMomRow;
       return matchesDate && matchesOwner;
     });
 
@@ -155,7 +157,7 @@ export async function POST(request: Request) {
       cleanRows.push({ ...item, calculatedAmount: amount, isNegative });
     });
 
-    const tabLabel = ownerTab === 'mom' ? 'Mom COGS' : 'Pich / Jing / Both COGS';
+    const tabLabel = isMomTab ? 'Mom COGS' : 'Pich / Jing / Both COGS';
 
     // Compile JSX to PDF Buffer
     const pdfBuffer = await renderToBuffer(
@@ -168,13 +170,12 @@ export async function POST(request: Request) {
       />
     );
 
-    // 🔥 FIXED: Wrapped in Uint8Array to satisfy strict TypeScript Blob typing
     const pdfBlob = new Blob([new Uint8Array(pdfBuffer)], { type: 'application/pdf' });
 
     // Send as PDF attachment via `/sendDocument`
     const tgFormData = new FormData();
     tgFormData.append('chat_id', chatId);
-    tgFormData.append('document', pdfBlob, `COGS-${ownerTab.toUpperCase()}-${fromDate}.pdf`);
+    tgFormData.append('document', pdfBlob, `COGS-${(ownerTab || 'REPORT').toUpperCase()}-${fromDate}.pdf`);
     tgFormData.append(
       'caption',
       `🌾 <b>${tabLabel} A4 REPORT</b>\n📅 Date: <b>${fromDate} to ${toDate}</b>\n💰 Total Due: <b>${formatRiel(grandTotal)}</b>\n✅ Attached: Multi-page A4 PDF`
