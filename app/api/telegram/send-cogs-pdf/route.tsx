@@ -4,7 +4,7 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { TELEGRAM_CONFIG } from '@/lib/telegramConfig';
 import { renderToBuffer, Document, Page, View, Text, StyleSheet } from '@react-pdf/renderer';
-import { parseOwner, EXCHANGE_RATE } from '@/utils/formatters';
+import { parseOwner } from '@/utils/formatters';
 
 const formatRiel = (val: number) => `${Math.round(val || 0).toLocaleString()} ៛`;
 
@@ -104,26 +104,24 @@ export async function POST(request: Request) {
     const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    // Fetch recent records descending
-    const [{ data: sales }, { data: retailSales }] = await Promise.all([
-      supabase.from('sales').select('*').order('created_at', { ascending: false }).limit(2000),
-      supabase.from('retail_sales').select('*').order('created_at', { ascending: false }).limit(2000)
+    // 🔥 Query exact date range boundaries directly in Supabase
+    const startIso = `${fromDate}T00:00:00`;
+    const endIso = `${toDate}T23:59:59`;
+
+    const [{ data: sales, error: salesErr }, { data: retailSales, error: retailErr }] = await Promise.all([
+      supabase.from('sales').select('*').gte('created_at', startIso).lte('created_at', endIso),
+      supabase.from('retail_sales').select('*').gte('created_at', startIso).lte('created_at', endIso)
     ]);
+
+    if (salesErr) console.error('Sales Query Error:', salesErr);
+    if (retailErr) console.error('Retail Sales Query Error:', retailErr);
 
     const isMomTab = (ownerTab || '').toLowerCase() === 'mom';
 
     const rawSales = [...(sales || []), ...(retailSales || [])].filter((s) => {
-      if (!s.created_at) return false;
-      
-      // 🔥 FIXED: Safely grabs 'YYYY-MM-DD' whether separated by space or 'T'
-      const d = s.created_at.substring(0, 10);
-      const matchesDate = d >= fromDate && d <= toDate;
-      
       const owner = parseOwner(s.owner);
       const isMomRow = owner.toLowerCase() === 'mom';
-      const matchesOwner = isMomTab ? isMomRow : !isMomRow;
-
-      return matchesDate && matchesOwner;
+      return isMomTab ? isMomRow : !isMomRow;
     });
 
     if (rawSales.length === 0) {
