@@ -114,10 +114,11 @@ export async function POST(request: Request) {
 
     const rawSales = [...(sales || []), ...(retailSales || [])].filter((s) => {
       if (!s.created_at) return false;
-      const d = s.created_at.split('T')[0];
+      
+      // 🔥 FIXED: Safely grabs 'YYYY-MM-DD' whether separated by space or 'T'
+      const d = s.created_at.substring(0, 10);
       const matchesDate = d >= fromDate && d <= toDate;
       
-      // Uses your exact shared parseOwner utility
       const owner = parseOwner(s.owner);
       const isMomRow = owner.toLowerCase() === 'mom';
       const matchesOwner = isMomTab ? isMomRow : !isMomRow;
