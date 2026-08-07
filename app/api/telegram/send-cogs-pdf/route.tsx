@@ -4,19 +4,9 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { TELEGRAM_CONFIG } from '@/lib/telegramConfig';
 import { renderToBuffer, Document, Page, View, Text, StyleSheet } from '@react-pdf/renderer';
+import { parseOwner, EXCHANGE_RATE } from '@/utils/formatters';
 
-const EXCHANGE_RATE = 4000;
 const formatRiel = (val: number) => `${Math.round(val || 0).toLocaleString()} ៛`;
-
-function parseOwner(owner?: string): 'Mom' | 'Pich' | 'Jing' | 'Both' | 'Others' {
-  if (!owner) return 'Others';
-  const clean = owner.toLowerCase().trim();
-  if (clean.includes('mom')) return 'Mom';
-  if (clean.includes('pich')) return 'Pich';
-  if (clean.includes('jing')) return 'Jing';
-  if (clean.includes('both')) return 'Both';
-  return 'Others';
-}
 
 // --- 1. DEFINE A4 PDF STYLES ---
 const styles = StyleSheet.create({
@@ -25,7 +15,6 @@ const styles = StyleSheet.create({
   title: { fontSize: 20, fontWeight: 'bold', color: '#15803d' },
   subtitle: { fontSize: 10, color: '#64748b', marginTop: 4 },
   dateText: { fontSize: 12, fontWeight: 'bold', textAlign: 'right' },
-  sectionTitle: { fontSize: 13, fontWeight: 'bold', color: '#1e293b', marginTop: 15, marginBottom: 8, backgroundColor: '#f1f5f9', padding: 6 },
   tableHeader: { flexDirection: 'row', backgroundColor: '#fef9c3', borderBottomWidth: 1, borderColor: '#000000', paddingVertical: 6, paddingHorizontal: 4, fontWeight: 'bold' },
   tableRow: { flexDirection: 'row', borderBottomWidth: 0.5, borderColor: '#cbd5e1', paddingVertical: 6, paddingHorizontal: 4 },
   colInv: { width: '12%', textAlign: 'center' },
@@ -115,22 +104,24 @@ export async function POST(request: Request) {
     const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    // 🔥 FIXED: Query recent descending records exactly like your frontend does (no SQL timezone traps!)
+    // Fetch recent records descending
     const [{ data: sales }, { data: retailSales }] = await Promise.all([
       supabase.from('sales').select('*').order('created_at', { ascending: false }).limit(2000),
       supabase.from('retail_sales').select('*').order('created_at', { ascending: false }).limit(2000)
     ]);
 
-    // 🔥 FIXED: Mirrors your Frontend's exact .split('T')[0] matching logic
     const isMomTab = (ownerTab || '').toLowerCase() === 'mom';
 
     const rawSales = [...(sales || []), ...(retailSales || [])].filter((s) => {
       if (!s.created_at) return false;
       const d = s.created_at.split('T')[0];
       const matchesDate = d >= fromDate && d <= toDate;
+      
+      // Uses your exact shared parseOwner utility
       const owner = parseOwner(s.owner);
-      const isMomRow = owner === 'Mom';
+      const isMomRow = owner.toLowerCase() === 'mom';
       const matchesOwner = isMomTab ? isMomRow : !isMomRow;
+
       return matchesDate && matchesOwner;
     });
 
@@ -138,7 +129,6 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'No COGS records found for this selection' }, { status: 404 });
     }
 
-    // Clean & calculate row totals
     let grandTotal = 0;
     const cleanRows: any[] = [];
 
