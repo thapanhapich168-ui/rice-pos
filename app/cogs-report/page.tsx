@@ -220,40 +220,32 @@ export default function CogsReportPage() {
 
   // 🟢 NEW: Send Current Tab's A4 Report Image to Telegram
   const handleSendToTelegram = async () => {
-    if (!reportRef.current || isSendingTelegram) return;
+    if (isSendingTelegram) return;
     setIsSendingTelegram(true);
-    showToast('info', 'Telegram', 'Capturing report image...');
+    showToast('info', 'Generating PDF...', 'Building A4 PDF report and sending to Telegram...');
 
     try {
-      await document.fonts.ready;
-      const dataUrl = await htmlToImage.toPng(reportRef.current, { pixelRatio: 2, backgroundColor: '#ffffff' });
-      const res = await fetch(dataUrl);
-      const blob = await res.blob();
-      const tabLabel = activeOwnerTab === 'mom' ? 'Mom COGS' : 'Pich / Jing / Both COGS';
-      const file = new File([blob], `COGS-${tabLabel}-${fromDate}.png`, { type: 'image/png' });
-
-      const formData = new FormData();
-      formData.append('photo', file);
-      formData.append(
-        'caption',
-        `🌾 <b>${tabLabel} Report</b>\n📅 Date: <b>${fromDate}</b> to <b>${toDate}</b>\n💰 Total: <b>${Math.round(combinedGrandTotal).toLocaleString('en-US')} ៛</b>`
-      );
-
-      const apiRes = await fetch('/api/telegram/send-photo', {
+      // 🔥 UPDATED: Calls your new send-cogs-pdf route instead of send-photo!
+      const res = await fetch('/api/telegram/send-cogs-pdf', {
         method: 'POST',
-        body: formData,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fromDate,
+          toDate,
+          ownerTab: activeOwnerTab // Sends 'mom' or 'others' dynamically
+        })
       });
 
-      const apiData = await apiRes.json();
+      const data = await res.json();
 
-      if (!apiRes.ok) {
-        throw new Error(apiData.error || 'Failed to send to Telegram');
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to generate or send PDF');
       }
 
-      showToast('success', 'Sent to Telegram', `${tabLabel} report image posted to Telegram!`);
+      showToast('success', 'PDF Sent!', 'A4 PDF document delivered to your Telegram group!');
     } catch (err: any) {
-      console.error('Telegram Send Error:', err);
-      showToast('error', 'Send Failed', err.message || 'Could not send image to Telegram');
+      console.error('Telegram PDF Send Error:', err);
+      showToast('error', 'Send Failed', err.message || 'Could not send PDF to Telegram');
     } finally {
       setIsSendingTelegram(false);
     }
