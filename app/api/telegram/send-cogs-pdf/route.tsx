@@ -66,7 +66,7 @@ const CogsReportDocument = ({ rows, grandTotal, fromDate, toDate, tabLabel }: an
         <Text style={styles.colTotal}>TOTAL (KHR)</Text>
       </View>
 
-      {/* Table Rows (Auto page-breaks if table is long!) */}
+      {/* Table Rows */}
       {rows.map((row: any, idx: number) => (
         <View key={idx} style={styles.tableRow} wrap={false}>
           <Text style={styles.colInv}>{row.invoice_id ? String(row.invoice_id).replace(/\D/g, '') : '-'}</Text>
@@ -111,20 +111,25 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Telegram credentials missing' }, { status: 500 });
     }
 
-    // Initialize Supabase
+    // 🔥 FIXED: Includes Service Role Key fallback to prevent RLS read blocks
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-    const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+    const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    // Query Sales for the requested dates
+    // 🔥 FIXED: Added Cambodia Timezone (+07:00) so Postgres doesn't shift by 7 hours
     const [{ data: sales }, { data: retailSales }] = await Promise.all([
-      supabase.from('sales').select('*').gte('created_at', `${fromDate}T00:00:00`).lte('created_at', `${toDate}T23:59:59`),
-      supabase.from('retail_sales').select('*').gte('created_at', `${fromDate}T00:00:00`).lte('created_at', `${toDate}T23:59:59`)
+      supabase.from('sales').select('*').gte('created_at', `${fromDate}T00:00:00+07:00`).lte('created_at', `${toDate}T23:59:59+07:00`),
+      supabase.from('retail_sales').select('*').gte('created_at', `${fromDate}T00:00:00+07:00`).lte('created_at', `${toDate}T23:59:59+07:00`)
     ]);
 
+    // 🔥 FIXED: Mirrors your Frontend's exact .split('T')[0] matching logic
     const rawSales = [...(sales || []), ...(retailSales || [])].filter((s) => {
+      if (!s.created_at) return false;
+      const d = s.created_at.split('T')[0];
+      const matchesDate = d >= fromDate && d <= toDate;
       const owner = parseOwner(s.owner);
-      return ownerTab === 'mom' ? owner === 'Mom' : owner !== 'Mom';
+      const matchesOwner = ownerTab === 'mom' ? owner === 'Mom' : owner !== 'Mom';
+      return matchesDate && matchesOwner;
     });
 
     if (rawSales.length === 0) {
@@ -152,7 +157,7 @@ export async function POST(request: Request) {
 
     const tabLabel = ownerTab === 'mom' ? 'Mom COGS' : 'Pich / Jing / Both COGS';
 
-    // 🔥 COMPILE JSX TO BINARY A4 PDF BUFFER IN MILLISECONDS
+    // Compile JSX to PDF Buffer
     const pdfBuffer = await renderToBuffer(
       <CogsReportDocument
         rows={cleanRows}
@@ -163,9 +168,10 @@ export async function POST(request: Request) {
       />
     );
 
+    // 🔥 FIXED: Wrapped in Uint8Array to satisfy strict TypeScript Blob typing
     const pdfBlob = new Blob([new Uint8Array(pdfBuffer)], { type: 'application/pdf' });
 
-    // 🔥 SEND AS A PDF ATTACHMENT VIA `/sendDocument`
+    // Send as PDF attachment via `/sendDocument`
     const tgFormData = new FormData();
     tgFormData.append('chat_id', chatId);
     tgFormData.append('document', pdfBlob, `COGS-${ownerTab.toUpperCase()}-${fromDate}.pdf`);
