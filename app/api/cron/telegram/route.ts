@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { TELEGRAM_CONFIG } from '@/lib/telegramConfig'
+import { generateAndSendCogsReport } from '@/lib/cogsReportSender'
 
 const EXCHANGE_RATE = 4000
 const formatRiel = (val: number) => `${Math.round(val || 0).toLocaleString()}៛`
@@ -14,13 +15,13 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    // 2. Validate Supabase Environment Variables
+    // 2. Validate Supabase Environment Variables (Prioritize Service Role Key for background RLS bypass)
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
-    const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+    const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 
     if (!supabaseUrl || !supabaseKey) {
       return NextResponse.json(
-        { error: 'Missing NEXT_PUBLIC_SUPABASE_URL or NEXT_PUBLIC_SUPABASE_ANON_KEY in Vercel Environment Variables' },
+        { error: 'Missing Supabase URL or Key in Vercel Environment Variables' },
         { status: 500 }
       )
     }
@@ -40,10 +41,9 @@ export async function GET(request: Request) {
       )
     }
 
-    // 4. 🔥 CAMBODIA TIMEZONE DATE LOGIC (Asia/Phnom_Penh | UTC+7)
+    // 4. CAMBODIA TIMEZONE DATE LOGIC (Asia/Phnom_Penh | UTC+7)
     const now = new Date()
 
-    // Converts any Date object to Cambodia local year, month, day
     const getCambodiaDateParts = (d: Date) => {
       const parts = new Intl.DateTimeFormat('en-US', {
         timeZone: 'Asia/Phnom_Penh',
@@ -56,8 +56,6 @@ export async function GET(request: Request) {
     }
 
     const nowCam = getCambodiaDateParts(now)
-
-    // Force Supabase query to start from Day 1 at 00:00:00 Cambodia time (+07:00)
     const startOfMonth = `${nowCam.year}-${String(nowCam.month).padStart(2, '0')}-01T00:00:00+07:00`
 
     const isToday = (dateStr: string) => {
@@ -72,11 +70,10 @@ export async function GET(request: Request) {
       return d.month === nowCam.month && d.year === nowCam.year
     }
 
-    // Check if tomorrow is Day 1 in Cambodia (Last day of month check)
     const tomorrowCam = getCambodiaDateParts(new Date(now.getTime() + 86400000))
     const isLastDayOfMonth = tomorrowCam.day === 1
 
-    // 5. Fetch Data from Supabase safely using Cambodia startOfMonth
+    // 5. Fetch Data from Supabase
     const [
       { data: invData, error: invError },
       { data: retData, error: retError },
@@ -166,7 +163,7 @@ export async function GET(request: Request) {
     let dailyTelegramResponse = null
     let monthlyTelegramResponse = null
 
-    // --- 7. DISPATCH DAILY REPORT (CLEAN REGULAR FONT) ---
+    // 7. DISPATCH DAILY REPORT
     if (sendDaily) {
       const cleanUSD = (val: number) => (val === 0 ? '$0' : formatUSD(val))
 
@@ -217,13 +214,12 @@ export async function GET(request: Request) {
       }
     }
 
-    // --- 8. 🔥 DISPATCH FULL MONTHLY PDF REPORT ON LAST DAY OF MONTH ---
+    // 8. DISPATCH FULL MONTHLY PDF REPORT ON LAST DAY OF MONTH
     if (isLastDayOfMonth && sendMonthly) {
       const rawBaseUrl = process.env.NEXT_PUBLIC_SITE_URL || 
         (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000')
       const baseUrl = rawBaseUrl.replace(/\/$/, '')
 
-      // Calls your multi-page PDF generation endpoint instead of the deleted 3-image OG cards
       const monthlyRes = await fetch(`${baseUrl}/api/telegram/send-monthly-pdf`, {
         method: 'POST'
       })
@@ -234,27 +230,32 @@ export async function GET(request: Request) {
       }
     }
 
-    // --- 9. 🔥 DISPATCH COGS A4 PDF REPORTS (MOM & PICH/JING/BOTH) AT 7 PM ---
-    if (sendDaily) {
-      const rawBaseUrl = process.env.NEXT_PUBLIC_SITE_URL || 
-        (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000')
-      const baseUrl = rawBaseUrl.replace(/\/$/, '')
+    // 9. DISPATCH COGS A4 PDF REPORTS AT 7 PM
+    let cogsMomResult = null
+    let cogsOthersResult = null
 
+    if (sendDaily) {
       const todayIsoStr = `${nowCam.year}-${String(nowCam.month).padStart(2, '0')}-${String(nowCam.day).padStart(2, '0')}`
 
-      // 1. Send Mom COGS PDF
-      await fetch(`${baseUrl}/api/telegram/send-cogs-pdf`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ fromDate: todayIsoStr, toDate: todayIsoStr, ownerTab: 'mom' })
-      })
+      try {
+        cogsMomResult = await generateAndSendCogsReport({
+          fromDate: todayIsoStr,
+          toDate: todayIsoStr,
+          ownerTab: 'mom'
+        })
+      } catch (err: any) {
+        console.error('Failed to send Mom COGS PDF in Cron:', err.message)
+      }
 
-      // 2. Send Pich / Jing / Both COGS PDF
-      await fetch(`${baseUrl}/api/telegram/send-cogs-pdf`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ fromDate: todayIsoStr, toDate: todayIsoStr, ownerTab: 'others' })
-      })
+      try {
+        cogsOthersResult = await generateAndSendCogsReport({
+          fromDate: todayIsoStr,
+          toDate: todayIsoStr,
+          ownerTab: 'others'
+        })
+      } catch (err: any) {
+        console.error('Failed to send Others COGS PDF in Cron:', err.message)
+      }
     }
 
     return NextResponse.json({
@@ -263,7 +264,9 @@ export async function GET(request: Request) {
       monthlySent: isLastDayOfMonth && sendMonthly,
       telegramResults: {
         daily: dailyTelegramResponse,
-        monthly: monthlyTelegramResponse
+        monthly: monthlyTelegramResponse,
+        cogsMom: cogsMomResult,
+        cogsOthers: cogsOthersResult
       }
     })
   } catch (error: any) {
