@@ -1,12 +1,9 @@
 // app/api/telegram/send-cogs-pdf/route.ts
 
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { generateAndSendCogsReport } from '@/lib/cogsReportSender';
 
-export const runtime = 'nodejs';
-export const maxDuration = 30;
-
-export async function POST(request: Request) {
+export async function POST(request: NextRequest) {
   try {
     const { fromDate, toDate, ownerTab, downloadOnly } = await request.json();
 
@@ -24,7 +21,7 @@ export async function POST(request: Request) {
     });
 
     if (downloadOnly && result?.pdfBuffer) {
-      return new NextResponse(result.pdfBuffer, {
+      return new NextResponse(new Uint8Array(result.pdfBuffer), {
         status: 200,
         headers: {
           'Content-Type': 'application/pdf',

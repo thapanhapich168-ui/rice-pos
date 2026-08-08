@@ -7,8 +7,13 @@ const nextConfig: NextConfig = {
     removeConsole: process.env.NODE_ENV === "production",
   },
 
-  // 🚀 Tells Next.js NOT to bundle these packages so Vercel keeps their /bin files intact
+  // 1. Opt out of bundling so package references stay intact
   serverExternalPackages: ["@sparticuz/chromium", "puppeteer-core"],
+
+  // 2. Force Vercel to copy the physical Chromium /bin binary files into your API routes
+  outputFileTracingIncludes: {
+    "/api/**/*": ["./node_modules/@sparticuz/chromium/bin/**/*"],
+  },
 };
 
 export default nextConfig;
