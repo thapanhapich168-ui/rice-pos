@@ -1,4 +1,4 @@
-// app/cogs-report/page.tsx (or your CogsReportPage path)
+// app/cogs-report/page.tsx
 
 'use client'
 
@@ -49,9 +49,6 @@ export default function CogsReportPage() {
   // Inline History States
   const [inlinePayments, setInlinePayments] = useState<Record<string, PaymentRow[]>>({})
 
-  // 🔥 Optimized default loadLimit to 500 to prevent memory exhaustion
-  const [loadLimit, setLoadLimit] = useState(500);
-
   useEffect(() => {
     const tzoffset = (new Date()).getTimezoneOffset() * 60000;
     const localISOTime = (new Date(Date.now() - tzoffset)).toISOString().slice(0, 10);
@@ -59,29 +56,76 @@ export default function CogsReportPage() {
     setToDate(localISOTime);
   }, [])
 
+  // 🔥 Automatically refetches optimal data when you change tabs or dates!
   useEffect(() => {
-    fetchReportData();
-  }, [loadLimit]) 
+    if (fromDate && toDate) {
+      fetchReportData();
+    }
+  }, [fromDate, toDate, activeMainTab, timeFilter]) 
 
   useFocusRefresh(fetchReportData);
 
   async function fetchReportData() {
     setLoading(true)
     
-    const [{data: sData}, {data: rData}, {data: cData}, {data: aData}, {data: invData}, {data: expData}, {data: payData}] = await Promise.all([
-        supabase.from('sales').select('*').order('created_at', { ascending: false }).limit(loadLimit),
-        supabase.from('retail_sales').select('*').order('created_at', { ascending: false }).limit(loadLimit),
-        supabase.from('cogs_settlements').select('*').order('created_at', { ascending: false }).limit(loadLimit),
+    // 1. Dynamically calculate the Database Date Range based on the active tab
+    let queryStart = `${fromDate}T00:00:00`;
+    let queryEnd = `${toDate}T23:59:59`;
+
+    if (activeMainTab !== 'report') {
+      const today = new Date();
+      today.setHours(0,0,0,0);
+      const todayStr = today.toISOString().split('T')[0];
+      queryEnd = `${todayStr}T23:59:59`;
+
+      if (timeFilter === 'today') {
+          queryStart = `${todayStr}T00:00:00`;
+      } else if (timeFilter === 'week') {
+          const lastWeek = new Date(today);
+          lastWeek.setDate(lastWeek.getDate() - 7);
+          queryStart = `${lastWeek.toISOString().split('T')[0]}T00:00:00`;
+      } else if (timeFilter === 'month') {
+          queryStart = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-01T00:00:00`;
+      } else {
+          queryStart = '2020-01-01T00:00:00'; // All time fallback
+      }
+    }
+
+    const startJustDate = queryStart.split('T')[0];
+    const endJustDate = queryEnd.split('T')[0];
+
+    // 2. Fetch Data (Split into View Data vs Liability Math Data to save RAM while keeping math perfect)
+    const [
+      { data: sData }, 
+      { data: rDataView }, 
+      { data: cDataView }, 
+      { data: rDataLiability },
+      { data: cDataLiability },
+      { data: aData }, 
+      { data: invData }, 
+      { data: expData }, 
+      { data: payData }
+    ] = await Promise.all([
+        // 🔥 VIEW DATA: Only fetches exact date range required (Zero Memory Leaks!)
+        supabase.from('sales').select('*').gte('created_at', queryStart).lte('created_at', queryEnd).order('created_at', { ascending: false }),
+        supabase.from('retail_sales').select('*').gte('created_at', queryStart).lte('created_at', queryEnd).order('created_at', { ascending: false }),
+        supabase.from('cogs_settlements').select('*').gte('settlement_date', startJustDate).lte('settlement_date', endJustDate).order('created_at', { ascending: false }),
+        
+        // ⚖️ LIABILITY DATA: Fetches historical records but ONLY specific tiny columns (Keeps Math accurate)
+        supabase.from('retail_sales').select('owner, payment_method, qty, price_per_bag').order('created_at', { ascending: false }).limit(3000),
+        supabase.from('cogs_settlements').select('owner_name, payment_method, paid_amount_riel, paid_amount_usd').order('created_at', { ascending: false }).limit(3000),
         supabase.from('app_settings').select('*').in('setting_key', ['personal_owe_riel', 'personal_owe_usd']),
-        supabase.from('invoice_summaries').select('*').order('created_at', { ascending: false }).limit(loadLimit),
-        supabase.from('expenses').select('*').order('created_at', { ascending: false }).limit(loadLimit),
-        supabase.from('invoice_payments').select('*').limit(loadLimit)
+        supabase.from('invoice_summaries').select('invoice_id, owner').order('created_at', { ascending: false }).limit(3000),
+        supabase.from('expenses').select('amount_riel, amount_usd, remarks').order('created_at', { ascending: false }).limit(3000),
+        supabase.from('invoice_payments').select('invoice_id, amount_paid_usd, amount_paid_riel, payment_method').order('created_at', { ascending: false }).limit(3000)
     ]);
 
+    // Populate View State
     setSales(sData || [])
-    setRetailSales(rData || [])
-    setCogsSettlements(cData || [])
+    setRetailSales(rDataView || [])
+    setCogsSettlements(cDataView || [])
 
+    // Calculate Liability based on Historical Data
     const isBusinessMethod = (m: string) => {
         const lowerM = m.toLowerCase();
         if (lowerM.includes('mom qr')) return false; 
@@ -90,7 +134,7 @@ export default function CogsReportPage() {
 
     let momCollectedRiel = 0;
     
-    (rData || []).forEach((r: any) => {
+    (rDataLiability || []).forEach((r: any) => {
       const owner = parseOwner(r.owner);
       const methodStr = r.payment_method || 'Cash ៛';
       const totalSale = Number(r.qty || 0) * Number(r.price_per_bag || 0);
@@ -141,7 +185,7 @@ export default function CogsReportPage() {
     });
 
     let momCogsSettledRiel = 0;
-    (cData || []).forEach((c: any) => {
+    (cDataLiability || []).forEach((c: any) => {
       if (parseOwner(c.owner_name) === 'mom') {
           const method = (c.payment_method || '').toLowerCase();
           if (method.includes(':')) {
@@ -774,12 +818,6 @@ export default function CogsReportPage() {
                 </div>
               </div>
             </div>
-
-            <div style={{ textAlign: 'center', padding: '20px', flexShrink: 0 }}>
-              <button onClick={() => setLoadLimit(prev => prev + 500)} className="saas-btn saas-btn-secondary" style={{ borderRadius: '20px', boxShadow: '0 2px 4px rgba(0,0,0,0.02)' }}>
-                ⬇️ Load More Records (Current Limit: {loadLimit})
-              </button>
-            </div>
           </>
         )}
 
@@ -834,12 +872,6 @@ export default function CogsReportPage() {
                   )}
                 </tbody>
               </table>
-            </div>
-
-            <div style={{ textAlign: 'center', padding: '20px', flexShrink: 0 }}>
-              <button onClick={() => setLoadLimit(prev => prev + 500)} className="saas-btn saas-btn-secondary" style={{ borderRadius: '20px', boxShadow: '0 2px 4px rgba(0,0,0,0.02)' }}>
-                ⬇️ Load More Records (Current Limit: {loadLimit})
-              </button>
             </div>
 
             {selectedDays.length > 0 && (
@@ -973,12 +1005,6 @@ export default function CogsReportPage() {
                   )}
                 </tbody>
               </table>
-            </div>
-
-            <div style={{ textAlign: 'center', padding: '20px', flexShrink: 0 }}>
-              <button onClick={() => setLoadLimit(prev => prev + 500)} className="saas-btn saas-btn-secondary" style={{ borderRadius: '20px', boxShadow: '0 2px 4px rgba(0,0,0,0.02)' }}>
-                ⬇️ Load More Records (Current Limit: {loadLimit})
-              </button>
             </div>
           </div>
         )}

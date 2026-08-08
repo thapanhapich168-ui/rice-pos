@@ -124,9 +124,9 @@ function generateHtmlReport(
 
     sellersHtml += `
       <div style="margin-bottom: 30px;">
-        <h2 style="font-size: 16px; margin: 0 0 8px 0; color: #333; font-family: 'Noto Sans Khmer', Arial, sans-serif; font-weight: normal;">
-          ថៅកែ ${seller.toUpperCase()}
-        </h2>
+        <h2 style="font-size: 16px; margin: 0 0 8px 0; color: #333; font-family: 'Noto Sans Khmer', Arial, sans-serif; font-weight: bold;">
+  ថៅកែ ${seller.toUpperCase()}
+</h2>
         <table class="report-table">
           <thead>
             <tr style="background-color: #fffacd;">
@@ -229,9 +229,9 @@ function generateHtmlReport(
         <img class="center-logo" src="https://i.imgur.com/s0hg3MQ.png" alt="Logo" crossOrigin="anonymous" />
         
         <div class="a4-content">
-          <h1 style="text-align: center; font-size: 22px; color: green; margin: 0 0 20px 0; font-family: 'Noto Sans Khmer', Arial, sans-serif; font-weight: normal;">
-            🌾 អង្ករត្រូវទូទាត់ 🧾
-          </h1>
+          <h1 style="text-align: center; font-size: 22px; color: green; margin: 0 0 20px 0; font-family: 'Noto Sans Khmer', Arial, sans-serif; font-weight: bold;">
+  🌾 អង្ករត្រូវទូទាត់ 🧾
+</h1>
 
           ${Object.keys(groupedBySeller).length === 0 ? '<div style="text-align: center; color: #64748b; padding: 40px;">No COGS sales recorded for this date range.</div>' : sellersHtml}
 
