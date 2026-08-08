@@ -8,21 +8,22 @@ import { parseOwner } from '@/utils/formatters';
 
 // --- 1. REGISTER KHMER FONT FOR REACT-PDF ---
 Font.register({
-  family: 'NotoSansKhmer',
-  src: 'https://cdn.jsdelivr.net/fontsource/fonts/noto-sans-khmer@latest/khmer-400-normal.ttf'
+  family: 'KhmerFont',
+  src: 'https://cdn.jsdelivr.net/gh/googlefonts/noto-fonts@main/hinted/ttf/NotoSansKhmer/NotoSansKhmer-Regular.ttf'
 });
 
-const formatRiel = (val: number) => `${Math.round(val || 0).toLocaleString()} ៛`;
+const formatRielPDF = (val: number) => `${Math.round(val || 0).toLocaleString()} KHR`;
+const formatRielCaption = (val: number) => `${Math.round(val || 0).toLocaleString()} ៛`;
 
-// --- 2. EXACT WEBPAGE STYLING (CREAM #FFFACD & GOLDEN #B58A3D) ---
+// --- 2. STYLING ---
 const styles = StyleSheet.create({
-  page: { padding: 35, fontFamily: 'NotoSansKhmer', fontSize: 10, color: '#0f172a' },
+  page: { padding: 35, fontFamily: 'KhmerFont', fontSize: 10, color: '#0f172a' },
   headerContainer: { flexDirection: 'row', justifyContent: 'space-between', borderBottomWidth: 2, borderColor: '#15803d', paddingBottom: 12, marginBottom: 16 },
   title: { fontSize: 18, color: '#15803d' },
   subtitle: { fontSize: 10, color: '#64748b', marginTop: 4 },
   dateText: { fontSize: 11, textAlign: 'right' },
-  sellerTitle: { fontSize: 13, color: '#1e293b', marginTop: 14, marginBottom: 6 },
-  tableHeader: { flexDirection: 'row', backgroundColor: '#fffacd', borderBottomWidth: 1, borderTopWidth: 1, borderColor: '#000000', paddingVertical: 6, paddingHorizontal: 4 },
+  sellerTitle: { fontSize: 12, color: '#1e293b', marginTop: 14, marginBottom: 6, backgroundColor: '#f1f5f9', padding: 6 },
+  tableHeader: { flexDirection: 'row', backgroundColor: '#fffacd', borderBottomWidth: 1, borderColor: '#000000', paddingVertical: 6, paddingHorizontal: 4 },
   tableRow: { flexDirection: 'row', borderBottomWidth: 0.5, borderColor: '#cbd5e1', paddingVertical: 6, paddingHorizontal: 4 },
   colInv: { width: '12%', textAlign: 'center' },
   colCustomer: { width: '22%' },
@@ -31,12 +32,34 @@ const styles = StyleSheet.create({
   colQty: { width: '8%', textAlign: 'center' },
   colPrice: { width: '10%', textAlign: 'right' },
   colTotal: { width: '10%', textAlign: 'right' },
-  sellerSubtotal: { flexDirection: 'row', justifyContent: 'space-between', backgroundColor: '#fffacd', paddingVertical: 6, paddingHorizontal: 8, borderBottomWidth: 1, borderColor: '#000000' },
-  grandTotalBox: { flexDirection: 'row', justifyContent: 'space-between', backgroundColor: '#fffacd', borderWidth: 1.5, borderColor: '#000000', padding: 10, marginTop: 25 },
+  sellerSubtotal: { flexDirection: 'row', justifyContent: 'space-between', backgroundColor: '#fffacd', padding: 6, borderBottomWidth: 1, borderColor: '#000000' },
+  grandTotalBox: { flexDirection: 'row', justifyContent: 'space-between', backgroundColor: '#fffacd', borderWidth: 1.5, borderColor: '#000000', padding: 10, marginTop: 20 },
   footer: { position: 'absolute', bottom: 20, left: 35, right: 35, flexDirection: 'row', justifyContent: 'space-between', borderTopWidth: 0.5, borderColor: '#e2e8f0', paddingTop: 6, fontSize: 8, color: '#94a3b8' }
 });
 
-// --- 3. FRONTEND GROUPING MATH ---
+// --- 3. BULLETPROOF CAMBODIA TIMEZONE HELPER (UTC+7) ---
+// Safely converts UTC timestamps to zero-padded YYYY-MM-DD in Cambodia time
+const getCambodiaDateStr = (dateStr: string) => {
+  if (!dateStr) return '';
+  try {
+    const d = new Date(dateStr);
+    // Cambodia is UTC+7 (7 hours = 7 * 60 * 60 * 1000 ms)
+    const camTime = new Date(d.getTime() + (7 * 60 * 60 * 1000));
+    return camTime.toISOString().substring(0, 10);
+  } catch (e) {
+    return dateStr.substring(0, 10);
+  }
+};
+
+// Matches either direct YYYY-MM-DD string OR converted Cambodia UTC+7 YYYY-MM-DD
+const matchesDateRange = (rawDateStr: string, from: string, to: string) => {
+  if (!rawDateStr) return false;
+  const direct = rawDateStr.substring(0, 10);
+  const camDate = getCambodiaDateStr(rawDateStr);
+  return (direct >= from && direct <= to) || (camDate >= from && camDate <= to);
+};
+
+// --- 4. FRONTEND GROUPING MATH ---
 function processSellerData(sellerSales: any[]) {
   const customerGroups: Record<string, any[]> = {};
 
@@ -97,11 +120,10 @@ function processSellerData(sellerSales: any[]) {
   return { rows: finalRows, sellerGrandTotal };
 }
 
-// --- 4. EXACT WEBPAGE PDF DOCUMENT LAYOUT ---
+// --- 5. PDF DOCUMENT LAYOUT ---
 const CogsReportDocument = ({ groupedBySeller, combinedGrandTotal, fromDate, toDate, tabLabel }: any) => (
   <Document>
     <Page size="A4" style={styles.page}>
-      {/* Header */}
       <View style={styles.headerContainer} wrap={false}>
         <View>
           <Text style={styles.title}>អង្ករត្រូវទូទាត់</Text>
@@ -113,7 +135,6 @@ const CogsReportDocument = ({ groupedBySeller, combinedGrandTotal, fromDate, toD
         </View>
       </View>
 
-      {/* Empty State Guard */}
       {Object.keys(groupedBySeller).length === 0 ? (
         <View style={{ padding: 40, textAlign: 'center' }}>
           <Text style={{ color: '#64748b', fontSize: 13 }}>No COGS sales recorded for this date range.</Text>
@@ -123,10 +144,9 @@ const CogsReportDocument = ({ groupedBySeller, combinedGrandTotal, fromDate, toD
           const { rows, sellerGrandTotal } = processSellerData(groupedBySeller[seller]);
 
           return (
-            <View key={seller} style={{ marginBottom: 20 }}>
+            <View key={seller} style={{ marginBottom: 15 }}>
               <Text style={styles.sellerTitle}>ថៅកែ {seller.toUpperCase()}</Text>
 
-              {/* Table Header (#fffacd cream yellow) */}
               <View style={styles.tableHeader} wrap={false}>
                 <Text style={styles.colInv}>INV</Text>
                 <Text style={styles.colCustomer}>អតិថិជន</Text>
@@ -137,7 +157,6 @@ const CogsReportDocument = ({ groupedBySeller, combinedGrandTotal, fromDate, toD
                 <Text style={styles.colTotal}>សរុប</Text>
               </View>
 
-              {/* Table Rows */}
               {rows.map((row: any, idx: number) => (
                 <View key={idx} style={styles.tableRow} wrap={false}>
                   <Text style={styles.colInv}>{row.invoice_id ? String(row.invoice_id).replace(/\D/g, '') : '-'}</Text>
@@ -152,32 +171,29 @@ const CogsReportDocument = ({ groupedBySeller, combinedGrandTotal, fromDate, toD
                 </View>
               ))}
 
-              {/* Subtotal Row (#fffacd cream yellow + #b58a3d golden text) */}
               <View style={styles.sellerSubtotal} wrap={false}>
                 <Text>សរុប</Text>
-                <Text style={{ color: '#b58a3d' }}>{formatRiel(sellerGrandTotal)}</Text>
+                <Text style={{ color: '#b58a3d' }}>{formatRielPDF(sellerGrandTotal)}</Text>
               </View>
             </View>
           );
         })
       )}
 
-      {/* Combined Grand Total Box (#fffacd cream yellow + #b58a3d golden text) */}
       <View style={styles.grandTotalBox} wrap={false}>
         <Text style={{ fontSize: 13 }}>សរុបរួមទាំងអស់</Text>
-        <Text style={{ fontSize: 15, color: '#b58a3d' }}>{formatRiel(combinedGrandTotal)}</Text>
+        <Text style={{ fontSize: 15, color: '#b58a3d' }}>{formatRielPDF(combinedGrandTotal)}</Text>
       </View>
 
-      {/* Footer Watermark */}
       <View style={styles.footer} fixed>
-        <Text>Generated by COGS Automated Engine • Exact Frontend Layout Clone</Text>
+        <Text>Generated by COGS Automated Engine</Text>
         <Text render={({ pageNumber, totalPages }) => `Page ${pageNumber} of ${totalPages}`} />
       </View>
     </Page>
   </Document>
 );
 
-// --- 5. POST ROUTE HANDLER ---
+// --- 6. POST ROUTE HANDLER ---
 export async function POST(request: Request) {
   try {
     const { fromDate, toDate, ownerTab, downloadOnly } = await request.json();
@@ -190,30 +206,27 @@ export async function POST(request: Request) {
     const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    // 🔥 FIXED: Removes gte/lte ISO filters; pulls recent rows and filters in JS exactly like your web UI
     const [{ data: sales }, { data: retailSales }] = await Promise.all([
-      supabase.from('sales').select('*').order('created_at', { ascending: false }).limit(2000),
-      supabase.from('retail_sales').select('*').order('created_at', { ascending: false }).limit(2000)
+      supabase.from('sales').select('*').order('created_at', { ascending: false }).limit(3000),
+      supabase.from('retail_sales').select('*').order('created_at', { ascending: false }).limit(3000)
     ]);
 
     const isMomTab = (ownerTab || '').toLowerCase() === 'mom';
 
-    // 🔥 Uses .substring(0, 10) so today's transactions are guaranteed to appear
-    const rawSales = [...(sales || []), ...(retailSales || [])].filter((s) => {
-      if (!s.created_at) return false;
-      const d = s.created_at.substring(0, 10);
-      const matchesDate = d >= fromDate && d <= toDate;
-      const owner = parseOwner(s.owner || s.customer_name);
-      const isMomRow = owner.toLowerCase() === 'mom';
-      const matchesOwner = isMomTab ? isMomRow : !isMomRow;
-      return matchesDate && matchesOwner;
-    });
+    // 🔥 USES CAMBODIA TIMEZONE SAFE-MATCHING & SAFE OWNER PARSING
+    const rawSales = [...(sales || []), ...(retailSales || [])]
+      .filter((s) => matchesDateRange(s.created_at, fromDate, toDate))
+      .filter((s) => {
+        const owner = parseOwner(s.owner || s.customer_name || '');
+        const isMomRow = owner.toLowerCase() === 'mom' || String(s.owner || s.customer_name || '').toLowerCase().includes('mom');
+        return isMomTab ? isMomRow : !isMomRow;
+      });
 
     const groupedBySeller: Record<string, any[]> = {};
     let combinedGrandTotal = 0;
 
     rawSales.forEach((s) => {
-      let seller = parseOwner(s.owner || s.customer_name);
+      let seller = parseOwner(s.owner || s.customer_name || '');
       seller = seller.charAt(0).toUpperCase() + seller.slice(1);
       if (!groupedBySeller[seller]) groupedBySeller[seller] = [];
       groupedBySeller[seller].push(s);
@@ -226,7 +239,6 @@ export async function POST(request: Request) {
 
     const tabLabel = isMomTab ? 'Mom COGS' : 'Pich / Jing / Both COGS';
 
-    // Compile A4 PDF Buffer
     const pdfBuffer = await renderToBuffer(
       <CogsReportDocument
         groupedBySeller={groupedBySeller}
@@ -237,7 +249,6 @@ export async function POST(request: Request) {
       />
     );
 
-    // Return direct download if requested
     if (downloadOnly) {
       return new NextResponse(new Uint8Array(pdfBuffer), {
         status: 200,
@@ -248,7 +259,6 @@ export async function POST(request: Request) {
       });
     }
 
-    // Otherwise upload to Telegram
     const botToken = TELEGRAM_CONFIG.botToken || process.env.TELEGRAM_BOT_TOKEN;
     const chatId = TELEGRAM_CONFIG.chatId || process.env.TELEGRAM_CHAT_ID;
 
@@ -263,7 +273,7 @@ export async function POST(request: Request) {
     tgFormData.append('document', pdfBlob, `COGS-${(ownerTab || 'REPORT').toUpperCase()}-${fromDate}.pdf`);
     tgFormData.append(
       'caption',
-      `🌾 <b>${tabLabel} A4 REPORT</b>\n📅 Date: <b>${fromDate} to ${toDate}</b>\n💰 Total Due: <b>${formatRiel(combinedGrandTotal)}</b>\n✅ Attached: Multi-page A4 PDF`
+      `🌾 <b>${tabLabel} A4 REPORT</b>\n📅 Date: <b>${fromDate} to ${toDate}</b>\n💰 Total Due: <b>${formatRielCaption(combinedGrandTotal)}</b>\n✅ Attached: Multi-page A4 PDF`
     );
     tgFormData.append('parse_mode', 'HTML');
 
