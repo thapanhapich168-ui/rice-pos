@@ -3,34 +3,40 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { TELEGRAM_CONFIG } from '@/lib/telegramConfig';
-import { renderToBuffer, Document, Page, View, Text, StyleSheet } from '@react-pdf/renderer';
+import { renderToBuffer, Document, Page, View, Text, StyleSheet, Font } from '@react-pdf/renderer';
 import { parseOwner } from '@/utils/formatters';
+
+// --- 1. REGISTER KHMER FONT FOR REACT-PDF ---
+Font.register({
+  family: 'NotoSansKhmer',
+  src: 'https://cdn.jsdelivr.net/fontsource/fonts/noto-sans-khmer@latest/khmer-400-normal.ttf'
+});
 
 const formatRiel = (val: number) => `${Math.round(val || 0).toLocaleString()} ៛`;
 
-// --- 1. A4 STYLING ---
+// --- 2. EXACT WEBPAGE STYLING (CREAM #FFFACD & GOLDEN #B58A3D) ---
 const styles = StyleSheet.create({
-  page: { padding: 35, fontFamily: 'Helvetica', fontSize: 10, color: '#0f172a' },
+  page: { padding: 35, fontFamily: 'NotoSansKhmer', fontSize: 10, color: '#0f172a' },
   headerContainer: { flexDirection: 'row', justifyContent: 'space-between', borderBottomWidth: 2, borderColor: '#15803d', paddingBottom: 12, marginBottom: 16 },
-  title: { fontSize: 18, fontWeight: 'bold', color: '#15803d' },
+  title: { fontSize: 18, color: '#15803d' },
   subtitle: { fontSize: 10, color: '#64748b', marginTop: 4 },
-  dateText: { fontSize: 11, fontWeight: 'bold', textAlign: 'right' },
-  sellerTitle: { fontSize: 12, fontWeight: 'bold', color: '#1e293b', marginTop: 14, marginBottom: 6, backgroundColor: '#f1f5f9', padding: 6 },
-  tableHeader: { flexDirection: 'row', backgroundColor: '#fef9c3', borderBottomWidth: 1, borderColor: '#000000', paddingVertical: 6, paddingHorizontal: 4, fontWeight: 'bold' },
+  dateText: { fontSize: 11, textAlign: 'right' },
+  sellerTitle: { fontSize: 13, color: '#1e293b', marginTop: 14, marginBottom: 6 },
+  tableHeader: { flexDirection: 'row', backgroundColor: '#fffacd', borderBottomWidth: 1, borderTopWidth: 1, borderColor: '#000000', paddingVertical: 6, paddingHorizontal: 4 },
   tableRow: { flexDirection: 'row', borderBottomWidth: 0.5, borderColor: '#cbd5e1', paddingVertical: 6, paddingHorizontal: 4 },
   colInv: { width: '12%', textAlign: 'center' },
   colCustomer: { width: '22%' },
-  colRice: { width: '22%' },
-  colCustom: { width: '16%' },
+  colRice: { width: '20%' },
+  colCustom: { width: '18%' },
   colQty: { width: '8%', textAlign: 'center' },
   colPrice: { width: '10%', textAlign: 'right' },
-  colTotal: { width: '10%', textAlign: 'right', fontWeight: 'bold' },
-  sellerSubtotal: { flexDirection: 'row', justifyContent: 'space-between', backgroundColor: '#fffacd', padding: 6, borderBottomWidth: 1, borderColor: '#000000', fontWeight: 'bold' },
-  grandTotalBox: { flexDirection: 'row', justifyContent: 'space-between', backgroundColor: '#fffacd', borderWidth: 1.5, borderColor: '#000000', padding: 10, marginTop: 20 },
+  colTotal: { width: '10%', textAlign: 'right' },
+  sellerSubtotal: { flexDirection: 'row', justifyContent: 'space-between', backgroundColor: '#fffacd', paddingVertical: 6, paddingHorizontal: 8, borderBottomWidth: 1, borderColor: '#000000' },
+  grandTotalBox: { flexDirection: 'row', justifyContent: 'space-between', backgroundColor: '#fffacd', borderWidth: 1.5, borderColor: '#000000', padding: 10, marginTop: 25 },
   footer: { position: 'absolute', bottom: 20, left: 35, right: 35, flexDirection: 'row', justifyContent: 'space-between', borderTopWidth: 0.5, borderColor: '#e2e8f0', paddingTop: 6, fontSize: 8, color: '#94a3b8' }
 });
 
-// --- 2. FRONTEND GROUPING MATH ---
+// --- 3. FRONTEND GROUPING MATH ---
 function processSellerData(sellerSales: any[]) {
   const customerGroups: Record<string, any[]> = {};
 
@@ -91,18 +97,18 @@ function processSellerData(sellerSales: any[]) {
   return { rows: finalRows, sellerGrandTotal };
 }
 
-// --- 3. EXACT FRONTEND PDF DOCUMENT LAYOUT ---
+// --- 4. EXACT WEBPAGE PDF DOCUMENT LAYOUT ---
 const CogsReportDocument = ({ groupedBySeller, combinedGrandTotal, fromDate, toDate, tabLabel }: any) => (
   <Document>
     <Page size="A4" style={styles.page}>
       {/* Header */}
       <View style={styles.headerContainer} wrap={false}>
         <View>
-          <Text style={styles.title}>🌾 COGS ACCOUNTING SHEET</Text>
+          <Text style={styles.title}>អង្ករត្រូវទូទាត់</Text>
           <Text style={styles.subtitle}>{tabLabel} Breakdown Report</Text>
         </View>
         <View>
-          <Text style={styles.dateText}>📅 {fromDate === toDate ? fromDate : `${fromDate} to ${toDate}`}</Text>
+          <Text style={styles.dateText}>Date: {fromDate === toDate ? fromDate : `${fromDate} to ${toDate}`}</Text>
           <Text style={{ fontSize: 9, color: '#64748b', textAlign: 'right', marginTop: 3 }}>Phnom Penh, Cambodia</Text>
         </View>
       </View>
@@ -110,30 +116,32 @@ const CogsReportDocument = ({ groupedBySeller, combinedGrandTotal, fromDate, toD
       {/* Empty State Guard */}
       {Object.keys(groupedBySeller).length === 0 ? (
         <View style={{ padding: 40, textAlign: 'center' }}>
-          <Text style={{ color: '#64748b', fontSize: 14 }}>No COGS sales recorded for this date range.</Text>
+          <Text style={{ color: '#64748b', fontSize: 13 }}>No COGS sales recorded for this date range.</Text>
         </View>
       ) : (
         Object.keys(groupedBySeller).map((seller) => {
           const { rows, sellerGrandTotal } = processSellerData(groupedBySeller[seller]);
 
           return (
-            <View key={seller} style={{ marginBottom: 15 }}>
-              <Text style={styles.sellerTitle}>OWNER: {seller.toUpperCase()}</Text>
+            <View key={seller} style={{ marginBottom: 20 }}>
+              <Text style={styles.sellerTitle}>ថៅកែ {seller.toUpperCase()}</Text>
 
+              {/* Table Header (#fffacd cream yellow) */}
               <View style={styles.tableHeader} wrap={false}>
                 <Text style={styles.colInv}>INV</Text>
-                <Text style={styles.colCustomer}>CUSTOMER</Text>
-                <Text style={styles.colRice}>RICE TYPE</Text>
-                <Text style={styles.colCustom}>NAME (BILL)</Text>
-                <Text style={styles.colQty}>QTY</Text>
-                <Text style={styles.colPrice}>PRICE</Text>
-                <Text style={styles.colTotal}>TOTAL</Text>
+                <Text style={styles.colCustomer}>អតិថិជន</Text>
+                <Text style={styles.colRice}>ប្រភេទអង្ករ</Text>
+                <Text style={styles.colCustom}>ឈ្មោះក្នុងប៊ុង</Text>
+                <Text style={styles.colQty}>ចំនួន</Text>
+                <Text style={styles.colPrice}>តម្លៃ</Text>
+                <Text style={styles.colTotal}>សរុប</Text>
               </View>
 
+              {/* Table Rows */}
               {rows.map((row: any, idx: number) => (
                 <View key={idx} style={styles.tableRow} wrap={false}>
                   <Text style={styles.colInv}>{row.invoice_id ? String(row.invoice_id).replace(/\D/g, '') : '-'}</Text>
-                  <Text style={styles.colCustomer}>{row.customer_name || 'Walk-in'}</Text>
+                  <Text style={styles.colCustomer}>{row.isFirstOfCustomer ? (row.customer_name || 'Walk-in') : ''}</Text>
                   <Text style={styles.colRice}>{row.rice_type || '-'}</Text>
                   <Text style={styles.colCustom}>{row.custom_rice_type || '-'}</Text>
                   <Text style={styles.colQty}>{Number(row.qty || 0).toLocaleString()}</Text>
@@ -144,19 +152,20 @@ const CogsReportDocument = ({ groupedBySeller, combinedGrandTotal, fromDate, toD
                 </View>
               ))}
 
+              {/* Subtotal Row (#fffacd cream yellow + #b58a3d golden text) */}
               <View style={styles.sellerSubtotal} wrap={false}>
-                <Text>Subtotal ({seller})</Text>
-                <Text>{formatRiel(sellerGrandTotal)}</Text>
+                <Text>សរុប</Text>
+                <Text style={{ color: '#b58a3d' }}>{formatRiel(sellerGrandTotal)}</Text>
               </View>
             </View>
           );
         })
       )}
 
-      {/* Combined Grand Total Box */}
+      {/* Combined Grand Total Box (#fffacd cream yellow + #b58a3d golden text) */}
       <View style={styles.grandTotalBox} wrap={false}>
-        <Text style={{ fontWeight: 'bold', fontSize: 13 }}>TOTAL COGS DUE:</Text>
-        <Text style={{ fontWeight: 'bold', fontSize: 15, color: '#b58a3d' }}>{formatRiel(combinedGrandTotal)}</Text>
+        <Text style={{ fontSize: 13 }}>សរុបរួមទាំងអស់</Text>
+        <Text style={{ fontSize: 15, color: '#b58a3d' }}>{formatRiel(combinedGrandTotal)}</Text>
       </View>
 
       {/* Footer Watermark */}
@@ -168,7 +177,7 @@ const CogsReportDocument = ({ groupedBySeller, combinedGrandTotal, fromDate, toD
   </Document>
 );
 
-// --- 4. POST ROUTE HANDLER ---
+// --- 5. POST ROUTE HANDLER ---
 export async function POST(request: Request) {
   try {
     const { fromDate, toDate, ownerTab, downloadOnly } = await request.json();
@@ -181,27 +190,30 @@ export async function POST(request: Request) {
     const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    const startIso = `${fromDate}T00:00:00`;
-    const endIso = `${toDate}T23:59:59`;
-
+    // 🔥 FIXED: Removes gte/lte ISO filters; pulls recent rows and filters in JS exactly like your web UI
     const [{ data: sales }, { data: retailSales }] = await Promise.all([
-      supabase.from('sales').select('*').gte('created_at', startIso).lte('created_at', endIso),
-      supabase.from('retail_sales').select('*').gte('created_at', startIso).lte('created_at', endIso)
+      supabase.from('sales').select('*').order('created_at', { ascending: false }).limit(2000),
+      supabase.from('retail_sales').select('*').order('created_at', { ascending: false }).limit(2000)
     ]);
 
     const isMomTab = (ownerTab || '').toLowerCase() === 'mom';
 
+    // 🔥 Uses .substring(0, 10) so today's transactions are guaranteed to appear
     const rawSales = [...(sales || []), ...(retailSales || [])].filter((s) => {
-      const owner = parseOwner(s.owner);
+      if (!s.created_at) return false;
+      const d = s.created_at.substring(0, 10);
+      const matchesDate = d >= fromDate && d <= toDate;
+      const owner = parseOwner(s.owner || s.customer_name);
       const isMomRow = owner.toLowerCase() === 'mom';
-      return isMomTab ? isMomRow : !isMomRow;
+      const matchesOwner = isMomTab ? isMomRow : !isMomRow;
+      return matchesDate && matchesOwner;
     });
 
     const groupedBySeller: Record<string, any[]> = {};
     let combinedGrandTotal = 0;
 
     rawSales.forEach((s) => {
-      let seller = parseOwner(s.owner);
+      let seller = parseOwner(s.owner || s.customer_name);
       seller = seller.charAt(0).toUpperCase() + seller.slice(1);
       if (!groupedBySeller[seller]) groupedBySeller[seller] = [];
       groupedBySeller[seller].push(s);
@@ -225,7 +237,7 @@ export async function POST(request: Request) {
       />
     );
 
-    // 🔥 NEW: If downloadOnly is requested, return the binary PDF file directly!
+    // Return direct download if requested
     if (downloadOnly) {
       return new NextResponse(new Uint8Array(pdfBuffer), {
         status: 200,
@@ -236,7 +248,7 @@ export async function POST(request: Request) {
       });
     }
 
-    // Otherwise, upload to Telegram
+    // Otherwise upload to Telegram
     const botToken = TELEGRAM_CONFIG.botToken || process.env.TELEGRAM_BOT_TOKEN;
     const chatId = TELEGRAM_CONFIG.chatId || process.env.TELEGRAM_CHAT_ID;
 

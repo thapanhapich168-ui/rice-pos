@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { supabase } from '@/lib/supabaseClient'
+import * as htmlToImage from 'html-to-image'
 import { useFocusRefresh } from '@/lib/useFocusRefresh'
 import { useToast } from '@/components/ToastProvider'
 import { formatRiel, parseOwner, EXCHANGE_RATE } from '@/utils/formatters'
@@ -28,7 +29,6 @@ export default function CogsReportPage() {
   const [activeOwnerTab, setActiveOwnerTab] = useState<'mom' | 'others'>('mom')
   const [timeFilter, setTimeFilter] = useState<'today' | 'week' | 'month' | 'all'>('month')
   
-  const [isDeviceMobile, setIsDeviceMobile] = useState(false)
   const [isCapturing, setIsCapturing] = useState(false)
   const [isSendingTelegram, setIsSendingTelegram] = useState(false)
   
@@ -51,9 +51,6 @@ export default function CogsReportPage() {
   const [loadLimit, setLoadLimit] = useState(3000);
 
   useEffect(() => {
-    const isMobile = window.innerWidth < 1024 || /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-    setIsDeviceMobile(isMobile);
-
     const tzoffset = (new Date()).getTimezoneOffset() * 60000;
     const localISOTime = (new Date(Date.now() - tzoffset)).toISOString().slice(0, 10);
     setFromDate(localISOTime);
@@ -175,7 +172,7 @@ export default function CogsReportPage() {
     setLoading(false)
   }
 
-  // 🟢 NEW: Downloads the real A4 PDF document directly from your API route
+  // 🟢 Downloads the exact A4 PDF document directly from your API route
   const handleDownload = async () => {
     if (isCapturing || isSendingTelegram) return;
     setIsCapturing(true);
@@ -265,20 +262,20 @@ export default function CogsReportPage() {
     return true;
   }
 
-  // 🔥 FIXED: Uses .substring(0, 10) so today's timestamps are never filtered out
+  // Uses .substring(0, 10) for safe date extraction
   const reportSales = [...sales, ...retailSales].filter(s => {
     if (!s.created_at) return false;
     const d = s.created_at.substring(0, 10);
     return d >= fromDate && d <= toDate;
   }).filter(s => {
-    const owner = String(parseOwner(s.owner || s.customer_name)).toLowerCase();
+    const owner = parseOwner(s.owner);
     if (activeOwnerTab === 'mom') return owner === 'mom';
     else return owner !== 'mom';
   });
 
   const groupedBySeller: Record<string, any[]> = {};
   reportSales.forEach(s => {
-    let seller = parseOwner(s.owner || s.customer_name);
+    let seller = parseOwner(s.owner);
     seller = seller.charAt(0).toUpperCase() + seller.slice(1);
     if (!groupedBySeller[seller]) groupedBySeller[seller] = [];
     groupedBySeller[seller].push(s);
@@ -348,7 +345,7 @@ export default function CogsReportPage() {
   const dailyMap: Record<string, any> = {};
   
   [...sales, ...retailSales].forEach(s => {
-    const owner = String(parseOwner(s.owner || s.customer_name)).toLowerCase();
+    const owner = parseOwner(s.owner);
     const isMomTab = activeOwnerTab === 'mom';
     const isMomOwner = owner === 'mom';
     
@@ -553,10 +550,10 @@ export default function CogsReportPage() {
           <h1 className="saas-page-title">🌾 COGS Accounting</h1>
         </div>
         
-        <div style={{ display: 'flex', gap: '8px' }}>
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
           {activeMainTab === 'report' && (
             <>
-              {/* 🔥 FIXED: Icon-only on mobile to prevent header overflow */}
+              {/* Telegram Send Button */}
               <button 
                 onClick={handleSendToTelegram} 
                 disabled={isSendingTelegram || isCapturing} 
@@ -567,20 +564,19 @@ export default function CogsReportPage() {
                   display: 'flex', 
                   alignItems: 'center', 
                   gap: '6px',
-                  padding: isDeviceMobile ? '8px 12px' : '10px 16px',
-                  fontSize: isDeviceMobile ? '16px' : '14px'
+                  padding: '8px 12px'
                 }}
                 title="Send to Telegram"
               >
                 {isSendingTelegram ? '⏳' : (
                   <>
                     <span>✈️</span>
-                    {!isDeviceMobile && <span>Send to Telegram</span>}
+                    <span className="desktop-btn-text">Send to Telegram</span>
                   </>
                 )}
               </button>
 
-              {/* 🔥 FIXED: Generates exact A4 PDF file & Icon-only on mobile */}
+              {/* Download A4 PDF Button */}
               <button 
                 onClick={handleDownload} 
                 disabled={isCapturing || isSendingTelegram} 
@@ -591,15 +587,14 @@ export default function CogsReportPage() {
                   display: 'flex', 
                   alignItems: 'center', 
                   gap: '6px',
-                  padding: isDeviceMobile ? '8px 12px' : '10px 16px',
-                  fontSize: isDeviceMobile ? '16px' : '14px'
+                  padding: '8px 12px'
                 }}
                 title="Download A4 PDF"
               >
                 {isCapturing ? '⏳' : (
                   <>
                     <span>⬇️</span>
-                    {!isDeviceMobile && <span>Download A4</span>}
+                    <span className="desktop-btn-text">Download A4</span>
                   </>
                 )}
               </button>
@@ -686,96 +681,99 @@ export default function CogsReportPage() {
         {/* A4 REPORT TAB */}
         {activeMainTab === 'report' && (
           <>
-            <div className="a4-paper-container" ref={reportRef} style={{ flexShrink: 0, margin: '0 auto 24px auto' }}>
-              <img className="center-logo" src="https://i.imgur.com/s0hg3MQ.png" alt="Logo" crossOrigin="anonymous" />
-              
-              <div className="a4-content">
-                <h1 style={{ textAlign: 'center', fontSize: '22px', color: 'green', margin: '0 0 20px 0', fontFamily: "'Noto Sans Khmer', Arial, sans-serif", fontWeight: 'bold' }}>
-                  🌾 អង្ករត្រូវទូទាត់ 🧾
-                </h1>
+            <div className="a4-paper-scroller">
+              <div className="a4-paper-container" ref={reportRef}>
+                <img className="center-logo" src="https://i.imgur.com/s0hg3MQ.png" alt="Logo" crossOrigin="anonymous" />
+                
+                <div className="a4-content">
+                  <h1 style={{ textAlign: 'center', fontSize: '22px', color: 'green', margin: '0 0 20px 0', fontFamily: "'Noto Sans Khmer', Arial, sans-serif", fontWeight: 'normal' }}>
+                    🌾 អង្ករត្រូវទូទាត់ 🧾
+                  </h1>
 
-                {loading ? (
-                  <p style={{ textAlign: 'center', color: '#64748b', padding: '40px' }}>Loading records...</p>
-                ) : reportSales.length === 0 ? (
-                  <p style={{ textAlign: 'center', color: '#94a3b8', padding: '40px' }}>No sales records found for this date range.</p>
-                ) : (
-                  <>
-                    {Object.keys(groupedBySeller).map((seller) => {
-                      const { rows, sellerGrandTotal } = processSellerData(groupedBySeller[seller]);
-                      combinedGrandTotal += sellerGrandTotal;
+                  {loading ? (
+                    <p style={{ textAlign: 'center', color: '#64748b', padding: '40px' }}>Loading records...</p>
+                  ) : reportSales.length === 0 ? (
+                    <p style={{ textAlign: 'center', color: '#94a3b8', padding: '40px' }}>No sales records found for this date range.</p>
+                  ) : (
+                    <>
+                      {Object.keys(groupedBySeller).map((seller) => {
+                        const { rows, sellerGrandTotal } = processSellerData(groupedBySeller[seller]);
+                        combinedGrandTotal += sellerGrandTotal;
 
-                      return (
-                        <div key={seller} style={{ marginBottom: '30px' }}>
-                          <h2 style={{ fontSize: '16px', margin: '0 0 8px 0', color: '#333', fontFamily: "'Noto Sans Khmer', Arial, sans-serif", fontWeight: 'bold' }}>
-                            ថៅកែ {seller.toUpperCase()}
-                          </h2>
-                          <table className="report-table">
-                            <thead>
-                              <tr style={{ backgroundColor: '#fffacd' }}>
-                                <th style={{ width: '10%' }}>INV</th>
-                                <th style={{ width: '20%' }}>អតិថិជន</th>
-                                <th style={{ width: '20%' }}>ប្រភេទអង្ករ</th>
-                                <th style={{ width: '20%' }}>ឈ្មោះក្នុងប៊ុង</th>
-                                <th style={{ width: '10%' }}>ចំនួន</th>
-                                <th style={{ width: '10%' }}>តម្លៃ</th>
-                                <th style={{ width: '10%' }}>សរុប</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {rows.map((row, idx) => (
-                                <tr key={idx}>
-                                  <td style={{ textAlign: 'center', fontWeight: 'bold' }}>
-                                    {row.invoice_id ? String(row.invoice_id).replace(/\D/g, '') : ''}
-                                  </td>
-                                  {row.isFirstOfCustomer && (
-                                    <td rowSpan={row.rowSpan} style={{ verticalAlign: 'middle', fontWeight: 'bold' }}>
-                                      {row.customer_name}
+                        return (
+                          <div key={seller} style={{ marginBottom: '30px' }}>
+                            <h2 style={{ fontSize: '16px', margin: '0 0 8px 0', color: '#333', fontFamily: "'Noto Sans Khmer', Arial, sans-serif", fontWeight: 'normal' }}>
+                              ថៅកែ {seller.toUpperCase()}
+                            </h2>
+                            <table className="report-table">
+                              <thead>
+                                <tr style={{ backgroundColor: '#fffacd' }}>
+                                  <th style={{ width: '12%' }}>INV</th>
+                                  <th style={{ width: '18%' }}>អតិថិជន</th>
+                                  <th style={{ width: '18%' }}>ប្រភេទអង្ករ</th>
+                                  <th style={{ width: '16%' }}>ឈ្មោះក្នុងប៊ុង</th>
+                                  <th style={{ width: '8%' }}>ចំនួន</th>
+                                  <th style={{ width: '13%' }}>តម្លៃ</th>
+                                  <th style={{ width: '15%' }}>សរុប</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {rows.map((row, idx) => (
+                                  <tr key={idx}>
+                                    <td style={{ textAlign: 'center', whiteSpace: 'nowrap' }}>
+                                      {row.invoice_id ? String(row.invoice_id).replace(/\D/g, '') : ''}
                                     </td>
-                                  )}
-                                  <td style={{ fontWeight: 'bold' }}>
-                                    <div style={{ color: '#0f172a' }}>{row.rice_type}</div>
-                                  </td>
-                                  <td style={{ fontWeight: 'bold' }}>{row.custom_rice_type || ''}</td>
-                                  <td style={{ textAlign: 'center', fontWeight: 'bold' }}>{row.qty.toLocaleString('en-US')}</td>
-                                  <td style={{ textAlign: 'center', fontWeight: 'bold' }}>{Number(row.cogs_price).toLocaleString('en-US')}</td>
-                                  <td style={{ textAlign: 'center', fontWeight: 'bold', color: row.isNegative ? 'red' : 'inherit' }}>
-                                    {Math.round(row.calculatedAmount).toLocaleString('en-US')}
+                                    {row.isFirstOfCustomer && (
+                                      <td rowSpan={row.rowSpan} style={{ verticalAlign: 'middle' }}>
+                                        {row.customer_name}
+                                      </td>
+                                    )}
+                                    <td>
+                                      <div style={{ color: '#0f172a' }}>{row.rice_type}</div>
+                                    </td>
+                                    <td>{row.custom_rice_type || ''}</td>
+                                    <td style={{ textAlign: 'center', whiteSpace: 'nowrap' }}>{row.qty.toLocaleString('en-US')}</td>
+                                    <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>{Number(row.cogs_price).toLocaleString('en-US')}</td>
+                                    <td style={{ textAlign: 'right', whiteSpace: 'nowrap', color: row.isNegative ? 'red' : 'inherit' }}>
+                                      {Math.round(row.calculatedAmount).toLocaleString('en-US')}
+                                    </td>
+                                  </tr>
+                                ))}
+                                
+                                {/* 🔥 FIXED: Both Subtotal and Grand Total share exact same classes and matching sizes */}
+                                <tr style={{ backgroundColor: '#fffacd' }}>
+                                  <td colSpan={6} className="summary-label" style={{ paddingRight: '10px' }}>សរុប</td>
+                                  <td className="summary-value">
+                                    {Math.round(sellerGrandTotal).toLocaleString('en-US')} ៛
                                   </td>
                                 </tr>
-                              ))}
-                              
-                              <tr style={{ backgroundColor: '#fffacd', fontWeight: 'bold' }}>
-                                <td colSpan={6} style={{ textAlign: 'right', paddingRight: '15px' }}>សរុប</td>
-                                <td style={{ textAlign: 'center', fontSize: '14px' }}>
-                                  {Math.round(sellerGrandTotal).toLocaleString('en-US')}
-                                </td>
-                              </tr>
-                            </tbody>
-                          </table>
-                        </div>
-                      );
-                    })}
+                              </tbody>
+                            </table>
+                          </div>
+                        );
+                      })}
 
-                    <div style={{ marginTop: '40px' }}>
-                      <table className="combined-summary-table" style={{ width: '100%', borderCollapse: 'collapse', border: '2px solid #000' }}>
-                        <tbody>
-                          <tr style={{ backgroundColor: '#fffacd' }}>
-                            <td style={{ textAlign: 'right', fontWeight: 'bold', width: '80%', padding: '12px', border: '1px solid #000', fontSize: '16px' }}>
-                              សរុបរួមទាំងអស់
-                            </td>
-                            <td style={{ width: '20%', fontSize: '18px', fontWeight: 'bold', textAlign: 'center', border: '1px solid #000', padding: '12px', color: '#b58a3d' }}>
-                              {Math.round(combinedGrandTotal).toLocaleString('en-US')} ៛
-                            </td>
-                          </tr>
-                        </tbody>
-                      </table>
-                    </div>
+                      <div style={{ marginTop: '40px' }}>
+                        <table className="combined-summary-table" style={{ width: '100%', borderCollapse: 'collapse', border: '2px solid #000' }}>
+                          <tbody>
+                            <tr style={{ backgroundColor: '#fffacd' }}>
+                              <td className="summary-label" style={{ width: '80%', padding: '10px', border: '1px solid #000' }}>
+                                សរុបរួមទាំងអស់
+                              </td>
+                              <td className="summary-value" style={{ width: '20%', padding: '10px', border: '1px solid #000', textAlign: 'center' }}>
+                                {Math.round(combinedGrandTotal).toLocaleString('en-US')} ៛
+                              </td>
+                            </tr>
+                          </tbody>
+                        </table>
+                      </div>
 
-                    <div style={{ textAlign: 'right', marginTop: '20px', fontSize: '12px', color: '#64748b', fontWeight: 'bold' }}>
-                      Generated on: {new Date().toLocaleString('en-GB')}
-                    </div>
-                  </>
-                )}
+                      <div style={{ textAlign: 'right', marginTop: '20px', fontSize: '12px', color: '#64748b' }}>
+                        Generated on: {new Date().toLocaleString('en-GB')}
+                      </div>
+                    </>
+                  )}
+                </div>
               </div>
             </div>
 
@@ -1105,9 +1103,16 @@ export default function CogsReportPage() {
           gap: 16px;
         }
 
-        .a4-paper-container {
+        .a4-paper-scroller {
           width: 100%;
-          max-width: 794px; 
+          overflow-x: auto;
+          -webkit-overflow-scrolling: touch;
+          padding-bottom: 12px;
+        }
+
+        .a4-paper-container {
+          width: 794px;
+          min-width: 794px;
           min-height: 1123px; 
           margin: 0 auto;
           background: #ffffff;
@@ -1118,46 +1123,80 @@ export default function CogsReportPage() {
           overflow: hidden;
           box-sizing: border-box;
         }
+
         .center-logo {
           position: absolute;
           top: 50%;
           left: 50%;
           transform: translate(-50%, -50%);
-          width: 40%; /* 🔥 Automatically shrinks on phones */
-          max-width: 300px; /* 🔥 Prevents it from getting too big on laptops */
+          width: 300px;
           opacity: 0.04; 
           z-index: 0;
           pointer-events: none;
         }
+
         .a4-content {
           position: relative;
           z-index: 1;
         }
+
         .report-table {
           width: 100%;
           border-collapse: collapse;
           font-family: 'Noto Sans Khmer', Arial, sans-serif;
           font-size: 13px;
         }
+
         .report-table th, .report-table td {
           border: 1px solid #000;
           padding: 8px 10px;
         }
+
         .report-table th {
           font-weight: bold;
           text-align: center;
         }
 
-        .header-container {
-          display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; margin-top: 0; margin-left: 60px; gap: 12px; min-height: 42px; width: calc(100% - 60px); max-width: 1600px;
+        /* 🔥 UNIFIED SUMMARY STYLING (DESKTOP) */
+        .summary-label {
+          font-family: 'Noto Sans Khmer', Arial, sans-serif;
+          font-size: 14px;
+          font-weight: normal;
+          text-align: right;
+          color: #1e293b;
         }
+
+        .summary-value {
+          font-size: 15px;
+          font-weight: bold;
+          color: #b58a3d;
+          white-space: nowrap;
+          text-align: right;
+        }
+
+        .header-container {
+          display: flex; 
+          justify-content: space-between; 
+          align-items: center; 
+          margin-bottom: 24px; 
+          margin-top: 0; 
+          margin-left: 60px; 
+          gap: 12px; 
+          min-height: 42px; 
+          width: calc(100% - 60px); 
+          max-width: 1600px;
+        }
+
         .header-left {
-          display: flex; align-items: center; gap: 12px;
+          display: flex; 
+          align-items: center; 
+          gap: 12px;
         }
 
         input[type="text"].no-spinners::-webkit-inner-spin-button,
         input[type="text"].no-spinners::-webkit-outer-spin-button {
-          -webkit-appearance: none; margin: 0;
+          -webkit-appearance: none; 
+          margin: 0;
         }
 
         @media print {
@@ -1169,38 +1208,68 @@ export default function CogsReportPage() {
           @page { size: A4 portrait; margin: 10mm; }
         }
 
-        @media (max-width: 1023px) { 
-          .desktop-only-divider { display: none !important; }
+        /* 🔥 MOBILE RESPONSIVE TWEAKS (MINI-A4 NATIVE FITTING) */
+        @media (max-width: 768px) {
+          .desktop-btn-text {
+            display: none !important;
+          }
+
+          .header-container {
+            margin-left: 54px !important;
+            width: calc(100% - 54px) !important;
+          }
+
+          .desktop-only-divider { 
+            display: none !important; 
+          }
           
           .filter-card-layout {
             flex-wrap: wrap !important;
           }
 
-          .header-container {
-            margin-left: 54px !important; 
-            margin-right: 0 !important;
-            margin-bottom: 24px !important; 
-            margin-top: 0 !important;
-            display: flex !important;
-            flex-direction: row !important;
-            justify-content: space-between !important;
-            align-items: center !important; 
-            min-height: 44px !important;
-            width: calc(100% - 54px) !important;
+          .a4-paper-scroller {
+            width: 100%;
+            overflow: hidden !important;
           }
-          .header-left {
-            display: flex !important;
-            flex-direction: row !important;
-            align-items: center !important;
-            gap: 12px !important;
-          }
-          
-          /* 🔥 FIXED: Mathematically forces a realistic A4 shape on phones! */
+
           .a4-paper-container {
-            padding: 16px; 
-            min-height: auto; /* Removes the super-long CVS receipt look */
-            aspect-ratio: 1 / 1.4142; /* The exact aspect ratio of A4 paper */
-            overflow-x: auto; 
+            width: 100% !important;
+            min-width: 100% !important;
+            max-width: 100% !important;
+            padding: 16px 8px !important;
+            min-height: auto !important;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.08) !important;
+          }
+
+          .report-table {
+            font-size: 9.5px !important;
+          }
+
+          .report-table th, 
+          .report-table td {
+            padding: 4px 2px !important;
+            word-break: break-word;
+          }
+
+          /* 🔥 UNIFIED SUMMARY STYLING (MOBILE) */
+          .summary-label {
+            font-size: 11px !important;
+            padding: 6px 4px !important;
+          }
+
+          .summary-value {
+            font-size: 12px !important;
+            padding: 6px 4px !important;
+          }
+
+          .a4-content h1 {
+            font-size: 16px !important;
+            margin-bottom: 12px !important;
+          }
+
+          .a4-content h2 {
+            font-size: 12px !important;
+            margin-bottom: 6px !important;
           }
         }
       `}</style>
