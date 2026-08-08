@@ -1,4 +1,4 @@
-// lib/cogsReportSender.ts
+// lib/cogsReportSender.tsx
 
 import { createClient } from '@supabase/supabase-js';
 import { TELEGRAM_CONFIG } from '@/lib/telegramConfig';
@@ -15,7 +15,6 @@ function getCambodiaDateStr(dateVal: string): string {
   if (!dateVal) return '';
   try {
     const d = new Date(dateVal);
-    // Formats strictly as YYYY-MM-DD in Cambodia time
     return new Intl.DateTimeFormat('en-CA', {
       timeZone: 'Asia/Phnom_Penh',
       year: 'numeric',
@@ -104,7 +103,7 @@ function generateHtmlReport(
 
     let sellerRowsHtml = '';
 
-    rows.forEach((row, index) => {
+    rows.forEach((row) => {
       const invNum = row.invoice_id ? String(row.invoice_id).replace(/\D/g, '') : '';
       const amountColor = row.isNegative ? 'color: red;' : 'color: inherit;';
 
@@ -274,7 +273,6 @@ export async function generateAndSendCogsReport({
   downloadOnly?: boolean;
 }) {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-  // Prioritize SERVICE_ROLE_KEY so Row-Level Security (RLS) never blocks backend queries
   const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
   const supabase = createClient(supabaseUrl, supabaseKey);
 
@@ -287,12 +285,10 @@ export async function generateAndSendCogsReport({
 
   const rawSales = [...(sales || []), ...(retailSales || [])].filter((s) => {
     if (!s.created_at) return false;
-    // Checks both Cambodia Time and UTC date strings to prevent timezone cut-off
     const camDate = getCambodiaDateStr(s.created_at);
     const utcDate = s.created_at.substring(0, 10);
     const matchesDate = (camDate >= fromDate && camDate <= toDate) || (utcDate >= fromDate && utcDate <= toDate);
 
-    // Guaranteed matching for "Mom - លក់ត" or "mom"
     const ownerStr = (s.owner || s.customer_name || '').toString().toLowerCase();
     const parsed = parseOwner(s.owner || s.customer_name);
     const isMomRow = ownerStr.includes('mom') || parsed === 'mom';
@@ -319,16 +315,18 @@ export async function generateAndSendCogsReport({
   const tabLabel = isMomTab ? 'Mom COGS' : 'Pich / Jing / Both COGS';
   const htmlContent = generateHtmlReport(groupedBySeller, combinedGrandTotal, fromDate, toDate, tabLabel);
 
-  // --- LAUNCH HEADLESS BROWSER ---
+  // --- LAUNCH HEADLESS BROWSER (ZERO references to 'puppeteer' package) ---
   const isLocal = process.env.NODE_ENV === 'development';
   let browser: any;
 
   if (isLocal) {
+    // Uses puppeteer-core to launch local Google Chrome automatically
     browser = await puppeteer.launch({
       channel: 'chrome',
       headless: true,
     });
   } else {
+    // Production / Vercel Serverless launch
     browser = await puppeteer.launch({
       args: chromium.args,
       defaultViewport: { width: 1200, height: 800 },
