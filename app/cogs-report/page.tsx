@@ -1,3 +1,5 @@
+// app/cogs-report/page.tsx (or your CogsReportPage path)
+
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
@@ -47,8 +49,8 @@ export default function CogsReportPage() {
   // Inline History States
   const [inlinePayments, setInlinePayments] = useState<Record<string, PaymentRow[]>>({})
 
-  // Pagination state to prevent browser freezing
-  const [loadLimit, setLoadLimit] = useState(3000);
+  // 🔥 Optimized default loadLimit to 500 to prevent memory exhaustion
+  const [loadLimit, setLoadLimit] = useState(500);
 
   useEffect(() => {
     const tzoffset = (new Date()).getTimezoneOffset() * 60000;
@@ -172,7 +174,7 @@ export default function CogsReportPage() {
     setLoading(false)
   }
 
-  // 🟢 Downloads the exact A4 PDF document using your loaded screen records
+  // 🟢 Downloads the exact A4 PDF document directly from your API route (passing screen records)
   const handleDownload = async () => {
     if (isCapturing || isSendingTelegram) return;
     setIsCapturing(true);
@@ -187,13 +189,13 @@ export default function CogsReportPage() {
           toDate,
           ownerTab: activeOwnerTab,
           downloadOnly: true,
-          records: reportSales // 🔥 Direct payload from screen
+          records: reportSales
         })
       });
 
       if (!res.ok) {
-        const errorData = await res.json().catch(() => ({}));
-        throw new Error(errorData.error || 'Failed to generate PDF download');
+        const errText = await res.text();
+        throw new Error(errText.slice(0, 150) || 'Failed to generate PDF download');
       }
 
       const blob = await res.blob();
@@ -215,7 +217,7 @@ export default function CogsReportPage() {
     }
   };
 
-  // 🟢 Send Current Tab's A4 Report PDF to Telegram using your loaded screen records
+  // 🟢 Send Current Tab's A4 Report PDF to Telegram (passing screen records)
   const handleSendToTelegram = async () => {
     if (isSendingTelegram || isCapturing) return;
     setIsSendingTelegram(true);
@@ -229,14 +231,13 @@ export default function CogsReportPage() {
           fromDate,
           toDate,
           ownerTab: activeOwnerTab,
-          records: reportSales // 🔥 Direct payload from screen
+          records: reportSales
         })
       });
 
-      const data = await res.json();
-
       if (!res.ok) {
-        throw new Error(data.error || 'Failed to generate or send PDF');
+        const errText = await res.text();
+        throw new Error(errText.slice(0, 150) || 'Failed to send PDF to Telegram');
       }
 
       showToast('success', 'PDF Sent!', 'A4 PDF document delivered to your Telegram group!');
@@ -264,7 +265,6 @@ export default function CogsReportPage() {
     return true;
   }
 
-  // 🔥 FIXED: Checks s.owner || s.customer_name so Mom records are never excluded
   const reportSales = [...sales, ...retailSales].filter(s => {
     if (!s.created_at) return false;
     const d = s.created_at.substring(0, 10);
@@ -402,9 +402,6 @@ export default function CogsReportPage() {
     else setSelectedDays(pendingDays.map(d => d.key));
   }
 
-  // =========================================================
-  // CLEAN ARCHITECTURE: PAYMENT PROCESSOR
-  // =========================================================
   async function processPayments(rows: PaymentRow[], targetDays: any[], isBulk: boolean) {
     if (isProcessing) return;
 
@@ -779,8 +776,8 @@ export default function CogsReportPage() {
             </div>
 
             <div style={{ textAlign: 'center', padding: '20px', flexShrink: 0 }}>
-              <button onClick={() => setLoadLimit(prev => prev + 2000)} className="saas-btn saas-btn-secondary" style={{ borderRadius: '20px', boxShadow: '0 2px 4px rgba(0,0,0,0.02)' }}>
-                ⬇️ Load Older Records (Current Limit: {loadLimit})
+              <button onClick={() => setLoadLimit(prev => prev + 500)} className="saas-btn saas-btn-secondary" style={{ borderRadius: '20px', boxShadow: '0 2px 4px rgba(0,0,0,0.02)' }}>
+                ⬇️ Load More Records (Current Limit: {loadLimit})
               </button>
             </div>
           </>
@@ -840,8 +837,8 @@ export default function CogsReportPage() {
             </div>
 
             <div style={{ textAlign: 'center', padding: '20px', flexShrink: 0 }}>
-              <button onClick={() => setLoadLimit(prev => prev + 2000)} className="saas-btn saas-btn-secondary" style={{ borderRadius: '20px', boxShadow: '0 2px 4px rgba(0,0,0,0.02)' }}>
-                ⬇️ Load Older Records (Current Limit: {loadLimit})
+              <button onClick={() => setLoadLimit(prev => prev + 500)} className="saas-btn saas-btn-secondary" style={{ borderRadius: '20px', boxShadow: '0 2px 4px rgba(0,0,0,0.02)' }}>
+                ⬇️ Load More Records (Current Limit: {loadLimit})
               </button>
             </div>
 
@@ -979,8 +976,8 @@ export default function CogsReportPage() {
             </div>
 
             <div style={{ textAlign: 'center', padding: '20px', flexShrink: 0 }}>
-              <button onClick={() => setLoadLimit(prev => prev + 2000)} className="saas-btn saas-btn-secondary" style={{ borderRadius: '20px', boxShadow: '0 2px 4px rgba(0,0,0,0.02)' }}>
-                ⬇️ Load Older Records (Current Limit: {loadLimit})
+              <button onClick={() => setLoadLimit(prev => prev + 500)} className="saas-btn saas-btn-secondary" style={{ borderRadius: '20px', boxShadow: '0 2px 4px rgba(0,0,0,0.02)' }}>
+                ⬇️ Load More Records (Current Limit: {loadLimit})
               </button>
             </div>
           </div>
@@ -1158,7 +1155,6 @@ export default function CogsReportPage() {
           text-align: center;
         }
 
-        /* 🔥 UNIFIED SUMMARY STYLING (DESKTOP) */
         .summary-label {
           font-family: 'Noto Sans Khmer', Arial, sans-serif;
           font-size: 14px;
@@ -1209,7 +1205,6 @@ export default function CogsReportPage() {
           @page { size: A4 portrait; margin: 10mm; }
         }
 
-        /* 🔥 MOBILE RESPONSIVE TWEAKS (MINI-A4 NATIVE FITTING) */
         @media (max-width: 768px) {
           .desktop-btn-text {
             display: none !important;
@@ -1252,7 +1247,6 @@ export default function CogsReportPage() {
             word-break: break-word;
           }
 
-          /* 🔥 UNIFIED SUMMARY STYLING (MOBILE) */
           .summary-label {
             font-size: 11px !important;
             padding: 6px 4px !important;
