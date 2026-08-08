@@ -262,20 +262,20 @@ export default function CogsReportPage() {
     return true;
   }
 
-  // Uses .substring(0, 10) for safe date extraction
+  // 🔥 FIXED: Checks s.owner || s.customer_name so Mom records are never excluded
   const reportSales = [...sales, ...retailSales].filter(s => {
     if (!s.created_at) return false;
     const d = s.created_at.substring(0, 10);
     return d >= fromDate && d <= toDate;
   }).filter(s => {
-    const owner = parseOwner(s.owner);
+    const owner = parseOwner(s.owner || s.customer_name);
     if (activeOwnerTab === 'mom') return owner === 'mom';
     else return owner !== 'mom';
   });
 
   const groupedBySeller: Record<string, any[]> = {};
   reportSales.forEach(s => {
-    let seller = parseOwner(s.owner);
+    let seller = parseOwner(s.owner || s.customer_name);
     seller = seller.charAt(0).toUpperCase() + seller.slice(1);
     if (!groupedBySeller[seller]) groupedBySeller[seller] = [];
     groupedBySeller[seller].push(s);
@@ -345,7 +345,7 @@ export default function CogsReportPage() {
   const dailyMap: Record<string, any> = {};
   
   [...sales, ...retailSales].forEach(s => {
-    const owner = parseOwner(s.owner);
+    const owner = parseOwner(s.owner || s.customer_name);
     const isMomTab = activeOwnerTab === 'mom';
     const isMomOwner = owner === 'mom';
     
@@ -740,7 +740,6 @@ export default function CogsReportPage() {
                                   </tr>
                                 ))}
                                 
-                                {/* 🔥 FIXED: Both Subtotal and Grand Total share exact same classes and matching sizes */}
                                 <tr style={{ backgroundColor: '#fffacd' }}>
                                   <td colSpan={6} className="summary-label" style={{ paddingRight: '10px' }}>សរុប</td>
                                   <td className="summary-value">
