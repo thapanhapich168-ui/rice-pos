@@ -229,8 +229,10 @@ function generateHtmlReport(
         <img class="center-logo" src="https://i.imgur.com/s0hg3MQ.png" alt="Logo" crossOrigin="anonymous" />
         
         <div class="a4-content">
-          <h1 style="text-align: center; font-size: 22px; color: green; margin: 0 0 20px 0; font-family: 'Noto Sans Khmer', Arial, sans-serif; font-weight: bold;">
-  🌾 អង្ករត្រូវទូទាត់ 🧾
+          <h1 style="text-align: center; font-size: 22px; color: green; margin: 0 0 20px 0; font-family: 'Noto Sans Khmer', Arial, sans-serif; font-weight: bold; display: flex; align-items: center; justify-content: center; gap: 8px;">
+  <img src="https://cdnjs.cloudflare.com/ajax/libs/emoji-datasource-apple/15.0.1/img/apple/64/1f33e.png" alt="rice" style="width: 26px; height: 26px;" />
+  អង្ករត្រូវទូទាត់
+  <img src="https://cdnjs.cloudflare.com/ajax/libs/emoji-datasource-apple/15.0.1/img/apple/64/1f9fe.png" alt="receipt" style="width: 26px; height: 26px;" />
 </h1>
 
           ${Object.keys(groupedBySeller).length === 0 ? '<div style="text-align: center; color: #64748b; padding: 40px;">No COGS sales recorded for this date range.</div>' : sellersHtml}
