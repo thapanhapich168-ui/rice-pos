@@ -13,11 +13,11 @@ export function useUserRole() {
       const { data: { user } } = await supabase.auth.getUser();
       
       if (user) {
-        const { data } = await supabase
-          .from('profiles')
-          .select('role')
-          .eq('id', user.id)
-          .single();
+        const { data, error } = await supabase
+     .from('profiles')
+     .select('role')
+     .eq('id', user.id)
+     .maybeSingle(); // 🌟 Fixed!
         
         if (data && data.role) {
           // Force it to lowercase just in case the database has weird casing
