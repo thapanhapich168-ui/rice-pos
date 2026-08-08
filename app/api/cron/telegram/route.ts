@@ -1,6 +1,9 @@
+// app/api/cron/telegram/route.ts
+
 import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { TELEGRAM_CONFIG } from '@/lib/telegramConfig'
+// @ts-ignore
 import { generateAndSendCogsReport } from '@/lib/cogsReportSender'
 
 const EXCHANGE_RATE = 4000
@@ -231,8 +234,8 @@ export async function GET(request: Request) {
     }
 
     // 9. DISPATCH COGS A4 PDF REPORTS AT 7 PM
-    let cogsMomResult = null
-    let cogsOthersResult = null
+    let cogsMomResult: any = null
+    let cogsOthersResult: any = null
 
     if (sendDaily) {
       const todayIsoStr = `${nowCam.year}-${String(nowCam.month).padStart(2, '0')}-${String(nowCam.day).padStart(2, '0')}`
