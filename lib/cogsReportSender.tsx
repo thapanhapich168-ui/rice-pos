@@ -1,4 +1,4 @@
-// lib/cogsReportSender.tsx
+// lib/cogsReportSender.ts
 
 import { createClient } from '@supabase/supabase-js';
 import { TELEGRAM_CONFIG } from '@/lib/telegramConfig';
@@ -265,37 +265,53 @@ export async function generateAndSendCogsReport({
   fromDate,
   toDate,
   ownerTab,
-  downloadOnly = false
+  downloadOnly = false,
+  clientRecords = null
 }: {
   fromDate: string;
   toDate: string;
   ownerTab: 'mom' | 'others';
   downloadOnly?: boolean;
+  clientRecords?: any[] | null;
 }) {
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-  const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-  const supabase = createClient(supabaseUrl, supabaseKey);
-
-  const [{ data: sales }, { data: retailSales }] = await Promise.all([
-    supabase.from('sales').select('*').order('created_at', { ascending: false }).limit(5000),
-    supabase.from('retail_sales').select('*').order('created_at', { ascending: false }).limit(5000)
-  ]);
-
   const isMomTab = ownerTab === 'mom';
+  let rawSales: any[] = [];
 
-  const rawSales = [...(sales || []), ...(retailSales || [])].filter((s) => {
-    if (!s.created_at) return false;
-    const camDate = getCambodiaDateStr(s.created_at);
-    const utcDate = s.created_at.substring(0, 10);
-    const matchesDate = (camDate >= fromDate && camDate <= toDate) || (utcDate >= fromDate && utcDate <= toDate);
+  // 🔥 1. If UI passed records directly, use them immediately (Zero DB queries!)
+  if (Array.isArray(clientRecords) && clientRecords.length > 0) {
+    rawSales = clientRecords;
+  } else {
+    // 🔥 2. Otherwise (7 PM Cron), fetch a 48-Hour Window to prevent UTC+7 timezone cutoff
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+    const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+    const supabase = createClient(supabaseUrl, supabaseKey);
 
-    const ownerStr = (s.owner || s.customer_name || '').toString().toLowerCase();
-    const parsed = parseOwner(s.owner || s.customer_name);
-    const isMomRow = ownerStr.includes('mom') || parsed === 'mom';
+    const dStart = new Date(fromDate);
+    dStart.setDate(dStart.getDate() - 1);
+    const dEnd = new Date(toDate);
+    dEnd.setDate(dEnd.getDate() + 1);
+    const startIso = dStart.toISOString().substring(0, 10);
+    const endIso = dEnd.toISOString().substring(0, 10);
 
-    const matchesOwner = isMomTab ? isMomRow : !isMomRow;
-    return matchesDate && matchesOwner;
-  });
+    const [{ data: sales }, { data: retailSales }] = await Promise.all([
+      supabase.from('sales').select('*').gte('created_at', `${startIso}T00:00:00`).lte('created_at', `${endIso}T23:59:59`),
+      supabase.from('retail_sales').select('*').gte('created_at', `${startIso}T00:00:00`).lte('created_at', `${endIso}T23:59:59`)
+    ]);
+
+    rawSales = [...(sales || []), ...(retailSales || [])].filter((s) => {
+      if (!s.created_at) return false;
+      const camDate = getCambodiaDateStr(s.created_at);
+      const utcDate = s.created_at.substring(0, 10);
+      const matchesDate = (camDate >= fromDate && camDate <= toDate) || (utcDate >= fromDate && utcDate <= toDate);
+
+      const ownerStr = (s.owner || s.customer_name || '').toString().toLowerCase();
+      const parsed = parseOwner(s.owner || s.customer_name);
+      const isMomRow = ownerStr.includes('mom') || parsed === 'mom';
+
+      const matchesOwner = isMomTab ? isMomRow : !isMomRow;
+      return matchesDate && matchesOwner;
+    });
+  }
 
   const groupedBySeller: Record<string, any[]> = {};
   let combinedGrandTotal = 0;
@@ -320,13 +336,11 @@ export async function generateAndSendCogsReport({
   let browser: any;
 
   if (isLocal) {
-    // Uses puppeteer-core to launch local Google Chrome automatically
     browser = await puppeteer.launch({
       channel: 'chrome',
       headless: true,
     });
   } else {
-    // Production / Vercel Serverless launch
     browser = await puppeteer.launch({
       args: chromium.args,
       defaultViewport: { width: 1200, height: 800 },

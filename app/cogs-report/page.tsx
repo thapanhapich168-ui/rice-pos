@@ -172,7 +172,7 @@ export default function CogsReportPage() {
     setLoading(false)
   }
 
-  // 🟢 Downloads the exact A4 PDF document directly from your API route
+  // 🟢 Downloads the exact A4 PDF document using your loaded screen records
   const handleDownload = async () => {
     if (isCapturing || isSendingTelegram) return;
     setIsCapturing(true);
@@ -186,7 +186,8 @@ export default function CogsReportPage() {
           fromDate,
           toDate,
           ownerTab: activeOwnerTab,
-          downloadOnly: true
+          downloadOnly: true,
+          records: reportSales // 🔥 Direct payload from screen
         })
       });
 
@@ -214,7 +215,7 @@ export default function CogsReportPage() {
     }
   };
 
-  // 🟢 Send Current Tab's A4 Report PDF to Telegram
+  // 🟢 Send Current Tab's A4 Report PDF to Telegram using your loaded screen records
   const handleSendToTelegram = async () => {
     if (isSendingTelegram || isCapturing) return;
     setIsSendingTelegram(true);
@@ -227,7 +228,8 @@ export default function CogsReportPage() {
         body: JSON.stringify({
           fromDate,
           toDate,
-          ownerTab: activeOwnerTab
+          ownerTab: activeOwnerTab,
+          records: reportSales // 🔥 Direct payload from screen
         })
       });
 

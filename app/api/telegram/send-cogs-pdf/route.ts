@@ -5,7 +5,7 @@ import { generateAndSendCogsReport } from '@/lib/cogsReportSender';
 
 export async function POST(request: NextRequest) {
   try {
-    const { fromDate, toDate, ownerTab, downloadOnly } = await request.json();
+    const { fromDate, toDate, ownerTab, downloadOnly, records } = await request.json();
 
     if (!fromDate || !toDate) {
       return NextResponse.json({ error: 'Date range required' }, { status: 400 });
@@ -17,7 +17,8 @@ export async function POST(request: NextRequest) {
       fromDate,
       toDate,
       ownerTab: validOwnerTab,
-      downloadOnly: !!downloadOnly
+      downloadOnly: !!downloadOnly,
+      clientRecords: records || null // 🔥 Passes UI records directly to the PDF printer
     });
 
     if (downloadOnly && result?.pdfBuffer) {
