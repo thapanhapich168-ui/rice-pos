@@ -1,3 +1,5 @@
+// lib/cogsReportSender.tsx
+
 import { createClient } from '@supabase/supabase-js';
 import { TELEGRAM_CONFIG } from '@/lib/telegramConfig';
 import { renderToBuffer, Document, Page, View, Text, StyleSheet, Font } from '@react-pdf/renderer';
@@ -31,6 +33,19 @@ const styles = StyleSheet.create({
   grandTotalBox: { flexDirection: 'row', justifyContent: 'space-between', backgroundColor: '#fffacd', borderWidth: 1.5, borderColor: '#000000', padding: 10, marginTop: 20 },
   footer: { position: 'absolute', bottom: 20, left: 35, right: 35, flexDirection: 'row', justifyContent: 'space-between', borderTopWidth: 0.5, borderColor: '#e2e8f0', paddingTop: 6, fontSize: 8, color: '#94a3b8' }
 });
+
+// Matches either direct YYYY-MM-DD string OR Cambodia UTC+7 YYYY-MM-DD string
+const matchesDate = (dateStr: string, from: string, to: string) => {
+  if (!dateStr) return false;
+  const direct = String(dateStr).substring(0, 10);
+  let camDate = direct;
+  try {
+    const d = new Date(dateStr);
+    const camTime = new Date(d.getTime() + (7 * 3600 * 1000));
+    camDate = camTime.toISOString().substring(0, 10);
+  } catch (e) {}
+  return (direct >= from && direct <= to) || (camDate >= from && camDate <= to);
+};
 
 function processSellerData(sellerSales: any[]) {
   const customerGroups: Record<string, any[]> = {};
@@ -164,6 +179,7 @@ const CogsReportDocument = ({ groupedBySeller, combinedGrandTotal, fromDate, toD
   </Document>
 );
 
+// 🔥 CLONED EXACTLY FROM YOUR FRONTEND: No SQL date filters!
 export async function generateAndSendCogsReport({
   fromDate,
   toDate,
@@ -176,32 +192,30 @@ export async function generateAndSendCogsReport({
   downloadOnly?: boolean;
 }) {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-  // MUST use Service Role Key to bypass RLS in serverless functions
   const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
   const supabase = createClient(supabaseUrl, supabaseKey);
 
-  // Exact calendar boundaries for Cambodia (+07:00)
-  const startTimestamp = `${fromDate}T00:00:00+07:00`;
-  const endTimestamp = `${toDate}T23:59:59.999+07:00`;
-
+  // Exact same query as CogsReportPage.tsx
   const [{ data: sales }, { data: retailSales }] = await Promise.all([
-    supabase.from('sales').select('*').gte('created_at', startTimestamp).lte('created_at', endTimestamp),
-    supabase.from('retail_sales').select('*').gte('created_at', startTimestamp).lte('created_at', endTimestamp)
+    supabase.from('sales').select('*').order('created_at', { ascending: false }).limit(3000),
+    supabase.from('retail_sales').select('*').order('created_at', { ascending: false }).limit(3000)
   ]);
 
   const isMomTab = ownerTab === 'mom';
 
-  const rawSales = [...(sales || []), ...(retailSales || [])].filter((s) => {
-    const owner = parseOwner(s.owner || s.customer_name || '');
-    const isMomRow = owner.toLowerCase() === 'mom' || String(s.owner || s.customer_name || '').toLowerCase().includes('mom');
-    return isMomTab ? isMomRow : !isMomRow;
-  });
+  // Exact same JavaScript filter as CogsReportPage.tsx
+  const rawSales = [...(sales || []), ...(retailSales || [])]
+    .filter((s) => matchesDate(s.created_at, fromDate, toDate))
+    .filter((s) => {
+      const owner = parseOwner(s.owner);
+      return isMomTab ? owner === 'mom' : owner !== 'mom';
+    });
 
   const groupedBySeller: Record<string, any[]> = {};
   let combinedGrandTotal = 0;
 
   rawSales.forEach((s) => {
-    let seller = parseOwner(s.owner || s.customer_name || '');
+    let seller = parseOwner(s.owner);
     seller = seller.charAt(0).toUpperCase() + seller.slice(1);
     if (!groupedBySeller[seller]) groupedBySeller[seller] = [];
     groupedBySeller[seller].push(s);
