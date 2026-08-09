@@ -945,15 +945,16 @@ export default function POSPage() {
            });
            
            if (!item.bypass_stock) {
-             stockUpdates[item.product_id] = (stockUpdates[item.product_id] ?? latestProducts.find(p=>p.id === item.product_id)?.stock ?? 0) - Number(item.quantity);
+             // We only store the change (delta), e.g., -2 or -5
+             stockUpdates[item.product_id] = (stockUpdates[item.product_id] || 0) - Number(item.quantity);
            }
-        }
+        } // <--- THIS WAS THE BRACKET THAT WAS ACCIDENTALLY DELETED!
 
         const { error: retailErr } = await supabase.from('retail_sales').insert(retailRows);
         if (retailErr) throw new Error(`Retail Error: ${retailErr.message}`);
 
-        for (const [prodIdStr, newStock] of Object.entries(stockUpdates)) {
-            await supabase.from('products').update({ stock: newStock }).eq('id', Number(prodIdStr));
+        for (const [prodIdStr, delta] of Object.entries(stockUpdates)) {
+            await supabase.rpc('adjust_product_stock', { p_product_id: Number(prodIdStr), p_quantity: delta });
         }
 
       } else {
@@ -988,7 +989,7 @@ export default function POSPage() {
              }
 
              if (targetBatch) {
-                 fifoUpdates[targetBatch.id] = (fifoUpdates[targetBatch.id] !== undefined ? fifoUpdates[targetBatch.id] : targetBatch.remaining_qty) + 1;
+                 fifoUpdates[targetBatch.id] = (fifoUpdates[targetBatch.id] || 0) + 1;
              } else {
                  const returnedProd = latestProducts.find(p => p.id === item.product_id);
                  await supabase.from('inventory_batches').insert([{
@@ -1000,7 +1001,7 @@ export default function POSPage() {
           }
 
           if (item.add_loose_kg && item.loose_retail_id && !editingInvoiceId) {
-             stockUpdates[item.loose_retail_id] = (stockUpdates[item.loose_retail_id] ?? latestProducts.find(p => p.id === item.loose_retail_id)?.stock ?? 0) + item.add_loose_kg;
+             stockUpdates[item.loose_retail_id] = (stockUpdates[item.loose_retail_id] || 0) + item.add_loose_kg;
           }
           
           if (isNegativeItem || isBypass || editingInvoiceId) {
@@ -1024,7 +1025,7 @@ export default function POSPage() {
               cogs_price: specificBatch ? specificBatch.cost_price : (item.cost_price || 0), owner: finalOwner
             });
             if (specificBatch) {
-                fifoUpdates[specificBatch.id] = (fifoUpdates[specificBatch.id] !== undefined ? fifoUpdates[specificBatch.id] : specificBatch.remaining_qty) - finalQty;
+                fifoUpdates[specificBatch.id] = (fifoUpdates[specificBatch.id] || 0) - finalQty;
             }
           } else {
             const splits = await getFIFOSplits(item.product_id, finalQty, item.cost_price || 0);
@@ -1035,13 +1036,13 @@ export default function POSPage() {
                 cogs_price: split.cogs_price, owner: finalOwner
               });
               if (split.batch_id) {
-                fifoUpdates[split.batch_id] = (fifoUpdates[split.batch_id] !== undefined ? fifoUpdates[split.batch_id] : split.current_remaining) - split.qty;
+                fifoUpdates[split.batch_id] = (fifoUpdates[split.batch_id] || 0) - split.qty;
               }
             }
           }
 
           if (!editingInvoiceId && !isBypass) {
-            stockUpdates[item.product_id] = (stockUpdates[item.product_id] ?? latestProducts.find(p => p.id === item.product_id)?.stock ?? 0) - finalQty;
+            stockUpdates[item.product_id] = (stockUpdates[item.product_id] || 0) - finalQty;
           }
         }
 
@@ -1081,11 +1082,11 @@ export default function POSPage() {
         const { error: salesErr } = await supabase.from('sales').upsert(finalSaleRows, { onConflict: 'id' });
         if (salesErr) throw new Error(`Failed to save to Sales table: ${salesErr.message}`);
 
-        for (const [prodIdStr, newStock] of Object.entries(stockUpdates)) {
-            await supabase.from('products').update({ stock: newStock }).eq('id', Number(prodIdStr));
+        for (const [prodIdStr, delta] of Object.entries(stockUpdates)) {
+            await supabase.rpc('adjust_product_stock', { p_product_id: Number(prodIdStr), p_quantity: delta });
         }
-        for (const [batchIdStr, newRemaining] of Object.entries(fifoUpdates)) {
-            await supabase.from('inventory_batches').update({ remaining_qty: newRemaining }).eq('id', Number(batchIdStr));
+        for (const [batchIdStr, delta] of Object.entries(fifoUpdates)) {
+            await supabase.rpc('adjust_batch_stock', { p_batch_id: Number(batchIdStr), p_quantity: delta });
         }
       }
 

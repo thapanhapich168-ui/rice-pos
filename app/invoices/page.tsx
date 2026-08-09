@@ -200,11 +200,8 @@ export default function InvoiceGallery() {
                 .maybeSingle();
 
               if (prod) {
-                const newStock = Number(prod.stock || 0) + qty;
-                await supabase
-                  .from('products')
-                  .update({ stock: newStock })
-                  .eq('id', productId);
+                // Atomically restores stock safely, bypassing frontend state
+                await supabase.rpc('adjust_product_stock', { p_product_id: productId, p_quantity: qty });
               } else {
                 console.warn(`Product not found for ID: ${productId}`);
               }
@@ -217,9 +214,8 @@ export default function InvoiceGallery() {
                 .limit(1); 
               
               if (batchesInv && batchesInv.length > 0) {
-                await supabase.from('inventory_batches')
-                  .update({ remaining_qty: Number(batchesInv[0].remaining_qty) + qty })
-                  .eq('id', batchesInv[0].id);
+                // Atomically restores batch stock safely
+                await supabase.rpc('adjust_batch_stock', { p_batch_id: batchesInv[0].id, p_quantity: qty });
               } else {
                 await supabase.from('inventory_batches').insert([{
                   product_id: productId,

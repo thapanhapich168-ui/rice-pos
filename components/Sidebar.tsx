@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabaseClient'
 import { useUserRole } from '@/lib/useUserRole'
+import { useBranch } from '@/components/BranchContext' // 🔥 IMPORT THE GLOBAL MEMORY
 
 interface MenuItem {
   label: string;
@@ -33,7 +34,10 @@ export default function Sidebar() {
   const [menuItems, setMenuItems] = useState<MenuItem[]>(defaultMenuItems)
   const pathname = usePathname()
   const router = useRouter()
+  
   const { role, loadingRole } = useUserRole();
+  // 🔥 GRAB THE BRANCH DATA FROM OUR RADIO TOWER
+  const { branches, activeBranchId, setActiveBranchId } = useBranch();
 
   const sidebarRef = useRef<HTMLDivElement>(null)
   const buttonRef = useRef<HTMLButtonElement>(null)
@@ -52,8 +56,7 @@ export default function Sidebar() {
           return idxA - idxB
         })
         setMenuItems(sorted)
-      } catch (e) {
-      }
+      } catch (e) {}
     }
   }, [])
 
@@ -137,9 +140,35 @@ export default function Sidebar() {
         className={`sidebar-wrapper ${isOpen ? 'open' : 'closed'}`}
       >
         <div>
-          {/* 🔥 FIX: Extracted to responsive CSS class for perfect math alignment */}
           <div className="sidebar-header">
             <h2 style={{ margin: 0, whiteSpace: 'nowrap', fontSize: '20px', lineHeight: 1 }}>🌾 Rice POS</h2>
+          </div>
+
+          {/* 🔥 THE BRANCH SWITCHER UI */}
+          <div style={{ paddingRight: '12px', marginBottom: '24px' }}>
+            <select
+              value={activeBranchId}
+              onChange={(e) => setActiveBranchId(Number(e.target.value))}
+              disabled={role !== 'admin'} 
+              style={{
+                width: '100%',
+                padding: '10px 12px',
+                borderRadius: '8px',
+                background: role === 'admin' ? '#1f2937' : '#111827',
+                color: role === 'admin' ? 'white' : '#9ca3af',
+                border: '1px solid #374151',
+                fontSize: '13px',
+                fontWeight: 'bold',
+                cursor: role === 'admin' ? 'pointer' : 'not-allowed',
+                outline: 'none',
+                appearance: role === 'admin' ? 'auto' : 'none' 
+              }}
+              title={role !== 'admin' ? "You do not have permission to switch branches" : "Switch Branch"}
+            >
+              {branches.map(b => (
+                <option key={b.id} value={b.id}>📍 Branch: {b.name}</option>
+              ))}
+            </select>
           </div>
           
           <nav style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
@@ -197,7 +226,8 @@ export default function Sidebar() {
             fontWeight: 'bold',
             whiteSpace: 'nowrap',
             width: '100%',
-            transition: 'background 0.2s'
+            transition: 'background 0.2s',
+            marginTop: '20px'
           }}
         >
           🚪 Log Out
@@ -205,7 +235,6 @@ export default function Sidebar() {
       </div>
 
       <style jsx>{`
-        /* 🔥 NEW: Exact alignment matching the Dashboard/Customer page headers */
         .burger-btn {
           position: fixed;
           top: max(20px, env(safe-area-inset-top, 20px));
@@ -222,7 +251,7 @@ export default function Sidebar() {
           display: flex;
           align-items: center;
           justify-content: center;
-          padding: 0; /* Ensures perfect square without stretching */
+          padding: 0; 
           box-sizing: border-box;
           outline: none;
         }
@@ -230,9 +259,9 @@ export default function Sidebar() {
         .sidebar-header {
           display: flex;
           align-items: center;
-          height: 42px; /* Matches exact desktop burger height */
-          margin-bottom: 32px;
-          margin-left: 54px; /* 42px button + 12px exact gap */
+          height: 42px; 
+          margin-bottom: 20px;
+          margin-left: 54px; 
         }
 
         .sidebar-backdrop {
@@ -273,7 +302,6 @@ export default function Sidebar() {
           min-width: 250px;
           opacity: 1;
           pointer-events: auto;
-          /* Matches exact Desktop layout padding */
           padding: max(20px, env(safe-area-inset-top, 20px)) 24px 24px 24px;
           box-shadow: 4px 0 10px rgba(0, 0, 0, 0.1);
         }
@@ -297,8 +325,8 @@ export default function Sidebar() {
             height: 44px;
           }
           .sidebar-header {
-            height: 44px; /* Matches exact mobile burger height */
-            margin-left: 56px; /* 44px button + 12px exact gap */
+            height: 44px; 
+            margin-left: 56px; 
           }
           .sidebar-wrapper {
             position: fixed;
@@ -306,7 +334,6 @@ export default function Sidebar() {
             left: 0;
           }
           .sidebar-wrapper.open {
-             /* Matches exact Mobile layout padding */
              padding: max(20px, env(safe-area-inset-top, 20px)) 16px 16px 16px;
           }
           .sidebar-backdrop.open {
