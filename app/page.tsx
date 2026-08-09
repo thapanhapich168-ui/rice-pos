@@ -10,11 +10,10 @@ export default function LoginPage() {
   
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [rememberMe, setRememberMe] = useState(true)
   const [loading, setLoading] = useState(false)
   const [errorMsg, setErrorMsg] = useState('')
   
-  // New state for toggling password visibility
+  // State for toggling password visibility
   const [showPassword, setShowPassword] = useState(false)
 
   useEffect(() => {
@@ -33,7 +32,7 @@ export default function LoginPage() {
     setLoading(true)
     setErrorMsg('')
 
-    // Supabase automatically handles local storage persistence in the background.
+    // Supabase automatically handles local storage persistence in the background indefinitely.
     const { error } = await supabase.auth.signInWithPassword({ 
       email, 
       password 
@@ -85,7 +84,16 @@ export default function LoginPage() {
           </div>
 
           <div>
-            <label style={{ display: 'block', marginBottom: '6px', fontWeight: 'bold', fontSize: '12px', color: '#475569', textTransform: 'uppercase' }}>Password</label>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+              <label style={{ fontWeight: 'bold', fontSize: '12px', color: '#475569', textTransform: 'uppercase' }}>Password</label>
+              <button 
+                type="button" 
+                onClick={() => router.push('/forgot-password')} 
+                style={{ background: 'none', border: 'none', color: '#b58a3d', fontSize: '12px', fontWeight: 'bold', cursor: 'pointer', padding: 0 }}
+              >
+                Forgot password?
+              </button>
+            </div>
             <div style={{ position: 'relative' }}>
               <input 
                 type={showPassword ? "text" : "password"} 
@@ -116,13 +124,11 @@ export default function LoginPage() {
                 }}
               >
                 {showPassword ? (
-                  // Google-style "Open Eye" SVG
                   <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z" />
                     <circle cx="12" cy="12" r="3" />
                   </svg>
                 ) : (
-                  // Google-style "Eye with Slash" SVG
                   <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M9.88 9.88a3 3 0 1 0 4.24 4.24" />
                     <path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68" />
@@ -133,16 +139,6 @@ export default function LoginPage() {
               </button>
             </div>
           </div>
-
-          <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '13px', color: '#475569', marginTop: '4px' }}>
-            <input 
-              type="checkbox" 
-              checked={rememberMe} 
-              onChange={(e) => setRememberMe(e.target.checked)} 
-              style={{ width: '16px', height: '16px', accentColor: '#b58a3d', cursor: 'pointer' }} 
-            />
-            Remember me for 1 week
-          </label>
 
           <button 
             type="submit" 
