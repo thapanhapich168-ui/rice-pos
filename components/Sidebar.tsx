@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabaseClient'
 import { useUserRole } from '@/lib/useUserRole'
-import { useBranch } from '@/components/BranchContext' // 🔥 IMPORT THE GLOBAL MEMORY
+import { useBranch } from '@/components/BranchContext' 
 
 interface MenuItem {
   label: string;
@@ -36,11 +36,19 @@ export default function Sidebar() {
   const router = useRouter()
   
   const { role, loadingRole } = useUserRole();
-  // 🔥 GRAB THE BRANCH DATA FROM OUR RADIO TOWER
   const { branches, activeBranchId, setActiveBranchId } = useBranch();
 
   const sidebarRef = useRef<HTMLDivElement>(null)
   const buttonRef = useRef<HTMLButtonElement>(null)
+
+  // 🔥 NEW: THE SMART GATEKEEPER
+  // If the user leaves the Dashboard while in HQ Mode, force them back to Branch 1
+  useEffect(() => {
+    if (activeBranchId === 0 && pathname !== '/dashboard') {
+      const defaultBranch = branches.length > 0 ? branches[0].id : 1;
+      setActiveBranchId(defaultBranch);
+    }
+  }, [pathname, activeBranchId, branches, setActiveBranchId]);
 
   useEffect(() => {
     const saved = localStorage.getItem('sidebar_menu_order')
@@ -140,34 +148,36 @@ export default function Sidebar() {
         className={`sidebar-wrapper ${isOpen ? 'open' : 'closed'}`}
       >
         <div>
-          <div className="sidebar-header">
-            <h2 style={{ margin: 0, whiteSpace: 'nowrap', fontSize: '20px', lineHeight: 1 }}>🌾 Rice POS</h2>
-          </div>
-
-          {/* 🔥 THE BRANCH SWITCHER UI */}
-          <div style={{ paddingRight: '12px', marginBottom: '24px' }}>
+          {/* 🔥 THE BRANCH SWITCHER */}
+          <div className="sidebar-header" style={{ paddingRight: '24px' }}>
             <select
               value={activeBranchId}
               onChange={(e) => setActiveBranchId(Number(e.target.value))}
               disabled={role !== 'admin'} 
               style={{
                 width: '100%',
-                padding: '10px 12px',
-                borderRadius: '8px',
-                background: role === 'admin' ? '#1f2937' : '#111827',
-                color: role === 'admin' ? 'white' : '#9ca3af',
-                border: '1px solid #374151',
-                fontSize: '13px',
-                fontWeight: 'bold',
-                cursor: role === 'admin' ? 'pointer' : 'not-allowed',
+                padding: '10px 12px', 
+                borderRadius: '6px',
+                background: role === 'admin' ? '#1f2937' : 'transparent',
+                color: 'white',
+                border: role === 'admin' ? '1px solid #374151' : 'none',
+                fontSize: '14px', 
+                fontWeight: 'bold', 
+                cursor: role === 'admin' ? 'pointer' : 'default',
                 outline: 'none',
                 appearance: role === 'admin' ? 'auto' : 'none' 
               }}
-              title={role !== 'admin' ? "You do not have permission to switch branches" : "Switch Branch"}
+              title={role !== 'admin' ? "You are locked to this branch" : "Switch Workspace"}
             >
-              {branches.map(b => (
-                <option key={b.id} value={b.id}>📍 Branch: {b.name}</option>
-              ))}
+              {/* 🔥 ONLY SHOW GLOBAL HQ WHEN ON DASHBOARD */}
+              {pathname === '/dashboard' && (
+                 <option value={0} style={{ fontWeight: 'bold' }}>🌍 Global HQ (All)</option>
+              )}
+              <optgroup label="Your Stores">
+                {branches.map(b => (
+                  <option key={b.id} value={b.id}>🏬 {b.name}</option> 
+                ))}
+              </optgroup>
             </select>
           </div>
           
@@ -260,7 +270,7 @@ export default function Sidebar() {
           display: flex;
           align-items: center;
           height: 42px; 
-          margin-bottom: 20px;
+          margin-bottom: 24px;
           margin-left: 54px; 
         }
 

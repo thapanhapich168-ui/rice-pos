@@ -8,9 +8,11 @@ import { PaymentRow } from '@/types'
 import { useToast } from '@/components/ToastProvider'
 import TableSkeleton from '@/components/TableSkeleton'
 import EmptyState from '@/components/EmptyState'
+import { useBranch } from '@/components/BranchContext' // 🔥 GLOBAL MEMORY IMPORTED
 
 export default function DeliveryPage() {
   const { showToast } = useToast();
+  const { activeBranchId } = useBranch(); // 🔥 TUNED INTO RADIO TOWER
 
   const [deliveries, setDeliveries] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
@@ -39,25 +41,27 @@ export default function DeliveryPage() {
     return () => {
       supabase.removeChannel(deliveryChannel);
     };
-  }, [loadLimit]) // Re-fetch when loadLimit increases
+  }, [loadLimit, activeBranchId]) // 🔥 RE-FETCH ON BRANCH CHANGE
 
   async function fetchDeliveries() {
     setLoading(true);
     
-    // 1. Fetch ALL Unpaid/Pending Debts unconditionally (So we never lose track of money owed)
+    // 1. Fetch ALL Unpaid/Pending Debts unconditionally (Filtered by Branch)
     const { data: pendingData, error: pendingErr } = await supabase
       .from('invoice_summaries')
       .select('*')
       .not('customer_name', 'ilike', '%Walk-in%')
       .eq('is_done', false)
+      .eq('branch_id', activeBranchId) // 🔥 FILTER ADDED
       .order('created_at', { ascending: false });
 
-    // 2. Fetch Completed/Done Invoices using the Load Limit (100 at a time)
+    // 2. Fetch Completed/Done Invoices using the Load Limit (Filtered by Branch)
     const { data: doneData, error: doneErr, count: doneCount } = await supabase
       .from('invoice_summaries')
       .select('*', { count: 'exact' })
       .not('customer_name', 'ilike', '%Walk-in%')
       .eq('is_done', true)
+      .eq('branch_id', activeBranchId) // 🔥 FILTER ADDED
       .order('created_at', { ascending: false })
       .limit(loadLimit);
 
@@ -138,7 +142,8 @@ export default function DeliveryPage() {
         amount_paid_usd: isUsd ? amt : 0,
         payment_method: r.method,
         recorded_by: validSpender,
-        remarks: `Inline Delivery Settlement`
+        remarks: `Inline Delivery Settlement`,
+        branch_id: activeBranchId // 🔥 STAMPED
       });
     }
 
@@ -298,7 +303,8 @@ export default function DeliveryPage() {
                 amount_paid_usd: fund.isUsd ? applyFace : 0,
                 payment_method: fund.method,
                 recorded_by: validSpender,
-                remarks: `Bulk Credit Settlement`
+                remarks: `Bulk Credit Settlement`,
+                branch_id: activeBranchId // 🔥 STAMPED
             });
 
             fund.eqRemaining -= applyEq;

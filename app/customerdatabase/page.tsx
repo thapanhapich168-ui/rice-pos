@@ -8,6 +8,7 @@ import { useToast } from '@/components/ToastProvider'
 import { useDebounce } from '@/lib/useDebounce'
 import EmptyState from '@/components/EmptyState'
 import Modal from '@/components/Modal'
+import { useBranch } from '@/components/BranchContext' // 🔥 GLOBAL MEMORY IMPORTED
 
 type SortConfig = {
   key: keyof Customer;
@@ -26,6 +27,7 @@ const DEFAULT_ORDER: Array<keyof Customer> = [
 
 export default function CustomerDatabasePage() {
   const { showToast } = useToast();
+  const { activeBranchId } = useBranch(); // 🔥 TUNED INTO RADIO TOWER
 
   // --- CORE STATE ---
   const [customers, setCustomers] = useState<Customer[]>([])
@@ -60,7 +62,7 @@ export default function CustomerDatabasePage() {
   useEffect(() => {
     loadCustomers()
     fetchSettings()
-  }, [])
+  }, [activeBranchId]) // 🔥 RE-RUNS ON BRANCH SWITCH
 
   useFocusRefresh(loadCustomers);
 
@@ -90,6 +92,7 @@ export default function CustomerDatabasePage() {
       .from('customers')
       .select('*')
       .eq('is_archived', false)
+      .eq('branch_id', activeBranchId) // 🔥 FILTERED BY BRANCH
       .order('created_at', { ascending: false })
       
     if (!error && data) {
@@ -142,7 +145,8 @@ export default function CustomerDatabasePage() {
 
     const { error } = await supabase.from('customers').insert([{
       name: newCustomer.name, owner: newCustomer.owner, type: newCustomer.type, 
-      phone: newCustomer.phone, location: newCustomer.location, google_map: newCustomer.google_map
+      phone: newCustomer.phone, location: newCustomer.location, google_map: newCustomer.google_map,
+      branch_id: activeBranchId // 🔥 STAMPED WITH BRANCH ID
     }])
 
     if (!error) {

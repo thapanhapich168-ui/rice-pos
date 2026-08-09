@@ -9,6 +9,7 @@ import { CurrencyInput } from '@/components/Inputs'
 import Modal from '@/components/Modal'
 import TableSkeleton from '@/components/TableSkeleton'
 import EmptyState from '@/components/EmptyState'
+import { useBranch } from '@/components/BranchContext' // 🔥 GLOBAL MEMORY IMPORTED
 
 // --- Interfaces ---
 interface PaymentSplit {
@@ -176,6 +177,7 @@ function CustomDatePicker({ value, onChange }: { value: string; onChange: (val: 
 
 export default function ExpenseDashboard() {
   const { showToast } = useToast();
+  const { activeBranchId } = useBranch(); // 🔥 CONNECTED TO GLOBAL MEMORY
   const [isMounted, setIsMounted] = useState(false);
 
   // --- Active Tab State ---
@@ -245,9 +247,7 @@ export default function ExpenseDashboard() {
     setExpenseDate(today)
     setInsightFrom(today)
     setInsightTo(today)
-    fetchStaff()
-    fetchDatabase()
-
+    
     const savedPers = localStorage.getItem('expense_ledger_personal');
     const savedBiz = localStorage.getItem('expense_ledger_business');
     const savedDbTabOrder = localStorage.getItem('expense_db_tab_order');
@@ -270,6 +270,14 @@ export default function ExpenseDashboard() {
     window.addEventListener('expense_ledger_synced', handleAutoSynced);
     return () => window.removeEventListener('expense_ledger_synced', handleAutoSynced);
   }, [])
+
+  // 🔥 FETCH DATA WHEN BRANCH CHANGES
+  useEffect(() => {
+    if (isMounted) {
+      fetchStaff();
+      fetchDatabase();
+    }
+  }, [activeBranchId, isMounted]);
 
   useEffect(() => {
     if (isMounted) {
@@ -296,6 +304,11 @@ export default function ExpenseDashboard() {
   useEffect(() => {
     if (isMounted) localStorage.setItem('expense_db_tab_order', JSON.stringify(dbTabOrder));
   }, [dbTabOrder, isMounted])
+
+  useFocusRefresh(() => {
+    fetchStaff();
+    fetchDatabase();
+  });
 
   // --- Helper: Dynamic Ledger Handlers ---
   const getActiveList = () => activeTab === 'personal' ? pendingPersonal : pendingBusiness;
@@ -346,7 +359,7 @@ export default function ExpenseDashboard() {
   // --- API: Fetch Staff ---
   async function fetchStaff() {
     setIsFetchingStaff(true)
-    const { data } = await supabase.from('staff').select('*').order('id', { ascending: true })
+    const { data } = await supabase.from('staff').select('*').eq('branch_id', activeBranchId).order('id', { ascending: true }) // 🔥 BRANCH FILTER
     if (data) setStaffList(data)
     setIsFetchingStaff(false)
   }
@@ -355,8 +368,8 @@ export default function ExpenseDashboard() {
   async function fetchDatabase() {
     setIsFetchingDb(true)
     const [ {data: exp}, {data: debt} ] = await Promise.all([
-       supabase.from('expenses').select('*').order('created_at', { ascending: false }).limit(2000),
-       supabase.from('staff_debt_history').select('*, staff:staff_id(name)').order('created_at', { ascending: false }).limit(2000)
+       supabase.from('expenses').select('*').eq('branch_id', activeBranchId).order('created_at', { ascending: false }).limit(2000), // 🔥 BRANCH FILTER
+       supabase.from('staff_debt_history').select('*, staff:staff_id(name)').eq('branch_id', activeBranchId).order('created_at', { ascending: false }).limit(2000) // 🔥 BRANCH FILTER
     ])
     setDbExpenses(exp || []);
     setDbStaffDebt(debt || []);
@@ -403,10 +416,11 @@ export default function ExpenseDashboard() {
           expense_date: expenseDate,
           spender: exp.spender,
           payment_method: combinedMethod,
-          remarks: exp.remarks,                      
+          remarks: exp.remarks,                    
           amount_usd: totalUsd,              
           amount_riel: totalRiel,         
-          description: activeTab.toUpperCase(), 
+          description: activeTab.toUpperCase(),
+          branch_id: activeBranchId // 🔥 STAMPED
         };
       });
 
@@ -440,7 +454,8 @@ export default function ExpenseDashboard() {
       total_debt_usd: 0, 
       start_date: firstOfMonth,
       leave_quota: Number(newStaffQuota) || 12,
-      leave_used: 0
+      leave_used: 0,
+      branch_id: activeBranchId // 🔥 STAMPED
     }])
     setLoading(false)
     if (error) { showToast('error', 'Error', `Error adding staff: ${error.message}`); } else {
@@ -473,8 +488,8 @@ export default function ExpenseDashboard() {
     const { error: staffErr } = await supabase.from('staff').update({ total_debt_riel: newTotalRiel, total_debt_usd: newTotalUsd }).eq('id', staff.id);
     if (staffErr) { showToast('error', 'Update Failed', `Error updating debt: ${staffErr.message}`); fetchStaff(); return; }
 
-    await supabase.from('staff_debt_history').insert([{ staff_id: staff.id, amount: rawAmount, payment_method: advanceModal.method }]);
-    await supabase.from('expenses').insert([{ expense_date: new Date().toISOString().split('T')[0], spender: 'Both', payment_method: advanceModal.method, remarks: `Staff Advance: ${staff.name}`, amount_usd: saveUsd, amount_riel: saveRiel, description: 'STAFF_ADVANCE' }]);
+    await supabase.from('staff_debt_history').insert([{ staff_id: staff.id, amount: rawAmount, payment_method: advanceModal.method, branch_id: activeBranchId }]); // 🔥 STAMPED
+    await supabase.from('expenses').insert([{ expense_date: new Date().toISOString().split('T')[0], spender: 'Both', payment_method: advanceModal.method, remarks: `Staff Advance: ${staff.name}`, amount_usd: saveUsd, amount_riel: saveRiel, description: 'STAFF_ADVANCE', branch_id: activeBranchId }]); // 🔥 STAMPED
     
     showToast('success', 'Advance Added', `Advance added for ${staff.name}`);
     fetchDatabase();
@@ -504,14 +519,13 @@ export default function ExpenseDashboard() {
     setStaffList(prev => prev.map(s => s.id === staff.id ? { ...s, leave_quota: quota, leave_used: newUsed } : s));
     setLeaveModal({ isOpen: false, staff: null, quota: '', days: 1, reason: '' });
 
-    // Update staff record
     await supabase.from('staff').update({ leave_quota: quota, leave_used: newUsed }).eq('id', staff.id);
 
-    // Insert audit history
     await supabase.from('staff_leave_history').insert([{
       staff_id: staff.id,
       days: days,
-      reason: reason
+      reason: reason,
+      branch_id: activeBranchId // 🔥 STAMPED
     }]);
 
     showToast('success', 'Leave Logged', `${days} day(s) leave recorded for ${staff.name}`);
@@ -539,8 +553,8 @@ export default function ExpenseDashboard() {
     setSettleModal({ isOpen: false, staff: null, amount: '', method: 'Cash ៛' });
 
     await supabase.from('staff').update({ total_debt_riel: newTotalRiel, total_debt_usd: newTotalUsd }).eq('id', staff.id);
-    await supabase.from('staff_debt_history').insert([{ staff_id: staff.id, amount: rawAmount, payment_method: `Settled: ${settleModal.method}` }]);
-    await supabase.from('expenses').insert([{ expense_date: new Date().toISOString().split('T')[0], spender: 'Both', payment_method: settleModal.method, remarks: `Staff Debt Settlement: ${staff.name}`, amount_usd: saveUsd, amount_riel: saveRiel, description: 'STAFF_SETTLEMENT' }]);
+    await supabase.from('staff_debt_history').insert([{ staff_id: staff.id, amount: rawAmount, payment_method: `Settled: ${settleModal.method}`, branch_id: activeBranchId }]); // 🔥 STAMPED
+    await supabase.from('expenses').insert([{ expense_date: new Date().toISOString().split('T')[0], spender: 'Both', payment_method: settleModal.method, remarks: `Staff Debt Settlement: ${staff.name}`, amount_usd: saveUsd, amount_riel: saveRiel, description: 'STAFF_SETTLEMENT', branch_id: activeBranchId }]); // 🔥 STAMPED
     
     showToast('success', 'Settled', `Settlement recorded for ${staff.name}`);
     fetchDatabase();
@@ -576,7 +590,7 @@ export default function ExpenseDashboard() {
     if (!error && (field === 'total_debt_riel' || field === 'total_debt_usd') && staff) {
         const difference = finalValue - (Number(staff[field]) || 0);
         if (difference !== 0) {
-            await supabase.from('staff_debt_history').insert([{ staff_id: id, amount: Math.abs(difference), payment_method: difference > 0 ? `Manual Increase ${field.includes('usd') ? '$' : '៛'}` : `Manual Reduction ${field.includes('usd') ? '$' : '៛'}` }]);
+            await supabase.from('staff_debt_history').insert([{ staff_id: id, amount: Math.abs(difference), payment_method: difference > 0 ? `Manual Increase ${field.includes('usd') ? '$' : '៛'}` : `Manual Reduction ${field.includes('usd') ? '$' : '៛'}`, branch_id: activeBranchId }]); // 🔥 STAMPED
             fetchDatabase();
         }
     }

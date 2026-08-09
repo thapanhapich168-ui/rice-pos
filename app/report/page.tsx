@@ -6,11 +6,13 @@ import { formatRiel, formatUSD, formatNumber, parseOwner, EXCHANGE_RATE } from '
 import { useToast } from '@/components/ToastProvider'
 import TableSkeleton from '@/components/TableSkeleton'
 import { TELEGRAM_CONFIG } from '@/lib/telegramConfig'
+import { useBranch } from '@/components/BranchContext' // 🔥 GLOBAL MEMORY IMPORTED
 
 const formatUSDEquiv = (vRiel: number) => formatUSD(vRiel / EXCHANGE_RATE);
 
 export default function ReportControlPage() {
   const { showToast } = useToast()
+  const { activeBranchId } = useBranch() // 🔥 TUNED INTO RADIO TOWER
 
   // --- DATA STATE ---
   const [loading, setLoading] = useState(true)
@@ -26,7 +28,7 @@ export default function ReportControlPage() {
 
   useEffect(() => {
     fetchReportData()
-  }, [])
+  }, [activeBranchId]) // 🔥 RE-RUNS ON BRANCH SWITCH
 
   // --- 1. FETCH SUPABASE DATA ---
   async function fetchReportData() {
@@ -35,6 +37,7 @@ export default function ReportControlPage() {
       const now = new Date()
       const firstDayOfLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1).toISOString()
 
+      // 🔥 ALL FETCHES SECURELY FILTERED BY BRANCH
       const [
         { data: salesData },
         { data: invData },
@@ -42,12 +45,12 @@ export default function ReportControlPage() {
         { data: expData },
         { data: payData }
       ] = await Promise.all([
-        supabase.from('sales').select('*').gte('created_at', firstDayOfLastMonth),
-        supabase.from('invoice_summaries').select('*').gte('created_at', firstDayOfLastMonth),
-        supabase.from('retail_sales').select('*').gte('created_at', firstDayOfLastMonth),
-        supabase.from('expenses').select('*').gte('created_at', firstDayOfLastMonth),
+        supabase.from('sales').select('*').gte('created_at', firstDayOfLastMonth).eq('branch_id', activeBranchId),
+        supabase.from('invoice_summaries').select('*').gte('created_at', firstDayOfLastMonth).eq('branch_id', activeBranchId),
+        supabase.from('retail_sales').select('*').gte('created_at', firstDayOfLastMonth).eq('branch_id', activeBranchId),
+        supabase.from('expenses').select('*').gte('created_at', firstDayOfLastMonth).eq('branch_id', activeBranchId),
         // 🔥 payment_date instead of created_at to prevent 400 Bad Request
-        supabase.from('invoice_payments').select('*').gte('payment_date', firstDayOfLastMonth)
+        supabase.from('invoice_payments').select('*').gte('payment_date', firstDayOfLastMonth).eq('branch_id', activeBranchId)
       ])
 
       setWholesaleSales(salesData || [])
@@ -424,7 +427,9 @@ export default function ReportControlPage() {
     setIsSending(true)
     try {
       const response = await fetch('/api/telegram/send-monthly-pdf', {
-        method: 'POST'
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ branch_id: activeBranchId }) // 🔥 SENT TO BACKEND API
       })
       const result = await response.json()
 

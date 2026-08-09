@@ -11,6 +11,7 @@ import { useDebounce } from '@/lib/useDebounce'
 import TableSkeleton from '@/components/TableSkeleton'
 import EmptyState from '@/components/EmptyState'
 import Modal from '@/components/Modal'
+import { useBranch } from '@/components/BranchContext' // 🔥 GLOBAL MEMORY IMPORTED
 
 // --- CATEGORIES ---
 const RICE_CATEGORIES = ['All', 'មិញ', 'ខុន', 'ខ្ញី', 'ម្លិះ', 'រំដួល', 'បីកំណាត់', 'ដំណើប', 'សម្រូប', 'ផ្សេងៗ', '❌ Out of Stock'];
@@ -44,6 +45,7 @@ const DEFAULT_SUPPLIER_ORDER: string[] = ['select', 'name', 'phone', 'location',
 
 export default function RiceControl() {
   const { showToast } = useToast();
+  const { activeBranchId } = useBranch(); // 🔥 TUNED INTO GLOBAL MEMORY
 
   // --- CORE STATE ---
   const [products, setProducts] = useState<Product[]>([])
@@ -179,24 +181,14 @@ export default function RiceControl() {
     }
     init();
 
-    const productsSub = supabase.channel('products-channel')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'products' }, fetchProducts)
-      .subscribe()
-      
-    const importsSub = supabase.channel('imports-channel')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'imports' }, fetchImports)
-      .subscribe()
-
-    const batchesSub = supabase.channel('batches-channel')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'inventory_batches' }, fetchBatches)
-      .subscribe()
+    // Re-fetch data seamlessly if a branch event is fired
+    const handleBranchChange = () => init();
+    window.addEventListener('branch_changed', handleBranchChange);
 
     return () => {
-      supabase.removeChannel(productsSub)
-      supabase.removeChannel(importsSub)
-      supabase.removeChannel(batchesSub)
+      window.removeEventListener('branch_changed', handleBranchChange);
     }
-  }, [])
+  }, [activeBranchId]) // 🔥 CRITICAL: RE-RUNS ON BRANCH SWITCH
 
   const handleManualPull = async (retailId: number, wholesaleId: number) => {
     const wholesaleProduct = products.find(p => p.id === wholesaleId);
@@ -311,23 +303,28 @@ export default function RiceControl() {
   }
 
   async function fetchProducts() {
-    const { data } = await supabase.from('products').select('*').eq('is_archived', false).order('id', { ascending: true })
+    // 🔥 FILTERED BY BRANCH
+    const { data } = await supabase.from('products').select('*').eq('is_archived', false).eq('branch_id', activeBranchId).order('id', { ascending: true })
     if (data) setProducts(data)
   }
 
   async function fetchSuppliers() {
-    const { data } = await supabase.from('suppliers').select('*').eq('is_archived', false).order('name', { ascending: true })
+    // 🔥 FILTERED BY BRANCH
+    const { data } = await supabase.from('suppliers').select('*').eq('is_archived', false).eq('branch_id', activeBranchId).order('name', { ascending: true })
     if (data) setSuppliers(data)
   }
 
   async function fetchImports() {
-    const { data } = await supabase.from('imports').select(`*, suppliers (name), products (name)`).order('created_at', { ascending: false })
+    // 🔥 FILTERED BY BRANCH
+    const { data } = await supabase.from('imports').select(`*, suppliers (name), products (name)`).eq('branch_id', activeBranchId).order('created_at', { ascending: false })
     if (data) setImports(data)
   }
 
   async function fetchBatches() {
+    // 🔥 FILTERED BY BRANCH
     const { data } = await supabase.from('inventory_batches')
       .select('*')
+      .eq('branch_id', activeBranchId)
       .gt('remaining_qty', 0) 
       .order('id', { ascending: true }); 
 
@@ -342,14 +339,17 @@ export default function RiceControl() {
   }
 
   const fetchHistory = async (product: Product) => {
+    // 🔥 FILTERED BY BRANCH
     const { data: importLog } = await supabase.from('imports')
       .select(`*, suppliers(name)`)
       .eq('product_id', product.id)
+      .eq('branch_id', activeBranchId)
       .order('created_at', { ascending: false });
 
     const { data: activeBatches } = await supabase.from('inventory_batches')
       .select('*')
       .eq('product_id', product.id)
+      .eq('branch_id', activeBranchId)
       .gt('remaining_qty', 0)
       .order('id', { ascending: true });
 
@@ -389,11 +389,12 @@ export default function RiceControl() {
       }
       
       const { data: updatedBatches } = await supabase.from('inventory_batches')
-        .select('*').eq('product_id', targetProduct.id).gt('remaining_qty', 0).order('id', { ascending: true });
+        .select('*').eq('product_id', targetProduct.id).eq('branch_id', activeBranchId).gt('remaining_qty', 0).order('id', { ascending: true });
       
       setHistoryModal(prev => ({...prev, activeBatches: updatedBatches || []}));
       setEditingHistoryId(null);
       showToast('success', 'Batch Updated', 'Inventory limits adjusted successfully.');
+      fetchProducts();
     } else {
       showToast('error', 'Update Failed', error.message);
     }
@@ -423,10 +424,11 @@ export default function RiceControl() {
       }
       
       const { data: updatedBatches } = await supabase.from('inventory_batches')
-        .select('*').eq('product_id', targetProduct.id).gt('remaining_qty', 0).order('id', { ascending: true });
+        .select('*').eq('product_id', targetProduct.id).eq('branch_id', activeBranchId).gt('remaining_qty', 0).order('id', { ascending: true });
       
       setHistoryModal(prev => ({...prev, activeBatches: updatedBatches || []}));
       showToast('success', 'Batch Deleted', 'Remaining stock deducted safely.');
+      fetchProducts();
       
     } else {
       showToast('error', 'Delete Failed', error.message);
@@ -500,7 +502,14 @@ export default function RiceControl() {
     if (!newSupplier.name) return showToast('error', 'Validation Error', 'Supplier name is required');
     setIsProcessing(true);
     try {
-      const { data, error } = await supabase.from('suppliers').insert([{ name: newSupplier.name, phone: newSupplier.phone, location: newSupplier.location }]).select();
+      // 🔥 STAMP BRANCH ID
+      const { data, error } = await supabase.from('suppliers').insert([{ 
+        name: newSupplier.name, 
+        phone: newSupplier.phone, 
+        location: newSupplier.location,
+        branch_id: activeBranchId 
+      }]).select();
+      
       if (error) throw error;
       
       setIsAddSupplierOpen(false);
@@ -549,6 +558,7 @@ export default function RiceControl() {
       const product = products.find(p => String(p.id) === String(importForm.product_id));
       if (!product) throw new Error("Product ID mismatch");
 
+      // 🔥 ALL INSERTS ARE STAMPED WITH BRANCH ID
       const { error: importErr } = await supabase.from('imports').insert([{
         supplier_id: Number(importForm.supplier_id),
         product_id: Number(importForm.product_id),
@@ -557,7 +567,8 @@ export default function RiceControl() {
         unit_cost: unitCost,
         total_cost: totalCost,
         paid_amount: paidAmount,
-        status: status
+        status: status,
+        branch_id: activeBranchId
       }]);
       if (importErr) throw importErr;
 
@@ -571,7 +582,8 @@ export default function RiceControl() {
           amount_riel: remainingDebt,
           amount_usd: 0,
           notes: `Stock Import: ${qty} bags`,
-          status: 'Unpaid'
+          status: 'Unpaid',
+          branch_id: activeBranchId
         }]);
       }
       
@@ -583,7 +595,8 @@ export default function RiceControl() {
         product_id: Number(importForm.product_id),
         product_name: product.name, 
         cost_price: unitCost,
-        remaining_qty: qty
+        remaining_qty: qty,
+        branch_id: activeBranchId
       }]);
 
       if (paidAmount > 0) {
@@ -601,7 +614,8 @@ export default function RiceControl() {
           remarks: `Stock Import: ${supplierName}`,
           amount_usd: Math.abs(amtUsd),
           amount_riel: Math.abs(amtRiel),
-          description: 'BUSINESS'
+          description: 'BUSINESS',
+          branch_id: activeBranchId
         }]);
       }
 
@@ -610,6 +624,11 @@ export default function RiceControl() {
       
       if (isPayLater) setActiveView('pending');
       else setActiveView('wholesale');
+
+      fetchProducts();
+      fetchBatches();
+      fetchSuppliers();
+      fetchImports();
 
     } catch (err: any) {
       showToast('error', 'Import Error', err.message);
@@ -687,7 +706,8 @@ export default function RiceControl() {
         remarks: `Paid Debt: ${supplier?.name || 'Supplier'}`,
         amount_usd: Math.abs(totalUsdFace),
         amount_riel: Math.abs(totalRielFace),
-        description: 'BUSINESS'
+        description: 'BUSINESS',
+        branch_id: activeBranchId // 🔥 STAMPED
       }]);
 
       setPayPendingModal({ isOpen: false, record: null, totalDue: 0 });
@@ -698,6 +718,9 @@ export default function RiceControl() {
       } else {
         showToast('info', 'Partial Payment', `Payment logged. ${formatRiel(remainingBefore - totalRielEq)} remaining.`);
       }
+
+      fetchImports();
+      fetchSuppliers();
       
     } catch (err: any) {
       showToast('error', 'Payment Error', err.message);
@@ -752,6 +775,7 @@ export default function RiceControl() {
     if (Object.keys(payload).length > 0) {
        const { error } = await supabase.from('products').update(payload).eq('id', id);
        if (error) showToast('error', 'Save Failed', error.message);
+       else fetchProducts();
     }
 
     setEdits(prev => { const n = { ...prev }; delete n[id]; return n });
@@ -788,7 +812,8 @@ export default function RiceControl() {
       stock: Number(newItem.stock) || 0,
       min_stock_level: Number(newItem.min_stock_level) || 10,
       mtd_kg_used: 0,
-      mtd_bags_used: 0
+      mtd_bags_used: 0,
+      branch_id: activeBranchId // 🔥 STAMPED
     }
     const { data, error } = await supabase.from('products').insert([payload]).select()
     
@@ -819,6 +844,7 @@ export default function RiceControl() {
     if (!error) {
       setActiveDropdownId(null);
       setDropdownSearch('');
+      fetchProducts();
     } else {
       showToast('error', 'Link Failed', error.message);
     }
@@ -1058,7 +1084,6 @@ export default function RiceControl() {
   const livePendingRemaining = payPendingModal.totalDue - liveTotalPendingReceived;
 
   return (
-    // 🔥 APP LAYOUT: Flex Column + Overflow Hidden locks the outer page
     <div className="main-wrapper" style={{ display: 'flex', flexDirection: 'column', height: '100dvh', overflow: 'hidden' }}>
       
       {/* HEADER (Frozen) */}
@@ -1127,11 +1152,9 @@ export default function RiceControl() {
                   padding: '10px' 
                 }}
               >
-                {/* Clean SVG Filter Icon */}
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon>
                 </svg>
-                {/* Shows active filter count if greater than 0 */}
                 {filterRules.length > 0 && (
                   <span style={{ marginLeft: '6px', fontSize: '13px', fontWeight: 'bold' }}>
                     {filterRules.length}

@@ -9,6 +9,7 @@ import { useToast } from '@/components/ToastProvider'
 import { useDebounce } from '@/lib/useDebounce'
 import TableSkeleton from '@/components/TableSkeleton'
 import EmptyState from '@/components/EmptyState'
+import { useBranch } from '@/components/BranchContext' // 🔥 GLOBAL MEMORY IMPORTED
 
 // Formats headers beautifully
 const formatHeader = (key: string) => {
@@ -65,6 +66,7 @@ const DEFAULT_EXPENSE_COLS = ['created_at', 'description', 'amount_riel', 'amoun
 
 export default function BizDatabase() {
   const { showToast } = useToast();
+  const { activeBranchId } = useBranch(); // 🔥 TUNED INTO RADIO TOWER
 
   // --- CORE STATE ---
   const [transactions, setTransactions] = useState<UnifiedTransaction[]>([])
@@ -102,7 +104,7 @@ export default function BizDatabase() {
   useEffect(() => { 
     fetchData(false)
     fetchSettings()
-  }, [])
+  }, [activeBranchId]) // 🔥 RE-RUNS ON BRANCH SWITCH
 
   useFocusRefresh(() => fetchData(true));
 
@@ -135,12 +137,13 @@ export default function BizDatabase() {
   async function fetchData(isSilent = false) {
     if (!isSilent) setIsLoading(true)
     
-    const { data: summaryData } = await supabase.from('invoice_summaries').select('*')
-    const { data: dailyData } = await supabase.from('sales').select('*')
+    // 🔥 ALL FETCHES SECURELY FILTERED BY BRANCH
+    const { data: summaryData } = await supabase.from('invoice_summaries').select('*').eq('branch_id', activeBranchId)
+    const { data: dailyData } = await supabase.from('sales').select('*').eq('branch_id', activeBranchId)
     
     let retailData: any[] = []
     try {
-      const { data, error } = await supabase.from('retail_sales').select('*')
+      const { data, error } = await supabase.from('retail_sales').select('*').eq('branch_id', activeBranchId)
       if (data && !error) retailData = data;
     } catch (e) {
       console.warn("Retail table not found", e)
@@ -148,7 +151,7 @@ export default function BizDatabase() {
 
     let allExpenses: any[] = []
     try {
-      const { data, error } = await supabase.from('expenses').select('*')
+      const { data, error } = await supabase.from('expenses').select('*').eq('branch_id', activeBranchId)
       if (data && !error) allExpenses = data;
     } catch (e) {
       console.warn("Expenses table not found", e)
@@ -274,7 +277,7 @@ export default function BizDatabase() {
     const sumIds: any[] = [];
     const dailyIds: any[] = [];
     const retIds: any[] = [];
-    const expenseIds: any[] = []; // 🔥 ONE ID ARRAY for all expense types
+    const expenseIds: any[] = []; 
 
     const itemsToRestore: UnifiedTransaction[] = [];
     const invoiceIdsToCascade = new Set<string>(); 
@@ -299,7 +302,6 @@ export default function BizDatabase() {
           retIds.push(t.raw_db_id);
           itemsToRestore.push(t);
         }
-        // 🔥 ALL EXPENSE TABS FUNNEL INTO THIS ONE ARRAY
         else if (t.source === 'Biz Expense' || t.source === 'Personal Expense' || t.source === 'Staff Debt') {
           expenseIds.push(t.raw_db_id);
         }
@@ -320,15 +322,18 @@ export default function BizDatabase() {
         const isSpecial = (item.rice_type || '').includes('បានប្រើ') || (item.rice_type || '').includes('សេវាដឹក');
         
         if (qty !== 0 && !isSpecial && item.product_id) {
-          const { data: prod } = await supabase.from('products').select('stock').eq('id', item.product_id).single();
+          // 🔥 BRANCH FILTER ON PRODUCT
+          const { data: prod } = await supabase.from('products').select('stock').eq('id', item.product_id).eq('branch_id', activeBranchId).single();
           if (prod) {
-            await supabase.from('products').update({ stock: Number(prod.stock) + qty }).eq('id', item.product_id);
+            await supabase.from('products').update({ stock: Number(prod.stock) + qty }).eq('id', item.product_id).eq('branch_id', activeBranchId);
           }
 
           let remainingToReverse = qty;
+          // 🔥 BRANCH FILTER ON BATCHES
           const { data: batches } = await supabase.from('price_history')
             .select('*')
             .eq('product_id', item.product_id)
+            .eq('branch_id', activeBranchId)
             .gt('sold_qty', 0)
             .order('created_at', { ascending: false }); 
           
@@ -345,18 +350,19 @@ export default function BizDatabase() {
 
       const allInvoicesToDelete = new Set([...Array.from(invoiceIdsToCascade), ...Array.from(summaryIdsToCascade)]);
       
+      // 🔥 ALL DELETIONS LOCKED TO BRANCH ID
       if (allInvoicesToDelete.size > 0) {
-        await supabase.from('invoice_payments').delete().in('invoice_id', Array.from(allInvoicesToDelete));
+        await supabase.from('invoice_payments').delete().in('invoice_id', Array.from(allInvoicesToDelete)).eq('branch_id', activeBranchId);
       }
 
-      if (dailyIds.length > 0) await supabase.from('sales').delete().in('id', dailyIds);
-      if (retIds.length > 0) await supabase.from('retail_sales').delete().in('id', retIds);
+      if (dailyIds.length > 0) await supabase.from('sales').delete().in('id', dailyIds).eq('branch_id', activeBranchId);
+      if (retIds.length > 0) await supabase.from('retail_sales').delete().in('id', retIds).eq('branch_id', activeBranchId);
       
-      if (expenseIds.length > 0) await supabase.from('expenses').delete().in('id', expenseIds);
+      if (expenseIds.length > 0) await supabase.from('expenses').delete().in('id', expenseIds).eq('branch_id', activeBranchId);
       
-      if (sumIds.length > 0) await supabase.from('invoice_summaries').delete().in('id', sumIds);
+      if (sumIds.length > 0) await supabase.from('invoice_summaries').delete().in('id', sumIds).eq('branch_id', activeBranchId);
       if (summaryIdsToCascade.size > 0) {
-        await supabase.from('invoice_summaries').delete().in('invoice_id', Array.from(summaryIdsToCascade));
+        await supabase.from('invoice_summaries').delete().in('invoice_id', Array.from(summaryIdsToCascade)).eq('branch_id', activeBranchId);
       }
       
       setSelectedToDelete(new Set());
@@ -446,7 +452,8 @@ export default function BizDatabase() {
     }
 
     if (Object.keys(dbPayload).length > 0) {
-      const { error } = await supabase.from(targetTable).update(dbPayload).eq('id', baseTx.raw_db_id);
+      // 🔥 UPDATE LOCKED TO BRANCH ID
+      const { error } = await supabase.from(targetTable).update(dbPayload).eq('id', baseTx.raw_db_id).eq('branch_id', activeBranchId);
       if (error) {
         showToast('error', 'Save Failed', error.message);
         return;
@@ -552,6 +559,7 @@ export default function BizDatabase() {
     const handleUp = async () => {
       document.removeEventListener('mousemove', handleMove)
       document.removeEventListener('mouseup', handleUp)
+      document.removeEventListener('touchmove', handleMove)
       document.removeEventListener('touchmove', handleMove)
       document.removeEventListener('touchend', handleUp)
       

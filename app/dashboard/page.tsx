@@ -7,11 +7,13 @@ import { CurrencyInput } from '@/components/Inputs'
 import { useToast } from '@/components/ToastProvider'
 import TableSkeleton from '@/components/TableSkeleton'
 import EmptyState from '@/components/EmptyState'
+import { useBranch } from '@/components/BranchContext' // 🔥 GLOBAL MEMORY IMPORTED
 
 const formatUSDEquiv = (vRiel: number) => formatUSD(vRiel / EXCHANGE_RATE);
 
 export default function DashboardPage() {
   const { showToast } = useToast();
+  const { branches, activeBranchId } = useBranch(); // 🔥 TUNED INTO RADIO TOWER
 
   const [isLoading, setIsLoading] = useState(true)
   const [wholesaleSales, setWholesaleSales] = useState<any[]>([])
@@ -39,7 +41,7 @@ export default function DashboardPage() {
   const [activeTab, setActiveTab] = useState<'summary' | 'wholesale' | 'retail' | 'asset'>('summary')
   const [assetFilter, setAssetFilter] = useState<any>('month')
 
-  // --- 🔥 NEW RICE EVALUATION STATES ---
+  // --- RICE EVALUATION STATES ---
   const [invTab, setInvTab] = useState<'wholesale_active' | 'wholesale_oos' | 'retail'>('wholesale_active')
   const [invTabOrder, setInvTabOrder] = useState(['wholesale_active', 'wholesale_oos', 'retail'])
   const [invSortConfig, setInvSortConfig] = useState<{key: string, direction: 'asc' | 'desc'} | null>(null)
@@ -47,28 +49,37 @@ export default function DashboardPage() {
   useEffect(() => {
     async function loadData() {
       setIsLoading(true);
-      // 🚀 100K LOAD PROBLEM FIX: Smart Data Filtering!
-      
-      // Calculate exactly the first day of last month to fetch only relevant metric data
       const now = new Date();
       const firstDayOfLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1).toISOString();
+
+      // 🔥 SMART QUERY BUILDER: 
+      // If activeBranchId === 0, fetch ALL data (HQ Mode). Otherwise, filter by branch.
+      const buildQ = (table: string) => {
+        let q = supabase.from(table).select('*');
+        if (activeBranchId !== 0) q = q.eq('branch_id', activeBranchId);
+        return q;
+      }
+      const buildQNarrow = (table: string, columns: string) => {
+        let q = supabase.from(table).select(columns);
+        if (activeBranchId !== 0) q = q.eq('branch_id', activeBranchId);
+        return q;
+      }
 
       const [
         {data: salesData}, {data: sumData}, {data: retData}, {data: expData}, 
         {data: staffData}, {data: prodData}, {data: apData}, {data: cogsData}, 
         {data: batchData}, {data: invPayData}
       ] = await Promise.all([
-        // Only grab sales/expenses created on or after last month
-        supabase.from('sales').select('*').gte('created_at', firstDayOfLastMonth),
-        supabase.from('invoice_summaries').select('*').eq('is_done', false), // Only need unpaid summaries for debt math
-        supabase.from('retail_sales').select('*').gte('created_at', firstDayOfLastMonth),
-        supabase.from('expenses').select('*').gte('created_at', firstDayOfLastMonth),
-        supabase.from('staff').select('*'),
-        supabase.from('products').select('*').order('id'),
-        supabase.from('accounts_payable').select('*').eq('status', 'Unpaid').order('created_at', { ascending: false }), // Only Unpaid AP
-        supabase.from('cogs_settlements').select('payment_method, paid_amount_riel, paid_amount_usd, owner_name'), // Narrow column fetch
-        supabase.from('inventory_batches').select('*').gt('remaining_qty', 0), // Only active batches
-        supabase.from('invoice_payments').select('invoice_id, payment_method, amount_paid_riel, amount_paid_usd, recorded_by') // Narrow column fetch
+        buildQ('sales').gte('created_at', firstDayOfLastMonth),
+        buildQ('invoice_summaries').eq('is_done', false),
+        buildQ('retail_sales').gte('created_at', firstDayOfLastMonth),
+        buildQ('expenses').gte('created_at', firstDayOfLastMonth),
+        buildQ('staff'),
+        buildQ('products').order('id'),
+        buildQ('accounts_payable').eq('status', 'Unpaid').order('created_at', { ascending: false }),
+        buildQNarrow('cogs_settlements', 'payment_method, paid_amount_riel, paid_amount_usd, owner_name'),
+        buildQ('inventory_batches').gt('remaining_qty', 0),
+        buildQNarrow('invoice_payments', 'invoice_id, payment_method, amount_paid_riel, amount_paid_usd, recorded_by')
       ]);
 
       setWholesaleSales(salesData || []); 
@@ -82,6 +93,7 @@ export default function DashboardPage() {
       setPriceHistory(batchData || []); 
       setInvoicePayments(invPayData || []);
 
+      // App Settings is global (No branch filter)
       const keys = ['base_capital', 'initial_cash_riel', 'initial_cash_usd', 'initial_qr_riel', 'initial_qr_usd', 'personal_owe_riel', 'personal_owe_usd', 'family_owe_riel', 'family_owe_usd'];
       const { data: capData } = await supabase.from('app_settings').select('*').in('setting_key', keys)
       if (capData) {
@@ -108,7 +120,7 @@ export default function DashboardPage() {
     return () => { 
       window.removeEventListener('focus', onFocus); 
     };
-  }, [])
+  }, [activeBranchId]) // 🔥 RE-RUNS ON BRANCH SWITCH
 
   async function updateSetting(key: string, val: number) {
     const { error } = await supabase.from('app_settings').upsert({ setting_key: key, setting_value: val }, { onConflict: 'setting_key' })
@@ -705,13 +717,35 @@ export default function DashboardPage() {
   const thisMonthData = generateDailyArray(activeSalesData, isMTD)
   const lastMonthData = generateDailyArray(activeSalesData, isLastMonth)
 
+  // 🔥 Determine the Branch Name for the Badge
+  const activeBranchName = activeBranchId === 0 ? "Global HQ" : branches.find(b => b.id === activeBranchId)?.name || "Unknown";
+
   return (
     <div className="main-wrapper">
       
       {/* HEADER */}
       <div className="header-container">
         <div className="header-left">
-          <h1 className="saas-page-title">📊 Business Dashboard</h1>
+          <h1 className="saas-page-title" style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            📊 Business Dashboard
+            
+            {/* 🔥 DYNAMIC BRANCH BADGE */}
+            <span style={{ 
+               fontSize: '11px', 
+               background: activeBranchId === 0 ? '#3b82f6' : '#10b981', 
+               color: '#fff', 
+               padding: '4px 8px', 
+               borderRadius: '4px', 
+               verticalAlign: 'middle', 
+               fontWeight: 'bold',
+               display: 'flex',
+               alignItems: 'center',
+               gap: '4px'
+            }}>
+              {activeBranchId === 0 ? '🌍' : '🏬'} {activeBranchName}
+            </span>
+
+          </h1>
         </div>
       </div>
 
@@ -740,58 +774,61 @@ export default function DashboardPage() {
               ))}
             </div>
 
-            <div className="saas-card" style={{ padding: 0, marginBottom: '24px', overflow: 'hidden' }}>
-              <button 
-                onClick={() => setShowStartingBalance(!showStartingBalance)}
-                style={{ width: '100%', padding: '16px 24px', background: '#f8fafc', border: 'none', textAlign: 'left', fontWeight: 'bold', color: '#475569', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '14px' }}
-              >
-                <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <span>⚙️</span> Manual Starting Balances
-                </span>
-                <span style={{ fontSize: '12px', color: '#94a3b8' }}>{showStartingBalance ? '▲ CLOSE' : '▼ OPEN TO EDIT'}</span>
-              </button>
-              
-              {showStartingBalance && (
-                <div style={{ padding: '24px', borderTop: '1px solid #e2e8f0', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '16px', background: '#ffffff' }}>
-                  <div>
-                    <label style={{ display: 'block', fontSize: '12px', color: '#475569', marginBottom: '6px', fontWeight: 'bold' }}>Base Capital (៛)</label>
-                    <CurrencyInput value={baseCapital} onChange={(v: any) => setBaseCapital(Number(v) || 0)} onBlur={() => updateSetting('base_capital', baseCapital)} className="saas-input" style={{ width: '100%', textAlign: 'left' }} />
+            {/* ONLY SHOW STARTING BALANCE EDITS IF NOT IN HQ MODE */}
+            {activeBranchId !== 0 && (
+              <div className="saas-card" style={{ padding: 0, marginBottom: '24px', overflow: 'hidden' }}>
+                <button 
+                  onClick={() => setShowStartingBalance(!showStartingBalance)}
+                  style={{ width: '100%', padding: '16px 24px', background: '#f8fafc', border: 'none', textAlign: 'left', fontWeight: 'bold', color: '#475569', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '14px' }}
+                >
+                  <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span>⚙️</span> Manual Starting Balances
+                  </span>
+                  <span style={{ fontSize: '12px', color: '#94a3b8' }}>{showStartingBalance ? '▲ CLOSE' : '▼ OPEN TO EDIT'}</span>
+                </button>
+                
+                {showStartingBalance && (
+                  <div style={{ padding: '24px', borderTop: '1px solid #e2e8f0', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '16px', background: '#ffffff' }}>
+                    <div>
+                      <label style={{ display: 'block', fontSize: '12px', color: '#475569', marginBottom: '6px', fontWeight: 'bold' }}>Base Capital (៛)</label>
+                      <CurrencyInput value={baseCapital} onChange={(v: any) => setBaseCapital(Number(v) || 0)} onBlur={() => updateSetting('base_capital', baseCapital)} className="saas-input" style={{ width: '100%', textAlign: 'left' }} />
+                    </div>
+                    <div>
+                      <label style={{ display: 'block', fontSize: '12px', color: '#475569', marginBottom: '6px', fontWeight: 'bold' }}>Initial Cash (៛)</label>
+                      <CurrencyInput value={initCashRiel} onChange={(v: any) => setInitCashRiel(Number(v) || 0)} onBlur={() => updateSetting('initial_cash_riel', initCashRiel)} className="saas-input" style={{ width: '100%', textAlign: 'left' }} />
+                    </div>
+                    <div>
+                      <label style={{ display: 'block', fontSize: '12px', color: '#475569', marginBottom: '6px', fontWeight: 'bold' }}>Initial Cash ($)</label>
+                      <CurrencyInput value={initCashUsd} onChange={(v: any) => setInitCashUsd(Number(v) || 0)} onBlur={() => updateSetting('initial_cash_usd', initCashUsd)} className="saas-input" style={{ width: '100%', textAlign: 'left' }} />
+                    </div>
+                    <div>
+                      <label style={{ display: 'block', fontSize: '12px', color: '#475569', marginBottom: '6px', fontWeight: 'bold' }}>Initial QR (៛)</label>
+                      <CurrencyInput value={initQrRiel} onChange={(v: any) => setInitQrRiel(Number(v) || 0)} onBlur={() => updateSetting('initial_qr_riel', initQrRiel)} className="saas-input" style={{ width: '100%', textAlign: 'left' }} />
+                    </div>
+                    <div>
+                      <label style={{ display: 'block', fontSize: '12px', color: '#475569', marginBottom: '6px', fontWeight: 'bold' }}>Initial QR ($)</label>
+                      <CurrencyInput value={initQrUsd} onChange={(v: any) => setInitQrUsd(Number(v) || 0)} onBlur={() => updateSetting('initial_qr_usd', initQrUsd)} className="saas-input" style={{ width: '100%', textAlign: 'left' }} />
+                    </div>
+                    <div>
+                      <label style={{ display: 'block', fontSize: '12px', color: '#475569', marginBottom: '6px', fontWeight: 'bold' }}>Family Owes Me (៛)</label>
+                      <CurrencyInput value={familyOweRiel} onChange={(v: any) => setFamilyOweRiel(Number(v) || 0)} onBlur={() => updateSetting('family_owe_riel', familyOweRiel)} className="saas-input" style={{ width: '100%', textAlign: 'left' }} />
+                    </div>
+                    <div>
+                      <label style={{ display: 'block', fontSize: '12px', color: '#475569', marginBottom: '6px', fontWeight: 'bold' }}>Family Owes Me ($)</label>
+                      <CurrencyInput value={familyOweUsd} onChange={(v: any) => setFamilyOweUsd(Number(v) || 0)} onBlur={() => updateSetting('family_owe_usd', familyOweUsd)} className="saas-input" style={{ width: '100%', textAlign: 'left' }} />
+                    </div>
+                    <div>
+                      <label style={{ display: 'block', fontSize: '12px', color: '#475569', marginBottom: '6px', fontWeight: 'bold' }}>Mom Starting Owe (៛)</label>
+                      <CurrencyInput value={persOweRiel} onChange={(v: any) => setPersOweRiel(Number(v) || 0)} onBlur={() => updateSetting('personal_owe_riel', persOweRiel)} className="saas-input" style={{ width: '100%', textAlign: 'left' }} />
+                    </div>
+                    <div>
+                      <label style={{ display: 'block', fontSize: '12px', color: '#475569', marginBottom: '6px', fontWeight: 'bold' }}>Mom Starting Owe ($)</label>
+                      <CurrencyInput value={persOweUsd} onChange={(v: any) => setPersOweUsd(Number(v) || 0)} onBlur={() => updateSetting('personal_owe_usd', persOweUsd)} className="saas-input" style={{ width: '100%', textAlign: 'left' }} />
+                    </div>
                   </div>
-                  <div>
-                    <label style={{ display: 'block', fontSize: '12px', color: '#475569', marginBottom: '6px', fontWeight: 'bold' }}>Initial Cash (៛)</label>
-                    <CurrencyInput value={initCashRiel} onChange={(v: any) => setInitCashRiel(Number(v) || 0)} onBlur={() => updateSetting('initial_cash_riel', initCashRiel)} className="saas-input" style={{ width: '100%', textAlign: 'left' }} />
-                  </div>
-                  <div>
-                    <label style={{ display: 'block', fontSize: '12px', color: '#475569', marginBottom: '6px', fontWeight: 'bold' }}>Initial Cash ($)</label>
-                    <CurrencyInput value={initCashUsd} onChange={(v: any) => setInitCashUsd(Number(v) || 0)} onBlur={() => updateSetting('initial_cash_usd', initCashUsd)} className="saas-input" style={{ width: '100%', textAlign: 'left' }} />
-                  </div>
-                  <div>
-                    <label style={{ display: 'block', fontSize: '12px', color: '#475569', marginBottom: '6px', fontWeight: 'bold' }}>Initial QR (៛)</label>
-                    <CurrencyInput value={initQrRiel} onChange={(v: any) => setInitQrRiel(Number(v) || 0)} onBlur={() => updateSetting('initial_qr_riel', initQrRiel)} className="saas-input" style={{ width: '100%', textAlign: 'left' }} />
-                  </div>
-                  <div>
-                    <label style={{ display: 'block', fontSize: '12px', color: '#475569', marginBottom: '6px', fontWeight: 'bold' }}>Initial QR ($)</label>
-                    <CurrencyInput value={initQrUsd} onChange={(v: any) => setInitQrUsd(Number(v) || 0)} onBlur={() => updateSetting('initial_qr_usd', initQrUsd)} className="saas-input" style={{ width: '100%', textAlign: 'left' }} />
-                  </div>
-                  <div>
-                    <label style={{ display: 'block', fontSize: '12px', color: '#475569', marginBottom: '6px', fontWeight: 'bold' }}>Family Owes Me (៛)</label>
-                    <CurrencyInput value={familyOweRiel} onChange={(v: any) => setFamilyOweRiel(Number(v) || 0)} onBlur={() => updateSetting('family_owe_riel', familyOweRiel)} className="saas-input" style={{ width: '100%', textAlign: 'left' }} />
-                  </div>
-                  <div>
-                    <label style={{ display: 'block', fontSize: '12px', color: '#475569', marginBottom: '6px', fontWeight: 'bold' }}>Family Owes Me ($)</label>
-                    <CurrencyInput value={familyOweUsd} onChange={(v: any) => setFamilyOweUsd(Number(v) || 0)} onBlur={() => updateSetting('family_owe_usd', familyOweUsd)} className="saas-input" style={{ width: '100%', textAlign: 'left' }} />
-                  </div>
-                  <div>
-                    <label style={{ display: 'block', fontSize: '12px', color: '#475569', marginBottom: '6px', fontWeight: 'bold' }}>Mom Starting Owe (៛)</label>
-                    <CurrencyInput value={persOweRiel} onChange={(v: any) => setPersOweRiel(Number(v) || 0)} onBlur={() => updateSetting('personal_owe_riel', persOweRiel)} className="saas-input" style={{ width: '100%', textAlign: 'left' }} />
-                  </div>
-                  <div>
-                    <label style={{ display: 'block', fontSize: '12px', color: '#475569', marginBottom: '6px', fontWeight: 'bold' }}>Mom Starting Owe ($)</label>
-                    <CurrencyInput value={persOweUsd} onChange={(v: any) => setPersOweUsd(Number(v) || 0)} onBlur={() => updateSetting('personal_owe_usd', persOweUsd)} className="saas-input" style={{ width: '100%', textAlign: 'left' }} />
-                  </div>
-                </div>
-              )}
-            </div>
+                )}
+              </div>
+            )}
 
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '16px', marginBottom: '16px' }}>
               

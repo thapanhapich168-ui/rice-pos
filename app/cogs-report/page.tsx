@@ -1,5 +1,3 @@
-// app/cogs-report/page.tsx
-
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
@@ -12,9 +10,11 @@ import { CurrencyInput } from '@/components/Inputs'
 import { PaymentRow } from '@/types'
 import TableSkeleton from '@/components/TableSkeleton'
 import EmptyState from '@/components/EmptyState'
+import { useBranch } from '@/components/BranchContext' // 🔥 GLOBAL MEMORY IMPORTED
 
 export default function CogsReportPage() {
   const { showToast } = useToast();
+  const { activeBranchId } = useBranch(); // 🔥 TUNED INTO RADIO TOWER
 
   const [sales, setSales] = useState<any[]>([])
   const [retailSales, setRetailSales] = useState<any[]>([])
@@ -56,12 +56,12 @@ export default function CogsReportPage() {
     setToDate(localISOTime);
   }, [])
 
-  // 🔥 Automatically refetches optimal data when you change tabs or dates!
+  // 🔥 Automatically refetches optimal data when you change tabs, dates, OR BRANCHES!
   useEffect(() => {
     if (fromDate && toDate) {
       fetchReportData();
     }
-  }, [fromDate, toDate, activeMainTab, timeFilter]) 
+  }, [fromDate, toDate, activeMainTab, timeFilter, activeBranchId]) // 🔥 BRANCH FILTER ATTACHED
 
   useFocusRefresh(fetchReportData);
 
@@ -94,7 +94,7 @@ export default function CogsReportPage() {
     const startJustDate = queryStart.split('T')[0];
     const endJustDate = queryEnd.split('T')[0];
 
-    // 2. Fetch Data (Split into View Data vs Liability Math Data to save RAM while keeping math perfect)
+    // 2. Fetch Data (All rigorously locked to activeBranchId)
     const [
       { data: sData }, 
       { data: rDataView }, 
@@ -106,18 +106,21 @@ export default function CogsReportPage() {
       { data: expData }, 
       { data: payData }
     ] = await Promise.all([
-        // 🔥 VIEW DATA: Only fetches exact date range required (Zero Memory Leaks!)
-        supabase.from('sales').select('*').gte('created_at', queryStart).lte('created_at', queryEnd).order('created_at', { ascending: false }),
-        supabase.from('retail_sales').select('*').gte('created_at', queryStart).lte('created_at', queryEnd).order('created_at', { ascending: false }),
-        supabase.from('cogs_settlements').select('*').gte('settlement_date', startJustDate).lte('settlement_date', endJustDate).order('created_at', { ascending: false }),
+        // 🔥 VIEW DATA: Only fetches exact date range required
+        supabase.from('sales').select('*').gte('created_at', queryStart).lte('created_at', queryEnd).eq('branch_id', activeBranchId).order('created_at', { ascending: false }),
+        supabase.from('retail_sales').select('*').gte('created_at', queryStart).lte('created_at', queryEnd).eq('branch_id', activeBranchId).order('created_at', { ascending: false }),
+        supabase.from('cogs_settlements').select('*').gte('settlement_date', startJustDate).lte('settlement_date', endJustDate).eq('branch_id', activeBranchId).order('created_at', { ascending: false }),
         
-        // ⚖️ LIABILITY DATA: Fetches historical records but ONLY specific tiny columns (Keeps Math accurate)
-        supabase.from('retail_sales').select('owner, payment_method, qty, price_per_bag').order('created_at', { ascending: false }).limit(3000),
-        supabase.from('cogs_settlements').select('owner_name, payment_method, paid_amount_riel, paid_amount_usd').order('created_at', { ascending: false }).limit(3000),
+        // ⚖️ LIABILITY DATA: Fetches historical records but ONLY specific tiny columns
+        supabase.from('retail_sales').select('owner, payment_method, qty, price_per_bag').eq('branch_id', activeBranchId).order('created_at', { ascending: false }).limit(3000),
+        supabase.from('cogs_settlements').select('owner_name, payment_method, paid_amount_riel, paid_amount_usd').eq('branch_id', activeBranchId).order('created_at', { ascending: false }).limit(3000),
+        
+        // app_settings is Global, so NO branch filter here
         supabase.from('app_settings').select('*').in('setting_key', ['personal_owe_riel', 'personal_owe_usd']),
-        supabase.from('invoice_summaries').select('invoice_id, owner').order('created_at', { ascending: false }).limit(3000),
-        supabase.from('expenses').select('amount_riel, amount_usd, remarks').order('created_at', { ascending: false }).limit(3000),
-        supabase.from('invoice_payments').select('invoice_id, amount_paid_usd, amount_paid_riel, payment_method').order('created_at', { ascending: false }).limit(3000)
+        
+        supabase.from('invoice_summaries').select('invoice_id, owner').eq('branch_id', activeBranchId).order('created_at', { ascending: false }).limit(3000),
+        supabase.from('expenses').select('amount_riel, amount_usd, remarks').eq('branch_id', activeBranchId).order('created_at', { ascending: false }).limit(3000),
+        supabase.from('invoice_payments').select('invoice_id, amount_paid_usd, amount_paid_riel, payment_method').eq('branch_id', activeBranchId).order('created_at', { ascending: false }).limit(3000)
     ]);
 
     // Populate View State
@@ -518,7 +521,8 @@ export default function CogsReportPage() {
            paid_amount_riel: allocatedRiel,
            payment_method: methodStrings.join(', '),
            status: apply >= owed ? 'Settled' : 'Partial',
-           remarks: isBulk ? `Bulk via COGS Dashboard` : `Inline via COGS Dashboard`
+           remarks: isBulk ? `Bulk via COGS Dashboard` : `Inline via COGS Dashboard`,
+           branch_id: activeBranchId // 🔥 STAMPED
          });
 
          remainingToDistribute -= apply;

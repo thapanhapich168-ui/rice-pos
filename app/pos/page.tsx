@@ -10,6 +10,7 @@ import { Product, InventoryBatch, Customer, PaymentRow } from '@/types'
 import { useToast } from '@/components/ToastProvider'
 import Modal from '@/components/Modal'
 import EmptyState from '@/components/EmptyState'
+import { useBranch } from '@/components/BranchContext' // 🔥 GLOBAL MEMORY IMPORTED
 
 // --- LOCAL TYPES ---
 interface CartItem extends Product {
@@ -105,6 +106,7 @@ const t: Record<'en' | 'kh', any> = {
 
 export default function POSPage() {
   const { showToast } = useToast();
+  const { activeBranchId } = useBranch(); // 🔥 CONNECTED TO GLOBAL MEMORY
 
   const [products, setProducts] = useState<Product[]>([])
   const [customers, setCustomers] = useState<Customer[]>([])
@@ -113,7 +115,6 @@ export default function POSPage() {
   const [activeBatches, setActiveBatches] = useState<Record<number, InventoryBatch[]>>({})
   const [mtdSalesStats, setMtdSalesStats] = useState<Record<number, number>>({})
   
-  // 🟢 Active vs Non-Active Retail Tab States
   const [retailSubTab, setRetailSubTab] = useState<'active' | 'inactive'>('active')
   const [hiddenRetailIds, setHiddenRetailIds] = useState<number[]>([])
 
@@ -151,28 +152,15 @@ export default function POSPage() {
     isOpen: false, product: null, consumedKg: ''
   })
   
-  // 🟢 Cart Adjustments Modal State with white dropdown tray tracker
   const [adjustmentModal, setAdjustmentModal] = useState<{
-    isOpen: boolean,
-    type: 'discount' | 'deposit' | 'bag' | null,
-    amount: number | string,
-    qty: number | string,
-    note: string,
-    isCoveredByDepot: boolean,
-    selectedBagName: string,
-    isBagMenuOpen?: boolean
+    isOpen: boolean, type: 'discount' | 'deposit' | 'bag' | null,
+    amount: number | string, qty: number | string, note: string,
+    isCoveredByDepot: boolean, selectedBagName: string, isBagMenuOpen?: boolean
   }>({
-    isOpen: false, 
-    type: null, 
-    amount: '', 
-    qty: 1, 
-    note: '', 
-    isCoveredByDepot: false, 
-    selectedBagName: 'ថ្លៃបាវ ប្រ៊េន',
-    isBagMenuOpen: false
+    isOpen: false, type: null, amount: '', qty: 1, note: '',
+    isCoveredByDepot: false, selectedBagName: 'ថ្លៃបាវ ប្រ៊េន', isBagMenuOpen: false
   });
 
-  // State to toggle compact Adjustment dropdown menu in cart footer
   const [showAdjustmentMenu, setShowAdjustmentMenu] = useState(false);
   
   const [autoOpenModal, setAutoOpenModal] = useState<{ isOpen: boolean, items: (Product & { bags_needed: number })[] }>({ isOpen: false, items: [] });
@@ -331,7 +319,7 @@ export default function POSPage() {
       supabase.removeChannel(posProductsChannel);
       supabase.removeChannel(posBatchesChannel);
     };
-  }, [])
+  }, [activeBranchId]) // 🔥 RE-RUNS WHEN BRANCH CHANGES
 
   useEffect(() => {
     if (selectedCustomer) setCartCustomerNameOverride(selectedCustomer.name || '');
@@ -410,7 +398,8 @@ export default function POSPage() {
   }, [completedSale, previewImageUrl, showInvoicePreview])
 
   async function loadProductsAndSettings() {
-    const { data: prodData } = await supabase.from('products').select('*').order('id', { ascending: true })
+    // 🔥 FILTERED BY BRANCH
+    const { data: prodData } = await supabase.from('products').select('*').eq('is_archived', false).eq('branch_id', activeBranchId).order('id', { ascending: true })
     if (prodData) setProducts(prodData)
     
     const { data: setObj } = await supabase.from('app_settings').select('*').eq('setting_key', 'pos_product_order').maybeSingle()
@@ -421,12 +410,14 @@ export default function POSPage() {
   }
 
   async function loadCustomers() {
-    const { data } = await supabase.from('customers').select('*').order('name', { ascending: true })
+    // 🔥 FILTERED BY BRANCH
+    const { data } = await supabase.from('customers').select('*').eq('branch_id', activeBranchId).order('name', { ascending: true })
     setCustomers(data || [])
   }
 
   async function loadBatches() {
-    const { data } = await supabase.from('inventory_batches').select('*').order('created_at', { ascending: true });
+    // 🔥 FILTERED BY BRANCH
+    const { data } = await supabase.from('inventory_batches').select('*').eq('branch_id', activeBranchId).order('created_at', { ascending: true });
     if (data) {
       const batchMap: Record<number, InventoryBatch[]> = {};
       data.forEach((b: any) => {
@@ -443,7 +434,8 @@ export default function POSPage() {
   async function loadMtdSales() {
     const today = new Date();
     const firstDay = new Date(today.getFullYear(), today.getMonth(), 1).toISOString();
-    const { data } = await supabase.from('sales').select('product_id, qty').gte('created_at', firstDay);
+    // 🔥 FILTERED BY BRANCH
+    const { data } = await supabase.from('sales').select('product_id, qty').gte('created_at', firstDay).eq('branch_id', activeBranchId);
     if (data) {
       const stats: Record<number, number> = {};
       data.forEach((s: any) => {
@@ -523,7 +515,7 @@ export default function POSPage() {
     setSelectedMobileProduct(null);
   }
 
-  // 🟢 Handle Cart Adjustments with bag selector support
+  // 🟢 Handle Cart Adjustments
   function handleAddCartAdjustment() {
     if (!adjustmentModal.type) return;
     const isCoveredBag = adjustmentModal.type === 'bag' && adjustmentModal.isCoveredByDepot;
@@ -595,6 +587,7 @@ export default function POSPage() {
          const perKgCogs = Math.round(Number(prod.cost_price || 0) / 50);
 
          const { data: newProd, error } = await supabase.from('products').insert([{
+           branch_id: activeBranchId, // 🔥 ADDED BRANCH ID
            name: newRetailName,
            price: perKgPrice,
            cost_price: perKgCogs,
@@ -724,7 +717,8 @@ export default function POSPage() {
     const finalName = newCustomerForm.name.trim() || 'Walk-in';
     const { data, error } = await supabase.from('customers').insert([{
       name: finalName, phone: newCustomerForm.phone.trim(), location: newCustomerForm.location.trim(),
-      owner: newCustomerForm.owner.trim() || null, type: newCustomerForm.type.trim()
+      owner: newCustomerForm.owner.trim() || null, type: newCustomerForm.type.trim(),
+      branch_id: activeBranchId // 🔥 ADDED BRANCH ID
     }]).select().single();
 
     if (!error && data) {
@@ -744,6 +738,7 @@ export default function POSPage() {
     const { data: batches } = await supabase.from('inventory_batches')
       .select('*')
       .eq('product_id', productId)
+      .eq('branch_id', activeBranchId) // 🔥 ADDED BRANCH ID
       .gt('remaining_qty', 0)
       .order('created_at', { ascending: true });
       
@@ -848,7 +843,7 @@ export default function POSPage() {
         
         setAutoOpenModal({ isOpen: false, items: [] });
         
-        const { data: prodData } = await supabase.from('products').select('*').eq('is_archived', false).order('id', { ascending: true });
+        const { data: prodData } = await supabase.from('products').select('*').eq('is_archived', false).eq('branch_id', activeBranchId).order('id', { ascending: true });
         if (prodData) {
             setProducts(prodData);
             await loadBatches(); 
@@ -936,6 +931,7 @@ export default function POSPage() {
 
            retailRows.push({
              transaction_id: activeTxId,
+             branch_id: activeBranchId, // 🔥 ADDED BRANCH ID
              rice_type: item.name,
              custom_rice_type: item.custom_name !== item.name ? item.custom_name : null,
              qty: item.quantity,
@@ -945,10 +941,9 @@ export default function POSPage() {
            });
            
            if (!item.bypass_stock) {
-             // We only store the change (delta), e.g., -2 or -5
              stockUpdates[item.product_id] = (stockUpdates[item.product_id] || 0) - Number(item.quantity);
            }
-        } // <--- THIS WAS THE BRACKET THAT WAS ACCIDENTALLY DELETED!
+        }
 
         const { error: retailErr } = await supabase.from('retail_sales').insert(retailRows);
         if (retailErr) throw new Error(`Retail Error: ${retailErr.message}`);
@@ -978,6 +973,7 @@ export default function POSPage() {
              const { data: dbBatches } = await supabase.from('inventory_batches')
                 .select('*')
                 .eq('product_id', item.product_id)
+                .eq('branch_id', activeBranchId) // 🔥 ADDED BRANCH ID
                 .order('id', { ascending: true });
 
              let targetBatch = null;
@@ -994,6 +990,7 @@ export default function POSPage() {
                  const returnedProd = latestProducts.find(p => p.id === item.product_id);
                  await supabase.from('inventory_batches').insert([{
                      product_id: item.product_id,
+                     branch_id: activeBranchId, // 🔥 ADDED BRANCH ID
                      cost_price: returnedProd ? returnedProd.cost_price : item.cost_price,
                      remaining_qty: 1
                  }]);
@@ -1011,6 +1008,7 @@ export default function POSPage() {
             }
 
             const newRow: any = {
+              branch_id: activeBranchId, // 🔥 ADDED BRANCH ID
               product_id: item.product_id, customer_name: finalCustomerName, rice_type: item.name,
               custom_rice_type: item.custom_name !== item.name ? item.custom_name : null, qty: finalQty, price_per_bag: item.custom_price_riel,
               cogs_price: effectiveCogs, owner: finalOwner
@@ -1020,6 +1018,7 @@ export default function POSPage() {
           } else if (item.selected_batch_id) {
             const specificBatch = activeBatches[item.product_id]?.find(b => b.id === item.selected_batch_id);
             baseSaleRows.push({
+              branch_id: activeBranchId, // 🔥 ADDED BRANCH ID
               product_id: item.product_id, customer_name: finalCustomerName, rice_type: item.name,
               custom_rice_type: item.custom_name !== item.name ? item.custom_name : null, qty: finalQty, price_per_bag: item.custom_price_riel,
               cogs_price: specificBatch ? specificBatch.cost_price : (item.cost_price || 0), owner: finalOwner
@@ -1031,6 +1030,7 @@ export default function POSPage() {
             const splits = await getFIFOSplits(item.product_id, finalQty, item.cost_price || 0);
             for (const split of splits) {
               baseSaleRows.push({
+                branch_id: activeBranchId, // 🔥 ADDED BRANCH ID
                 product_id: item.product_id, customer_name: finalCustomerName, rice_type: item.name,
                 custom_rice_type: item.custom_name !== item.name ? item.custom_name : null, qty: split.qty, price_per_bag: item.custom_price_riel,
                 cogs_price: split.cogs_price, owner: finalOwner
@@ -1063,6 +1063,7 @@ export default function POSPage() {
 
         const summaryRow = {
           invoice_id: activeTxId,
+          branch_id: activeBranchId, // 🔥 ADDED BRANCH ID
           customer_name: finalCustomerName,
           owner: finalOwner,
           rice_types: combinedRiceTypes,
@@ -1095,6 +1096,7 @@ export default function POSPage() {
             if (split.method === 'Unpaid / Debt') continue;
             await supabase.from('invoice_payments').insert([{
               invoice_id: activeTxId,
+              branch_id: activeBranchId, // 🔥 ADDED BRANCH ID
               amount_paid_usd: split.amount_usd, 
               amount_paid_riel: split.amount_riel, 
               payment_method: split.method,

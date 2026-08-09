@@ -8,6 +8,7 @@ import { formatRiel } from '@/utils/formatters'
 import { useDebounce } from '@/lib/useDebounce'
 import TableSkeleton from '@/components/TableSkeleton'
 import EmptyState from '@/components/EmptyState'
+import { useBranch } from '@/components/BranchContext' // 🔥 GLOBAL MEMORY IMPORTED
 
 // --- TYPESCRIPT INTERFACES ---
 interface Invoice {
@@ -28,6 +29,7 @@ type VoidSubTab = 'All' | 'Wholesale' | 'WalkinWholesale' | 'WalkinRetail';
 
 export default function InvoiceGallery() {
   const { showToast } = useToast();
+  const { activeBranchId } = useBranch(); // 🔥 TUNED INTO RADIO TOWER
 
   const [invoices, setInvoices] = useState<Invoice[]>([])
   const [isLoading, setIsLoading] = useState<boolean>(true)
@@ -51,7 +53,7 @@ export default function InvoiceGallery() {
     const isMobile = window.innerWidth < 1024 || /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
     setIsDeviceMobile(isMobile);
     fetchInvoices();
-  }, [filterTab, categoryTab, voidSubTab])
+  }, [filterTab, categoryTab, voidSubTab, activeBranchId]) // 🔥 RE-RUNS ON BRANCH SWITCH
 
   // 🚀 Window Focus Auto-Refresh
   useFocusRefresh(fetchInvoices);
@@ -61,7 +63,7 @@ export default function InvoiceGallery() {
     const now = new Date()
 
     // --- 1. FETCH WHOLESALE & STANDARD INVOICES ---
-    let query = supabase.from('invoice_summaries').select('*')
+    let query = supabase.from('invoice_summaries').select('*').eq('branch_id', activeBranchId) // 🔥 FILTERED BY BRANCH
 
     if (filterTab === 'Today') {
       const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString()
@@ -83,7 +85,8 @@ export default function InvoiceGallery() {
     }
 
     // --- 2. FETCH WALK-IN RETAIL SALES (Grouped into single rows per transaction_id) ---
-    let retailQuery = supabase.from('retail_sales').select('*')
+    let retailQuery = supabase.from('retail_sales').select('*').eq('branch_id', activeBranchId) // 🔥 FILTERED BY BRANCH
+    
     if (filterTab === 'Today') {
       const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString()
       retailQuery = retailQuery.gte('created_at', todayStart)
@@ -161,7 +164,8 @@ export default function InvoiceGallery() {
       const { data: items, error: fetchErr } = await supabase
         .from(isRetail ? 'retail_sales' : 'sales')
         .select('*')
-        .eq(isRetail ? 'transaction_id' : 'invoice_id', invoiceId);
+        .eq(isRetail ? 'transaction_id' : 'invoice_id', invoiceId)
+        .eq('branch_id', activeBranchId); // 🔥 STRICT BRANCH FILTER
 
       if (fetchErr) {
         throw new Error(`Failed to fetch items: ${fetchErr.message}`);
@@ -184,6 +188,7 @@ export default function InvoiceGallery() {
               const { data: prodByName } = await supabase
                 .from('products')
                 .select('id')
+                .eq('branch_id', activeBranchId)
                 .ilike('name', riceName)
                 .maybeSingle();
               if (prodByName) {
@@ -197,6 +202,7 @@ export default function InvoiceGallery() {
                 .from('products')
                 .select('stock, cost_price')
                 .eq('id', productId)
+                .eq('branch_id', activeBranchId)
                 .maybeSingle();
 
               if (prod) {
@@ -210,6 +216,7 @@ export default function InvoiceGallery() {
               const { data: batchesInv } = await supabase.from('inventory_batches')
                 .select('*')
                 .eq('product_id', productId)
+                .eq('branch_id', activeBranchId)
                 .order('id', { ascending: false })
                 .limit(1); 
               
@@ -221,7 +228,8 @@ export default function InvoiceGallery() {
                   product_id: productId,
                   product_name: riceName || 'Unknown Product',
                   cost_price: item.cogs_price || prod?.cost_price || 0,
-                  remaining_qty: qty
+                  remaining_qty: qty,
+                  branch_id: activeBranchId // 🔥 STAMPED
                 }]);
               }
 
@@ -230,6 +238,7 @@ export default function InvoiceGallery() {
               const { data: batches } = await supabase.from('price_history')
                 .select('*')
                 .eq('product_id', productId)
+                .eq('branch_id', activeBranchId)
                 .gt('sold_qty', 0)
                 .order('created_at', { ascending: false }); 
               
@@ -252,11 +261,11 @@ export default function InvoiceGallery() {
 
       // 🟢 4. Delete Line Items (ONLY delete from 'sales' for wholesale. Do NOT delete 'retail_sales' rows!)
       if (!isRetail) {
-        await supabase.from('sales').delete().eq('invoice_id', invoiceId);
+        await supabase.from('sales').delete().eq('invoice_id', invoiceId).eq('branch_id', activeBranchId);
       }
 
       // 🟢 5. Delete Payments (Removes from Cash on Hand)
-      await supabase.from('invoice_payments').delete().eq('invoice_id', invoiceId);
+      await supabase.from('invoice_payments').delete().eq('invoice_id', invoiceId).eq('branch_id', activeBranchId);
 
       // 🟢 6. Update Master Status to Voided (Marks ALL rows with that ID as Voided)
       if (!isRetail) {
@@ -264,10 +273,10 @@ export default function InvoiceGallery() {
           delivery_status: 'Voided',
           balance_due: 0,
           is_done: true
-        }).eq('invoice_id', invoiceId);
+        }).eq('invoice_id', invoiceId).eq('branch_id', activeBranchId);
       } else {
         // Updates every row with this transaction_id in retail_sales to 'Voided'
-        await supabase.from('retail_sales').update({ status: 'Voided' }).eq('transaction_id', invoiceId);
+        await supabase.from('retail_sales').update({ status: 'Voided' }).eq('transaction_id', invoiceId).eq('branch_id', activeBranchId);
       }
 
       showToast('success', 'Transaction Voided', `Transaction ${invoiceId} was successfully voided!`);
@@ -317,8 +326,8 @@ export default function InvoiceGallery() {
         if (storageError) console.error("Storage deletion warning:", storageError);
       }
 
-      const { error: salesError } = await supabase.from('sales').update({ invoice_url: null }).in('invoice_id', idsToUpdate);
-      const { error: summaryError } = await supabase.from('invoice_summaries').update({ invoice_url: null }).in('invoice_id', idsToUpdate);
+      const { error: salesError } = await supabase.from('sales').update({ invoice_url: null }).in('invoice_id', idsToUpdate).eq('branch_id', activeBranchId);
+      const { error: summaryError } = await supabase.from('invoice_summaries').update({ invoice_url: null }).in('invoice_id', idsToUpdate).eq('branch_id', activeBranchId);
 
       if (salesError || summaryError) {
         showToast('error', 'Deletion Failed', 'Database Blocked the Update!');

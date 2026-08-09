@@ -7,6 +7,7 @@ import { formatRiel } from '@/utils/formatters'
 import { CurrencyInput } from '@/components/Inputs'
 import { useToast } from '@/components/ToastProvider'
 import EmptyState from '@/components/EmptyState'
+import { useBranch } from '@/components/BranchContext' // 🔥 GLOBAL MEMORY IMPORTED
 
 // --- LOCAL TYPES ---
 interface MixHistory {
@@ -20,10 +21,12 @@ interface MixHistory {
   rice3Ratio?: number
   mixedCogs: number
   yieldStr: string
+  branch_id?: number // 🔥 ADDED FOR JSON FILTERING
 }
 
 export default function RiceMixCalculator() {
   const { showToast } = useToast();
+  const { activeBranchId } = useBranch(); // 🔥 TUNED INTO RADIO TOWER
 
   const [products, setProducts] = useState<Product[]>([])
   
@@ -45,7 +48,11 @@ export default function RiceMixCalculator() {
 
   // Auto-Calc Results & History
   const [calcResult, setCalcResult] = useState<{ blendedCogsPerKg: number, totalYieldKg: number, totalCost: number } | null>(null)
+  
+  // 🔥 SMART HISTORY STATES
+  const [globalHistory, setGlobalHistory] = useState<MixHistory[]>([])
   const [history, setHistory] = useState<MixHistory[]>([])
+  
   const [isProcessing, setIsProcessing] = useState(false)
   
   // Inline Sync Action States
@@ -59,7 +66,7 @@ export default function RiceMixCalculator() {
   useEffect(() => {
     fetchProducts()
     fetchHistory()
-  }, [])
+  }, [activeBranchId]) // 🔥 RE-RUNS ON BRANCH SWITCH
 
   const rice1 = products.find(p => p.id.toString() === rice1Id)
   const rice2 = products.find(p => p.id.toString() === rice2Id)
@@ -101,14 +108,17 @@ export default function RiceMixCalculator() {
   }, [rice1Id, rice2Id, rice3Id, rice1Qty, rice2Qty, rice3Qty, showThirdRice, products, rice1, rice2, rice3])
 
   async function fetchProducts() {
-    const { data } = await supabase.from('products').select('*').order('name', { ascending: true })
+    // 🔥 FILTERED BY BRANCH
+    const { data } = await supabase.from('products').select('*').eq('is_archived', false).eq('branch_id', activeBranchId).order('name', { ascending: true })
     if (data) setProducts(data)
   }
 
   async function fetchHistory() {
     const { data } = await supabase.from('app_settings').select('setting_value').eq('setting_key', 'calculator_history').single()
     if (data && data.setting_value) {
-      setHistory(data.setting_value)
+      setGlobalHistory(data.setting_value);
+      // 🔥 LOCALLY FILTER THE GLOBAL JSON SO WE ONLY SEE THIS BRANCH'S HISTORY
+      setHistory(data.setting_value.filter((h: any) => h.branch_id === activeBranchId || !h.branch_id));
     }
   }
 
@@ -124,11 +134,17 @@ export default function RiceMixCalculator() {
   }
 
   const clearHistory = async () => {
-    if (!confirm('Are you sure you want to clear all calculator history?')) return
-    setHistory([])
+    if (!confirm('Are you sure you want to clear all calculator history for this branch?')) return
+    
+    // 🔥 PRESERVE OTHER BRANCHES' HISTORY WHEN CLEARING
+    const keptHistory = globalHistory.filter(h => h.branch_id !== activeBranchId && h.branch_id !== undefined);
+    
+    setGlobalHistory(keptHistory);
+    setHistory([]);
+    
     await supabase.from('app_settings').upsert({
       setting_key: 'calculator_history',
-      setting_value: []
+      setting_value: keptHistory
     }, { onConflict: 'setting_key' })
   }
 
@@ -209,7 +225,8 @@ export default function RiceMixCalculator() {
           price: Number(newMixPrice),
           cost_price: Math.round(finalCogs),
           weight: newMixType === 'wholesale' ? 50 : 1, 
-          stock: finalYield
+          stock: finalYield,
+          branch_id: activeBranchId // 🔥 STAMPED
         }
         const { error } = await supabase.from('products').insert([payload]);
         if (error) throw error;
@@ -222,7 +239,7 @@ export default function RiceMixCalculator() {
         if (error) throw error;
       }
 
-      // 3. LOG HISTORY
+      // 3. LOG HISTORY (Safely injecting Branch ID)
       const yieldStr = `${finalYield.toLocaleString('en-US', { maximumFractionDigits: 2 })} ${outputUnit}`;
       const newRecord: MixHistory = {
         id: Date.now().toString(),
@@ -234,11 +251,15 @@ export default function RiceMixCalculator() {
         rice3Name: showThirdRice && rice3 ? rice3.name : undefined,
         rice3Ratio: showThirdRice ? qtyToDeduct3 : undefined,
         mixedCogs: finalCogs,
-        yieldStr: yieldStr
+        yieldStr: yieldStr,
+        branch_id: activeBranchId // 🔥 STAMPED IN JSON
       }
-      const updatedHistory = [newRecord, ...history].slice(0, 50) 
-      setHistory(updatedHistory)
-      await supabase.from('app_settings').upsert({ setting_key: 'calculator_history', setting_value: updatedHistory }, { onConflict: 'setting_key' })
+      
+      const updatedGlobalHistory = [newRecord, ...globalHistory].slice(0, 100); 
+      setGlobalHistory(updatedGlobalHistory);
+      setHistory(updatedGlobalHistory.filter(h => h.branch_id === activeBranchId || !h.branch_id));
+      
+      await supabase.from('app_settings').upsert({ setting_key: 'calculator_history', setting_value: updatedGlobalHistory }, { onConflict: 'setting_key' })
 
       showToast('success', 'Sync Successful', 'Inventory successfully synced and updated!');
       handleReset();
