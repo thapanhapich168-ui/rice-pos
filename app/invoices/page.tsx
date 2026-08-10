@@ -31,6 +31,11 @@ export default function InvoiceGallery() {
   const { showToast } = useToast();
   const { activeBranchId } = useBranch(); // 🔥 TUNED INTO RADIO TOWER
 
+  // 🔥 SETS THE SAFARI BROWSER TAB TITLE
+  useEffect(() => {
+    document.title = 'Invoice Gallery';
+  }, []);
+
   const [invoices, setInvoices] = useState<Invoice[]>([])
   const [isLoading, setIsLoading] = useState<boolean>(true)
   const [isProcessing, setIsProcessing] = useState<boolean>(false)
@@ -206,6 +211,7 @@ export default function InvoiceGallery() {
         const isSpecial = riceName.includes('បានប្រើ') || riceName.includes('សេវាដឹក');
         
         if (qty !== 0 && !isSpecial) {
+          // 🟢 ROBUST ID RESOLUTION: Match by product_id OR rice_type name (case-insensitive)
           let productId = item.product_id;
           if (!productId && riceName) {
             const { data: prodByName } = await supabase
@@ -214,34 +220,69 @@ export default function InvoiceGallery() {
               .eq('branch_id', activeBranchId)
               .ilike('name', riceName)
               .maybeSingle();
-            if (prodByName) productId = prodByName.id;
+            if (prodByName) {
+              productId = prodByName.id;
+            }
           }
 
           if (productId) {
-            const { data: prod } = await supabase.from('products').select('stock, cost_price').eq('id', productId).eq('branch_id', activeBranchId).maybeSingle();
-            
-            // Restore Master Stock
-            await supabase.rpc('adjust_product_stock', { p_product_id: productId, p_quantity: qty });
+            // A. Restore Master Stock (Works for retail kg AND wholesale bags!)
+            const { data: prod } = await supabase
+              .from('products')
+              .select('stock, cost_price')
+              .eq('id', productId)
+              .eq('branch_id', activeBranchId)
+              .maybeSingle();
 
-            // Restore Batches
-            const { data: batchesInv } = await supabase.from('inventory_batches').select('*').eq('product_id', productId).eq('branch_id', activeBranchId).order('id', { ascending: false }).limit(1); 
-            if (batchesInv && batchesInv.length > 0) {
-              await supabase.rpc('adjust_batch_stock', { p_batch_id: batchesInv[0].id, p_quantity: qty });
+            if (prod) {
+              // Atomically restores stock safely, bypassing frontend state
+              await supabase.rpc('adjust_product_stock', { p_product_id: productId, p_quantity: qty });
             } else {
-              await supabase.from('inventory_batches').insert([{ product_id: productId, product_name: riceName || 'Unknown Product', cost_price: item.cogs_price || prod?.cost_price || 0, remaining_qty: qty, branch_id: activeBranchId }]);
+              console.warn(`Product not found for ID: ${productId}`);
             }
 
-            // Reverse FIFO ledgers
+            // B. Restore Inventory Batch
+            const { data: batchesInv } = await supabase.from('inventory_batches')
+              .select('*')
+              .eq('product_id', productId)
+              .eq('branch_id', activeBranchId)
+              .order('id', { ascending: false })
+              .limit(1); 
+            
+            if (batchesInv && batchesInv.length > 0) {
+              // Atomically restores batch stock safely
+              await supabase.rpc('adjust_batch_stock', { p_batch_id: batchesInv[0].id, p_quantity: qty });
+            } else {
+              await supabase.from('inventory_batches').insert([{
+                product_id: productId,
+                product_name: riceName || 'Unknown Product',
+                cost_price: item.cogs_price || prod?.cost_price || 0,
+                remaining_qty: qty,
+                branch_id: activeBranchId // 🔥 STAMPED
+              }]);
+            }
+
+            // C. Reverse FIFO Batches (Subtract from sold_qty in price_history)
             let remainingToReverse = qty;
-            const { data: batches } = await supabase.from('price_history').select('*').eq('product_id', productId).eq('branch_id', activeBranchId).gt('sold_qty', 0).order('created_at', { ascending: false }); 
+            const { data: batches } = await supabase.from('price_history')
+              .select('*')
+              .eq('product_id', productId)
+              .eq('branch_id', activeBranchId)
+              .gt('sold_qty', 0)
+              .order('created_at', { ascending: false }); 
+            
             if (batches) {
               for (const b of batches) {
                 if (remainingToReverse <= 0) break;
                 const possibleToReverse = Math.min(b.sold_qty, remainingToReverse);
-                await supabase.from('price_history').update({ sold_qty: b.sold_qty - possibleToReverse }).eq('id', b.id);
+                await supabase.from('price_history')
+                  .update({ sold_qty: b.sold_qty - possibleToReverse })
+                  .eq('id', b.id);
                 remainingToReverse -= possibleToReverse;
               }
             }
+          } else {
+            console.warn(`Could not resolve productId for item: ${riceName}`);
           }
         }
       }
@@ -436,301 +477,318 @@ export default function InvoiceGallery() {
   if (!mounted) return null;
 
   return (
-    <div className="main-wrapper">
+    <div style={{ display: 'flex', width: '100%', height: '100dvh', overflow: 'hidden', backgroundColor: '#f8fafc', boxSizing: 'border-box' }}>
       
-      {/* HEADER */}
-      <div className="header-container">
-        <div className="header-left">
-          <h1 className="saas-page-title">🖼️ Invoice Image Gallery</h1>
-        </div>
-      </div>
+      {/* 🔥 1. FLEX COLUMN WRAPPER: Splits the panel into Top (Frozen) and Bottom (Scrollable) */}
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', height: '100%', minWidth: 0, overflow: 'hidden' }}>
 
-      {/* 🟢 TOP TABS: WHOLESALE, WALK-IN WHOLESALE, WALK-IN RETAIL, VOIDED */}
-      <div className="saas-tab-container hide-scrollbar" style={{ width: 'fit-content', border: 'none', padding: 0, boxShadow: 'none', background: 'transparent', marginBottom: categoryTab === 'Voided' ? '8px' : '16px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-        <button 
-          onClick={() => { setCategoryTab('All'); setSelectedInvoices(new Set()); setViewMode('table'); }} 
-          className={`saas-tab ${categoryTab === 'All' ? 'active' : ''}`}
-          style={categoryTab === 'All' ? { background: '#10b981', color: '#fff' } : { border: '1px solid #cbd5e1', background: '#fff' }}
-        >
-          ✅ All Active
-        </button>
-        <button 
-          onClick={() => { setCategoryTab('Wholesale'); setSelectedInvoices(new Set()); setViewMode('grid'); }} 
-          className={`saas-tab ${categoryTab === 'Wholesale' ? 'active' : ''}`}
-          style={categoryTab === 'Wholesale' ? { background: '#10b981', color: '#fff' } : { border: '1px solid #cbd5e1', background: '#fff' }}
-        >
-          🌾 Wholesale
-        </button>
-        <button 
-          onClick={() => { setCategoryTab('WalkinWholesale'); setSelectedInvoices(new Set()); setViewMode('table'); }} 
-          className={`saas-tab ${categoryTab === 'WalkinWholesale' ? 'active' : ''}`}
-          style={categoryTab === 'WalkinWholesale' ? { background: '#10b981', color: '#fff' } : { border: '1px solid #cbd5e1', background: '#fff' }}
-        >
-          🏬 Walk-in Wholesale
-        </button>
-        <button 
-          onClick={() => { setCategoryTab('WalkinRetail'); setSelectedInvoices(new Set()); setViewMode('table'); }} 
-          className={`saas-tab ${categoryTab === 'WalkinRetail' ? 'active' : ''}`}
-          style={categoryTab === 'WalkinRetail' ? { background: '#10b981', color: '#fff' } : { border: '1px solid #cbd5e1', background: '#fff' }}
-        >
-          🛍️ Walk-in Retail
-        </button>
-        <button 
-          onClick={() => { setCategoryTab('Voided'); setVoidSubTab('All'); setSelectedInvoices(new Set()); setViewMode('table'); }} 
-          className={`saas-tab ${categoryTab === 'Voided' ? 'active' : ''}`}
-          style={categoryTab === 'Voided' ? { background: '#ef4444', color: '#fff' } : { border: '1px solid #cbd5e1', background: '#fff' }}
-        >
-          ❌ Voided
-        </button>
-      </div>
-
-      {/* 🟢 3 SUB-TABS WHEN INSIDE 'VOIDED' TAB */}
-      {categoryTab === 'Voided' && (
-        <div className="saas-tab-container hide-scrollbar" style={{ width: 'fit-content', border: 'none', padding: '4px 6px', boxShadow: 'none', background: '#fee2e2', borderRadius: '8px', marginBottom: '16px', display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-          <button 
-            onClick={() => setVoidSubTab('All')} 
-            className={`saas-tab ${voidSubTab === 'All' ? 'active' : ''}`}
-            style={voidSubTab === 'All' ? { background: '#dc2626', color: '#fff', fontSize: '12px', padding: '6px 12px' } : { background: 'transparent', color: '#991b1b', fontSize: '12px', padding: '6px 12px', border: 'none' }}
-          >
-            All Voided
-          </button>
-          <button 
-            onClick={() => setVoidSubTab('Wholesale')} 
-            className={`saas-tab ${voidSubTab === 'Wholesale' ? 'active' : ''}`}
-            style={voidSubTab === 'Wholesale' ? { background: '#dc2626', color: '#fff', fontSize: '12px', padding: '6px 12px' } : { background: 'transparent', color: '#991b1b', fontSize: '12px', padding: '6px 12px', border: 'none' }}
-          >
-            Wholesale
-          </button>
-          <button 
-            onClick={() => setVoidSubTab('WalkinWholesale')} 
-            className={`saas-tab ${voidSubTab === 'WalkinWholesale' ? 'active' : ''}`}
-            style={voidSubTab === 'WalkinWholesale' ? { background: '#dc2626', color: '#fff', fontSize: '12px', padding: '6px 12px' } : { background: 'transparent', color: '#991b1b', fontSize: '12px', padding: '6px 12px', border: 'none' }}
-          >
-            Walk-in Wholesale
-          </button>
-          <button 
-            onClick={() => setVoidSubTab('WalkinRetail')} 
-            className={`saas-tab ${voidSubTab === 'WalkinRetail' ? 'active' : ''}`}
-            style={voidSubTab === 'WalkinRetail' ? { background: '#dc2626', color: '#fff', fontSize: '12px', padding: '6px 12px' } : { background: 'transparent', color: '#991b1b', fontSize: '12px', padding: '6px 12px', border: 'none' }}
-          >
-            Walk-in Retail
-          </button>
-        </div>
-      )}
-
-      {/* FILTER TABS & SEARCH CONTAINER */}
-      <div className="saas-card" style={{ marginBottom: '24px', padding: '16px 20px' }}>
-        <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between' }}>
+        {/* 🔥 2. FROZEN TOP SECTION: flexShrink: 0 prevents it from scrolling away */}
+        <div className="main-wrapper-frozen" style={{ flexShrink: 0, zIndex: 10 }}>
           
-          <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', flex: 1 }}>
-            <input 
-              type="text"
-              placeholder="🔍 Search ID, Customer, or Rice..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
-              className="saas-input"
-              style={{ minWidth: '200px', flex: 1 }}
-            />
-            
-            <div className="saas-tab-container hide-scrollbar" style={{ margin: 0, padding: '4px', background: '#f1f5f9', border: 'none', boxShadow: 'none' }}>
-              {(['All', 'Today', 'This Week', 'This Month'] as FilterTab[]).map(tab => (
-                <button
-                  key={tab}
-                  onClick={() => setFilterTab(tab)}
-                  className={`saas-tab ${filterTab === tab ? 'active' : ''}`}
-                  style={filterTab === tab ? { background: '#0f172a', color: '#fff', padding: '8px 16px' } : { padding: '8px 16px' }}
-                >
-                  {tab}
-                </button>
-              ))}
+          {/* HEADER */}
+          <div className="header-container">
+            <div className="header-left">
+              <h1 className="saas-page-title" style={{ margin: 0 }}>🖼️ Invoice Image Gallery</h1>
             </div>
           </div>
 
-          <div className="saas-tab-container hide-scrollbar" style={{ margin: 0, padding: '4px', background: '#e2e8f0', border: 'none', boxShadow: 'none' }}>
-            <button onClick={() => setViewMode('grid')} className={`saas-tab ${viewMode === 'grid' ? 'active' : ''}`} style={viewMode === 'grid' ? { background: '#10b981', color: '#fff', padding: '8px 16px' } : { padding: '8px 16px' }}>Grid</button>
-            <button onClick={() => setViewMode('table')} className={`saas-tab ${viewMode === 'table' ? 'active' : ''}`} style={viewMode === 'table' ? { background: '#10b981', color: '#fff', padding: '8px 16px' } : { padding: '8px 16px' }}>Table</button>
+          {/* 🟢 TOP TABS: WHOLESALE, WALK-IN WHOLESALE, WALK-IN RETAIL, VOIDED */}
+          <div className="saas-tab-container hide-scrollbar" style={{ width: 'fit-content', border: 'none', padding: 0, boxShadow: 'none', background: 'transparent', marginBottom: categoryTab === 'Voided' ? '8px' : '16px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+            <button 
+              onClick={() => { setCategoryTab('All'); setSelectedInvoices(new Set()); setViewMode('table'); }} 
+              className={`saas-tab ${categoryTab === 'All' ? 'active' : ''}`}
+              style={categoryTab === 'All' ? { background: '#10b981', color: '#fff' } : { border: '1px solid #cbd5e1', background: '#fff' }}
+            >
+              ✅ All Active
+            </button>
+            <button 
+              onClick={() => { setCategoryTab('Wholesale'); setSelectedInvoices(new Set()); setViewMode('grid'); }} 
+              className={`saas-tab ${categoryTab === 'Wholesale' ? 'active' : ''}`}
+              style={categoryTab === 'Wholesale' ? { background: '#10b981', color: '#fff' } : { border: '1px solid #cbd5e1', background: '#fff' }}
+            >
+              🌾 Wholesale
+            </button>
+            <button 
+              onClick={() => { setCategoryTab('WalkinWholesale'); setSelectedInvoices(new Set()); setViewMode('table'); }} 
+              className={`saas-tab ${categoryTab === 'WalkinWholesale' ? 'active' : ''}`}
+              style={categoryTab === 'WalkinWholesale' ? { background: '#10b981', color: '#fff' } : { border: '1px solid #cbd5e1', background: '#fff' }}
+            >
+              🏬 Walk-in Wholesale
+            </button>
+            <button 
+              onClick={() => { setCategoryTab('WalkinRetail'); setSelectedInvoices(new Set()); setViewMode('table'); }} 
+              className={`saas-tab ${categoryTab === 'WalkinRetail' ? 'active' : ''}`}
+              style={categoryTab === 'WalkinRetail' ? { background: '#10b981', color: '#fff' } : { border: '1px solid #cbd5e1', background: '#fff' }}
+            >
+              🛍️ Walk-in Retail
+            </button>
+            <button 
+              onClick={() => { setCategoryTab('Voided'); setVoidSubTab('All'); setSelectedInvoices(new Set()); setViewMode('table'); }} 
+              className={`saas-tab ${categoryTab === 'Voided' ? 'active' : ''}`}
+              style={categoryTab === 'Voided' ? { background: '#ef4444', color: '#fff' } : { border: '1px solid #cbd5e1', background: '#fff' }}
+            >
+              ❌ Voided
+            </button>
           </div>
-          
-        </div>
 
-        {/* Global Action Modifiers */}
-        <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', marginTop: '16px', borderTop: '1px solid #f1f5f9', paddingTop: '16px' }}>
-          <button onClick={toggleSelectAll} disabled={processedInvoices.length === 0} className="saas-btn saas-btn-secondary">
-            {selectedInvoices.size === processedInvoices.length && processedInvoices.length > 0 ? 'Deselect All' : 'Select All'}
-          </button>
-
-          {selectedInvoices.size > 0 && (
-            <>
-              <button onClick={deleteSelected} className="saas-btn saas-btn-danger">
-                Clear Images ({selectedInvoices.size})
+          {/* 🟢 3 SUB-TABS WHEN INSIDE 'VOIDED' TAB */}
+          {categoryTab === 'Voided' && (
+            <div className="saas-tab-container hide-scrollbar" style={{ width: 'fit-content', border: 'none', padding: '4px 6px', boxShadow: 'none', background: '#fee2e2', borderRadius: '8px', marginBottom: '16px', display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+              <button 
+                onClick={() => setVoidSubTab('All')} 
+                className={`saas-tab ${voidSubTab === 'All' ? 'active' : ''}`}
+                style={voidSubTab === 'All' ? { background: '#dc2626', color: '#fff', fontSize: '12px', padding: '6px 12px' } : { background: 'transparent', color: '#991b1b', fontSize: '12px', padding: '6px 12px', border: 'none' }}
+              >
+                All Voided
               </button>
-              <button onClick={handleBulkAction} className="saas-btn saas-btn-primary">
-                {isDeviceMobile ? `Share (${selectedInvoices.size})` : `Download (${selectedInvoices.size})`}
+              <button 
+                onClick={() => setVoidSubTab('Wholesale')} 
+                className={`saas-tab ${voidSubTab === 'Wholesale' ? 'active' : ''}`}
+                style={voidSubTab === 'Wholesale' ? { background: '#dc2626', color: '#fff', fontSize: '12px', padding: '6px 12px' } : { background: 'transparent', color: '#991b1b', fontSize: '12px', padding: '6px 12px', border: 'none' }}
+              >
+                Wholesale
               </button>
-            </>
+              <button 
+                onClick={() => setVoidSubTab('WalkinWholesale')} 
+                className={`saas-tab ${voidSubTab === 'WalkinWholesale' ? 'active' : ''}`}
+                style={voidSubTab === 'WalkinWholesale' ? { background: '#dc2626', color: '#fff', fontSize: '12px', padding: '6px 12px' } : { background: 'transparent', color: '#991b1b', fontSize: '12px', padding: '6px 12px', border: 'none' }}
+              >
+                Walk-in Wholesale
+              </button>
+              <button 
+                onClick={() => setVoidSubTab('WalkinRetail')} 
+                className={`saas-tab ${voidSubTab === 'WalkinRetail' ? 'active' : ''}`}
+                style={voidSubTab === 'WalkinRetail' ? { background: '#dc2626', color: '#fff', fontSize: '12px', padding: '6px 12px' } : { background: 'transparent', color: '#991b1b', fontSize: '12px', padding: '6px 12px', border: 'none' }}
+              >
+                Walk-in Retail
+              </button>
+            </div>
           )}
-        </div>
-      </div>
 
-      {/* CONTENT AREA */}
-      {isLoading ? (
-        viewMode === 'table' ? (
-          <div className="saas-table-wrapper">
-            <div className="saas-table-responsive">
-              <table className="saas-table">
-                <tbody>
-                  <TableSkeleton columns={7} rows={6} />
-                </tbody>
-              </table>
-            </div>
-          </div>
-        ) : (
-          <div style={{ textAlign: 'center', padding: '40px', color: '#94a3b8' }}>Loading records...</div>
-        )
-      ) : processedInvoices.length === 0 ? (
-        <EmptyState 
-          icon="🖼️" 
-          title="No records found" 
-          message="Adjust your tabs, search term, or date ranges to see more results." 
-        />
-      ) : viewMode === 'grid' ? (
-        
-        /* --- GRID VIEW --- */
-        <div className="grid-layout">
-          {processedInvoices.map((inv) => {
-            const isSelected = selectedInvoices.has(inv.invoice_id);
-            const isVoided = inv.delivery_status === 'Voided';
-
-            return (
-              <div key={inv.id} className={`saas-card ${isSelected ? 'selected-grid-card' : ''} ${isVoided ? 'voided-grid-card' : ''}`} style={{ padding: 0, overflow: 'hidden', position: 'relative' }}>
+          {/* FILTER TABS & SEARCH CONTAINER */}
+          <div className="saas-card" style={{ marginBottom: '16px', padding: '16px 20px' }}>
+            <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between' }}>
+              
+              <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', flex: 1 }}>
+                <input 
+                  type="text"
+                  placeholder="🔍 Search ID, Customer, or Rice..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
+                  className="saas-input"
+                  style={{ minWidth: '200px', flex: 1 }}
+                />
                 
-                <input type="checkbox" checked={isSelected} onChange={() => toggleSelect(inv.invoice_id)} className="card-checkbox" />
-
-                <div onClick={() => toggleSelect(inv.invoice_id)} className="card-image-box">
-                  {inv.invoice_url ? (
-                    <img src={inv.invoice_url} alt="Invoice Document" className={`card-img ${isSelected ? 'img-selected' : ''}`} />
-                  ) : (
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#94a3b8', fontSize: '14px', background: '#f8fafc' }}>
-                      No Image (Retail Sale)
-                    </div>
-                  )}
-                  {isVoided && (
-                    <div className="void-overlay">
-                      <span className="void-stamp">VOID</span>
-                    </div>
-                  )}
-                </div>
-
-                <div style={{ padding: '16px', borderBottom: '1px solid #e2e8f0' }}>
-                  <div className={`saas-card-title ${isVoided ? 'voided-text' : ''}`} style={{ fontSize: '15px', color: '#0f172a', margin: 0 }}>{inv.invoice_id}</div>
-                  <div style={{ fontSize: '14px', color: '#475569', marginTop: '6px', fontWeight: 'bold' }}>Customer: {inv.customer_name}</div>
-                  <div style={{ fontSize: '13px', color: '#64748b', marginTop: '6px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={inv.rice_types}>
-                    🌾 {inv.rice_types}
-                  </div>
-                  <div style={{ fontSize: '16px', color: '#b58a3d', marginTop: '8px', fontWeight: 'bold' }}>💰 {formatRiel(inv.total_sales)}</div>
-                </div>
-
-                <div style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px', background: '#f8fafc', marginTop: 'auto' }}>
-                  <div style={{ fontSize: '13px', color: '#64748b', textAlign: 'center', fontWeight: 'bold' }}>{formatDate(inv.created_at)}</div>
-                  
-                  <div style={{ display: 'flex', gap: '8px' }}>
-                    {/* 🚨 VOID BUTTON FIRST IN ACTION GROUP */}
-                    {!isVoided && (
-                      <button onClick={(e) => { e.stopPropagation(); handleVoidInvoice(inv.invoice_id); }} disabled={isProcessing} className="saas-btn" style={{ flex: 1, padding: '8px 4px', background: '#fee2e2', color: '#dc2626', border: '1px solid #fca5a5', fontWeight: 'bold' }}>
-                        🚨 Void
-                      </button>
-                    )}
-                    {!isVoided && !inv.is_retail && (
-                      <button onClick={() => window.location.href = `/pos?edit=${inv.invoice_id}`} className="saas-btn" style={{ flex: 1, padding: '8px 4px', background: '#fef3c7', color: '#b45309', border: '1px solid #fde047' }}>
-                        Edit
-                      </button>
-                    )}
-                    {inv.invoice_url && (
-                      <button onClick={() => handleAction(inv.invoice_url, inv.invoice_id)} className="saas-btn saas-btn-secondary" style={{ flex: 1, padding: '8px 4px' }}>
-                        {isDeviceMobile ? 'Share' : 'Download'}
-                      </button>
-                    )}
-                  </div>
+                <div className="saas-tab-container hide-scrollbar" style={{ margin: 0, padding: '4px', background: '#f1f5f9', border: 'none', boxShadow: 'none' }}>
+                  {(['All', 'Today', 'This Week', 'This Month'] as FilterTab[]).map(tab => (
+                    <button
+                      key={tab}
+                      onClick={() => setFilterTab(tab)}
+                      className={`saas-tab ${filterTab === tab ? 'active' : ''}`}
+                      style={filterTab === tab ? { background: '#0f172a', color: '#fff', padding: '8px 16px' } : { padding: '8px 16px' }}
+                    >
+                      {tab}
+                    </button>
+                  ))}
                 </div>
               </div>
-            );
-          })}
-        </div>
 
-      ) : (
+              <div className="saas-tab-container hide-scrollbar" style={{ margin: 0, padding: '4px', background: '#e2e8f0', border: 'none', boxShadow: 'none' }}>
+                <button onClick={() => setViewMode('grid')} className={`saas-tab ${viewMode === 'grid' ? 'active' : ''}`} style={viewMode === 'grid' ? { background: '#10b981', color: '#fff', padding: '8px 16px' } : { padding: '8px 16px' }}>Grid</button>
+                <button onClick={() => setViewMode('table')} className={`saas-tab ${viewMode === 'table' ? 'active' : ''}`} style={viewMode === 'table' ? { background: '#10b981', color: '#fff', padding: '8px 16px' } : { padding: '8px 16px' }}>Table</button>
+              </div>
+              
+            </div>
 
-        /* --- TABLE VIEW --- */
-        <div className="saas-table-wrapper">
-          <div className="saas-table-responsive">
-            <table className="saas-table">
-              <thead>
-                <tr>
-                  <th className="saas-th" style={{ width: '40px', textAlign: 'center' }}>
-                    <input type="checkbox" checked={selectedInvoices.size === processedInvoices.length && processedInvoices.length > 0} onChange={toggleSelectAll} style={{ cursor: 'pointer', width: '16px', height: '16px' }} />
-                  </th>
-                  {/* 🚨 FIRST COLUMN: DEDICATED FOR VOID ONLY */}
-                  <th className="saas-th" style={{ width: '80px', textAlign: 'center' }}>Void</th>
-                  <th className="saas-th">Invoice ID</th>
-                  <th className="saas-th">Customer</th>
-                  <th className="saas-th">Items Sold</th>
-                  <th className="saas-th" style={{ textAlign: 'right' }}>Total Amount</th>
-                  <th className="saas-th">Date</th>
-                  <th className="saas-th" style={{ textAlign: 'center' }}>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {processedInvoices.map((inv) => {
-                  const isSelected = selectedInvoices.has(inv.invoice_id);
-                  const isVoided = inv.delivery_status === 'Voided';
+            {/* Global Action Modifiers */}
+            <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', marginTop: '16px', borderTop: '1px solid #f1f5f9', paddingTop: '16px' }}>
+              <button onClick={toggleSelectAll} disabled={processedInvoices.length === 0} className="saas-btn saas-btn-secondary">
+                {selectedInvoices.size === processedInvoices.length && processedInvoices.length > 0 ? 'Deselect All' : 'Select All'}
+              </button>
 
-                  return (
-                    <tr key={inv.id} className={`saas-tr ${isSelected ? 'selected' : ''} ${isVoided ? 'row-voided' : ''}`}>
-                      <td className="saas-td" style={{ textAlign: 'center' }}>
-                        <input type="checkbox" checked={isSelected} onChange={() => toggleSelect(inv.invoice_id)} style={{ cursor: 'pointer', width: '16px', height: '16px' }} />
-                      </td>
-                      
-                      {/* 🚨 FIRST COLUMN VOID BUTTON */}
-                      <td className="saas-td" style={{ textAlign: 'center' }}>
-                        {!isVoided ? (
-                          <button onClick={(e) => { e.stopPropagation(); handleVoidInvoice(inv.invoice_id); }} disabled={isProcessing} className="saas-btn" style={{ padding: '6px 10px', background: '#fee2e2', color: '#dc2626', border: '1px solid #fca5a5', fontWeight: 'bold', fontSize: '11px', borderRadius: '6px', cursor: 'pointer' }}>
-                            🚨 Void
-                          </button>
-                        ) : (
-                          <span style={{ fontSize: '12px', fontWeight: 'bold', color: '#991b1b' }}>VOIDED</span>
-                        )}
-                      </td>
-
-                      <td className={`saas-td ${isVoided ? 'voided-text' : ''}`} style={{ fontWeight: 'bold' }}>{inv.invoice_id}</td>
-                      <td className="saas-td" style={{ fontWeight: 'bold' }}>{inv.customer_name}</td>
-                      <td className="saas-td" style={{ maxWidth: '280px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: '#475569' }} title={inv.rice_types}>
-                        {inv.rice_types}
-                      </td>
-                      <td className="saas-td" style={{ textAlign: 'right', fontWeight: 'bold', color: '#b58a3d' }}>{formatRiel(inv.total_sales)}</td>
-                      <td className="saas-td" style={{ color: '#475569' }}>{formatDate(inv.created_at)}</td>
-                      <td className="saas-td" style={{ textAlign: 'center' }}>
-                        <div style={{ display: 'flex', gap: '8px', justifyContent: 'center' }}>
-                          {!isVoided && !inv.is_retail && (
-                            <button onClick={() => window.location.href = `/pos?edit=${inv.invoice_id}`} className="saas-btn" style={{ padding: '6px 12px', background: '#fef3c7', color: '#b45309', border: 'none', fontSize: '12px' }}>Edit</button>
-                          )}
-                          {inv.invoice_url && (
-                            <button onClick={() => handleAction(inv.invoice_url, inv.invoice_id)} className="saas-btn saas-btn-secondary" style={{ padding: '6px 12px', fontSize: '12px' }}>
-                              {isDeviceMobile ? 'Share' : 'Download'}
-                            </button>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
+              {selectedInvoices.size > 0 && (
+                <>
+                  <button onClick={deleteSelected} className="saas-btn saas-btn-danger">
+                    Clear Images ({selectedInvoices.size})
+                  </button>
+                  <button onClick={handleBulkAction} className="saas-btn saas-btn-primary">
+                    {isDeviceMobile ? `Share (${selectedInvoices.size})` : `Download (${selectedInvoices.size})`}
+                  </button>
+                </>
+              )}
+            </div>
           </div>
         </div>
-      )}
+
+        {/* 🔥 3. SCROLLABLE CONTENT AREA: flex: 1 allows it to take remaining screen space and scroll */}
+        <div className="hide-scrollbar main-wrapper-scrollable" style={{ flex: 1, overflowY: 'auto', WebkitOverflowScrolling: 'touch' }}>
+          {isLoading ? (
+            viewMode === 'table' ? (
+              <div className="saas-table-wrapper">
+                <div className="saas-table-responsive">
+                  <table className="saas-table">
+                    <tbody>
+                      <TableSkeleton columns={7} rows={6} />
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            ) : (
+              <div style={{ textAlign: 'center', padding: '40px', color: '#94a3b8' }}>Loading records...</div>
+            )
+          ) : processedInvoices.length === 0 ? (
+            <EmptyState 
+              icon="🖼️" 
+              title="No records found" 
+              message="Adjust your tabs, search term, or date ranges to see more results." 
+            />
+          ) : viewMode === 'grid' ? (
+            
+            /* --- GRID VIEW --- */
+            <div className="grid-layout">
+              {processedInvoices.map((inv) => {
+                const isSelected = selectedInvoices.has(inv.invoice_id);
+                const isVoided = inv.delivery_status === 'Voided';
+
+                return (
+                  <div key={inv.id} className={`saas-card ${isSelected ? 'selected-grid-card' : ''} ${isVoided ? 'voided-grid-card' : ''}`} style={{ padding: 0, overflow: 'hidden', position: 'relative' }}>
+                    
+                    <input type="checkbox" checked={isSelected} onChange={() => toggleSelect(inv.invoice_id)} className="card-checkbox" />
+
+                    <div onClick={() => toggleSelect(inv.invoice_id)} className="card-image-box">
+                      {inv.invoice_url ? (
+                        <img src={inv.invoice_url} alt="Invoice Document" className={`card-img ${isSelected ? 'img-selected' : ''}`} />
+                      ) : (
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#94a3b8', fontSize: '14px', background: '#f8fafc' }}>
+                          No Image (Retail Sale)
+                        </div>
+                      )}
+                      {isVoided && (
+                        <div className="void-overlay">
+                          <span className="void-stamp">VOID</span>
+                        </div>
+                      )}
+                    </div>
+
+                    <div style={{ padding: '16px', borderBottom: '1px solid #e2e8f0' }}>
+                      <div className={`saas-card-title ${isVoided ? 'voided-text' : ''}`} style={{ fontSize: '15px', color: '#0f172a', margin: 0 }}>{inv.invoice_id}</div>
+                      <div style={{ fontSize: '14px', color: '#475569', marginTop: '6px', fontWeight: 'bold' }}>Customer: {inv.customer_name}</div>
+                      <div style={{ fontSize: '13px', color: '#64748b', marginTop: '6px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={inv.rice_types}>
+                        🌾 {inv.rice_types}
+                      </div>
+                      <div style={{ fontSize: '16px', color: '#b58a3d', marginTop: '8px', fontWeight: 'bold' }}>💰 {formatRiel(inv.total_sales)}</div>
+                    </div>
+
+                    <div style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px', background: '#f8fafc', marginTop: 'auto' }}>
+                      <div style={{ fontSize: '13px', color: '#64748b', textAlign: 'center', fontWeight: 'bold' }}>{formatDate(inv.created_at)}</div>
+                      
+                      <div style={{ display: 'flex', gap: '8px' }}>
+                        {/* 🚨 VOID BUTTON FIRST IN ACTION GROUP */}
+                        {!isVoided && (
+                          <button onClick={(e) => { e.stopPropagation(); handleVoidInvoice(inv.invoice_id); }} disabled={isProcessing} className="saas-btn" style={{ flex: 1, padding: '8px 4px', background: '#fee2e2', color: '#dc2626', border: '1px solid #fca5a5', fontWeight: 'bold' }}>
+                            🚨 Void
+                          </button>
+                        )}
+                        {!isVoided && !inv.is_retail && (
+                          <button onClick={(e) => { e.stopPropagation(); window.location.href = `/pos?edit=${inv.invoice_id}`; }} className="saas-btn" style={{ flex: 1, padding: '8px 4px', background: '#fef3c7', color: '#b45309', border: '1px solid #fde047' }}>
+                            Edit
+                          </button>
+                        )}
+                        {inv.invoice_url && (
+                          <button onClick={(e) => { e.stopPropagation(); handleAction(inv.invoice_url, inv.invoice_id); }} className="saas-btn saas-btn-secondary" style={{ flex: 1, padding: '8px 4px' }}>
+                            {isDeviceMobile ? 'Share' : 'Download'}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+          ) : (
+
+            /* --- TABLE VIEW --- */
+            <div className="saas-table-wrapper" style={{ margin: 0 }}>
+              <div className="saas-table-responsive">
+                <table className="saas-table">
+                  <thead>
+                    <tr>
+                      <th className="saas-th" style={{ width: '40px', textAlign: 'center', position: 'sticky', top: 0, zIndex: 30, backgroundColor: '#f8fafc', boxShadow: 'inset 0 -2px 0 0 #e2e8f0' }}>
+                        <input type="checkbox" checked={selectedInvoices.size === processedInvoices.length && processedInvoices.length > 0} onChange={toggleSelectAll} style={{ cursor: 'pointer', width: '16px', height: '16px' }} />
+                      </th>
+                      {/* 🚨 FIRST COLUMN: DEDICATED FOR VOID ONLY */}
+                      <th className="saas-th" style={{ width: '80px', textAlign: 'center', position: 'sticky', top: 0, zIndex: 30, backgroundColor: '#f8fafc', boxShadow: 'inset 0 -2px 0 0 #e2e8f0' }}>Void</th>
+                      <th className="saas-th" style={{ position: 'sticky', top: 0, zIndex: 30, backgroundColor: '#f8fafc', boxShadow: 'inset 0 -2px 0 0 #e2e8f0' }}>Invoice ID</th>
+                      <th className="saas-th" style={{ position: 'sticky', top: 0, zIndex: 30, backgroundColor: '#f8fafc', boxShadow: 'inset 0 -2px 0 0 #e2e8f0' }}>Customer</th>
+                      <th className="saas-th" style={{ position: 'sticky', top: 0, zIndex: 30, backgroundColor: '#f8fafc', boxShadow: 'inset 0 -2px 0 0 #e2e8f0' }}>Items Sold</th>
+                      <th className="saas-th" style={{ textAlign: 'right', position: 'sticky', top: 0, zIndex: 30, backgroundColor: '#f8fafc', boxShadow: 'inset 0 -2px 0 0 #e2e8f0' }}>Total Amount</th>
+                      <th className="saas-th" style={{ position: 'sticky', top: 0, zIndex: 30, backgroundColor: '#f8fafc', boxShadow: 'inset 0 -2px 0 0 #e2e8f0' }}>Date</th>
+                      <th className="saas-th" style={{ textAlign: 'center', position: 'sticky', top: 0, zIndex: 30, backgroundColor: '#f8fafc', boxShadow: 'inset 0 -2px 0 0 #e2e8f0' }}>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {processedInvoices.map((inv) => {
+                      const isSelected = selectedInvoices.has(inv.invoice_id);
+                      const isVoided = inv.delivery_status === 'Voided';
+
+                      return (
+                        <tr key={inv.id} className={`saas-tr ${isSelected ? 'selected' : ''} ${isVoided ? 'row-voided' : ''}`}>
+                          <td className="saas-td" style={{ textAlign: 'center' }}>
+                            <input type="checkbox" checked={isSelected} onChange={() => toggleSelect(inv.invoice_id)} style={{ cursor: 'pointer', width: '16px', height: '16px' }} />
+                          </td>
+                          
+                          {/* 🚨 FIRST COLUMN VOID BUTTON */}
+                          <td className="saas-td" style={{ textAlign: 'center' }}>
+                            {!isVoided ? (
+                              <button onClick={(e) => { e.stopPropagation(); handleVoidInvoice(inv.invoice_id); }} disabled={isProcessing} className="saas-btn" style={{ padding: '6px 10px', background: '#fee2e2', color: '#dc2626', border: '1px solid #fca5a5', fontWeight: 'bold', fontSize: '11px', borderRadius: '6px', cursor: 'pointer' }}>
+                                🚨 Void
+                              </button>
+                            ) : (
+                              <span style={{ fontSize: '12px', fontWeight: 'bold', color: '#991b1b' }}>VOIDED</span>
+                            )}
+                          </td>
+
+                          <td className={`saas-td ${isVoided ? 'voided-text' : ''}`} style={{ fontWeight: 'bold' }}>{inv.invoice_id}</td>
+                          <td className="saas-td" style={{ fontWeight: 'bold' }}>{inv.customer_name}</td>
+                          <td className="saas-td" style={{ maxWidth: '280px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: '#475569' }} title={inv.rice_types}>
+                            {inv.rice_types}
+                          </td>
+                          <td className="saas-td" style={{ textAlign: 'right', fontWeight: 'bold', color: '#b58a3d' }}>{formatRiel(inv.total_sales)}</td>
+                          <td className="saas-td" style={{ color: '#475569' }}>{formatDate(inv.created_at)}</td>
+                          <td className="saas-td" style={{ textAlign: 'center' }}>
+                            <div style={{ display: 'flex', gap: '8px', justifyContent: 'center' }}>
+                              {!isVoided && !inv.is_retail && (
+                                <button onClick={(e) => { e.stopPropagation(); window.location.href = `/pos?edit=${inv.invoice_id}`; }} className="saas-btn" style={{ padding: '6px 12px', background: '#fef3c7', color: '#b45309', border: 'none', fontSize: '12px' }}>Edit</button>
+                              )}
+                              {inv.invoice_url && (
+                                <button onClick={(e) => { e.stopPropagation(); handleAction(inv.invoice_url, inv.invoice_id); }} className="saas-btn saas-btn-secondary" style={{ padding: '6px 12px', fontSize: '12px' }}>
+                                  {isDeviceMobile ? 'Share' : 'Download'}
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </div>
+
+      </div>
 
       {/* --- PAGE SPECIFIC CSS --- */}
       <style jsx global>{`
+        /* 🔥 PREVENTS IOS SAFARI FROM OVER-SCROLLING THE WHOLE PAGE 🔥 */
+        body {
+          font-variant-numeric: tabular-nums lining-nums;
+          overscroll-behavior-y: none;
+        }
+
         .hide-scrollbar::-webkit-scrollbar { display: none; }
         .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
 
@@ -801,6 +859,36 @@ export default function InvoiceGallery() {
           box-shadow: 0 4px 10px rgba(0,0,0,0.1);
         }
 
+        /* 🔥 BULLETPROOF GLOBAL OVERRIDE FOR MOBILE TABS 🔥 */
+        .saas-tab-container {
+          flex-wrap: nowrap !important;
+          overflow-x: auto !important;
+          -webkit-overflow-scrolling: touch !important;
+          scrollbar-width: none !important;
+        }
+        .saas-tab-container::-webkit-scrollbar {
+          display: none !important;
+        }
+        .saas-tab {
+          flex-shrink: 0 !important;
+          white-space: nowrap !important;
+        }
+
+        /* 🔥 NEW FLEXBOX WRAPPERS FOR FREEZE STYLE */
+        .main-wrapper-frozen { 
+          padding: 24px 24px 0 24px; 
+          font-family: Arial, sans-serif; 
+          box-sizing: border-box; 
+          width: 100%;
+        }
+        .main-wrapper-scrollable { 
+          padding: 0 24px 24px 24px; 
+          font-family: Arial, sans-serif; 
+          box-sizing: border-box; 
+          width: 100%;
+          overscroll-behavior-y: contain; /* Prevents scroll chaining to the body */
+        }
+
         .header-container { 
           display: flex;
           justify-content: flex-start;
@@ -820,6 +908,15 @@ export default function InvoiceGallery() {
         }
 
         @media (max-width: 1023px) { 
+          /* 🔥 MOBILE PADDING: Keep bottom gap for the floating cart button */
+          .main-wrapper-frozen { 
+            padding: 0 16px 0 16px !important; 
+          }
+          .main-wrapper-scrollable { 
+            padding: 16px 16px 140px 16px !important; 
+            overscroll-behavior-y: contain;
+          }
+
           .header-container { 
             margin-left: 54px !important; 
             margin-right: 0 !important;
