@@ -318,7 +318,7 @@ export default function ReportControlPage() {
   const thisMonthData = generateDailyArray(activeSalesData, isMTD)
   const lastMonthData = generateDailyArray(activeSalesData, isLastMonth)
 
-  // --- 5. TELEGRAM MESSAGE GENERATOR ---
+  // --- 5. TELEGRAM MESSAGE GENERATOR (DAILY) ---
   const generateTelegramMessage = () => {
     const { today, month } = reportMetrics
     const cleanUSD = (val: number) => (val === 0 ? '$0' : formatUSD(val))
@@ -390,7 +390,7 @@ export default function ReportControlPage() {
   const { month } = reportMetrics
   const currentMonthName = new Date().toLocaleDateString('en-GB', { month: 'long', year: 'numeric' })
 
-  // --- 7. SECURE DISPATCH TO TELEGRAM (DAILY TEXT) ---
+  // --- 7. DISPATCH TO TELEGRAM (DAILY TEXT) ---
   async function handleSendTelegram() {
     const activeBotToken = TELEGRAM_CONFIG.botToken
     const activeChatId = TELEGRAM_CONFIG.chatId
@@ -499,9 +499,6 @@ export default function ReportControlPage() {
     <AdminGuard>
       <div className="main-wrapper" style={{ display: 'flex', flexDirection: 'column', height: '100dvh', overflow: 'hidden' }}>
         
-        {/* 🔥 INJECTS GOOGLE FONTS FOR THE HEADLESS BROWSER TO DOWNLOAD DURING PDF CAPTURE */}
-        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Noto+Sans+Khmer:wght@400;700&display=swap" rel="stylesheet" />
-
         <div className="header-container no-print" style={{ flexShrink: 0 }}>
           <div className="header-left">
             <h1 className="saas-page-title">📲 Report Automation & Dispatch</h1>
@@ -572,7 +569,6 @@ export default function ReportControlPage() {
                       <span className="desktop-only-inline">📥 Download A4 PDF</span>
                       <span className="mobile-only-inline">📥 Download PDF</span>
                     </button>
-                    
                     <button
                       onClick={handleSendMonthlyTelegram}
                       disabled={isSending || loading}
@@ -647,8 +643,8 @@ export default function ReportControlPage() {
                 padding: '24px',
                 borderRadius: '12px',
                 boxSizing: 'border-box',
-                // 🔥 THE PDF FONT FIX: Using the Google Font we injected above so Vercel renders it perfectly!
-                fontFamily: "'Inter', 'Noto Sans Khmer', sans-serif"
+                // 🔥 THE FONT FIX: Clean, sharp, modern text everywhere!
+                fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Noto Sans Khmer"'
             }}>
               
               <div style={{ borderBottom: '2px solid #0f172a', paddingBottom: '16px', marginBottom: '24px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', flexWrap: 'wrap', gap: '12px' }}>
