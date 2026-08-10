@@ -909,6 +909,9 @@ export default function POSPage() {
         return `${s.method}: ${s.face_amount}`;
       }).join(', ');
 
+      // ==========================================
+      // RETAIL CHECKOUT LOGIC
+      // ==========================================
       if (activeTab === 'retail') {
         const retailRows = [];
         const stockUpdates: Record<number, number> = {};
@@ -917,32 +920,46 @@ export default function POSPage() {
            const dbProduct = latestProducts.find(p => p.id === item.product_id);
            let retailCogsPerKg = Number(item.cost_price || 0);
 
+           // Auto-calculate retail COGS based on wholesale link
            if (dbProduct && dbProduct.linked_wholesale_id) {
                 const wholesaleProd = latestProducts.find(wp => wp.id === dbProduct.linked_wholesale_id);
                 if (wholesaleProd) {
                    const wBatches = activeBatches[wholesaleProd.id] || [];
                    const currentBatch = wBatches.length > 0 ? [...wBatches].sort((a,b) => a.id - b.id)[0] : null;
                    const wholesaleBagCogs = currentBatch ? Number(currentBatch.cost_price) : Number(wholesaleProd.cost_price || 0);
-                   
                    const wholesaleWeight = Number(wholesaleProd.weight) || 50;
                    retailCogsPerKg = wholesaleBagCogs / wholesaleWeight;
                 }
              }
 
+           // 🔥 PROFESSIONAL ACCOUNTING MATH
+           const isDiscount = item.custom_name.includes('បញ្ចុះតម្លៃ');
+           const isDeposit = item.custom_name.includes('កក់');
+           const isReturn = item.custom_name.includes('ដូរ');
+           
+           const isNegativeItem = isDiscount || isDeposit || isReturn;
+           const finalQty = isNegativeItem ? -Math.abs(Number(item.quantity)) : Number(item.quantity);
+
+           // Apply COGS rules
+           let finalCogs = retailCogsPerKg;
+           if (isDiscount) finalCogs = 0; // Discounts have no inventory cost
+           if (isDeposit) finalCogs = Number(item.custom_price_riel || 0); // Deposits equal their price to keep profit at 0
+
            retailRows.push({
-  transaction_id: activeTxId,
-  branch_id: activeBranchId, 
-  rice_type: item.name,
-  custom_rice_type: item.custom_name !== item.name ? item.custom_name : null,
-  qty: item.quantity,
-  price_per_bag: item.custom_price_riel,
-  cogs_price: retailCogsPerKg,
-  payment_method: primaryMethodStr,
-  owner: 'Both' // 🔥 Added default owner
-});
+             transaction_id: activeTxId,
+             branch_id: activeBranchId, 
+             product_id: item.product_id, // 🔥 Critical: Links to inventory
+             rice_type: item.name,
+             custom_rice_type: item.custom_name !== item.name ? item.custom_name : null,
+             qty: finalQty,
+             price_per_bag: Number(item.custom_price_riel || 0),
+             cogs_price: finalCogs,
+             payment_method: primaryMethodStr,
+             owner: 'Both'
+           });
            
            if (!item.bypass_stock) {
-             stockUpdates[item.product_id] = (stockUpdates[item.product_id] || 0) - Number(item.quantity);
+             stockUpdates[item.product_id] = (stockUpdates[item.product_id] || 0) - finalQty;
            }
         }
 
@@ -953,6 +970,9 @@ export default function POSPage() {
             await supabase.rpc('adjust_product_stock', { p_product_id: Number(prodIdStr), p_quantity: delta });
         }
 
+      // ==========================================
+      // WHOLESALE CHECKOUT LOGIC
+      // ==========================================
       } else {
         const combinedRiceTypes = currentCart.map(item => `${item.custom_name} (x${item.quantity})`).join(', ');
         const baseSaleRows: any[] = [];
@@ -960,21 +980,25 @@ export default function POSPage() {
         const fifoUpdates: Record<number, number> = {}; 
 
         for (const item of currentCart) {
-          const isReturn = item.custom_name.includes('ដូរ');
-          const isNegativeItem = 
-            isReturn || 
-            item.custom_name.includes('បញ្ចុះតម្លៃ') || 
-            item.custom_name.includes('កក់');
-            
-          const isCharge = item.custom_name.includes('បានប្រើ');
-          const isBypass = item.bypass_stock || isCharge;
-          const finalQty = isNegativeItem ? -Math.abs(Number(item.quantity)) : Number(item.quantity);
+           // 🔥 PROFESSIONAL ACCOUNTING MATH
+           const isReturn = item.custom_name.includes('ដូរ');
+           const isDiscount = item.custom_name.includes('បញ្ចុះតម្លៃ');
+           const isDeposit = item.custom_name.includes('កក់');
+           const isCharge = item.custom_name.includes('បានប្រើ');
+
+           const isNegativeItem = isReturn || isDiscount || isDeposit;
+           const isBypass = item.bypass_stock || isCharge;
+           const finalQty = isNegativeItem ? -Math.abs(Number(item.quantity)) : Number(item.quantity);
+
+           let finalCogs = Number(item.cost_price || 0);
+           if (isDiscount) finalCogs = 0; // Discounts have no inventory cost
+           if (isDeposit) finalCogs = Number(item.custom_price_riel || 0); // Deposits equal their price to keep profit at 0
 
           if (item.isReturnFullBag && !editingInvoiceId) {
              const { data: dbBatches } = await supabase.from('inventory_batches')
                 .select('*')
                 .eq('product_id', item.product_id)
-                .eq('branch_id', activeBranchId) // 🔥 ADDED BRANCH ID
+                .eq('branch_id', activeBranchId) 
                 .order('id', { ascending: true });
 
              let targetBatch = null;
@@ -991,7 +1015,7 @@ export default function POSPage() {
                  const returnedProd = latestProducts.find(p => p.id === item.product_id);
                  await supabase.from('inventory_batches').insert([{
                      product_id: item.product_id,
-                     branch_id: activeBranchId, // 🔥 ADDED BRANCH ID
+                     branch_id: activeBranchId,
                      cost_price: returnedProd ? returnedProd.cost_price : item.cost_price,
                      remaining_qty: 1
                  }]);
@@ -1003,39 +1027,40 @@ export default function POSPage() {
           }
           
           if (isNegativeItem || isBypass || editingInvoiceId) {
-            let effectiveCogs = Number(item.cost_price || 0);
-            if (item.custom_name.includes('កក់')) {
-              effectiveCogs = Number(item.custom_price_riel || 0);
-            }
-
             const newRow: any = {
-              branch_id: activeBranchId, // 🔥 ADDED BRANCH ID
+              branch_id: activeBranchId, 
               product_id: item.product_id, customer_name: finalCustomerName, rice_type: item.name,
-              custom_rice_type: item.custom_name !== item.name ? item.custom_name : null, qty: finalQty, price_per_bag: item.custom_price_riel,
-              cogs_price: effectiveCogs, owner: finalOwner
+              custom_rice_type: item.custom_name !== item.name ? item.custom_name : null, 
+              qty: finalQty, price_per_bag: Number(item.custom_price_riel || 0), cogs_price: finalCogs, 
+              owner: finalOwner
             };
             if (item.db_row_id) newRow.id = item.db_row_id;
             baseSaleRows.push(newRow);
           } else if (item.selected_batch_id) {
             const specificBatch = activeBatches[item.product_id]?.find(b => b.id === item.selected_batch_id);
+            const specificCogs = specificBatch ? specificBatch.cost_price : finalCogs;
+            
             baseSaleRows.push({
-              branch_id: activeBranchId, // 🔥 ADDED BRANCH ID
+              branch_id: activeBranchId, 
               product_id: item.product_id, customer_name: finalCustomerName, rice_type: item.name,
-              custom_rice_type: item.custom_name !== item.name ? item.custom_name : null, qty: finalQty, price_per_bag: item.custom_price_riel,
-              cogs_price: specificBatch ? specificBatch.cost_price : (item.cost_price || 0), owner: finalOwner
+              custom_rice_type: item.custom_name !== item.name ? item.custom_name : null, 
+              qty: finalQty, price_per_bag: Number(item.custom_price_riel || 0), cogs_price: specificCogs, 
+              owner: finalOwner
             });
             if (specificBatch) {
                 fifoUpdates[specificBatch.id] = (fifoUpdates[specificBatch.id] || 0) - finalQty;
             }
           } else {
-            const splits = await getFIFOSplits(item.product_id, finalQty, item.cost_price || 0);
+            const splits = await getFIFOSplits(item.product_id, finalQty, finalCogs);
             for (const split of splits) {
               baseSaleRows.push({
-                branch_id: activeBranchId, // 🔥 ADDED BRANCH ID
+                branch_id: activeBranchId, 
                 product_id: item.product_id, customer_name: finalCustomerName, rice_type: item.name,
-                custom_rice_type: item.custom_name !== item.name ? item.custom_name : null, qty: split.qty, price_per_bag: item.custom_price_riel,
-                cogs_price: split.cogs_price, owner: finalOwner
+                custom_rice_type: item.custom_name !== item.name ? item.custom_name : null, 
+                qty: split.qty, price_per_bag: Number(item.custom_price_riel || 0), cogs_price: split.cogs_price, 
+                owner: finalOwner
               });
+              
               if (split.batch_id) {
                 fifoUpdates[split.batch_id] = (fifoUpdates[split.batch_id] || 0) - split.qty;
               }
@@ -1059,18 +1084,25 @@ export default function POSPage() {
           await supabase.from('invoice_payments').delete().eq('invoice_id', editingInvoiceId);
         }
 
-        const finalSaleRows = baseSaleRows.map(r => ({ ...r, invoice_id: activeTxId, payment_method: primaryMethodStr }));
-        let splitCogsSum = baseSaleRows.reduce((sum, r) => sum + (r.cogs_price * r.qty), 0);
+        // Calculate the summary totals manually for the invoice_summaries table
+        let splitCogsSum = baseSaleRows.reduce((sum, r) => sum + (Number(r.qty) * Number(r.cogs_price)), 0);
+        let splitSalesSum = baseSaleRows.reduce((sum, r) => sum + (Number(r.qty) * Number(r.price_per_bag)), 0);
+
+        const finalSaleRows = baseSaleRows.map(r => {
+          // Strip db_row_id before insertion/upsert
+          const { db_row_id, ...cleanRow } = r;
+          return { ...cleanRow, invoice_id: activeTxId, payment_method: primaryMethodStr };
+        });
 
         const summaryRow = {
           invoice_id: activeTxId,
-          branch_id: activeBranchId, // 🔥 ADDED BRANCH ID
+          branch_id: activeBranchId, 
           customer_name: finalCustomerName,
           owner: finalOwner,
           rice_types: combinedRiceTypes,
-          total_sales: currentTotalRiel,
+          total_sales: splitSalesSum,
           total_cogs: splitCogsSum,
-          total_profit: currentTotalRiel - splitCogsSum,
+          total_profit: splitSalesSum - splitCogsSum,
           delivery_status: actualRemaining > 0 ? 'Pending' : 'Delivered',
           payment_method: primaryMethodStr,
           balance_due: actualRemaining > 0 ? actualRemaining : 0,
@@ -1092,12 +1124,15 @@ export default function POSPage() {
         }
       }
 
+      // ==========================================
+      // PAYMENTS & CLEANUP LOGIC
+      // ==========================================
       if (showPaymentSelector || !isSimpleCustomer) {
          for (const split of effectiveSplits) {
             if (split.method === 'Unpaid / Debt') continue;
             await supabase.from('invoice_payments').insert([{
               invoice_id: activeTxId,
-              branch_id: activeBranchId, // 🔥 ADDED BRANCH ID
+              branch_id: activeBranchId, 
               amount_paid_usd: split.amount_usd, 
               amount_paid_riel: split.amount_riel, 
               payment_method: split.method,
@@ -1690,14 +1725,51 @@ export default function POSPage() {
                     )}
                   </div>
                   
-                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                    <div style={{ width: '75px' }}>
-                      <CurrencyInput value={item.quantity} onChange={(v: any) => updateCartItem(item.id, 'quantity', v)} onFocus={() => updateCartItem(item.id, 'quantity', '')} className="saas-input" style={{ textAlign: 'center', padding: '6px' }} />
+                  <div style={{ display: 'flex', gap: activeTab === 'retail' ? '6px' : '8px', alignItems: 'center' }}>
+                    {/* 1. Quantity Input */}
+                    <div style={{ width: activeTab === 'retail' ? '65px' : '75px' }}>
+                      <CurrencyInput 
+                        value={item.quantity} 
+                        onChange={(v: any) => updateCartItem(item.id, 'quantity', v)} 
+                        onFocus={() => updateCartItem(item.id, 'quantity', '')} 
+                        className="saas-input" 
+                        style={{ textAlign: 'center', padding: '6px' }}
+                        readOnly={isSpecial}
+                      />
                     </div>
+                    
                     <span style={{ fontSize: '12px', color: '#94a3b8' }}>×</span>
+                    
+                    {/* 2. Unit Price Input */}
                     <div style={{ flex: 1 }}>
-                      <CurrencyInput value={item.custom_price_riel} onChange={(v: any) => updateCartItem(item.id, 'custom_price_riel', v)} onFocus={() => updateCartItem(item.id, 'custom_price_riel', '')} className="saas-input" style={{ textAlign: 'right', padding: '6px' }} />
+                      <CurrencyInput 
+                        value={item.custom_price_riel} 
+                        onChange={(v: any) => updateCartItem(item.id, 'custom_price_riel', v)} 
+                        onFocus={() => updateCartItem(item.id, 'custom_price_riel', '')} 
+                        className="saas-input" 
+                        style={{ textAlign: activeTab === 'retail' ? 'center' : 'right', padding: '6px' }} 
+                      />
                     </div>
+                    
+                    {/* 3. Editable Subtotal (ONLY SHOWS ON RETAIL TAB) */}
+                    {activeTab === 'retail' && (
+                      <>
+                        <span style={{ fontSize: '12px', color: '#94a3b8' }}>=</span>
+                        <div style={{ flex: 1 }}>
+                          <CurrencyInput 
+                            value={Math.round((Number(item.quantity) || 0) * (Number(item.custom_price_riel) || 0))} 
+                            onChange={(newTotal: any) => {
+                              // When typing a new Total, auto-adjust the Unit Price
+                              const qty = Number(item.quantity) || 1;
+                              const newUnitPrice = Math.round(Number(newTotal) / qty);
+                              updateCartItem(item.id, 'custom_price_riel', newUnitPrice);
+                            }} 
+                            className="saas-input" 
+                            style={{ textAlign: 'right', padding: '6px', fontWeight: 'bold', color: '#0f172a', backgroundColor: '#f8fafc' }} 
+                          />
+                        </div>
+                      </>
+                    )}
                   </div>
                 </div>
               )
@@ -1788,14 +1860,51 @@ export default function POSPage() {
                       />
                     </div>
 
-                    <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                      <div style={{ width: '75px' }}>
-                        <CurrencyInput value={item.quantity} onChange={(v: any) => updateCartItem(item.id, 'quantity', v)} onFocus={() => updateCartItem(item.id, 'quantity', '')} className="saas-input" style={{ textAlign: 'center', padding: '6px' }} />
+                    <div style={{ display: 'flex', gap: activeTab === 'retail' ? '6px' : '8px', alignItems: 'center' }}>
+                      {/* 1. Quantity Input */}
+                      <div style={{ width: activeTab === 'retail' ? '65px' : '75px' }}>
+                        <CurrencyInput 
+                          value={item.quantity} 
+                          onChange={(v: any) => updateCartItem(item.id, 'quantity', v)} 
+                          onFocus={() => updateCartItem(item.id, 'quantity', '')} 
+                          className="saas-input" 
+                          style={{ textAlign: 'center', padding: '6px' }}
+                          readOnly={isSpecial}
+                        />
                       </div>
+                      
                       <span style={{ fontSize: '12px', color: '#94a3b8' }}>×</span>
+                      
+                      {/* 2. Unit Price Input */}
                       <div style={{ flex: 1 }}>
-                        <CurrencyInput value={item.custom_price_riel} onChange={(v: any) => updateCartItem(item.id, 'custom_price_riel', v)} onFocus={() => updateCartItem(item.id, 'custom_price_riel', '')} className="saas-input" style={{ textAlign: 'right', padding: '6px' }} />
+                        <CurrencyInput 
+                          value={item.custom_price_riel} 
+                          onChange={(v: any) => updateCartItem(item.id, 'custom_price_riel', v)} 
+                          onFocus={() => updateCartItem(item.id, 'custom_price_riel', '')} 
+                          className="saas-input" 
+                          style={{ textAlign: activeTab === 'retail' ? 'center' : 'right', padding: '6px' }} 
+                        />
                       </div>
+                      
+                      {/* 3. Editable Subtotal (ONLY SHOWS ON RETAIL TAB) */}
+                      {activeTab === 'retail' && (
+                        <>
+                          <span style={{ fontSize: '12px', color: '#94a3b8' }}>=</span>
+                          <div style={{ flex: 1 }}>
+                            <CurrencyInput 
+                              value={Math.round((Number(item.quantity) || 0) * (Number(item.custom_price_riel) || 0))} 
+                              onChange={(newTotal: any) => {
+                                // When typing a new Total, auto-adjust the Unit Price
+                                const qty = Number(item.quantity) || 1;
+                                const newUnitPrice = Math.round(Number(newTotal) / qty);
+                                updateCartItem(item.id, 'custom_price_riel', newUnitPrice);
+                              }} 
+                              className="saas-input" 
+                              style={{ textAlign: 'right', padding: '6px', fontWeight: 'bold', color: '#0f172a', backgroundColor: '#f8fafc' }} 
+                            />
+                          </div>
+                        </>
+                      )}
                     </div>
                   </div>
                 )
@@ -2618,11 +2727,6 @@ export default function POSPage() {
           display: flex;
           align-items: center; 
           gap: 12px;
-        }
-
-        input[type="text"].no-spinners::-webkit-inner-spin-button,
-        input[type="text"].no-spinners::-webkit-outer-spin-button {
-          -webkit-appearance: none; margin: 0;
         }
 
         @media print {
