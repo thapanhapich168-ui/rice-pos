@@ -667,7 +667,9 @@ export default function ReportControlPage() {
                 margin: '0 auto',
                 padding: '24px',
                 borderRadius: '12px',
-                boxSizing: 'border-box'
+                boxSizing: 'border-box',
+                // 🔥 THE FIX: Force the PDF engine to use clean Sans-Serif fonts
+                fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Noto Sans Khmer"' 
             }}>
               
               {/* HEADER / BRANDING */}
