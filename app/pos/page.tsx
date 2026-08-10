@@ -930,15 +930,16 @@ export default function POSPage() {
              }
 
            retailRows.push({
-             transaction_id: activeTxId,
-             branch_id: activeBranchId, // 🔥 ADDED BRANCH ID
-             rice_type: item.name,
-             custom_rice_type: item.custom_name !== item.name ? item.custom_name : null,
-             qty: item.quantity,
-             price_per_bag: item.custom_price_riel,
-             cogs_price: retailCogsPerKg,
-             payment_method: primaryMethodStr
-           });
+  transaction_id: activeTxId,
+  branch_id: activeBranchId, 
+  rice_type: item.name,
+  custom_rice_type: item.custom_name !== item.name ? item.custom_name : null,
+  qty: item.quantity,
+  price_per_bag: item.custom_price_riel,
+  cogs_price: retailCogsPerKg,
+  payment_method: primaryMethodStr,
+  owner: 'Both' // 🔥 Added default owner
+});
            
            if (!item.bypass_stock) {
              stockUpdates[item.product_id] = (stockUpdates[item.product_id] || 0) - Number(item.quantity);
