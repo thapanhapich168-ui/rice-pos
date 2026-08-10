@@ -1161,18 +1161,33 @@ export default function POSPage() {
     try {
       const res = await fetch(dataUrl);
       const blob = await res.blob();
-      const fileName = `${invoiceId}-${Date.now()}.jpg`;
-      const { error: uploadError } = await supabase.storage.from('invoices').upload(fileName, blob, { contentType: 'image/jpeg' });
+      
+      // 🔥 PHASE 3 SECURITY: Generate an unguessable cryptographic UUID
+      // Fallback used just in case older mobile browsers don't support crypto.randomUUID
+      const secureUUID = typeof crypto !== 'undefined' && crypto.randomUUID 
+        ? crypto.randomUUID() 
+        : Math.random().toString(36).substring(2) + Date.now().toString(36);
+        
+      // 🔥 SAFARI FIX: Extension and ContentType MUST perfectly match the PNG blob
+      const fileName = `${invoiceId}-${secureUUID}.png`; 
+      
+      const { error: uploadError } = await supabase.storage.from('invoices').upload(fileName, blob, { 
+        contentType: 'image/png' 
+      });
+      
       if (!uploadError) {
         const { data: publicUrlData } = supabase.storage.from('invoices').getPublicUrl(fileName);
-        await supabase.from('sales').update({ invoice_url: publicUrlData.publicUrl }).eq('invoice_id', invoiceId);
-        await supabase.from('invoice_summaries').update({ invoice_url: publicUrlData.publicUrl }).eq('invoice_id', invoiceId);
+        
+        // Save the clean, short, unguessable public URL to the database
+        await supabase.from('sales').update({ invoice_url: publicUrlData.publicUrl }).eq('invoice_id', invoiceId).eq('branch_id', activeBranchId);
+        await supabase.from('invoice_summaries').update({ invoice_url: publicUrlData.publicUrl }).eq('invoice_id', invoiceId).eq('branch_id', activeBranchId);
+      } else {
+        console.error("Supabase Storage Error:", uploadError.message);
       }
     } catch (error: any) {
       console.error("Auto-capture cloud upload failed:", error);
     }
   }
-
   const handleDesktopDownloadPNG = () => {
     if (!previewImageUrl || !completedSale) return;
     const link = document.createElement('a');

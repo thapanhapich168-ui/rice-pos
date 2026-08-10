@@ -49,6 +49,9 @@ export default function CogsReportPage() {
   // Inline History States
   const [inlinePayments, setInlinePayments] = useState<Record<string, PaymentRow[]>>({})
 
+  // 🔥 NEW FAST MATH METRICS
+  const [fastMetrics, setFastMetrics] = useState({ total_revenue: 0, total_cogs: 0, total_profit: 0 });
+
   useEffect(() => {
     const tzoffset = (new Date()).getTimezoneOffset() * 60000;
     const localISOTime = (new Date(Date.now() - tzoffset)).toISOString().slice(0, 10);
@@ -94,7 +97,18 @@ export default function CogsReportPage() {
     const startJustDate = queryStart.split('T')[0];
     const endJustDate = queryEnd.split('T')[0];
 
-    // 2. Fetch Data (All rigorously locked to activeBranchId)
+    // 🔥 NEW PHASE 4: HIGH-SPEED RPC AGGREGATION ENGINE 🔥
+    // Instead of downloading everything just to do the math, we ask Supabase to do it for us
+    const { data: metricsData } = await supabase.rpc('get_optimized_sales_metrics', {
+      p_branch_id: activeBranchId,
+      p_start_date: queryStart
+    });
+
+    if (metricsData) {
+      setFastMetrics(metricsData as any);
+    }
+
+    // 2. Fetch Visual Data (Only what we explicitly need to render the screen)
     const [
       { data: sData }, 
       { data: rDataView }, 

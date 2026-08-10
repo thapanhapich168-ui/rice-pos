@@ -1,25 +1,27 @@
 'use client'
 
-import React, { useEffect, useState, useMemo } from 'react'
+import React, { useEffect, useState, useMemo, useRef } from 'react'
 import { supabase } from '@/lib/supabaseClient'
 import { formatRiel, formatUSD, formatNumber, parseOwner, EXCHANGE_RATE } from '@/utils/formatters'
 import { useToast } from '@/components/ToastProvider'
 import TableSkeleton from '@/components/TableSkeleton'
 import { TELEGRAM_CONFIG } from '@/lib/telegramConfig'
-import { useBranch } from '@/components/BranchContext' // 🔥 GLOBAL MEMORY IMPORTED
+import { useBranch } from '@/components/BranchContext' 
+import AdminGuard from '@/components/AdminGuard' 
+import html2canvas from 'html2canvas'
+import { jsPDF } from 'jspdf'
 
 const formatUSDEquiv = (vRiel: number) => formatUSD(vRiel / EXCHANGE_RATE);
 
 export default function ReportControlPage() {
   const { showToast } = useToast()
-  const { activeBranchId } = useBranch() // 🔥 TUNED INTO RADIO TOWER
+  const { activeBranchId } = useBranch() 
 
-  // --- DATA STATE ---
   const [loading, setLoading] = useState(true)
   const [isSending, setIsSending] = useState(false)
   const [activeReportTab, setActiveReportTab] = useState<'daily' | 'monthly'>('daily')
+  const monthlyReportRef = useRef<HTMLDivElement>(null)
 
-  // Raw DB records
   const [wholesaleSales, setWholesaleSales] = useState<any[]>([])
   const [invoices, setInvoices] = useState<any[]>([])
   const [retailSales, setRetailSales] = useState<any[]>([])
@@ -28,16 +30,21 @@ export default function ReportControlPage() {
 
   useEffect(() => {
     fetchReportData()
-  }, [activeBranchId]) // 🔥 RE-RUNS ON BRANCH SWITCH
+  }, [activeBranchId]) 
 
-  // --- 1. FETCH SUPABASE DATA ---
+  // --- 1. FETCH SUPABASE DATA (OPTIMIZED PAYLOADS) ---
   async function fetchReportData() {
     setLoading(true)
     try {
       const now = new Date()
       const firstDayOfLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1).toISOString()
 
-      // 🔥 ALL FETCHES SECURELY FILTERED BY BRANCH
+      const buildQNarrow = (table: string, columns: string) => {
+        let q = supabase.from(table).select(columns);
+        if (activeBranchId !== 0) q = q.eq('branch_id', activeBranchId);
+        return q;
+      }
+
       const [
         { data: salesData },
         { data: invData },
@@ -45,12 +52,11 @@ export default function ReportControlPage() {
         { data: expData },
         { data: payData }
       ] = await Promise.all([
-        supabase.from('sales').select('*').gte('created_at', firstDayOfLastMonth).eq('branch_id', activeBranchId),
-        supabase.from('invoice_summaries').select('*').gte('created_at', firstDayOfLastMonth).eq('branch_id', activeBranchId),
-        supabase.from('retail_sales').select('*').gte('created_at', firstDayOfLastMonth).eq('branch_id', activeBranchId),
-        supabase.from('expenses').select('*').gte('created_at', firstDayOfLastMonth).eq('branch_id', activeBranchId),
-        // 🔥 payment_date instead of created_at to prevent 400 Bad Request
-        supabase.from('invoice_payments').select('*').gte('payment_date', firstDayOfLastMonth).eq('branch_id', activeBranchId)
+        buildQNarrow('sales', 'id, created_at, qty, price_per_bag, cogs_price, owner, custom_rice_type, rice_type').gte('created_at', firstDayOfLastMonth),
+        buildQNarrow('invoice_summaries', 'invoice_id, created_at, owner, total_sales, total_profit').gte('created_at', firstDayOfLastMonth),
+        buildQNarrow('retail_sales', 'id, created_at, qty, price_per_bag, cogs_price, owner, custom_rice_type, rice_type').gte('created_at', firstDayOfLastMonth),
+        buildQNarrow('expenses', 'id, created_at, amount_riel, amount_usd, spender, category, description, expense_date').gte('created_at', firstDayOfLastMonth),
+        buildQNarrow('invoice_payments', 'invoice_id, amount_paid_usd, amount_paid_riel, payment_method, payment_date').gte('payment_date', firstDayOfLastMonth)
       ])
 
       setWholesaleSales(salesData || [])
@@ -168,7 +174,7 @@ export default function ReportControlPage() {
     return { month: monthSlice, today: todaySlice }
   }, [invoices, retailSales, expenses])
 
-  // --- 4. BUSINESS SUMMARY CALCULATIONS (FOR MONTHLY REPORT PAGE) ---
+  // --- 4. BUSINESS SUMMARY CALCULATIONS ---
   const activeSalesData = useMemo(() => [...wholesaleSales, ...retailSales], [wholesaleSales, retailSales])
 
   function calculateMetrics(dataSet: any[], timeFilter: any) {
@@ -315,13 +321,14 @@ export default function ReportControlPage() {
   const thisMonthData = generateDailyArray(activeSalesData, isMTD)
   const lastMonthData = generateDailyArray(activeSalesData, isLastMonth)
 
-  // --- 5. TELEGRAM MESSAGE GENERATOR (DAILY - CLEAN REGULAR FONT) ---
+  // --- 5. TELEGRAM MESSAGE GENERATOR ---
   const generateTelegramMessage = () => {
     const { today, month } = reportMetrics
     const cleanUSD = (val: number) => (val === 0 ? '$0' : formatUSD(val))
+    const branchLabel = activeBranchId === 0 ? '🌍 GLOBAL HQ' : `🏬 BRANCH: ${activeBranchId}`
 
     return (
-`📊 RICE BUSINESS REPORT
+`📊 RICE BUSINESS REPORT (${branchLabel})
 
 📆 THIS MONTH
 💰 Sales      ${formatRiel(month.totalSales)}
@@ -411,7 +418,7 @@ export default function ReportControlPage() {
 
       const result = await response.json()
       if (result.ok) {
-        showToast('success', 'Sent to Telegram!', 'The daily business report has been dispatched.')
+        showToast('success', 'Sent to Telegram!', 'The report summary has been dispatched.')
       } else {
         throw new Error(result.description || 'Telegram API rejected the request.')
       }
@@ -422,24 +429,76 @@ export default function ReportControlPage() {
     }
   }
 
-  // --- 8. 🔥 FIXED: DISPATCH MULTI-PAGE PDF DOCUMENT TO TELEGRAM ---
+  // --- 8. 🔥 SERVERLESS MULTI-PAGE PDF ENGINE (RESTORED!) ---
   async function handleSendMonthlyTelegram() {
-    setIsSending(true)
-    try {
-      const response = await fetch('/api/telegram/send-monthly-pdf', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ branch_id: activeBranchId }) // 🔥 SENT TO BACKEND API
-      })
-      const result = await response.json()
+    const activeBotToken = TELEGRAM_CONFIG.botToken
+    const activeChatId = TELEGRAM_CONFIG.chatId
 
-      if (response.ok && result.success) {
+    if (!activeBotToken || !activeChatId) {
+      showToast('error', 'Missing Info', 'Please add your credentials to lib/telegramConfig.ts first.')
+      return
+    }
+
+    if (!monthlyReportRef.current) return;
+
+    setIsSending(true)
+    showToast('info', 'Generating PDF...', 'Slicing A4 pages using device memory...')
+
+    try {
+      // 1. Capture the exact HTML DOM in high resolution
+      const canvas = await html2canvas(monthlyReportRef.current, { 
+        scale: 2, 
+        useCORS: true,
+        backgroundColor: '#ffffff'
+      });
+      
+      const imgData = canvas.toDataURL('image/png');
+      const pdf = new jsPDF('p', 'mm', 'a4');
+      
+      // 2. A4 Pagination Math (The "Smart Slicer")
+      const pdfWidth = pdf.internal.pageSize.getWidth();
+      const pdfHeight = pdf.internal.pageSize.getHeight();
+      const renderHeight = (canvas.height * pdfWidth) / canvas.width;
+      
+      let heightLeft = renderHeight;
+      let position = 0;
+
+      // Add the first page
+      pdf.addImage(imgData, 'PNG', 0, position, pdfWidth, renderHeight);
+      heightLeft -= pdfHeight;
+
+      // Loop and add extra pages if the report is longer than one A4 sheet
+      while (heightLeft > 0) {
+        position -= pdfHeight; // Shift the image up by exactly one A4 page height
+        pdf.addPage();
+        pdf.addImage(imgData, 'PNG', 0, position, pdfWidth, renderHeight);
+        heightLeft -= pdfHeight;
+      }
+
+      const pdfBlob = pdf.output('blob');
+
+      // 3. Create an invisible form to hand directly to Telegram
+      const formData = new FormData();
+      formData.append('chat_id', activeChatId);
+      formData.append('document', pdfBlob, `Monthly_Report_Branch_${activeBranchId}.pdf`);
+      formData.append('caption', `📊 Executive Monthly Report (${activeBranchId === 0 ? 'Global HQ' : 'Branch ' + activeBranchId})`);
+
+      // 4. Fire it directly to Telegram! Vercel is bypassed.
+      const response = await fetch(`https://api.telegram.org/bot${activeBotToken}/sendDocument`, {
+        method: 'POST',
+        body: formData
+      });
+
+      const result = await response.json();
+
+      if (response.ok && result.ok) {
         showToast('success', 'PDF Sent!', 'The multi-page executive PDF report has been dispatched to Telegram.')
       } else {
-        throw new Error(result.error || 'Failed to dispatch PDF.')
+        throw new Error(result.description || 'Telegram rejected the PDF.')
       }
     } catch (e: any) {
       showToast('error', 'Telegram Failed', e.message)
+      console.error(e)
     } finally {
       setIsSending(false)
     }
@@ -456,487 +515,484 @@ export default function ReportControlPage() {
   }
 
   return (
-    // 🔥 EXACT RICECONTROL LAYOUT: Flex Column + Overflow Hidden locks outer page
-    <div className="main-wrapper" style={{ display: 'flex', flexDirection: 'column', height: '100dvh', overflow: 'hidden' }}>
-      
-      {/* 🔥 FROZEN HEADER AT TOP: Same 60px/54px margin-left & alignment as RiceControl */}
-      <div className="header-container no-print" style={{ flexShrink: 0 }}>
-        <div className="header-left">
-          <h1 className="saas-page-title">📲 Report Automation & Dispatch</h1>
+    <AdminGuard>
+      {/* 🔥 EXACT RICECONTROL LAYOUT: Flex Column + Overflow Hidden locks outer page */}
+      <div className="main-wrapper" style={{ display: 'flex', flexDirection: 'column', height: '100dvh', overflow: 'hidden' }}>
+        
+        <div className="header-container no-print" style={{ flexShrink: 0 }}>
+          <div className="header-left">
+            <h1 className="saas-page-title">📲 Report Automation & Dispatch</h1>
+          </div>
+          <div className="header-actions">
+            <button onClick={fetchReportData} className="saas-btn saas-btn-secondary" title="Refresh Numbers">
+              <span className="desktop-only-inline">{loading ? '🔄 Loading...' : '🔄 Refresh Numbers'}</span>
+              <span className="mobile-only-inline">{loading ? '⏳' : '🔄'}</span>
+            </button>
+          </div>
         </div>
-        <div className="header-actions">
-          <button onClick={fetchReportData} className="saas-btn saas-btn-secondary" title="Refresh Numbers">
-            <span className="desktop-only-inline">{loading ? '🔄 Loading...' : '🔄 Refresh Numbers'}</span>
-            <span className="mobile-only-inline">{loading ? '⏳' : '🔄'}</span>
-          </button>
-        </div>
-      </div>
 
-      {/* SCROLLING CONTENT AREA BELOW HEADER */}
-      <div className="hide-scrollbar" style={{ flex: 1, overflowY: 'auto', paddingBottom: '60px' }}>
+        {/* SCROLLING CONTENT AREA BELOW HEADER */}
+        <div className="hide-scrollbar" style={{ flex: 1, overflowY: 'auto', paddingBottom: '60px' }}>
 
-        {/* 🔥 BEAUTIFULLY ARRANGED REPORT DISPATCH CONTROLS */}
-        <div className="saas-card no-print" style={{ padding: '20px', marginBottom: '24px' }}>
-          <div className="controls-header">
-            
-            {/* SEGMENTED CONTROL TABS */}
-            <div className="saas-tab-container controls-tabs" style={{ margin: 0, padding: 0, border: 'none', background: '#f1f5f9' }}>
-              <button
-                type="button"
-                onClick={() => setActiveReportTab('daily')}
-                className={`saas-tab ${activeReportTab === 'daily' ? 'active' : ''}`}
-                style={{ padding: '10px 20px', fontWeight: 'bold' }}
-              >
-                <span className="desktop-only-inline">📅 Daily Telegram Format</span>
-                <span className="mobile-only-inline">📅 Daily Format</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setActiveReportTab('monthly')}
-                className={`saas-tab ${activeReportTab === 'monthly' ? 'active' : ''}`}
-                style={{ padding: '10px 20px', fontWeight: 'bold' }}
-              >
-                <span className="desktop-only-inline">📄 Full Monthly Business Report</span>
-                <span className="mobile-only-inline">📄 Monthly Report</span>
-              </button>
+          <div className="saas-card no-print" style={{ padding: '20px', marginBottom: '24px' }}>
+            <div className="controls-header">
+              
+              <div className="saas-tab-container controls-tabs" style={{ margin: 0, padding: 0, border: 'none', background: '#f1f5f9' }}>
+                <button
+                  type="button"
+                  onClick={() => setActiveReportTab('daily')}
+                  className={`saas-tab ${activeReportTab === 'daily' ? 'active' : ''}`}
+                  style={{ padding: '10px 20px', fontWeight: 'bold' }}
+                >
+                  <span className="desktop-only-inline">📅 Daily Telegram Format</span>
+                  <span className="mobile-only-inline">📅 Daily Format</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveReportTab('monthly')}
+                  className={`saas-tab ${activeReportTab === 'monthly' ? 'active' : ''}`}
+                  style={{ padding: '10px 20px', fontWeight: 'bold' }}
+                >
+                  <span className="desktop-only-inline">📄 Full Monthly Business Report</span>
+                  <span className="mobile-only-inline">📄 Monthly Report</span>
+                </button>
+              </div>
+
+              {/* DYNAMIC ACTION BUTTONS */}
+              <div className="controls-actions">
+                {activeReportTab === 'daily' ? (
+                  <>
+                    <button
+                      onClick={copyToClipboard}
+                      className="saas-btn saas-btn-secondary controls-btn-secondary"
+                      style={{ fontWeight: 'bold' }}
+                    >
+                      <span className="desktop-only-inline">📋 Copy Text</span>
+                      <span className="mobile-only-inline">📋 Copy</span>
+                    </button>
+                    <button
+                      onClick={handleSendTelegram}
+                      disabled={isSending || loading}
+                      className="saas-btn saas-btn-primary controls-btn-primary"
+                      style={{ background: '#0088cc', borderColor: '#0077b5', color: '#fff', fontWeight: 'bold' }}
+                    >
+                      <span className="desktop-only-inline">{isSending ? '🚀 Dispatching...' : '🚀 Send Daily Report to Telegram'}</span>
+                      <span className="mobile-only-inline">{isSending ? '🚀 Sending...' : '🚀 Send Daily'}</span>
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <button
+                      onClick={handlePrintA4}
+                      className="saas-btn saas-btn-secondary controls-btn-secondary"
+                      style={{ fontWeight: 'bold' }}
+                    >
+                      <span className="desktop-only-inline">🖨️ Print A4 PDF</span>
+                      <span className="mobile-only-inline">🖨️ Print PDF</span>
+                    </button>
+                    {/* 🔥 RESTORED THE PDF SEND BUTTON HERE */}
+                    <button
+                      onClick={handleSendMonthlyTelegram}
+                      disabled={isSending || loading}
+                      className="saas-btn saas-btn-primary controls-btn-primary"
+                      style={{ background: '#0088cc', borderColor: '#0077b5', color: '#fff', fontWeight: 'bold' }}
+                    >
+                      <span className="desktop-only-inline">{isSending ? '📄 Creating PDF...' : '📄 Send Monthly PDF to Telegram'}</span>
+                      <span className="mobile-only-inline">{isSending ? '📄 Sending...' : '📄 Send PDF'}</span>
+                    </button>
+                  </>
+                )}
+              </div>
             </div>
 
-            {/* DYNAMIC ACTION BUTTONS */}
-            <div className="controls-actions">
-              {activeReportTab === 'daily' ? (
-                <>
-                  <button
-                    onClick={copyToClipboard}
-                    className="saas-btn saas-btn-secondary controls-btn-secondary"
-                    style={{ fontWeight: 'bold' }}
-                  >
-                    <span className="desktop-only-inline">📋 Copy Text</span>
-                    <span className="mobile-only-inline">📋 Copy</span>
-                  </button>
-                  <button
-                    onClick={handleSendTelegram}
-                    disabled={isSending || loading}
-                    className="saas-btn saas-btn-primary controls-btn-primary"
-                    style={{ background: '#0088cc', borderColor: '#0077b5', color: '#fff', fontWeight: 'bold' }}
-                  >
-                    <span className="desktop-only-inline">{isSending ? '🚀 Dispatching...' : '🚀 Send Daily Report to Telegram'}</span>
-                    <span className="mobile-only-inline">{isSending ? '🚀 Sending...' : '🚀 Send Daily'}</span>
-                  </button>
-                </>
-              ) : (
-                <>
-                  <button
-                    onClick={handlePrintA4}
-                    className="saas-btn saas-btn-secondary controls-btn-secondary"
-                    style={{ fontWeight: 'bold' }}
-                  >
-                    <span className="desktop-only-inline">📥 Download A4 PDF / Print</span>
-                    <span className="mobile-only-inline">📥 PDF / Print</span>
-                  </button>
-                  <button
-                    onClick={handleSendMonthlyTelegram}
-                    disabled={isSending || loading}
-                    className="saas-btn saas-btn-primary controls-btn-primary"
-                    style={{ background: '#0088cc', borderColor: '#0077b5', color: '#fff', fontWeight: 'bold' }}
-                  >
-                    <span className="desktop-only-inline">{isSending ? '📄 Creating PDF...' : '📄 Send Monthly PDF to Telegram'}</span>
-                    <span className="mobile-only-inline">{isSending ? '📄 Sending...' : '📄 Send PDF'}</span>
-                  </button>
-                </>
-              )}
-            </div>
+            {/* DAILY TELEGRAM PREVIEW */}
+            {activeReportTab === 'daily' && (
+              <div style={{ marginTop: '20px' }}>
+                <label style={{ display: 'block', fontSize: '11px', fontWeight: 'bold', color: '#64748b', marginBottom: '8px', textTransform: 'uppercase' }}>
+                  Exact Daily Telegram Preview
+                </label>
+                
+                {loading ? (
+                  <div style={{
+                    background: '#0f172a',
+                    padding: '20px',
+                    borderRadius: '12px',
+                    border: '1px solid #1e293b',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '12px'
+                  }}>
+                    {Array.from({ length: 6 }).map((_, i) => (
+                      <div
+                        key={i}
+                        style={{
+                          height: '14px',
+                          width: `${((i * 17) % 40) + 40}%`,
+                          background: '#1e293b',
+                          borderRadius: '4px'
+                        }}
+                      />
+                    ))}
+                  </div>
+                ) : (
+                  <pre style={{
+                    background: '#0f172a',
+                    color: '#38bdf8',
+                    padding: '20px',
+                    borderRadius: '12px',
+                    overflowX: 'auto',
+                    fontFamily: 'monospace',
+                    fontSize: '14px',
+                    lineHeight: '1.6',
+                    whiteSpace: 'pre-wrap',
+                    border: '1px solid #1e293b',
+                    margin: 0
+                  }}>
+                    {generateTelegramMessage()}
+                  </pre>
+                )}
+              </div>
+            )}
           </div>
 
-          {/* DAILY TELEGRAM PREVIEW */}
-          {activeReportTab === 'daily' && (
-            <div style={{ marginTop: '20px' }}>
-              <label style={{ display: 'block', fontSize: '11px', fontWeight: 'bold', color: '#64748b', marginBottom: '8px', textTransform: 'uppercase' }}>
-                Exact Daily Telegram Preview
-              </label>
+          {/* --- FULL MONTHLY REPORT (INCLUDES EVERY BUSINESS SUMMARY COMPONENT) --- */}
+          {activeReportTab === 'monthly' && (
+            <div 
+              ref={monthlyReportRef} 
+              className="a4-report-container fade-in" 
+              style={{
+                background: '#ffffff',
+                width: '100%',
+                maxWidth: '1200px',
+                margin: '0 auto',
+                padding: '24px',
+                borderRadius: '12px',
+                boxSizing: 'border-box'
+            }}>
               
-              {loading ? (
-                <div style={{
-                  background: '#0f172a',
-                  padding: '20px',
-                  borderRadius: '12px',
-                  border: '1px solid #1e293b',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: '12px'
-                }}>
-                  {Array.from({ length: 6 }).map((_, i) => (
-                    <div
-                      key={i}
-                      style={{
-                        height: '14px',
-                        width: `${((i * 17) % 40) + 40}%`,
-                        background: '#1e293b',
-                        borderRadius: '4px'
-                      }}
-                    />
-                  ))}
+              {/* HEADER / BRANDING */}
+              <div style={{ borderBottom: '2px solid #0f172a', paddingBottom: '16px', marginBottom: '24px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', flexWrap: 'wrap', gap: '12px' }}>
+                <div>
+                  <h1 style={{ fontSize: '24px', fontWeight: 'bold', margin: '0 0 6px 0', textTransform: 'uppercase', color: '#0f172a' }}>
+                    Rice Business Monthly Report
+                  </h1>
+                  <div style={{ fontSize: '13px', color: '#64748b' }}>
+                    Comprehensive Financial Statement & Operational Insights
+                  </div>
                 </div>
-              ) : (
-                <pre style={{
-                  background: '#0f172a',
-                  color: '#38bdf8',
-                  padding: '20px',
-                  borderRadius: '12px',
-                  overflowX: 'auto',
-                  fontFamily: 'monospace',
-                  fontSize: '14px',
-                  lineHeight: '1.6',
-                  whiteSpace: 'pre-wrap',
-                  border: '1px solid #1e293b',
-                  margin: 0
-                }}>
-                  {generateTelegramMessage()}
-                </pre>
-              )}
+                <div style={{ textAlign: 'right' }}>
+                  <div style={{ fontSize: '16px', fontWeight: 'bold', color: '#b58a3d' }}>{currentMonthName}</div>
+                  <div style={{ fontSize: '11px', color: '#94a3b8' }}>Generated: {new Date().toLocaleDateString('en-GB')}</div>
+                </div>
+              </div>
+
+              {/* SECTION 1: EXECUTIVE INSIGHT CARDS */}
+              <h3 className="section-divider" style={{ fontWeight: 'bold' }}>📌 EXECUTIVE SUMMARY & KEY INSIGHTS</h3>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '16px', marginBottom: '24px' }}>
+                
+                <div className="saas-card" style={{ borderLeft: '4px solid #10b981' }}>
+                  <div className="saas-card-title">Gross Profit Margin</div>
+                  <div style={{ fontSize: '28px', fontWeight: 'bold', color: '#10b981', margin: '12px 0 4px 0' }}>
+                    {monthlyInsights.margin}%
+                  </div>
+                  <div style={{ fontSize: '12px', color: '#64748b' }}>Based on monthly gross sales</div>
+                </div>
+
+                <div className="saas-card" style={{ borderLeft: '4px solid #3b82f6' }}>
+                  <div className="saas-card-title">Net Retained Cash Flow</div>
+                  <div style={{ fontSize: '24px', fontWeight: 'bold', color: monthlyInsights.netCashFlowRiel >= 0 ? '#10b981' : '#ef4444', margin: '12px 0 4px 0' }}>
+                    {formatRiel(monthlyInsights.netCashFlowRiel)}
+                  </div>
+                  <div style={{ fontSize: '12px', color: '#64748b' }}>After all operational & personal expenses</div>
+                </div>
+
+                <div className="saas-card" style={{ borderLeft: '4px solid #f59e0b' }}>
+                  <div className="saas-card-title">Largest Expense Category</div>
+                  <div style={{ fontSize: '18px', fontWeight: 'bold', color: '#334155', margin: '12px 0 4px 0' }}>
+                    {monthlyInsights.topCat}
+                  </div>
+                  <div style={{ fontSize: '13px', color: '#f59e0b', fontWeight: 'bold' }}>
+                    {formatRiel(monthlyInsights.topCatAmount)}
+                  </div>
+                </div>
+              </div>
+
+              <div className="saas-card" style={{ background: '#f8fafc', marginBottom: '32px', border: '1px solid #e2e8f0' }}>
+                <p style={{ fontSize: '13px', color: '#334155', margin: 0, lineHeight: '1.6' }}>
+                  <b>Operational Conclusion:</b> During {currentMonthName}, the business achieved total sales of <b>{formatRiel(month.totalSales)}</b> with a gross profit of <b>{formatRiel(month.totalProfit)}</b>. After accounting for all operational and personal expenses of <b>{formatRiel(monthlyInsights.totalExpenseRielEq)}</b> (converted equivalent), the net retained cash flow stands at <b>{formatRiel(monthlyInsights.netCashFlowRiel)}</b>.
+                </p>
+              </div>
+
+              {/* SECTION 2: TODAY'S PERFORMANCE */}
+              <h2 className="section-divider" style={{ fontWeight: 'bold' }}>📅 TODAY'S PERFORMANCE</h2>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '16px', marginBottom: '32px' }}>
+                <ComplexCard title="Today Sales" total={todayM.totalSales} pich={todayM.pichSales} jing={todayM.jingSales} both={todayM.bothSales} mom={todayM.momSales} color="#2563eb" hideUsdEquiv={true} />
+                <ComplexCard title="Today Profit" total={todayM.totalProfit} pich={todayM.pichProfit} jing={todayM.jingProfit} both={todayM.bothProfit} mom={todayM.momProfit} color="#10b981" hideUsdEquiv={true} />
+                <ExpenseBreakdownCard title="Cash Collected (Direct)" cR={todayC.cR} cU={todayC.cU} qR={todayC.qR} qU={todayC.qU} color="#3b82f6" />
+                <ExpenseBreakdownCard title="Today Biz Expenses" cR={todayE.bizCashRiel} cU={todayE.bizCashUsd} qR={todayE.bizQrRiel} qU={todayE.bizQrUsd} color="#b91c1c" />
+                <ExpenseBreakdownCard title="Today Personal Exp" cR={todayE.persCashRiel} cU={todayE.persCashUsd} qR={todayE.persQrRiel} qU={todayE.persQrUsd} color="#f59e0b" />
+              </div>
+
+              {/* SECTION 3: MONTH TO DATE (MTD) PERFORMANCE */}
+              <h2 className="section-divider" style={{ fontWeight: 'bold' }}>📈 MONTH TO DATE (MTD)</h2>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '16px', marginBottom: '32px' }}>
+                <ComplexCard title="MTD Sales" total={mtdM.totalSales} pich={mtdM.pichSales} jing={mtdM.jingSales} both={mtdM.bothSales} mom={mtdM.momSales} color="#2563eb" />
+                <ComplexCard title="MTD Profit" total={mtdM.totalProfit} pich={mtdM.pichProfit} jing={mtdM.jingProfit} both={mtdM.bothProfit} mom={mtdM.momProfit} color="#10b981" />
+                <ExpenseBreakdownCard title="Cash Collected (Direct)" cR={mtdC.cR} cU={mtdC.cU} qR={mtdC.qR} qU={mtdC.qU} color="#3b82f6" />
+                <ExpenseBreakdownCard title="MTD Biz Expenses" cR={mtdE.bizCashRiel} cU={mtdE.bizCashUsd} qR={mtdE.bizQrRiel} qU={mtdE.bizQrUsd} color="#b91c1c" />
+                <ExpenseBreakdownCard title="MTD Personal Exp" cR={mtdE.persCashRiel} cU={mtdE.persCashUsd} qR={mtdE.persQrRiel} qU={mtdE.persQrUsd} color="#f59e0b" />
+              </div>
+
+              {/* SECTION 4: TOP PERFORMERS */}
+              <h2 className="section-divider" style={{ fontWeight: 'bold' }}>🏆 MTD TOP PERFORMERS (WHOLESALE)</h2>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '16px', marginBottom: '32px' }}>
+                <TopPerformersCard title="Top 3 Wholesale (By Volume)" data={wholesaleTopMTD.topByQty} type="qty" />
+                <TopPerformersCard title="Top 3 Wholesale (By Profit)" data={wholesaleTopMTD.topByProfit} type="profit" />
+              </div>
+              
+              <h2 className="section-divider" style={{ fontWeight: 'bold' }}>🏆 MTD TOP PERFORMERS (RETAIL)</h2>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '16px', marginBottom: '32px' }}>
+                <TopPerformersCard title="Top 3 Retail (By Volume)" data={retailTopMTD.topByQty} type="qty" />
+                <TopPerformersCard title="Top 3 Retail (By Profit)" data={retailTopMTD.topByProfit} type="profit" />
+              </div>
+
+              {/* SECTION 5: COMPARE MTD VS LAST MONTH */}
+              <h2 className="section-divider" style={{ fontWeight: 'bold' }}>⚖️ COMPARE MTD VS LAST MONTH</h2>
+              <div className="saas-card" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '20px', marginBottom: '32px' }}>
+                <HealthBar title="Sales" current={mtdM.totalSales} target={lastMonthM.totalSales} color="#2563eb" />
+                <HealthBar title="Profit" current={mtdM.totalProfit} target={lastMonthM.totalProfit} color="#10b981" />
+                <HealthBar title="Biz Expenses" current={mtdE.bizCashRiel + mtdE.bizQrRiel + (mtdE.bizCashUsd*EXCHANGE_RATE)} target={lastMonthE.bizCashRiel + lastMonthE.bizQrRiel + (lastMonthE.bizCashUsd*EXCHANGE_RATE)} color="#b91c1c" reverseLogic />
+                <HealthBar title="Personal Expenses" current={mtdE.persCashRiel + mtdE.persQrRiel + (mtdE.persCashUsd*EXCHANGE_RATE)} target={lastMonthE.persCashRiel + lastMonthE.persQrRiel + (lastMonthE.persCashUsd*EXCHANGE_RATE)} color="#f59e0b" reverseLogic />
+              </div>
+
+              {/* SECTION 6: TREND ANALYSIS CHARTS */}
+              <h2 className="section-divider" style={{ fontWeight: 'bold' }}>📉 TREND ANALYSIS (Day 1 - 31)</h2>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '24px', marginBottom: '40px' }}>
+                <LineChartCard title="Total Sales: This Month vs Last Month" dataCurrent={thisMonthData.dailySales} dataLast={lastMonthData.dailySales} color="#2563eb" />
+                <LineChartCard title="Total Profit: This Month vs Last Month" dataCurrent={thisMonthData.dailyProfit} dataLast={lastMonthData.dailyProfit} color="#10b981" />
+              </div>
+
+              {/* SECTION 7: EXPENSES BY CATEGORY TABLE */}
+              <h3 className="section-divider" style={{ fontWeight: 'bold' }}>📂 EXPENSE CATEGORIZATION ANALYSIS</h3>
+              <div className="saas-table-wrapper" style={{ marginBottom: '40px' }}>
+                <div className="saas-table-responsive">
+                  <table className="saas-table">
+                    <thead>
+                      <tr>
+                        <th className="saas-th">Category / Function</th>
+                        <th className="saas-th" style={{ textAlign: 'right' }}>Total (KHR ៛)</th>
+                        <th className="saas-th" style={{ textAlign: 'right' }}>Total (USD $)</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {Object.entries(month.categoryBreakdown).length === 0 ? (
+                        <tr>
+                          <td colSpan={3} style={{ padding: '20px', textAlign: 'center', color: '#94a3b8' }}>
+                            No expenses recorded this month.
+                          </td>
+                        </tr>
+                      ) : (
+                        Object.entries(month.categoryBreakdown)
+                          .sort((a, b) => (b[1].riel + b[1].usd * EXCHANGE_RATE) - (a[1].riel + a[1].usd * EXCHANGE_RATE))
+                          .map(([cat, val]) => (
+                            <tr key={cat} className="saas-tr">
+                              <td className="saas-td" style={{ fontWeight: 'bold', color: '#334155' }}>{cat}</td>
+                              <td className="saas-td" style={{ textAlign: 'right', fontWeight: 'bold', color: '#ef4444' }}>{formatRiel(val.riel)}</td>
+                              <td className="saas-td" style={{ textAlign: 'right', fontWeight: 'bold', color: '#ef4444' }}>{formatUSD(val.usd)}</td>
+                            </tr>
+                          ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* FOOTER SIGNATURES */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', paddingTop: '20px', borderTop: '1px dashed #cbd5e1' }}>
+                <div>
+                  <div style={{ marginBottom: '30px', fontWeight: 'bold', color: '#0f172a' }}>Prepared By: ___________________</div>
+                  <div style={{ color: '#64748b' }}>Accountant / POS System</div>
+                </div>
+                <div>
+                  <div style={{ marginBottom: '30px', fontWeight: 'bold', color: '#0f172a' }}>Approved By: ___________________</div>
+                  <div style={{ color: '#64748b' }}>Business Ownership</div>
+                </div>
+              </div>
+
             </div>
           )}
+
         </div>
 
-        {/* --- FULL MONTHLY REPORT (INCLUDES EVERY BUSINESS SUMMARY COMPONENT) --- */}
-        {activeReportTab === 'monthly' && (
-          <div className="a4-report-container fade-in" style={{
-            background: '#ffffff',
-            width: '100%',
-            maxWidth: '1200px',
-            margin: '0 auto',
-            padding: '24px',
-            borderRadius: '12px',
-            boxSizing: 'border-box'
-          }}>
-            
-            {/* HEADER / BRANDING */}
-            <div style={{ borderBottom: '2px solid #0f172a', paddingBottom: '16px', marginBottom: '24px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', flexWrap: 'wrap', gap: '12px' }}>
-              <div>
-                <h1 style={{ fontSize: '24px', fontWeight: 'bold', margin: '0 0 6px 0', textTransform: 'uppercase', color: '#0f172a' }}>
-                  Rice Business Monthly Report
-                </h1>
-                <div style={{ fontSize: '13px', color: '#64748b' }}>
-                  Comprehensive Financial Statement & Operational Insights
-                </div>
-              </div>
-              <div style={{ textAlign: 'right' }}>
-                <div style={{ fontSize: '16px', fontWeight: 'bold', color: '#b58a3d' }}>{currentMonthName}</div>
-                <div style={{ fontSize: '11px', color: '#94a3b8' }}>Generated: {new Date().toLocaleDateString('en-GB')}</div>
-              </div>
-            </div>
-
-            {/* SECTION 1: EXECUTIVE INSIGHT CARDS */}
-            <h3 className="section-divider" style={{ fontWeight: 'bold' }}>📌 EXECUTIVE SUMMARY & KEY INSIGHTS</h3>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '16px', marginBottom: '24px' }}>
-              
-              <div className="saas-card" style={{ borderLeft: '4px solid #10b981' }}>
-                <div className="saas-card-title">Gross Profit Margin</div>
-                <div style={{ fontSize: '28px', fontWeight: 'bold', color: '#10b981', margin: '12px 0 4px 0' }}>
-                  {monthlyInsights.margin}%
-                </div>
-                <div style={{ fontSize: '12px', color: '#64748b' }}>Based on monthly gross sales</div>
-              </div>
-
-              <div className="saas-card" style={{ borderLeft: '4px solid #3b82f6' }}>
-                <div className="saas-card-title">Net Retained Cash Flow</div>
-                <div style={{ fontSize: '24px', fontWeight: 'bold', color: monthlyInsights.netCashFlowRiel >= 0 ? '#10b981' : '#ef4444', margin: '12px 0 4px 0' }}>
-                  {formatRiel(monthlyInsights.netCashFlowRiel)}
-                </div>
-                <div style={{ fontSize: '12px', color: '#64748b' }}>After all operational & personal expenses</div>
-              </div>
-
-              <div className="saas-card" style={{ borderLeft: '4px solid #f59e0b' }}>
-                <div className="saas-card-title">Largest Expense Category</div>
-                <div style={{ fontSize: '18px', fontWeight: 'bold', color: '#334155', margin: '12px 0 4px 0' }}>
-                  {monthlyInsights.topCat}
-                </div>
-                <div style={{ fontSize: '13px', color: '#f59e0b', fontWeight: 'bold' }}>
-                  {formatRiel(monthlyInsights.topCatAmount)}
-                </div>
-              </div>
-            </div>
-
-            <div className="saas-card" style={{ background: '#f8fafc', marginBottom: '32px', border: '1px solid #e2e8f0' }}>
-              <p style={{ fontSize: '13px', color: '#334155', margin: 0, lineHeight: '1.6' }}>
-                <b>Operational Conclusion:</b> During {currentMonthName}, the business achieved total sales of <b>{formatRiel(month.totalSales)}</b> with a gross profit of <b>{formatRiel(month.totalProfit)}</b>. After accounting for all operational and personal expenses of <b>{formatRiel(monthlyInsights.totalExpenseRielEq)}</b> (converted equivalent), the net retained cash flow stands at <b>{formatRiel(monthlyInsights.netCashFlowRiel)}</b>.
-              </p>
-            </div>
-
-            {/* SECTION 2: TODAY'S PERFORMANCE */}
-            <h2 className="section-divider" style={{ fontWeight: 'bold' }}>📅 TODAY'S PERFORMANCE</h2>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '16px', marginBottom: '32px' }}>
-              <ComplexCard title="Today Sales" total={todayM.totalSales} pich={todayM.pichSales} jing={todayM.jingSales} both={todayM.bothSales} mom={todayM.momSales} color="#2563eb" hideUsdEquiv={true} />
-              <ComplexCard title="Today Profit" total={todayM.totalProfit} pich={todayM.pichProfit} jing={todayM.jingProfit} both={todayM.bothProfit} mom={todayM.momProfit} color="#10b981" hideUsdEquiv={true} />
-              <ExpenseBreakdownCard title="Cash Collected (Direct)" cR={todayC.cR} cU={todayC.cU} qR={todayC.qR} qU={todayC.qU} color="#3b82f6" />
-              <ExpenseBreakdownCard title="Today Biz Expenses" cR={todayE.bizCashRiel} cU={todayE.bizCashUsd} qR={todayE.bizQrRiel} qU={todayE.bizQrUsd} color="#b91c1c" />
-              <ExpenseBreakdownCard title="Today Personal Exp" cR={todayE.persCashRiel} cU={todayE.persCashUsd} qR={todayE.persQrRiel} qU={todayE.persQrUsd} color="#f59e0b" />
-            </div>
-
-            {/* SECTION 3: MONTH TO DATE (MTD) PERFORMANCE */}
-            <h2 className="section-divider" style={{ fontWeight: 'bold' }}>📈 MONTH TO DATE (MTD)</h2>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '16px', marginBottom: '32px' }}>
-              <ComplexCard title="MTD Sales" total={mtdM.totalSales} pich={mtdM.pichSales} jing={mtdM.jingSales} both={mtdM.bothSales} mom={mtdM.momSales} color="#2563eb" />
-              <ComplexCard title="MTD Profit" total={mtdM.totalProfit} pich={mtdM.pichProfit} jing={mtdM.jingProfit} both={mtdM.bothProfit} mom={mtdM.momProfit} color="#10b981" />
-              <ExpenseBreakdownCard title="Cash Collected (Direct)" cR={mtdC.cR} cU={mtdC.cU} qR={mtdC.qR} qU={mtdC.qU} color="#3b82f6" />
-              <ExpenseBreakdownCard title="MTD Biz Expenses" cR={mtdE.bizCashRiel} cU={mtdE.bizCashUsd} qR={mtdE.bizQrRiel} qU={mtdE.bizQrUsd} color="#b91c1c" />
-              <ExpenseBreakdownCard title="MTD Personal Exp" cR={mtdE.persCashRiel} cU={mtdE.persCashUsd} qR={mtdE.persQrRiel} qU={mtdE.persQrUsd} color="#f59e0b" />
-            </div>
-
-            {/* SECTION 4: TOP PERFORMERS */}
-            <h2 className="section-divider" style={{ fontWeight: 'bold' }}>🏆 MTD TOP PERFORMERS (WHOLESALE)</h2>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '16px', marginBottom: '32px' }}>
-              <TopPerformersCard title="Top 3 Wholesale (By Volume)" data={wholesaleTopMTD.topByQty} type="qty" />
-              <TopPerformersCard title="Top 3 Wholesale (By Profit)" data={wholesaleTopMTD.topByProfit} type="profit" />
-            </div>
-            
-            <h2 className="section-divider" style={{ fontWeight: 'bold' }}>🏆 MTD TOP PERFORMERS (RETAIL)</h2>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '16px', marginBottom: '32px' }}>
-              <TopPerformersCard title="Top 3 Retail (By Volume)" data={retailTopMTD.topByQty} type="qty" />
-              <TopPerformersCard title="Top 3 Retail (By Profit)" data={retailTopMTD.topByProfit} type="profit" />
-            </div>
-
-            {/* SECTION 5: COMPARE MTD VS LAST MONTH */}
-            <h2 className="section-divider" style={{ fontWeight: 'bold' }}>⚖️ COMPARE MTD VS LAST MONTH</h2>
-            <div className="saas-card" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '20px', marginBottom: '32px' }}>
-              <HealthBar title="Sales" current={mtdM.totalSales} target={lastMonthM.totalSales} color="#2563eb" />
-              <HealthBar title="Profit" current={mtdM.totalProfit} target={lastMonthM.totalProfit} color="#10b981" />
-              <HealthBar title="Biz Expenses" current={mtdE.bizCashRiel + mtdE.bizQrRiel + (mtdE.bizCashUsd*EXCHANGE_RATE)} target={lastMonthE.bizCashRiel + lastMonthE.bizQrRiel + (lastMonthE.bizCashUsd*EXCHANGE_RATE)} color="#b91c1c" reverseLogic />
-              <HealthBar title="Personal Expenses" current={mtdE.persCashRiel + mtdE.persQrRiel + (mtdE.persCashUsd*EXCHANGE_RATE)} target={lastMonthE.persCashRiel + lastMonthE.persQrRiel + (lastMonthE.persCashUsd*EXCHANGE_RATE)} color="#f59e0b" reverseLogic />
-            </div>
-
-            {/* SECTION 6: TREND ANALYSIS CHARTS */}
-            <h2 className="section-divider" style={{ fontWeight: 'bold' }}>📉 TREND ANALYSIS (Day 1 - 31)</h2>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '24px', marginBottom: '40px' }}>
-              <LineChartCard title="Total Sales: This Month vs Last Month" dataCurrent={thisMonthData.dailySales} dataLast={lastMonthData.dailySales} color="#2563eb" />
-              <LineChartCard title="Total Profit: This Month vs Last Month" dataCurrent={thisMonthData.dailyProfit} dataLast={lastMonthData.dailyProfit} color="#10b981" />
-            </div>
-
-            {/* SECTION 7: EXPENSES BY CATEGORY TABLE */}
-            <h3 className="section-divider" style={{ fontWeight: 'bold' }}>📂 EXPENSE CATEGORIZATION ANALYSIS</h3>
-            <div className="saas-table-wrapper" style={{ marginBottom: '40px' }}>
-              <div className="saas-table-responsive">
-                <table className="saas-table">
-                  <thead>
-                    <tr>
-                      <th className="saas-th">Category / Function</th>
-                      <th className="saas-th" style={{ textAlign: 'right' }}>Total (KHR ៛)</th>
-                      <th className="saas-th" style={{ textAlign: 'right' }}>Total (USD $)</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {Object.entries(month.categoryBreakdown).length === 0 ? (
-                      <tr>
-                        <td colSpan={3} style={{ padding: '20px', textAlign: 'center', color: '#94a3b8' }}>
-                          No expenses recorded this month.
-                        </td>
-                      </tr>
-                    ) : (
-                      Object.entries(month.categoryBreakdown)
-                        .sort((a, b) => (b[1].riel + b[1].usd * EXCHANGE_RATE) - (a[1].riel + a[1].usd * EXCHANGE_RATE))
-                        .map(([cat, val]) => (
-                          <tr key={cat} className="saas-tr">
-                            <td className="saas-td" style={{ fontWeight: 'bold', color: '#334155' }}>{cat}</td>
-                            <td className="saas-td" style={{ textAlign: 'right', fontWeight: 'bold', color: '#ef4444' }}>{formatRiel(val.riel)}</td>
-                            <td className="saas-td" style={{ textAlign: 'right', fontWeight: 'bold', color: '#ef4444' }}>{formatUSD(val.usd)}</td>
-                          </tr>
-                        ))
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-
-            {/* FOOTER SIGNATURES */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', paddingTop: '20px', borderTop: '1px dashed #cbd5e1' }}>
-              <div>
-                <div style={{ marginBottom: '30px', fontWeight: 'bold', color: '#0f172a' }}>Prepared By: ___________________</div>
-                <div style={{ color: '#64748b' }}>Accountant / POS System</div>
-              </div>
-              <div>
-                <div style={{ marginBottom: '30px', fontWeight: 'bold', color: '#0f172a' }}>Approved By: ___________________</div>
-                <div style={{ color: '#64748b' }}>Business Ownership</div>
-              </div>
-            </div>
-
-          </div>
-        )}
-
-      </div>
-
-      {/* --- 🔥 EXACT RICECONTROL HEADER & MODERN MOBILE CSS --- */}
-      <style jsx global>{`
-        .fade-in { animation: fadeIn 0.3s ease-in-out; }
-        @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
-
-        /* 🔥 EXACT DESKTOP HEADER FROM REFERENCE: Middle vertical alignment, clears hamburger button */
-        .header-container { 
-          display: flex;
-          justify-content: space-between;
-          align-items: center; 
-          margin-bottom: 24px; 
-          margin-top: 0;
-          margin-left: 60px;
-          gap: 12px;
-          min-height: 48px; 
-          width: calc(100% - 60px);
-          max-width: 1600px;
-          padding-right: 24px;
-          box-sizing: border-box;
-        }
-
-        .header-left {
-          display: flex;
-          align-items: center;
-          gap: 12px;
-        }
-
-        .header-actions {
-          display: flex;
-          gap: 10px;
-          margin-left: auto;
-        }
-
-        .section-divider { 
-          font-size: 15px; 
-          color: #475569; 
-          margin-bottom: 16px; 
-          border-bottom: 1px solid #e2e8f0; 
-          padding-bottom: 6px; 
-        }
-
-        /* DESKTOP DISPATCH CONTROLS LAYOUT */
-        .controls-header {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          flex-wrap: wrap;
-          gap: 16px;
-          border-bottom: 1px solid #e2e8f0;
-          padding-bottom: 16px;
-        }
-
-        .controls-actions {
-          display: flex;
-          gap: 10px;
-          flex-wrap: wrap;
-        }
-
-        .desktop-only-inline { display: inline; }
-        .mobile-only-inline { display: none; }
-
-        /* 🔥 EXACT MOBILE HEADER (< 1024px): 54px left clears mobile menu icon cleanly */
-        @media (max-width: 1023px) { 
-          .desktop-only-inline { display: none !important; }
-          .mobile-only-inline { display: inline !important; }
+        <style jsx global>{`
+          .fade-in { animation: fadeIn 0.3s ease-in-out; }
+          @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
 
           .header-container { 
-            margin-left: 54px !important;
-            margin-right: 0 !important;
-            margin-bottom: 20px !important; 
-            margin-top: 0 !important;
-            display: flex !important;
-            flex-direction: row !important;
-            justify-content: space-between !important;
-            align-items: center !important; 
-            min-height: 44px !important;
-            width: calc(100% - 54px) !important;
-            padding-right: 16px !important;
+            display: flex;
+            justify-content: space-between;
+            align-items: center; 
+            margin-bottom: 24px; 
+            margin-top: 0;
+            margin-left: 60px;
+            gap: 12px;
+            min-height: 48px; 
+            width: calc(100% - 60px);
+            max-width: 1600px;
+            padding-right: 24px;
+            box-sizing: border-box;
           }
 
           .header-left {
-            display: flex !important;
-            flex-direction: row !important;
-            align-items: center !important;
-            gap: 12px !important;
-          }
-
-          .saas-page-title {
-            font-size: 16px !important;
-            margin: 0 !important;
+            display: flex;
+            align-items: center;
+            gap: 12px;
           }
 
           .header-actions {
-            margin-left: auto !important;
+            display: flex;
+            gap: 10px;
+            margin-left: auto;
           }
 
-          /* 🔥 MOBILE DISPATCH CARD: Segmented tabs & stretchy buttons */
+          .section-divider { 
+            font-size: 15px; 
+            color: #475569; 
+            margin-bottom: 16px; 
+            border-bottom: 1px solid #e2e8f0; 
+            padding-bottom: 6px; 
+          }
+
           .controls-header {
-            flex-direction: column !important;
-            align-items: stretch !important;
-            gap: 14px !important;
-          }
-
-          .controls-tabs {
-            display: flex !important;
-            width: 100% !important;
-          }
-
-          .controls-tabs .saas-tab {
-            flex: 1 !important;
-            text-align: center !important;
-            justify-content: center !important;
-            padding: 10px 12px !important;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 16px;
+            border-bottom: 1px solid #e2e8f0;
+            padding-bottom: 16px;
           }
 
           .controls-actions {
-            display: flex !important;
-            width: 100% !important;
-            gap: 10px !important;
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
           }
 
-          .controls-btn-secondary {
-            flex: 0 0 auto !important;
-            padding: 10px 16px !important;
-            text-align: center !important;
+          .desktop-only-inline { display: inline; }
+          .mobile-only-inline { display: none; }
+
+          @media (max-width: 1023px) { 
+            .desktop-only-inline { display: none !important; }
+            .mobile-only-inline { display: inline !important; }
+
+            .header-container { 
+              margin-left: 54px !important;
+              margin-right: 0 !important;
+              margin-bottom: 20px !important; 
+              margin-top: 0 !important;
+              display: flex !important;
+              flex-direction: row !important;
+              justify-content: space-between !important;
+              align-items: center !important; 
+              min-height: 44px !important;
+              width: calc(100% - 54px) !important;
+              padding-right: 16px !important;
+            }
+
+            .header-left {
+              display: flex !important;
+              flex-direction: row !important;
+              align-items: center !important;
+              gap: 12px !important;
+            }
+
+            .saas-page-title {
+              font-size: 16px !important;
+              margin: 0 !important;
+            }
+
+            .header-actions {
+              margin-left: auto !important;
+            }
+
+            .controls-header {
+              flex-direction: column !important;
+              align-items: stretch !important;
+              gap: 14px !important;
+            }
+
+            .controls-tabs {
+              display: flex !important;
+              width: 100% !important;
+            }
+
+            .controls-tabs .saas-tab {
+              flex: 1 !important;
+              text-align: center !important;
+              justify-content: center !important;
+              padding: 10px 12px !important;
+            }
+
+            .controls-actions {
+              display: flex !important;
+              width: 100% !important;
+              gap: 10px !important;
+            }
+
+            .controls-btn-secondary {
+              flex: 0 0 auto !important;
+              padding: 10px 16px !important;
+              text-align: center !important;
+            }
+
+            .controls-btn-primary {
+              flex: 1 !important;
+              padding: 10px 16px !important;
+              text-align: center !important;
+              justify-content: center !important;
+            }
           }
 
-          .controls-btn-primary {
-            flex: 1 !important;
-            padding: 10px 16px !important;
-            text-align: center !important;
-            justify-content: center !important;
+          @media (max-width: 480px) {
+            .saas-page-title {
+              font-size: 14px !important;
+            }
+            .saas-btn {
+              padding: 8px 12px !important;
+              font-size: 13px !important;
+            }
+            .saas-tab {
+              padding: 8px 10px !important;
+              font-size: 13px !important;
+            }
           }
-        }
 
-        @media (max-width: 480px) {
-          .saas-page-title {
-            font-size: 14px !important;
+          @media print {
+            body { background: #ffffff !important; }
+            .no-print { display: none !important; }
+            .main-wrapper {
+              padding: 0 !important;
+              margin: 0 !important;
+              box-shadow: none !important;
+              height: auto !important;
+              overflow: visible !important;
+              display: block !important;
+            }
+            .a4-report-container {
+              box-shadow: none !important;
+              width: 100% !important;
+              max-width: 100% !important;
+              padding: 0 !important;
+              margin: 0 !important;
+            }
           }
-          .saas-btn {
-            padding: 8px 12px !important;
-            font-size: 13px !important;
-          }
-          .saas-tab {
-            padding: 8px 10px !important;
-            font-size: 13px !important;
-          }
-        }
-
-        @media print {
-          body { background: #ffffff !important; }
-          .no-print { display: none !important; }
-          .main-wrapper {
-            padding: 0 !important;
-            margin: 0 !important;
-            box-shadow: none !important;
-            height: auto !important;
-            overflow: visible !important;
-            display: block !important;
-          }
-          .a4-report-container {
-            box-shadow: none !important;
-            width: 100% !important;
-            max-width: 100% !important;
-            padding: 0 !important;
-            margin: 0 !important;
-          }
-        }
-      `}</style>
-    </div>
+        `}</style>
+      </div>
+    </AdminGuard>
   )
 }
 
-/* --- CARD & CHART COMPONENT HELPER FUNCTIONS --- */
 function TopPerformersCard({ title, data, type }: any) {
   return (
     <div className="saas-card">

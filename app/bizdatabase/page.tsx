@@ -10,6 +10,7 @@ import { useDebounce } from '@/lib/useDebounce'
 import TableSkeleton from '@/components/TableSkeleton'
 import EmptyState from '@/components/EmptyState'
 import { useBranch } from '@/components/BranchContext' // 🔥 GLOBAL MEMORY IMPORTED
+import AdminGuard from '@/components/AdminGuard' // 🔒 NEW: IMPORT THE BOUNCER
 
 // Formats headers beautifully
 const formatHeader = (key: string) => {
@@ -623,8 +624,9 @@ export default function BizDatabase() {
   )
 
   return (
-    // 🔥 APP LAYOUT: Flex Column + Overflow Hidden locks the outer page
-    <div className="main-wrapper" style={{ display: 'flex', flexDirection: 'column', height: '100dvh', overflow: 'hidden' }}>
+    <AdminGuard>
+      {/* 🔥 APP LAYOUT: Flex Column + Overflow Hidden locks the outer page */}
+      <div className="main-wrapper" style={{ display: 'flex', flexDirection: 'column', height: '100dvh', overflow: 'hidden' }}>
       
       {/* HEADER (Frozen) */}
       <div className="header-container" style={{ flexShrink: 0 }}>
@@ -905,6 +907,7 @@ export default function BizDatabase() {
           .time-btn { flex: 1; padding: 10px 4px; font-size: 12px; text-align: center; }
         }
       `}</style>
-    </div>
+      </div>
+    </AdminGuard>
   )
 }
