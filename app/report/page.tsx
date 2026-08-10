@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useEffect, useState, useMemo, useRef } from 'react'
+import React, { useEffect, useState, useMemo } from 'react'
 import { supabase } from '@/lib/supabaseClient'
 import { formatRiel, formatUSD, formatNumber, parseOwner, EXCHANGE_RATE } from '@/utils/formatters'
 import { useToast } from '@/components/ToastProvider'
@@ -8,8 +8,6 @@ import TableSkeleton from '@/components/TableSkeleton'
 import { TELEGRAM_CONFIG } from '@/lib/telegramConfig'
 import { useBranch } from '@/components/BranchContext' 
 import AdminGuard from '@/components/AdminGuard' 
-import html2canvas from 'html2canvas'
-import { jsPDF } from 'jspdf'
 
 const formatUSDEquiv = (vRiel: number) => formatUSD(vRiel / EXCHANGE_RATE);
 
@@ -20,7 +18,6 @@ export default function ReportControlPage() {
   const [loading, setLoading] = useState(true)
   const [isSending, setIsSending] = useState(false)
   const [activeReportTab, setActiveReportTab] = useState<'daily' | 'monthly'>('daily')
-  const monthlyReportRef = useRef<HTMLDivElement>(null)
 
   const [wholesaleSales, setWholesaleSales] = useState<any[]>([])
   const [invoices, setInvoices] = useState<any[]>([])
@@ -321,7 +318,7 @@ export default function ReportControlPage() {
   const thisMonthData = generateDailyArray(activeSalesData, isMTD)
   const lastMonthData = generateDailyArray(activeSalesData, isLastMonth)
 
-  // --- 5. TELEGRAM MESSAGE GENERATOR (DAILY ONLY) ---
+  // --- 5. TELEGRAM MESSAGE GENERATOR ---
   const generateTelegramMessage = () => {
     const { today, month } = reportMetrics
     const cleanUSD = (val: number) => (val === 0 ? '$0' : formatUSD(val))
@@ -429,77 +426,23 @@ export default function ReportControlPage() {
     }
   }
 
-  // --- 8. 🔥 SERVERLESS MULTI-PAGE PDF ENGINE (TELEGRAM) ---
+  // --- 8. 🔥 ORIGINAL BACKEND PDF ENGINE (TELEGRAM) ---
   async function handleSendMonthlyTelegram() {
-    const activeBotToken = TELEGRAM_CONFIG.botToken
-    const activeChatId = TELEGRAM_CONFIG.chatId
-
-    if (!activeBotToken || !activeChatId) {
-      showToast('error', 'Missing Info', 'Please add your credentials to lib/telegramConfig.ts first.')
-      return
-    }
-
-    if (!monthlyReportRef.current) return;
-
     setIsSending(true)
-    showToast('info', 'Generating PDF...', 'Slicing A4 pages using device memory...')
-
+    showToast('info', 'Generating PDF...', 'Server is building your crisp, vector A4 report...')
     try {
-      // 1. Capture the exact HTML DOM in high resolution
-      const canvas = await html2canvas(monthlyReportRef.current, { 
-        scale: 2, 
-        useCORS: true,
-        backgroundColor: '#ffffff'
-      });
-      
-      const imgData = canvas.toDataURL('image/png');
-      const pdf = new jsPDF('p', 'mm', 'a4');
-      
-      // 2. A4 Pagination Math (The "Smart Slicer")
-      const pdfWidth = pdf.internal.pageSize.getWidth();
-      const pdfHeight = pdf.internal.pageSize.getHeight();
-      const renderHeight = (canvas.height * pdfWidth) / canvas.width;
-      
-      let heightLeft = renderHeight;
-      let position = 0;
-
-      // Add the first page
-      pdf.addImage(imgData, 'PNG', 0, position, pdfWidth, renderHeight);
-      heightLeft -= pdfHeight;
-
-      // Loop and add extra pages if the report is longer than one A4 sheet
-      while (heightLeft > 0) {
-        position -= pdfHeight; // Shift the image up by exactly one A4 page height
-        pdf.addPage();
-        pdf.addImage(imgData, 'PNG', 0, position, pdfWidth, renderHeight);
-        heightLeft -= pdfHeight;
-      }
-
-      const pdfBlob = pdf.output('blob');
-
-      // 3. Create an invisible form to hand directly to Telegram
-      const formData = new FormData();
-      formData.append('chat_id', activeChatId);
-      formData.append('document', pdfBlob, `Monthly_Report_Branch_${activeBranchId}.pdf`);
-      
-      // 🔥 CUSTOM DESCRIPTION ADDED HERE
-      const branchLabel = activeBranchId === 0 ? 'GLOBAL HQ' : `BRANCH ${activeBranchId}`;
-      const monthYear = new Date().toLocaleDateString('en-GB', { month: 'long', year: 'numeric' }).toUpperCase();
-      const caption = `📊 ${monthYear} — FULL EXECUTIVE BUSINESS REPORT (${branchLabel})\n\n📄 Complete multi-section statement attached (includes all MTD SaaS cards, Trend charts, and Expense categorization).`;
-      formData.append('caption', caption);
-
-      // 4. Fire it directly to Telegram! Vercel is bypassed.
-      const response = await fetch(`https://api.telegram.org/bot${activeBotToken}/sendDocument`, {
+      const response = await fetch('/api/telegram/send-monthly-pdf', {
         method: 'POST',
-        body: formData
-      });
+        headers: { 'Content-Type': 'application/json' },
+        // Sends your branch preference and requests Telegram Delivery
+        body: JSON.stringify({ branch_id: activeBranchId, downloadOnly: false }) 
+      })
+      const result = await response.json()
 
-      const result = await response.json();
-
-      if (response.ok && result.ok) {
+      if (response.ok && result.success) {
         showToast('success', 'PDF Sent!', 'The multi-page executive PDF report has been dispatched to Telegram.')
       } else {
-        throw new Error(result.description || 'Telegram rejected the PDF.')
+        throw new Error(result.error || 'Failed to dispatch PDF.')
       }
     } catch (e: any) {
       showToast('error', 'Telegram Failed', e.message)
@@ -509,47 +452,38 @@ export default function ReportControlPage() {
     }
   }
 
-  // --- 9. 🔥 LOCALLY DOWNLOAD PDF ENGINE ---
+  // --- 9. 🔥 ORIGINAL BACKEND PDF ENGINE (LOCAL DOWNLOAD) ---
   async function handleDownloadPDF() {
-    if (!monthlyReportRef.current) return;
-
     setIsSending(true)
-    showToast('info', 'Generating PDF...', 'Slicing A4 pages using device memory...')
+    showToast('info', 'Generating PDF...', 'Server is building exact A4 PDF report...')
 
     try {
-      const canvas = await html2canvas(monthlyReportRef.current, { 
-        scale: 2, 
-        useCORS: true,
-        backgroundColor: '#ffffff'
+      const res = await fetch('/api/telegram/send-monthly-pdf', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        // Passing downloadOnly: true tells your API route to return the file instead of sending to Telegram
+        body: JSON.stringify({ branch_id: activeBranchId, downloadOnly: true })
       });
-      
-      const imgData = canvas.toDataURL('image/png');
-      const pdf = new jsPDF('p', 'mm', 'a4');
-      
-      const pdfWidth = pdf.internal.pageSize.getWidth();
-      const pdfHeight = pdf.internal.pageSize.getHeight();
-      const renderHeight = (canvas.height * pdfWidth) / canvas.width;
-      
-      let heightLeft = renderHeight;
-      let position = 0;
 
-      pdf.addImage(imgData, 'PNG', 0, position, pdfWidth, renderHeight);
-      heightLeft -= pdfHeight;
-
-      while (heightLeft > 0) {
-        position -= pdfHeight; 
-        pdf.addPage();
-        pdf.addImage(imgData, 'PNG', 0, position, pdfWidth, renderHeight);
-        heightLeft -= pdfHeight;
+      if (!res.ok) {
+        const errText = await res.text();
+        throw new Error(errText.slice(0, 150) || 'Failed to generate PDF download');
       }
 
-      // Download directly to device
-      pdf.save(`Monthly_Report_Branch_${activeBranchId}.pdf`);
-      showToast('success', 'PDF Downloaded!', 'Your A4 PDF has been saved to your device.')
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `Monthly_Report_Branch_${activeBranchId}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
 
-    } catch (e: any) {
-      showToast('error', 'Download Failed', e.message)
-      console.error(e)
+      showToast('success', 'PDF Downloaded!', 'Crisp A4 PDF document downloaded successfully!');
+    } catch (err: any) {
+      console.error('Download Error:', err);
+      showToast('error', 'Download Failed', err.message || 'Could not download PDF');
     } finally {
       setIsSending(false)
     }
@@ -563,9 +497,11 @@ export default function ReportControlPage() {
 
   return (
     <AdminGuard>
-      {/* 🔥 EXACT RICECONTROL LAYOUT: Flex Column + Overflow Hidden locks outer page */}
       <div className="main-wrapper" style={{ display: 'flex', flexDirection: 'column', height: '100dvh', overflow: 'hidden' }}>
         
+        {/* 🔥 INJECTS GOOGLE FONTS FOR THE HEADLESS BROWSER TO DOWNLOAD DURING PDF CAPTURE */}
+        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Noto+Sans+Khmer:wght@400;700&display=swap" rel="stylesheet" />
+
         <div className="header-container no-print" style={{ flexShrink: 0 }}>
           <div className="header-left">
             <h1 className="saas-page-title">📲 Report Automation & Dispatch</h1>
@@ -578,7 +514,6 @@ export default function ReportControlPage() {
           </div>
         </div>
 
-        {/* SCROLLING CONTENT AREA BELOW HEADER */}
         <div className="hide-scrollbar" style={{ flex: 1, overflowY: 'auto', paddingBottom: '60px' }}>
 
           <div className="saas-card no-print" style={{ padding: '20px', marginBottom: '24px' }}>
@@ -605,7 +540,6 @@ export default function ReportControlPage() {
                 </button>
               </div>
 
-              {/* DYNAMIC ACTION BUTTONS */}
               <div className="controls-actions">
                 {activeReportTab === 'daily' ? (
                   <>
@@ -629,7 +563,6 @@ export default function ReportControlPage() {
                   </>
                 ) : (
                   <>
-                    {/* 🔥 RESTORED DOWNLOAD PDF BUTTON */}
                     <button
                       onClick={handleDownloadPDF}
                       disabled={isSending || loading}
@@ -654,7 +587,6 @@ export default function ReportControlPage() {
               </div>
             </div>
 
-            {/* DAILY TELEGRAM PREVIEW */}
             {activeReportTab === 'daily' && (
               <div style={{ marginTop: '20px' }}>
                 <label style={{ display: 'block', fontSize: '11px', fontWeight: 'bold', color: '#64748b', marginBottom: '8px', textTransform: 'uppercase' }}>
@@ -704,11 +636,9 @@ export default function ReportControlPage() {
             )}
           </div>
 
-          {/* --- FULL MONTHLY REPORT (INCLUDES EVERY BUSINESS SUMMARY COMPONENT) --- */}
           {activeReportTab === 'monthly' && (
             <div 
-              ref={monthlyReportRef} 
-              className="a4-report-container" // 🔥 Removed fade-in so screenshot captures solid text
+              className="a4-report-container fade-in" 
               style={{
                 background: '#ffffff',
                 width: '100%',
@@ -717,15 +647,10 @@ export default function ReportControlPage() {
                 padding: '24px',
                 borderRadius: '12px',
                 boxSizing: 'border-box',
-                // 🔥 WHITE TEXT FIX: Forces rendering to be solid, properly spaced, and uses System font
-                fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Noto Sans Khmer"',
-                fontVariantLigatures: 'none', 
-                textRendering: 'geometricPrecision',
-                letterSpacing: 'normal',
-                opacity: 1 
+                // 🔥 THE PDF FONT FIX: Using the Google Font we injected above so Vercel renders it perfectly!
+                fontFamily: "'Inter', 'Noto Sans Khmer', sans-serif"
             }}>
               
-              {/* HEADER / BRANDING */}
               <div style={{ borderBottom: '2px solid #0f172a', paddingBottom: '16px', marginBottom: '24px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', flexWrap: 'wrap', gap: '12px' }}>
                 <div>
                   <h1 style={{ fontSize: '24px', fontWeight: 'bold', margin: '0 0 6px 0', textTransform: 'uppercase', color: '#0f172a' }}>
@@ -741,7 +666,6 @@ export default function ReportControlPage() {
                 </div>
               </div>
 
-              {/* SECTION 1: EXECUTIVE INSIGHT CARDS */}
               <h3 className="section-divider" style={{ fontWeight: 'bold' }}>📌 EXECUTIVE SUMMARY & KEY INSIGHTS</h3>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '16px', marginBottom: '24px' }}>
                 
@@ -778,7 +702,6 @@ export default function ReportControlPage() {
                 </p>
               </div>
 
-              {/* SECTION 2: TODAY'S PERFORMANCE */}
               <h2 className="section-divider" style={{ fontWeight: 'bold' }}>📅 TODAY'S PERFORMANCE</h2>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '16px', marginBottom: '32px' }}>
                 <ComplexCard title="Today Sales" total={todayM.totalSales} pich={todayM.pichSales} jing={todayM.jingSales} both={todayM.bothSales} mom={todayM.momSales} color="#2563eb" hideUsdEquiv={true} />
@@ -788,8 +711,7 @@ export default function ReportControlPage() {
                 <ExpenseBreakdownCard title="Today Personal Exp" cR={todayE.persCashRiel} cU={todayE.persCashUsd} qR={todayE.persQrRiel} qU={todayE.persQrUsd} color="#f59e0b" />
               </div>
 
-              {/* SECTION 3: MONTH TO DATE (MTD) PERFORMANCE */}
-              <h2 className="section-divider" style={{ fontWeight: 'bold' }}>📈 MONTH TO DATE (MTD)</h2>
+              <h2 className="section-divider" style={{ fontWeight: 'bold' }}>📈 MONTH TO DATE (MTD) PERFORMANCE</h2>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '16px', marginBottom: '32px' }}>
                 <ComplexCard title="MTD Sales" total={mtdM.totalSales} pich={mtdM.pichSales} jing={mtdM.jingSales} both={mtdM.bothSales} mom={mtdM.momSales} color="#2563eb" />
                 <ComplexCard title="MTD Profit" total={mtdM.totalProfit} pich={mtdM.pichProfit} jing={mtdM.jingProfit} both={mtdM.bothProfit} mom={mtdM.momProfit} color="#10b981" />
@@ -798,7 +720,6 @@ export default function ReportControlPage() {
                 <ExpenseBreakdownCard title="MTD Personal Exp" cR={mtdE.persCashRiel} cU={mtdE.persCashUsd} qR={mtdE.persQrRiel} qU={mtdE.persQrUsd} color="#f59e0b" />
               </div>
 
-              {/* SECTION 4: TOP PERFORMERS */}
               <h2 className="section-divider" style={{ fontWeight: 'bold' }}>🏆 MTD TOP PERFORMERS (WHOLESALE)</h2>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '16px', marginBottom: '32px' }}>
                 <TopPerformersCard title="Top 3 Wholesale (By Volume)" data={wholesaleTopMTD.topByQty} type="qty" />
@@ -811,7 +732,6 @@ export default function ReportControlPage() {
                 <TopPerformersCard title="Top 3 Retail (By Profit)" data={retailTopMTD.topByProfit} type="profit" />
               </div>
 
-              {/* SECTION 5: COMPARE MTD VS LAST MONTH */}
               <h2 className="section-divider" style={{ fontWeight: 'bold' }}>⚖️ COMPARE MTD VS LAST MONTH</h2>
               <div className="saas-card" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '20px', marginBottom: '32px' }}>
                 <HealthBar title="Sales" current={mtdM.totalSales} target={lastMonthM.totalSales} color="#2563eb" />
@@ -820,14 +740,12 @@ export default function ReportControlPage() {
                 <HealthBar title="Personal Expenses" current={mtdE.persCashRiel + mtdE.persQrRiel + (mtdE.persCashUsd*EXCHANGE_RATE)} target={lastMonthE.persCashRiel + lastMonthE.persQrRiel + (lastMonthE.persCashUsd*EXCHANGE_RATE)} color="#f59e0b" reverseLogic />
               </div>
 
-              {/* SECTION 6: TREND ANALYSIS CHARTS */}
               <h2 className="section-divider" style={{ fontWeight: 'bold' }}>📉 TREND ANALYSIS (Day 1 - 31)</h2>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '24px', marginBottom: '40px' }}>
                 <LineChartCard title="Total Sales: This Month vs Last Month" dataCurrent={thisMonthData.dailySales} dataLast={lastMonthData.dailySales} color="#2563eb" />
                 <LineChartCard title="Total Profit: This Month vs Last Month" dataCurrent={thisMonthData.dailyProfit} dataLast={lastMonthData.dailyProfit} color="#10b981" />
               </div>
 
-              {/* SECTION 7: EXPENSES BY CATEGORY TABLE */}
               <h3 className="section-divider" style={{ fontWeight: 'bold' }}>📂 EXPENSE CATEGORIZATION ANALYSIS</h3>
               <div className="saas-table-wrapper" style={{ marginBottom: '40px' }}>
                 <div className="saas-table-responsive">
@@ -862,7 +780,6 @@ export default function ReportControlPage() {
                 </div>
               </div>
 
-              {/* FOOTER SIGNATURES */}
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', paddingTop: '20px', borderTop: '1px dashed #cbd5e1' }}>
                 <div>
                   <div style={{ marginBottom: '30px', fontWeight: 'bold', color: '#0f172a' }}>Prepared By: ___________________</div>
@@ -880,6 +797,9 @@ export default function ReportControlPage() {
         </div>
 
         <style jsx global>{`
+          .fade-in { animation: fadeIn 0.3s ease-in-out; }
+          @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+
           .header-container { 
             display: flex;
             justify-content: space-between;

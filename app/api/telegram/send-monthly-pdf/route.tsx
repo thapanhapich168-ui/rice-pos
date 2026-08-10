@@ -16,16 +16,17 @@ import {
 
 export const runtime = 'nodejs'
 
-// --- 1. REGISTER BATTAMBANG FONT (ALIASED AS 'NotoSansKhmer' TO PREVENT FONTKIT xCoordinate CRASHES) ---
+// --- 1. REGISTER MODERN UI FONTS ---
+// We register Roboto to perfectly match the sleek Sans-Serif look of your frontend UI
 Font.register({
-  family: 'NotoSansKhmer',
+  family: 'Roboto',
   fonts: [
     {
-      src: 'https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/battambang/Battambang-Regular.ttf',
+      src: 'https://cdnjs.cloudflare.com/ajax/libs/ink/3.1.10/fonts/Roboto/roboto-regular-webfont.ttf',
       fontWeight: 'normal'
     },
     {
-      src: 'https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/battambang/Battambang-Bold.ttf',
+      src: 'https://cdnjs.cloudflare.com/ajax/libs/ink/3.1.10/fonts/Roboto/roboto-bold-webfont.ttf',
       fontWeight: 'bold'
     }
   ]
@@ -41,7 +42,7 @@ const styles = StyleSheet.create({
   page: {
     padding: 35,
     paddingBottom: 45,
-    fontFamily: 'NotoSansKhmer',
+    fontFamily: 'Roboto', // 🔥 THE FIX: Using the sleek modern font instead of Khmer Serif
     backgroundColor: '#ffffff',
     color: '#0f172a'
   },
@@ -240,7 +241,7 @@ const HealthBarPDF = ({ title, current, target, color, reverseLogic = false }: a
   )
 }
 
-// --- HELPER COMPONENT: BULLETPROOF SVG TREND LINE CHART (<Path> ONLY) ---
+// --- HELPER COMPONENT: BULLETPROOF SVG TREND LINE CHART ---
 const LineChartCardPDF = ({ title, dataCurrent, dataLast, color }: any) => {
   const safeCurrent = (Array.isArray(dataCurrent) && dataCurrent.length > 0)
     ? dataCurrent.map(v => Number(v) || 0)
@@ -251,11 +252,8 @@ const LineChartCardPDF = ({ title, dataCurrent, dataLast, color }: any) => {
 
   const maxVal = Math.max(...safeCurrent, ...safeLast, 1) || 1
 
-  // SAFE PATH COMMAND GENERATOR
   const getSafePath = (arr: number[]) => {
-    if (!arr || !Array.isArray(arr) || arr.length === 0) {
-      return 'M 0 80 L 450 80'
-    }
+    if (!arr || !Array.isArray(arr) || arr.length === 0) return 'M 0 80 L 450 80'
     const len = Math.max(arr.length - 1, 1)
     const coords = arr.map((val, idx) => {
       const numVal = Number(val) || 0
@@ -466,6 +464,11 @@ const MonthlyReportPDF = ({ monthName, mtd, lastMonth, wholesaleTop, retailTop, 
 // --- API ROUTE HANDLER ---
 export async function POST(request: Request) {
   try {
+    // 🔥 THE FIX: Extract branch_id AND downloadOnly from the incoming request!
+    const body = await request.json();
+    const branch_id = body.branch_id || 0;
+    const downloadOnly = body.downloadOnly === true;
+
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
     const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
     if (!supabaseUrl || !supabaseKey) return NextResponse.json({ error: 'Missing Supabase variables' }, { status: 500 })
@@ -473,7 +476,11 @@ export async function POST(request: Request) {
     const supabase = createClient(supabaseUrl, supabaseKey)
     const botToken = TELEGRAM_CONFIG.botToken
     const chatId = TELEGRAM_CONFIG.chatId
-    if (!botToken || !chatId) return NextResponse.json({ error: 'Missing Telegram config' }, { status: 400 })
+    
+    // We only care about missing Telegram configs if we are actually sending to Telegram
+    if (!downloadOnly && (!botToken || !chatId)) {
+       return NextResponse.json({ error: 'Missing Telegram config' }, { status: 400 })
+    }
 
     const now = new Date()
     const monthName = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Phnom_Penh', month: 'long', year: 'numeric' }).format(now)
@@ -485,6 +492,21 @@ export async function POST(request: Request) {
     const lastMonthDate = new Date(Number(yearStr), Number(monthStr) - 2, 1)
     const lastMonthStart = lastMonthDate.toISOString()
 
+    // Helper to apply branch_id securely to backend queries
+    const buildQ = (table: string) => {
+      let q = supabase.from(table).select('*').gte('created_at', lastMonthStart);
+      if (branch_id !== 0) q = q.eq('branch_id', branch_id);
+      return q;
+    }
+
+    // Helper for invoice_payments (uses payment_date instead of created_at)
+    const buildQPayments = () => {
+      let q = supabase.from('invoice_payments').select('*').gte('payment_date', lastMonthStart);
+      if (branch_id !== 0) q = q.eq('branch_id', branch_id);
+      return q;
+    }
+
+    // 🔥 THE FIX: Now these queries are securely filtered by branch_id!
     const [
       { data: salesData },
       { data: invData },
@@ -492,11 +514,11 @@ export async function POST(request: Request) {
       { data: expData },
       { data: payData }
     ] = await Promise.all([
-      supabase.from('sales').select('*').gte('created_at', lastMonthStart),
-      supabase.from('invoice_summaries').select('*').gte('created_at', lastMonthStart),
-      supabase.from('retail_sales').select('*').gte('created_at', lastMonthStart),
-      supabase.from('expenses').select('*').gte('created_at', lastMonthStart),
-      supabase.from('invoice_payments').select('*').gte('payment_date', lastMonthStart)
+      buildQ('sales'),
+      buildQ('invoice_summaries'),
+      buildQ('retail_sales'),
+      buildQ('expenses'),
+      buildQPayments()
     ])
 
     const wholesaleSales = salesData || []
@@ -639,13 +661,30 @@ export async function POST(request: Request) {
       />
     )
 
+    const cleanFilename = `Monthly_Report_Branch_${branch_id}.pdf`
+
+    // 🔥 THE FIX: Convert the Node Buffer into a standard Web Blob FIRST
+    const pdfBlob = new Blob([new Uint8Array(pdfBuffer)], { type: 'application/pdf' })
+
+    // 🔥 If they only want to download, return the Blob! No more TypeScript errors.
+    if (downloadOnly) {
+       return new NextResponse(pdfBlob, {
+         status: 200,
+         headers: {
+           'Content-Type': 'application/pdf',
+           'Content-Disposition': `attachment; filename="${cleanFilename}"`,
+         }
+       });
+    }
+
+    // OTHERWISE, THEY CLICKED "SEND TO TELEGRAM", SO DO THE TELEGRAM LOGIC:
     const formData = new FormData()
     formData.append('chat_id', chatId)
-    formData.append('caption', `📊 *${monthName.toUpperCase()} — FULL EXECUTIVE BUSINESS REPORT*\n\n📄 Complete multi-section statement attached (includes all MTD SaaS cards, Trend charts, and Expense categorization).`)
+    const branchLabel = branch_id === 0 ? 'GLOBAL HQ' : `BRANCH ${branch_id}`
+    formData.append('caption', `📊 *${monthName.toUpperCase()} — FULL EXECUTIVE BUSINESS REPORT (${branchLabel})*\n\n📄 Complete multi-section statement attached (includes all MTD SaaS cards, Trend charts, and Expense categorization).`)
     formData.append('parse_mode', 'Markdown')
 
-    const cleanFilename = `Rice_Business_Report_${monthName.replace(/\s+/g, '_')}.pdf`
-    const pdfBlob = new Blob([new Uint8Array(pdfBuffer)], { type: 'application/pdf' })
+    // Attach the exact same pdfBlob here
     formData.append('document', pdfBlob, cleanFilename)
 
     const telegramRes = await fetch(`https://api.telegram.org/bot${botToken}/sendDocument`, { method: 'POST', body: formData })
