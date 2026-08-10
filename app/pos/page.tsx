@@ -106,7 +106,12 @@ const t: Record<'en' | 'kh', any> = {
 
 export default function POSPage() {
   const { showToast } = useToast();
-  const { activeBranchId } = useBranch(); // 🔥 CONNECTED TO GLOBAL MEMORY
+  const { activeBranchId } = useBranch(); 
+
+  // 🔥 1. ADD THIS BLOCK TO SET THE BROWSER TAB TITLE
+  useEffect(() => {
+    document.title = 'Point of Sales';
+  }, []);
 
   const [products, setProducts] = useState<Product[]>([])
   const [customers, setCustomers] = useState<Customer[]>([])

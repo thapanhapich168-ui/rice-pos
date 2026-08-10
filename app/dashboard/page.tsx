@@ -721,15 +721,15 @@ export default function DashboardPage() {
 
   return (
     <AdminGuard>
-      <div className="main-wrapper">
+      {/* 🔥 1. FLEXBOX WRAPPER: Locks page to exact screen height and prevents global scrolling */}
+      <div className="main-wrapper" style={{ display: 'flex', flexDirection: 'column', height: '100dvh', overflow: 'hidden', paddingBottom: 0 }}>
         
-        {/* HEADER */}
-        <div className="header-container">
+        {/* 🔥 2. HEADER (Frozen): Removed the wrapper with padding! */}
+        <div className="header-container" style={{ flexShrink: 0 }}>
           <div className="header-left">
-            <h1 className="saas-page-title" style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <h1 className="saas-page-title" style={{ display: 'flex', alignItems: 'center', gap: '12px', margin: 0 }}>
               📊 Business Dashboard
-              
-              {/* 🔥 DYNAMIC BRANCH BADGE */}
+              {/* DYNAMIC BRANCH BADGE */}
               <span style={{ 
                  fontSize: '11px', 
                  background: activeBranchId === 0 ? '#3b82f6' : '#10b981', 
@@ -744,35 +744,38 @@ export default function DashboardPage() {
               }}>
                 {activeBranchId === 0 ? '🌍' : '🏬'} {activeBranchName}
               </span>
-
             </h1>
           </div>
         </div>
 
-        {/* 🔥 MAIN TAB CONTAINER: Forced nowrap and auto overflow for horizontal scrolling! */}
-        <div className="saas-tab-container hide-scrollbar" style={{ display: 'flex', flexWrap: 'nowrap', overflowX: 'auto', width: '100%', WebkitOverflowScrolling: 'touch', marginBottom: '24px' }}>
+        {/* 🔥 3. MAIN TABS (Frozen) */}
+        <div className="saas-tab-container hide-scrollbar" style={{ display: 'flex', flexWrap: 'nowrap', overflowX: 'auto', width: '100%', WebkitOverflowScrolling: 'touch', marginBottom: activeTab === 'asset' ? '12px' : '24px', flexShrink: 0 }}>
           <button onClick={() => setActiveTab('summary')} className={`saas-tab ${activeTab === 'summary' ? 'active' : ''}`}>📈 Business Summary</button>
           <button onClick={() => setActiveTab('wholesale')} className={`saas-tab ${activeTab === 'wholesale' ? 'active' : ''}`}>🌾 Wholesale Data</button>
           <button onClick={() => setActiveTab('retail')} className={`saas-tab ${activeTab === 'retail' ? 'active' : ''}`}>🛍️ Retail Data</button>
           <button onClick={() => setActiveTab('asset')} className={`saas-tab ${activeTab === 'asset' ? 'active' : ''}`} style={activeTab === 'asset' ? { background: '#10b981', color: '#fff' } : {}}>💰 Business Asset</button>
         </div>
 
-        <div>
+        {/* ASSET SUB-TAB CONTAINER (Frozen) */}
+        {activeTab === 'asset' && (
+          <div className="saas-tab-container hide-scrollbar" style={{ margin: '0 0 24px 0', padding: '4px', border: 'none', boxShadow: 'none', background: '#f1f5f9', display: 'flex', flexWrap: 'nowrap', overflowX: 'auto', WebkitOverflowScrolling: 'touch', flexShrink: 0 }}>
+            {['today', 'yesterday', 'week', 'month', 'all'].map((f: any) => (
+              <button 
+                key={f} onClick={() => setAssetFilter(f)} 
+                className={`saas-tab ${assetFilter === f ? 'active' : ''}`}
+                style={assetFilter === f ? { background: '#0f172a', color: '#fff', padding: '8px 16px' } : { padding: '8px 16px' }}
+              >
+                {f === 'week' ? 'This Week' : f === 'month' ? 'This Month' : f === 'all' ? 'All Time' : f}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* 🔥 4. SCROLLABLE CONTENT AREA: Takes up remaining space (flex: 1) and scrolls (overflowY: auto) */}
+        <div className="hide-scrollbar" style={{ flex: 1, overflowY: 'auto', minHeight: 0, paddingBottom: '60px' }}>
           
           {activeTab === 'asset' && (
             <div className="fade-in">
-              {/* 🔥 ASSET SUB-TAB CONTAINER: Also perfectly scrollable horizontally */}
-              <div className="saas-tab-container hide-scrollbar" style={{ margin: '0 0 24px 0', padding: '4px', border: 'none', boxShadow: 'none', background: '#f1f5f9', display: 'flex', flexWrap: 'nowrap', overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
-                {['today', 'yesterday', 'week', 'month', 'all'].map((f: any) => (
-                  <button 
-                    key={f} onClick={() => setAssetFilter(f)} 
-                    className={`saas-tab ${assetFilter === f ? 'active' : ''}`}
-                    style={assetFilter === f ? { background: '#0f172a', color: '#fff', padding: '8px 16px' } : { padding: '8px 16px' }}
-                  >
-                    {f === 'week' ? 'This Week' : f === 'month' ? 'This Month' : f === 'all' ? 'All Time' : f}
-                  </button>
-                ))}
-              </div>
 
               {/* ONLY SHOW STARTING BALANCE EDITS IF NOT IN HQ MODE */}
               {activeBranchId !== 0 && (
@@ -1019,7 +1022,17 @@ export default function DashboardPage() {
                               if (invSortConfig && invSortConfig.key === col.key && invSortConfig.direction === 'asc') direction = 'desc';
                               setInvSortConfig({ key: col.key, direction });
                             }}
-                            style={{ textAlign: col.align as any, cursor: 'pointer', userSelect: 'none' }}
+                            // 🔥 4. STICKY TABLE HEADER APPLIED HERE
+                            style={{ 
+                              textAlign: col.align as any, 
+                              cursor: 'pointer', 
+                              userSelect: 'none',
+                              position: 'sticky', 
+                              top: 0, 
+                              zIndex: 30, 
+                              backgroundColor: '#f8fafc', 
+                              boxShadow: 'inset 0 -2px 0 0 #e2e8f0'
+                            }}
                           >
                             {col.label}
                             <span style={{ marginLeft: '6px', fontSize: '12px', opacity: invSortConfig?.key === col.key ? 1 : 0.3 }}>
@@ -1189,7 +1202,6 @@ export default function DashboardPage() {
               </div>
             </div>
           )}
-
         </div>
 
         <style jsx global>{`
