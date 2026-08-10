@@ -28,6 +28,11 @@ export default function RiceMixCalculator() {
   const { showToast } = useToast();
   const { activeBranchId } = useBranch(); // 🔥 TUNED INTO RADIO TOWER
 
+  // 🔥 BROWSER TAB TITLE FIX
+  useEffect(() => {
+    document.title = 'Rice Mix Calculator';
+  }, []);
+
   const [products, setProducts] = useState<Product[]>([])
   
   // Selection States
@@ -391,213 +396,243 @@ export default function RiceMixCalculator() {
   }
 
   return (
-    <div className="main-wrapper">
-      {/* HEADER */}
-      <div className="header-container">
+    // 🔥 EXACT Layout Match with Rice Inventory & COGS.
+    // Relies on your global.css `.main-wrapper` for the top boundary padding.
+    <div className="main-wrapper" style={{ display: 'flex', flexDirection: 'column', height: '100dvh', overflow: 'hidden' }}>
+      
+      {/* 🟢 HEADER (Frozen): Perfectly aligns with the absolute hamburger icon */}
+      <div className="header-container" style={{ flexShrink: 0 }}>
         <div className="header-left">
-          <h1 className="saas-page-title">🧮 Rice Mix Calculator</h1>
+          <h1 className="saas-page-title" style={{ margin: 0 }}>🧮 Rice Mix Calculator</h1>
         </div>
         <button className="saas-btn saas-btn-secondary" onClick={handleReset}>↺ Reset</button>
       </div>
 
-      {/* CALCULATOR WORKSPACE */}
-      <div className="calculator-grid">
-        {renderRiceCard('Base Rice A', rice1, rice1Qty, setRice1Qty, 'rice1')}
-        <div className="math-symbol">+</div>
-        {renderRiceCard('Base Rice B', rice2, rice2Qty, setRice2Qty, 'rice2')}
+      {/* 🟢 SCROLLABLE BOTTOM SECTION */}
+      <div className="hide-scrollbar" style={{ flex: 1, overflowY: 'auto', WebkitOverflowScrolling: 'touch', paddingBottom: '80px' }}>
         
-        {showThirdRice && (
-          <>
-            <div className="math-symbol">+</div>
-            {renderRiceCard('Base Rice C', rice3, rice3Qty, setRice3Qty, 'rice3')}
-          </>
-        )}
-      </div>
-
-      {/* TOGGLE 3RD RICE BUTTON */}
-      <div style={{ display: 'flex', justifyContent: 'center', marginTop: '24px' }}>
-        {!showThirdRice ? (
-           <button onClick={() => setShowThirdRice(true)} className="saas-btn saas-btn-secondary" style={{ border: '1px dashed #cbd5e1' }}>
-             ➕ Add 3rd Rice to Mix
-           </button>
-        ) : (
-           <button onClick={() => { setShowThirdRice(false); setRice3Id(''); setRice3Qty(''); }} className="saas-btn saas-btn-danger" style={{ background: '#fef2f2', color: '#ef4444', border: '1px dashed #fca5a5' }}>
-             ➖ Remove 3rd Rice
-           </button>
-        )}
-      </div>
-
-      {/* AUTO-CALCULATED RESULT PANEL */}
-      {calcResult && (
-        <div className="saas-card mint fade-in" style={{ marginTop: '30px', border: '2px solid #bbf7d0' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px', flexWrap: 'wrap', gap: '12px' }}>
-            <h2 className="saas-card-title" style={{ margin: 0, color: '#047857', fontSize: '16px' }}>Auto-Calculated Yield</h2>
-            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-              <button 
-                onClick={() => setSyncMode('existing')} 
-                className={`saas-btn ${syncMode === 'existing' ? 'saas-btn-primary' : 'saas-btn-secondary'}`}
-                style={syncMode === 'existing' ? { background: '#3b82f6' } : {}}
-              >
-                📦 Add to Existing
-              </button>
-              <button 
-                onClick={() => setSyncMode('new')} 
-                className={`saas-btn ${syncMode === 'new' ? 'saas-btn-primary' : 'saas-btn-secondary'}`}
-              >
-                ✨ Create New
-              </button>
-            </div>
-          </div>
+        {/* CALCULATOR WORKSPACE */}
+        <div className="calculator-grid">
+          {renderRiceCard('Base Rice A', rice1, rice1Qty, setRice1Qty, 'rice1')}
+          <div className="math-symbol">+</div>
+          {renderRiceCard('Base Rice B', rice2, rice2Qty, setRice2Qty, 'rice2')}
           
-          <div className="result-stats" style={{ marginBottom: syncMode !== 'none' ? '24px' : '0' }}>
-            <div className="stat-box" style={{ flex: 1.5 }}>
-              <span className="saas-card-title">Total Raw Mix Weight</span>
-              <span className="saas-card-metric" style={{ color: '#3b82f6' }}>
-                {calcResult.totalYieldKg.toLocaleString('en-US', { maximumFractionDigits: 2 })} <span style={{ fontSize: '16px', fontWeight: 'normal' }}>Kg</span>
-              </span>
-            </div>
-            
-            {/* Dynamic View showing exactly what this makes */}
-            <div className="stat-box highlight" style={{ flex: 2 }}>
-              <span className="saas-card-title" style={{ color: '#8a7650' }}>Will Generate Output of:</span>
-              <span className="saas-card-metric" style={{ display: 'flex', alignItems: 'baseline', gap: '8px', color: '#b58a3d' }}>
-                 {finalYield.toLocaleString('en-US', { maximumFractionDigits: 2 })} <span style={{ fontSize: '16px', fontWeight: 'bold' }}>{outputUnit}</span>
-              </span>
-              <div style={{ fontSize: '12px', color: '#64748b', marginTop: '6px', fontWeight: 'bold' }}>
-                At new COGS: <span style={{ color: '#0f172a' }}>{formatRiel(finalCogs)} per {outputUnit.slice(0,-1)}</span>
-              </div>
-            </div>
-          </div>
+          {showThirdRice && (
+            <>
+              <div className="math-symbol">+</div>
+              {renderRiceCard('Base Rice C', rice3, rice3Qty, setRice3Qty, 'rice3')}
+            </>
+          )}
+        </div>
 
-          {/* INLINE INVENTORY SYNC FORM */}
-          {syncMode !== 'none' && (
-            <div className="saas-card fade-in" style={{ background: '#f8fafc', padding: '20px', border: '1px solid #e2e8f0', boxShadow: 'none' }}>
-              <div style={{ fontSize: '14px', fontWeight: 'bold', color: '#1e293b', marginBottom: '16px' }}>
-                {syncMode === 'new' ? 'Create & Sync New Product' : 'Select Target to Sync & Overwrite'}
-              </div>
+        {/* TOGGLE 3RD RICE BUTTON */}
+        <div style={{ display: 'flex', justifyContent: 'center', marginTop: '24px' }}>
+          {!showThirdRice ? (
+             <button onClick={() => setShowThirdRice(true)} className="saas-btn saas-btn-secondary" style={{ border: '1px dashed #cbd5e1' }}>
+               ➕ Add 3rd Rice to Mix
+             </button>
+          ) : (
+             <button onClick={() => { setShowThirdRice(false); setRice3Id(''); setRice3Qty(''); }} className="saas-btn saas-btn-danger" style={{ background: '#fef2f2', color: '#ef4444', border: '1px dashed #fca5a5' }}>
+               ➖ Remove 3rd Rice
+             </button>
+          )}
+        </div>
 
-              {syncMode === 'new' ? (
-                <div style={{ display: 'flex', gap: '16px', marginBottom: '20px', flexWrap: 'wrap' }}>
-                  <div style={{ flex: 1, minWidth: '200px' }}>
-                    <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '6px' }}>New Product Name</label>
-                    <input type="text" placeholder={`e.g. Mix ${rice1?.name.split(' ')[0]}-${rice2?.name.split(' ')[0]}`} value={newMixName} onChange={e => setNewMixName(e.target.value)} className="saas-input" />
-                  </div>
-                  <div style={{ flex: 1, minWidth: '150px' }}>
-                    <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '6px' }}>Size Type</label>
-                    <select value={newMixType} onChange={(e: any) => setNewMixType(e.target.value)} className="saas-input" style={{ cursor: 'pointer' }}>
-                      <option value="wholesale">Wholesale (50kg Bag)</option>
-                      <option value="retail">Retail (1kg)</option>
-                    </select>
-                  </div>
-                  <div style={{ flex: 1, minWidth: '150px' }}>
-                    <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '6px' }}>Selling Price (៛)</label>
-                    <CurrencyInput value={newMixPrice} onChange={(v: any) => setNewMixPrice(v)} className="saas-input" />
-                  </div>
-                </div>
-              ) : (
-                <div style={{ marginBottom: '20px', position: 'relative' }}>
-                  {activeDropdown === 'target' && (
-                    <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, zIndex: 99 }} onClick={() => setActiveDropdown(null)}></div>
-                  )}
-                  {/* Target Trigger Box - NOW ACTS AS THE SEARCH INPUT */}
-                  <div style={{ position: 'relative', zIndex: activeDropdown === 'target' ? 100 : 1 }}>
-                    <input 
-                      type="text"
-                      placeholder="🔍 Search target product..."
-                      value={activeDropdown === 'target' ? dropdownSearch : (targetProd ? `${targetProd.name} (Cost: ${formatRiel(targetProd.cost_price)})` : '')}
-                      onClick={() => {
-                        if (activeDropdown !== 'target') {
-                          setActiveDropdown('target');
-                          setDropdownSearch('');
-                          setDropdownTab('wholesale');
-                        }
-                      }}
-                      onChange={(e) => {
-                        setActiveDropdown('target');
-                        setDropdownSearch(e.target.value);
-                      }}
-                      className="saas-input"
-                      style={{ 
-                        color: targetProd ? '#1e293b' : '#3b82f6', 
-                        fontWeight: 'bold', 
-                        paddingRight: '30px',
-                        borderColor: activeDropdown === 'target' ? '#3b82f6' : undefined,
-                        boxShadow: activeDropdown === 'target' ? '0 0 0 2px rgba(59, 130, 246, 0.2)' : undefined 
-                      }}
-                    />
-                    <span style={{ position: 'absolute', right: '14px', top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: '#3b82f6', fontSize: '12px' }}>▼</span>
-                  </div>
-                  
-                  {renderDropdownMenu('target')}
-                </div>
-              )}
-
-              <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '24px' }}>
-                <button onClick={handleExecuteInventorySync} disabled={isProcessing} className="saas-btn saas-btn-primary" style={{ padding: '14px 24px', fontSize: '15px' }}>
-                  {isProcessing ? 'Processing...' : `✅ Sync and Inject ${finalYield.toLocaleString('en-US', { maximumFractionDigits: 2 })} ${outputUnit}`}
+        {/* AUTO-CALCULATED RESULT PANEL */}
+        {calcResult && (
+          <div className="saas-card mint fade-in" style={{ marginTop: '30px', border: '2px solid #bbf7d0' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px', flexWrap: 'wrap', gap: '12px' }}>
+              <h2 className="saas-card-title" style={{ margin: 0, color: '#047857', fontSize: '16px' }}>Auto-Calculated Yield</h2>
+              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                <button 
+                  onClick={() => setSyncMode('existing')} 
+                  className={`saas-btn ${syncMode === 'existing' ? 'saas-btn-primary' : 'saas-btn-secondary'}`}
+                  style={syncMode === 'existing' ? { background: '#3b82f6' } : {}}
+                >
+                  📦 Add to Existing
+                </button>
+                <button 
+                  onClick={() => setSyncMode('new')} 
+                  className={`saas-btn ${syncMode === 'new' ? 'saas-btn-primary' : 'saas-btn-secondary'}`}
+                >
+                  ✨ Create New
                 </button>
               </div>
             </div>
-          )}
+            
+            <div className="result-stats" style={{ marginBottom: syncMode !== 'none' ? '24px' : '0' }}>
+              <div className="stat-box" style={{ flex: 1.5 }}>
+                <span className="saas-card-title">Total Raw Mix Weight</span>
+                <span className="saas-card-metric" style={{ color: '#3b82f6' }}>
+                  {calcResult.totalYieldKg.toLocaleString('en-US', { maximumFractionDigits: 2 })} <span style={{ fontSize: '16px', fontWeight: 'normal' }}>Kg</span>
+                </span>
+              </div>
+              
+              {/* Dynamic View showing exactly what this makes */}
+              <div className="stat-box highlight" style={{ flex: 2 }}>
+                <span className="saas-card-title" style={{ color: '#8a7650' }}>Will Generate Output of:</span>
+                <span className="saas-card-metric" style={{ display: 'flex', alignItems: 'baseline', gap: '8px', color: '#b58a3d' }}>
+                   {finalYield.toLocaleString('en-US', { maximumFractionDigits: 2 })} <span style={{ fontSize: '16px', fontWeight: 'bold' }}>{outputUnit}</span>
+                </span>
+                <div style={{ fontSize: '12px', color: '#64748b', marginTop: '6px', fontWeight: 'bold' }}>
+                  At new COGS: <span style={{ color: '#0f172a' }}>{formatRiel(finalCogs)} per {outputUnit.slice(0,-1)}</span>
+                </div>
+              </div>
+            </div>
 
-        </div>
-      )}
+            {/* INLINE INVENTORY SYNC FORM */}
+            {syncMode !== 'none' && (
+              <div className="saas-card fade-in" style={{ background: '#f8fafc', padding: '20px', border: '1px solid #e2e8f0', boxShadow: 'none' }}>
+                <div style={{ fontSize: '14px', fontWeight: 'bold', color: '#1e293b', marginBottom: '16px' }}>
+                  {syncMode === 'new' ? 'Create & Sync New Product' : 'Select Target to Sync & Overwrite'}
+                </div>
 
-      {/* HISTORY LOG */}
-      <div style={{ marginTop: '40px' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-          <h3 style={{ color: '#1e293b', margin: 0, fontSize: '16px' }}>Calculation History</h3>
-          {history.length > 0 && (
-             <button onClick={clearHistory} className="saas-btn saas-btn-danger" style={{ padding: '6px 12px', fontSize: '12px' }}>Clear History</button>
-          )}
-        </div>
-        
-        <div className="saas-table-wrapper">
-          <div className="saas-table-responsive">
-            <table className="saas-table">
-              <thead>
-                <tr>
-                  <th className="saas-th">Time</th>
-                  <th className="saas-th">Recipe Formula</th>
-                  <th className="saas-th">Final Yield</th>
-                  <th className="saas-th">Mixed COGS</th>
-                </tr>
-              </thead>
-              <tbody>
-                {history.length === 0 ? (
-                  <tr>
-                    <td colSpan={4} style={{ padding: 0 }}>
-                      <EmptyState 
-                        icon="🕒" 
-                        title="No history yet" 
-                        message="Calculations and inventory syncs will appear here." 
-                      />
-                    </td>
-                  </tr>
+                {syncMode === 'new' ? (
+                  <div style={{ display: 'flex', gap: '16px', marginBottom: '20px', flexWrap: 'wrap' }}>
+                    <div style={{ flex: 1, minWidth: '200px' }}>
+                      <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '6px' }}>New Product Name</label>
+                      <input type="text" placeholder={`e.g. Mix ${rice1?.name.split(' ')[0]}-${rice2?.name.split(' ')[0]}`} value={newMixName} onChange={e => setNewMixName(e.target.value)} className="saas-input" />
+                    </div>
+                    <div style={{ flex: 1, minWidth: '150px' }}>
+                      <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '6px' }}>Size Type</label>
+                      <select value={newMixType} onChange={(e: any) => setNewMixType(e.target.value)} className="saas-input" style={{ cursor: 'pointer' }}>
+                        <option value="wholesale">Wholesale (50kg Bag)</option>
+                        <option value="retail">Retail (1kg)</option>
+                      </select>
+                    </div>
+                    <div style={{ flex: 1, minWidth: '150px' }}>
+                      <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '6px' }}>Selling Price (៛)</label>
+                      <CurrencyInput value={newMixPrice} onChange={(v: any) => setNewMixPrice(v)} className="saas-input" />
+                    </div>
+                  </div>
                 ) : (
-                  history.map(h => (
-                    <tr key={h.id} className="saas-tr">
-                      <td className="saas-td" style={{ color: '#64748b', fontSize: '13px' }}>{h.time}</td>
-                      <td className="saas-td" style={{ color: '#334155', fontSize: '14px' }}>
-                        ({h.rice1Ratio} × <span style={{ fontWeight: 'bold', color: '#1e293b' }}>{h.rice1Name}</span>) 
-                        + ({h.rice2Ratio} × <span style={{ fontWeight: 'bold', color: '#1e293b' }}>{h.rice2Name}</span>)
-                        {h.rice3Name && h.rice3Ratio ? (
-                          <> + ({h.rice3Ratio} × <span style={{ fontWeight: 'bold', color: '#1e293b' }}>{h.rice3Name}</span>)</>
-                        ) : null}
-                      </td>
-                      <td className="saas-td" style={{ color: '#10b981', fontWeight: 'bold', fontSize: '13px' }}>{h.yieldStr || '-'}</td>
-                      <td className="saas-td" style={{ color: '#b58a3d', fontWeight: 'bold', fontSize: '14px' }}>{formatRiel(h.mixedCogs)}</td>
-                    </tr>
-                  ))
+                  <div style={{ marginBottom: '20px', position: 'relative' }}>
+                    {activeDropdown === 'target' && (
+                      <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, zIndex: 99 }} onClick={() => setActiveDropdown(null)}></div>
+                    )}
+                    {/* Target Trigger Box - NOW ACTS AS THE SEARCH INPUT */}
+                    <div style={{ position: 'relative', zIndex: activeDropdown === 'target' ? 100 : 1 }}>
+                      <input 
+                        type="text"
+                        placeholder="🔍 Search target product..."
+                        value={activeDropdown === 'target' ? dropdownSearch : (targetProd ? `${targetProd.name} (Cost: ${formatRiel(targetProd.cost_price)})` : '')}
+                        onClick={() => {
+                          if (activeDropdown !== 'target') {
+                            setActiveDropdown('target');
+                            setDropdownSearch('');
+                            setDropdownTab('wholesale');
+                          }
+                        }}
+                        onChange={(e) => {
+                          setActiveDropdown('target');
+                          setDropdownSearch(e.target.value);
+                        }}
+                        className="saas-input"
+                        style={{ 
+                          color: targetProd ? '#1e293b' : '#3b82f6', 
+                          fontWeight: 'bold', 
+                          paddingRight: '30px',
+                          borderColor: activeDropdown === 'target' ? '#3b82f6' : undefined,
+                          boxShadow: activeDropdown === 'target' ? '0 0 0 2px rgba(59, 130, 246, 0.2)' : undefined 
+                        }}
+                      />
+                      <span style={{ position: 'absolute', right: '14px', top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: '#3b82f6', fontSize: '12px' }}>▼</span>
+                    </div>
+                    
+                    {renderDropdownMenu('target')}
+                  </div>
                 )}
-              </tbody>
-            </table>
+
+                <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '24px' }}>
+                  <button onClick={handleExecuteInventorySync} disabled={isProcessing} className="saas-btn saas-btn-primary" style={{ padding: '14px 24px', fontSize: '15px' }}>
+                    {isProcessing ? 'Processing...' : `✅ Sync and Inject ${finalYield.toLocaleString('en-US', { maximumFractionDigits: 2 })} ${outputUnit}`}
+                  </button>
+                </div>
+              </div>
+            )}
+
+          </div>
+        )}
+
+        {/* HISTORY LOG */}
+        <div style={{ marginTop: '40px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+            <h3 style={{ color: '#1e293b', margin: 0, fontSize: '16px' }}>Calculation History</h3>
+            {history.length > 0 && (
+               <button onClick={clearHistory} className="saas-btn saas-btn-danger" style={{ padding: '6px 12px', fontSize: '12px' }}>Clear History</button>
+            )}
+          </div>
+          
+          <div className="saas-table-wrapper">
+            <div className="saas-table-responsive">
+              <table className="saas-table">
+                <thead>
+                  <tr>
+                    <th className="saas-th">Time</th>
+                    <th className="saas-th">Recipe Formula</th>
+                    <th className="saas-th">Final Yield</th>
+                    <th className="saas-th">Mixed COGS</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {history.length === 0 ? (
+                    <tr>
+                      <td colSpan={4} style={{ padding: 0 }}>
+                        <EmptyState 
+                          icon="🕒" 
+                          title="No history yet" 
+                          message="Calculations and inventory syncs will appear here." 
+                        />
+                      </td>
+                    </tr>
+                  ) : (
+                    history.map(h => (
+                      <tr key={h.id} className="saas-tr">
+                        <td className="saas-td" style={{ color: '#64748b', fontSize: '13px' }}>{h.time}</td>
+                        <td className="saas-td" style={{ color: '#334155', fontSize: '14px' }}>
+                          ({h.rice1Ratio} × <span style={{ fontWeight: 'bold', color: '#1e293b' }}>{h.rice1Name}</span>) 
+                          + ({h.rice2Ratio} × <span style={{ fontWeight: 'bold', color: '#1e293b' }}>{h.rice2Name}</span>)
+                          {h.rice3Name && h.rice3Ratio ? (
+                            <> + ({h.rice3Ratio} × <span style={{ fontWeight: 'bold', color: '#1e293b' }}>{h.rice3Name}</span>)</>
+                          ) : null}
+                        </td>
+                        <td className="saas-td" style={{ color: '#10b981', fontWeight: 'bold', fontSize: '13px' }}>{h.yieldStr || '-'}</td>
+                        <td className="saas-td" style={{ color: '#b58a3d', fontWeight: 'bold', fontSize: '14px' }}>{formatRiel(h.mixedCogs)}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
+
       </div>
 
       {/* --- PAGE-SPECIFIC CSS --- */}
       <style jsx global>{`
+        /* EXACT Copy from RiceControl for perfect alignment */
+        .header-container { 
+          display: flex;
+          justify-content: space-between;
+          align-items: center; 
+          margin-bottom: 24px; 
+          margin-top: 0;
+          margin-left: 60px; 
+          gap: 12px;
+          min-height: 48px; 
+          width: calc(100% - 60px); 
+          max-width: 1600px;
+          padding-right: 24px; 
+        }
+        
+        .header-left {
+          display: flex;
+          align-items: center; 
+          height: 100%;
+          gap: 12px;
+        }
+
         .dropdown-menu-container {
           position: absolute; top: calc(100% + 4px); left: 0; right: 0; background-color: #fff;
           border: 1px solid #cbd5e1; border-radius: 12px; box-shadow: 0 10px 25px rgba(0,0,0,0.15);
@@ -611,13 +646,6 @@ export default function RiceMixCalculator() {
         }
         .dropdown-result-item:hover {
           background-color: #f8fafc;
-        }
-
-        .header-container {
-          display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; margin-top: 0; margin-left: 60px; gap: 12px; min-height: 42px; width: calc(100% - 60px); max-width: 1600px;
-        }
-        .header-left {
-          display: flex; align-items: center; gap: 12px;
         }
 
         .fade-in {
@@ -649,23 +677,20 @@ export default function RiceMixCalculator() {
         }
 
         @media (max-width: 1023px) {
-          .header-container {
-            margin-left: 54px !important;
-            margin-bottom: 24px !important;
-            display: flex !important;
-            justify-content: space-between !important;
-            align-items: center !important;
+          /* EXACT Copy from RiceControl for perfect mobile alignment */
+          .header-container { 
+            margin-left: 54px !important; 
             margin-right: 0 !important;
-            margin-top: 0 !important;
-            min-height: 44px !important;
-            width: calc(100% - 54px) !important;
-          }
-          .header-left {
+            margin-bottom: 24px !important; 
+            margin-top: 0 !important; 
             display: flex !important;
             flex-direction: row !important;
-            align-items: center !important;
-            gap: 12px !important;
+            justify-content: space-between !important;
+            align-items: center !important; 
+            height: 44px !important;
+            width: calc(100% - 54px) !important;
           }
+
           .calculator-grid {
             flex-direction: column;
             align-items: stretch;

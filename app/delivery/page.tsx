@@ -14,6 +14,11 @@ export default function DeliveryPage() {
   const { showToast } = useToast();
   const { activeBranchId } = useBranch(); // 🔥 TUNED INTO RADIO TOWER
 
+  // 🔥 BROWSER TAB TITLE FIX
+  useEffect(() => {
+    document.title = 'Delivery & Credit Hub';
+  }, []);
+
   const [deliveries, setDeliveries] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [activeTab, setActiveTab] = useState<'delivery' | 'credit'>('delivery')
@@ -429,19 +434,19 @@ export default function DeliveryPage() {
   function sidebarContent() {
     if (activeTab === 'delivery') {
       return (
-        <div className="saas-table-wrapper">
-          <div className="saas-table-responsive">
+        <div className="saas-table-wrapper" style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, marginBottom: 0 }}>
+          <div className="saas-table-responsive" style={{ flex: 1, overflow: 'auto' }}>
             <table className="saas-table" style={{ minWidth: '1050px' }}>
               <thead>
                 <tr>
-                  <th className="saas-th">Date & INV</th>
-                  <th className="saas-th">Customer</th>
-                  <th className="saas-th" style={{ width: '25%' }}>Items Ordered</th>
-                  <th className="saas-th" style={{ textAlign: 'right' }}>Total (៛)</th>
-                  <th className="saas-th" style={{ textAlign: 'center' }}>Status</th>
-                  <th className="saas-th" style={{ textAlign: 'center', width: '160px' }}>Payment Method</th>
-                  <th className="saas-th" style={{ textAlign: 'right', width: '180px' }}>Pay Amount</th>
-                  <th className="saas-th" style={{ textAlign: 'center', width: '120px' }}>Complete</th>
+                  <th className="saas-th" style={{ position: 'sticky', top: 0, zIndex: 30, backgroundColor: '#f8fafc', boxShadow: 'inset 0 -2px 0 0 #e2e8f0' }}>Date & INV</th>
+                  <th className="saas-th" style={{ position: 'sticky', top: 0, zIndex: 30, backgroundColor: '#f8fafc', boxShadow: 'inset 0 -2px 0 0 #e2e8f0' }}>Customer</th>
+                  <th className="saas-th" style={{ position: 'sticky', top: 0, zIndex: 30, backgroundColor: '#f8fafc', boxShadow: 'inset 0 -2px 0 0 #e2e8f0', width: '25%' }}>Items Ordered</th>
+                  <th className="saas-th" style={{ position: 'sticky', top: 0, zIndex: 30, backgroundColor: '#f8fafc', boxShadow: 'inset 0 -2px 0 0 #e2e8f0', textAlign: 'right' }}>Total (៛)</th>
+                  <th className="saas-th" style={{ position: 'sticky', top: 0, zIndex: 30, backgroundColor: '#f8fafc', boxShadow: 'inset 0 -2px 0 0 #e2e8f0', textAlign: 'center' }}>Status</th>
+                  <th className="saas-th" style={{ position: 'sticky', top: 0, zIndex: 30, backgroundColor: '#f8fafc', boxShadow: 'inset 0 -2px 0 0 #e2e8f0', textAlign: 'center', width: '160px' }}>Payment Method</th>
+                  <th className="saas-th" style={{ position: 'sticky', top: 0, zIndex: 30, backgroundColor: '#f8fafc', boxShadow: 'inset 0 -2px 0 0 #e2e8f0', textAlign: 'right', width: '180px' }}>Pay Amount</th>
+                  <th className="saas-th" style={{ position: 'sticky', top: 0, zIndex: 30, backgroundColor: '#f8fafc', boxShadow: 'inset 0 -2px 0 0 #e2e8f0', textAlign: 'center', width: '120px' }}>Complete</th>
                 </tr>
               </thead>
               <tbody>
@@ -569,7 +574,7 @@ export default function DeliveryPage() {
           
           {/* LOAD MORE BUTTON */}
           {hasMore && (
-            <div style={{ textAlign: 'center', padding: '20px', backgroundColor: '#f8fafc', borderTop: '1px solid #e2e8f0' }}>
+            <div style={{ textAlign: 'center', padding: '20px', backgroundColor: '#f8fafc', borderTop: '1px solid #e2e8f0', flexShrink: 0 }}>
               <button 
                 onClick={() => setLoadLimit(prev => prev + 100)}
                 className="saas-btn saas-btn-secondary"
@@ -584,18 +589,18 @@ export default function DeliveryPage() {
     }
 
     return (
-      <div className="saas-table-wrapper">
-        <div className="saas-table-responsive">
+      <div className="saas-table-wrapper" style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, marginBottom: 0 }}>
+        <div className="saas-table-responsive" style={{ flex: 1, overflow: 'auto' }}>
           <table className="saas-table" style={{ minWidth: '950px' }}>
             <thead style={{ background: '#fff1f2' }}>
               <tr>
-                <th className="saas-th" style={{ color: '#be123c', borderBottom: '1px solid #ffe4e6' }}>Date</th>
-                <th className="saas-th" style={{ color: '#be123c', borderBottom: '1px solid #ffe4e6' }}>Owner</th>
-                <th className="saas-th" style={{ color: '#be123c', borderBottom: '1px solid #ffe4e6' }}>Customer & Invoices</th>
-                <th className="saas-th" style={{ color: '#be123c', borderBottom: '1px solid #ffe4e6', textAlign: 'right' }}>Total Debt (៛)</th>
-                <th className="saas-th" style={{ color: '#be123c', borderBottom: '1px solid #ffe4e6', textAlign: 'center', width: '160px' }}>Method</th>
-                <th className="saas-th" style={{ color: '#be123c', borderBottom: '1px solid #ffe4e6', textAlign: 'right', width: '180px' }}>Pay Amount (៛)</th>
-                <th className="saas-th" style={{ color: '#be123c', borderBottom: '1px solid #ffe4e6', textAlign: 'center', width: '120px' }}>Complete</th>
+                <th className="saas-th" style={{ color: '#be123c', borderBottom: '1px solid #ffe4e6', position: 'sticky', top: 0, zIndex: 30, backgroundColor: '#fff1f2', boxShadow: 'inset 0 -2px 0 0 #fecaca' }}>Date</th>
+                <th className="saas-th" style={{ color: '#be123c', borderBottom: '1px solid #ffe4e6', position: 'sticky', top: 0, zIndex: 30, backgroundColor: '#fff1f2', boxShadow: 'inset 0 -2px 0 0 #fecaca' }}>Owner</th>
+                <th className="saas-th" style={{ color: '#be123c', borderBottom: '1px solid #ffe4e6', position: 'sticky', top: 0, zIndex: 30, backgroundColor: '#fff1f2', boxShadow: 'inset 0 -2px 0 0 #fecaca' }}>Customer & Invoices</th>
+                <th className="saas-th" style={{ color: '#be123c', borderBottom: '1px solid #ffe4e6', textAlign: 'right', position: 'sticky', top: 0, zIndex: 30, backgroundColor: '#fff1f2', boxShadow: 'inset 0 -2px 0 0 #fecaca' }}>Total Debt (៛)</th>
+                <th className="saas-th" style={{ color: '#be123c', borderBottom: '1px solid #ffe4e6', textAlign: 'center', width: '160px', position: 'sticky', top: 0, zIndex: 30, backgroundColor: '#fff1f2', boxShadow: 'inset 0 -2px 0 0 #fecaca' }}>Method</th>
+                <th className="saas-th" style={{ color: '#be123c', borderBottom: '1px solid #ffe4e6', textAlign: 'right', width: '180px', position: 'sticky', top: 0, zIndex: 30, backgroundColor: '#fff1f2', boxShadow: 'inset 0 -2px 0 0 #fecaca' }}>Pay Amount (៛)</th>
+                <th className="saas-th" style={{ color: '#be123c', borderBottom: '1px solid #ffe4e6', textAlign: 'center', width: '120px', position: 'sticky', top: 0, zIndex: 30, backgroundColor: '#fff1f2', boxShadow: 'inset 0 -2px 0 0 #fecaca' }}>Complete</th>
               </tr>
             </thead>
             
@@ -732,30 +737,58 @@ export default function DeliveryPage() {
   }
 
   return (
-    <>
-      <div className="main-wrapper">
-        <div className="header-container">
-          <div className="header-left">
-            <h1 className="saas-page-title">🚚 Delivery & Credit Hub</h1>
-          </div>
+    // 🔥 EXACT Layout Match with Rice Inventory & COGS. 
+    // Uses 100dvh box split to freeze the header & tabs, leaving tables to scroll internally.
+    <div className="main-wrapper" style={{ display: 'flex', flexDirection: 'column', height: '100dvh', overflow: 'hidden', backgroundColor: '#f8fafc', boxSizing: 'border-box' }}>
+      
+      {/* 🟢 1. HEADER (FROZEN): Perfectly aligns with the absolute hamburger icon */}
+      <div className="header-container" style={{ flexShrink: 0 }}>
+        <div className="header-left">
+          <h1 className="saas-page-title" style={{ margin: 0 }}>🚚 Delivery & Credit Hub</h1>
         </div>
+      </div>
 
-        <div className="saas-tab-container" style={{ width: 'fit-content' }}>
-          <button onClick={() => setActiveTab('delivery')} className={`saas-tab ${activeTab === 'delivery' ? 'active' : ''}`}>📦 Delivery Queue</button>
-          <button onClick={() => setActiveTab('credit')} className={`saas-tab ${activeTab === 'credit' ? 'active' : ''}`}>💰 Accounts Credit ({debtorsList.length})</button>
+      {/* 🟢 2. TABS (FROZEN): TouchAction pan-x allows side scroll but blocks Safari bounce */}
+      <div className="content-container" style={{ flexShrink: 0, paddingBottom: '16px', touchAction: 'pan-x' }}>
+        <div className="saas-tab-container hide-scrollbar" style={{ width: 'fit-content', border: '1px solid #e2e8f0', background: '#fff', borderRadius: '12px', padding: '6px', margin: 0, display: 'flex', flexWrap: 'nowrap', overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
+          <button onClick={() => setActiveTab('delivery')} className={`saas-tab ${activeTab === 'delivery' ? 'active' : ''}`} style={{ flexShrink: 0, padding: '10px 24px' }}>📦 Delivery Queue</button>
+          <button onClick={() => setActiveTab('credit')} className={`saas-tab ${activeTab === 'credit' ? 'active' : ''}`} style={{ flexShrink: 0, padding: '10px 24px' }}>💰 Accounts Credit ({debtorsList.length})</button>
         </div>
+      </div>
 
-        {sidebarContent()}
+      {/* 🟢 3. SCROLLABLE AREA: Tables */}
+      <div className="hide-scrollbar" style={{ flex: 1, overflowY: 'auto', WebkitOverflowScrolling: 'touch', display: 'flex', flexDirection: 'column', paddingBottom: '40px' }}>
+        <div className="content-container" style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+          {sidebarContent()}
+        </div>
       </div>
 
       <style jsx global>{`
+        /* 🔥 BULLETPROOF SAFARI RUBBER-BANDING FIX 🔥 */
+        html, body {
+          overscroll-behavior: none !important;
+          height: 100dvh;
+          width: 100vw;
+          overflow: hidden;
+          margin: 0;
+          padding: 0;
+        }
+
+        body {
+          font-variant-numeric: tabular-nums lining-nums;
+        }
+
         input, select, button, textarea {
           font-family: inherit;
           font-variant-numeric: tabular-nums lining-nums;
         }
 
-        body {
-          font-variant-numeric: tabular-nums lining-nums;
+        .content-container {
+          width: 100%;
+          max-width: 1600px;
+          margin: 0 auto;
+          box-sizing: border-box;
+          padding: 0 24px;
         }
 
         .header-container { 
@@ -766,9 +799,11 @@ export default function DeliveryPage() {
           margin-top: 0;
           margin-left: 60px; /* Clears the burger menu icon */
           gap: 12px;
-          min-height: 42px; 
+          min-height: 48px; 
           width: calc(100% - 60px); 
           max-width: 1600px;
+          padding-right: 24px;
+          box-sizing: border-box;
         }
 
         .header-left {
@@ -785,10 +820,14 @@ export default function DeliveryPage() {
 
         /* 🔥 MOBILE LAYOUT FIXES */
         @media (max-width: 1023px) { 
+          .content-container {
+            padding: 0 16px !important;
+          }
+
           .header-container { 
             margin-left: 54px !important; /* Clears mobile hamburger button safely */
             margin-right: 0 !important;
-            margin-bottom: 24px !important; 
+            margin-bottom: 16px !important; 
             margin-top: 0 !important;
             display: flex !important;
             flex-direction: row !important;
@@ -796,6 +835,7 @@ export default function DeliveryPage() {
             align-items: center !important; 
             min-height: 44px !important;
             width: calc(100% - 54px) !important;
+            padding-right: 16px !important;
           }
 
           .header-left {
@@ -806,6 +846,6 @@ export default function DeliveryPage() {
           }
         }
       `}</style>
-    </>
+    </div>
   );
 }
