@@ -259,24 +259,24 @@ export default function InvoiceGallery() {
         }
       }
 
-      // 🟢 4. Delete Line Items (ONLY delete from 'sales' for wholesale. Do NOT delete 'retail_sales' rows!)
+      // 🟢 4. Delete Line Items from Database (Wholesale & Retail)
       if (!isRetail) {
         await supabase.from('sales').delete().eq('invoice_id', invoiceId).eq('branch_id', activeBranchId);
+      } else {
+        // 🔥 FIX: Successfully delete retail rows from the database!
+        await supabase.from('retail_sales').delete().eq('transaction_id', invoiceId).eq('branch_id', activeBranchId);
       }
 
       // 🟢 5. Delete Payments (Removes from Cash on Hand)
       await supabase.from('invoice_payments').delete().eq('invoice_id', invoiceId).eq('branch_id', activeBranchId);
 
-      // 🟢 6. Update Master Status to Voided (Marks ALL rows with that ID as Voided)
+      // 🟢 6. Update Master Status (Wholesale only, since retail rows are deleted)
       if (!isRetail) {
         await supabase.from('invoice_summaries').update({ 
           delivery_status: 'Voided',
           balance_due: 0,
           is_done: true
         }).eq('invoice_id', invoiceId).eq('branch_id', activeBranchId);
-      } else {
-        // Updates every row with this transaction_id in retail_sales to 'Voided'
-        await supabase.from('retail_sales').update({ status: 'Voided' }).eq('transaction_id', invoiceId).eq('branch_id', activeBranchId);
       }
 
       showToast('success', 'Transaction Voided', `Transaction ${invoiceId} was successfully voided!`);
