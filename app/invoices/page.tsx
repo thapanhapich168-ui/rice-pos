@@ -33,7 +33,7 @@ export default function InvoiceGallery() {
 
   // 🔥 SETS THE SAFARI BROWSER TAB TITLE
   useEffect(() => {
-    document.title = 'Invoice Gallery';
+    document.title = 'Sale Records';
   }, []);
 
   const [invoices, setInvoices] = useState<Invoice[]>([])
@@ -174,7 +174,6 @@ export default function InvoiceGallery() {
 
       if (isRetail) {
         if (invoiceId.startsWith('RET-ID-')) {
-          // Captures older retail rows that lacked a transaction_id
           const realId = invoiceId.replace('RET-ID-', '');
           const { data, error } = await supabase.from('retail_sales').select('*').eq('id', realId).eq('branch_id', activeBranchId);
           items = data || []; fetchErr = error;
@@ -191,8 +190,6 @@ export default function InvoiceGallery() {
       if (!items || items.length === 0) throw new Error(`Could not locate records for this transaction. It may already be deleted.`);
 
       // 🟢 2. PROTECTION: DELETE FROM DATABASE *FIRST*!
-      // By forcing the delete first, if the database blocks it or fails, the code throws an error and STOPS.
-      // This guarantees your stock will never artificially increase on a failed void.
       const rowIds = items.map(i => i.id);
       
       const { error: delErr } = await supabase
@@ -235,10 +232,7 @@ export default function InvoiceGallery() {
               .maybeSingle();
 
             if (prod) {
-              // Atomically restores stock safely, bypassing frontend state
               await supabase.rpc('adjust_product_stock', { p_product_id: productId, p_quantity: qty });
-            } else {
-              console.warn(`Product not found for ID: ${productId}`);
             }
 
             // B. Restore Inventory Batch
@@ -250,7 +244,6 @@ export default function InvoiceGallery() {
               .limit(1); 
             
             if (batchesInv && batchesInv.length > 0) {
-              // Atomically restores batch stock safely
               await supabase.rpc('adjust_batch_stock', { p_batch_id: batchesInv[0].id, p_quantity: qty });
             } else {
               await supabase.from('inventory_batches').insert([{
@@ -262,7 +255,7 @@ export default function InvoiceGallery() {
               }]);
             }
 
-            // C. Reverse FIFO Batches (Subtract from sold_qty in price_history)
+            // C. Reverse FIFO Batches
             let remainingToReverse = qty;
             const { data: batches } = await supabase.from('price_history')
               .select('*')
@@ -281,8 +274,6 @@ export default function InvoiceGallery() {
                 remainingToReverse -= possibleToReverse;
               }
             }
-          } else {
-            console.warn(`Could not resolve productId for item: ${riceName}`);
           }
         }
       }
@@ -427,7 +418,6 @@ export default function InvoiceGallery() {
     }
   }
 
-  // 🟢 HELPER: Classify invoice into 3 main buckets
   const getInvoiceCategory = (inv: Invoice): 'Wholesale' | 'WalkinWholesale' | 'WalkinRetail' => {
     if (inv.is_retail) return 'WalkinRetail';
     const name = (inv.customer_name || '').toLowerCase().trim();
@@ -437,7 +427,6 @@ export default function InvoiceGallery() {
     return 'Wholesale';
   };
 
-  // --- CLIENT-SIDE SEARCH & FILTER DYNAMICS ---
   const processedInvoices = invoices
     .filter(inv => {
       const isVoided = inv.delivery_status === 'Voided';
@@ -459,7 +448,6 @@ export default function InvoiceGallery() {
         if (voidSubTab === 'WalkinRetail' && cat !== 'WalkinRetail') return false;
       }
 
-      // 🚀 Debounced fast search
       if (!debouncedSearch) return true;
       const term = debouncedSearch.toLowerCase().trim();
       return (
@@ -482,150 +470,154 @@ export default function InvoiceGallery() {
       {/* 🔥 1. FLEX COLUMN WRAPPER: Splits the panel into Top (Frozen) and Bottom (Scrollable) */}
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', height: '100%', minWidth: 0, overflow: 'hidden' }}>
 
-        {/* 🔥 2. FROZEN TOP SECTION: flexShrink: 0 prevents it from scrolling away */}
-        <div className="main-wrapper-frozen" style={{ flexShrink: 0, zIndex: 10 }}>
+        {/* 🔥 2. FROZEN TOP SECTION: Title and Main Tabs (TouchAction pan-x allows side scroll, blocks Safari bounce) */}
+        <div className="main-wrapper-frozen" style={{ flexShrink: 0, zIndex: 10, touchAction: 'pan-x' }}>
           
           {/* HEADER */}
-          <div className="header-container">
+          <div className="header-container" style={{ marginBottom: '16px', touchAction: 'none' }}>
             <div className="header-left">
               <h1 className="saas-page-title" style={{ margin: 0 }}>🖼️ Invoice Image Gallery</h1>
             </div>
           </div>
 
-          {/* 🟢 TOP TABS: WHOLESALE, WALK-IN WHOLESALE, WALK-IN RETAIL, VOIDED */}
-          <div className="saas-tab-container hide-scrollbar" style={{ width: 'fit-content', border: 'none', padding: 0, boxShadow: 'none', background: 'transparent', marginBottom: categoryTab === 'Voided' ? '8px' : '16px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+          {/* 🟢 TOP TABS: NOW HORIZONTALLY SCROLLABLE (flexWrap: nowrap, overflowX: auto) */}
+          <div className="saas-tab-container hide-scrollbar" style={{ width: '100%', border: 'none', padding: 0, boxShadow: 'none', background: 'transparent', marginBottom: categoryTab === 'Voided' ? '8px' : '16px', display: 'flex', flexWrap: 'nowrap', overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
             <button 
               onClick={() => { setCategoryTab('All'); setSelectedInvoices(new Set()); setViewMode('table'); }} 
               className={`saas-tab ${categoryTab === 'All' ? 'active' : ''}`}
-              style={categoryTab === 'All' ? { background: '#10b981', color: '#fff' } : { border: '1px solid #cbd5e1', background: '#fff' }}
+              style={categoryTab === 'All' ? { background: '#10b981', color: '#fff', minWidth: 'max-content' } : { border: '1px solid #cbd5e1', background: '#fff', minWidth: 'max-content' }}
             >
               ✅ All Active
             </button>
             <button 
               onClick={() => { setCategoryTab('Wholesale'); setSelectedInvoices(new Set()); setViewMode('grid'); }} 
               className={`saas-tab ${categoryTab === 'Wholesale' ? 'active' : ''}`}
-              style={categoryTab === 'Wholesale' ? { background: '#10b981', color: '#fff' } : { border: '1px solid #cbd5e1', background: '#fff' }}
+              style={categoryTab === 'Wholesale' ? { background: '#10b981', color: '#fff', minWidth: 'max-content' } : { border: '1px solid #cbd5e1', background: '#fff', minWidth: 'max-content' }}
             >
               🌾 Wholesale
             </button>
             <button 
               onClick={() => { setCategoryTab('WalkinWholesale'); setSelectedInvoices(new Set()); setViewMode('table'); }} 
               className={`saas-tab ${categoryTab === 'WalkinWholesale' ? 'active' : ''}`}
-              style={categoryTab === 'WalkinWholesale' ? { background: '#10b981', color: '#fff' } : { border: '1px solid #cbd5e1', background: '#fff' }}
+              style={categoryTab === 'WalkinWholesale' ? { background: '#10b981', color: '#fff', minWidth: 'max-content' } : { border: '1px solid #cbd5e1', background: '#fff', minWidth: 'max-content' }}
             >
               🏬 Walk-in Wholesale
             </button>
             <button 
               onClick={() => { setCategoryTab('WalkinRetail'); setSelectedInvoices(new Set()); setViewMode('table'); }} 
               className={`saas-tab ${categoryTab === 'WalkinRetail' ? 'active' : ''}`}
-              style={categoryTab === 'WalkinRetail' ? { background: '#10b981', color: '#fff' } : { border: '1px solid #cbd5e1', background: '#fff' }}
+              style={categoryTab === 'WalkinRetail' ? { background: '#10b981', color: '#fff', minWidth: 'max-content' } : { border: '1px solid #cbd5e1', background: '#fff', minWidth: 'max-content' }}
             >
               🛍️ Walk-in Retail
             </button>
             <button 
               onClick={() => { setCategoryTab('Voided'); setVoidSubTab('All'); setSelectedInvoices(new Set()); setViewMode('table'); }} 
               className={`saas-tab ${categoryTab === 'Voided' ? 'active' : ''}`}
-              style={categoryTab === 'Voided' ? { background: '#ef4444', color: '#fff' } : { border: '1px solid #cbd5e1', background: '#fff' }}
+              style={categoryTab === 'Voided' ? { background: '#ef4444', color: '#fff', minWidth: 'max-content' } : { border: '1px solid #cbd5e1', background: '#fff', minWidth: 'max-content' }}
             >
               ❌ Voided
             </button>
           </div>
 
-          {/* 🟢 3 SUB-TABS WHEN INSIDE 'VOIDED' TAB */}
+          {/* 🟢 3 SUB-TABS WHEN INSIDE 'VOIDED' TAB (Horizontally Scrollable) */}
           {categoryTab === 'Voided' && (
-            <div className="saas-tab-container hide-scrollbar" style={{ width: 'fit-content', border: 'none', padding: '4px 6px', boxShadow: 'none', background: '#fee2e2', borderRadius: '8px', marginBottom: '16px', display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+            <div className="saas-tab-container hide-scrollbar" style={{ width: '100%', border: 'none', padding: '4px 6px', boxShadow: 'none', background: '#fee2e2', borderRadius: '8px', marginBottom: '16px', display: 'flex', flexWrap: 'nowrap', overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
               <button 
                 onClick={() => setVoidSubTab('All')} 
                 className={`saas-tab ${voidSubTab === 'All' ? 'active' : ''}`}
-                style={voidSubTab === 'All' ? { background: '#dc2626', color: '#fff', fontSize: '12px', padding: '6px 12px' } : { background: 'transparent', color: '#991b1b', fontSize: '12px', padding: '6px 12px', border: 'none' }}
+                style={voidSubTab === 'All' ? { background: '#dc2626', color: '#fff', fontSize: '12px', padding: '6px 12px', minWidth: 'max-content' } : { background: 'transparent', color: '#991b1b', fontSize: '12px', padding: '6px 12px', border: 'none', minWidth: 'max-content' }}
               >
                 All Voided
               </button>
               <button 
                 onClick={() => setVoidSubTab('Wholesale')} 
                 className={`saas-tab ${voidSubTab === 'Wholesale' ? 'active' : ''}`}
-                style={voidSubTab === 'Wholesale' ? { background: '#dc2626', color: '#fff', fontSize: '12px', padding: '6px 12px' } : { background: 'transparent', color: '#991b1b', fontSize: '12px', padding: '6px 12px', border: 'none' }}
+                style={voidSubTab === 'Wholesale' ? { background: '#dc2626', color: '#fff', fontSize: '12px', padding: '6px 12px', minWidth: 'max-content' } : { background: 'transparent', color: '#991b1b', fontSize: '12px', padding: '6px 12px', border: 'none', minWidth: 'max-content' }}
               >
                 Wholesale
               </button>
               <button 
                 onClick={() => setVoidSubTab('WalkinWholesale')} 
                 className={`saas-tab ${voidSubTab === 'WalkinWholesale' ? 'active' : ''}`}
-                style={voidSubTab === 'WalkinWholesale' ? { background: '#dc2626', color: '#fff', fontSize: '12px', padding: '6px 12px' } : { background: 'transparent', color: '#991b1b', fontSize: '12px', padding: '6px 12px', border: 'none' }}
+                style={voidSubTab === 'WalkinWholesale' ? { background: '#dc2626', color: '#fff', fontSize: '12px', padding: '6px 12px', minWidth: 'max-content' } : { background: 'transparent', color: '#991b1b', fontSize: '12px', padding: '6px 12px', border: 'none', minWidth: 'max-content' }}
               >
                 Walk-in Wholesale
               </button>
               <button 
                 onClick={() => setVoidSubTab('WalkinRetail')} 
                 className={`saas-tab ${voidSubTab === 'WalkinRetail' ? 'active' : ''}`}
-                style={voidSubTab === 'WalkinRetail' ? { background: '#dc2626', color: '#fff', fontSize: '12px', padding: '6px 12px' } : { background: 'transparent', color: '#991b1b', fontSize: '12px', padding: '6px 12px', border: 'none' }}
+                style={voidSubTab === 'WalkinRetail' ? { background: '#dc2626', color: '#fff', fontSize: '12px', padding: '6px 12px', minWidth: 'max-content' } : { background: 'transparent', color: '#991b1b', fontSize: '12px', padding: '6px 12px', border: 'none', minWidth: 'max-content' }}
               >
                 Walk-in Retail
               </button>
             </div>
           )}
+        </div>
 
-          {/* FILTER TABS & SEARCH CONTAINER */}
-          <div className="saas-card" style={{ marginBottom: '16px', padding: '16px 20px' }}>
-            <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between' }}>
-              
-              <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', flex: 1 }}>
-                <input 
-                  type="text"
-                  placeholder="🔍 Search ID, Customer, or Rice..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
-                  className="saas-input"
-                  style={{ minWidth: '200px', flex: 1 }}
-                />
-                
-                <div className="saas-tab-container hide-scrollbar" style={{ margin: 0, padding: '4px', background: '#f1f5f9', border: 'none', boxShadow: 'none' }}>
-                  {(['All', 'Today', 'This Week', 'This Month'] as FilterTab[]).map(tab => (
-                    <button
-                      key={tab}
-                      onClick={() => setFilterTab(tab)}
-                      className={`saas-tab ${filterTab === tab ? 'active' : ''}`}
-                      style={filterTab === tab ? { background: '#0f172a', color: '#fff', padding: '8px 16px' } : { padding: '8px 16px' }}
-                    >
-                      {tab}
-                    </button>
-                  ))}
-                </div>
+        {/* 🔥 3. SCROLLABLE CONTENT AREA: Flex: 1 takes up remaining space and scrolls */}
+        <div className="hide-scrollbar main-wrapper-scrollable" style={{ flex: 1, overflowY: 'auto', WebkitOverflowScrolling: 'touch' }}>
+          
+          {/* 🔥 REDESIGNED FILTER CARD: Cleaner layout on mobile, scrolls WITH the content! */}
+          <div className="saas-card" style={{ marginBottom: '24px', padding: '16px' }}>
+            
+            {/* Top Row: Search */}
+            <div style={{ marginBottom: '12px', width: '100%', position: 'relative' }}>
+              <span style={{ position: 'absolute', left: '14px', top: '50%', transform: 'translateY(-50%)', color: '#94a3b8', fontSize: '16px' }}>🔍</span>
+              <input 
+                type="text"
+                placeholder="Search ID, Customer, or Rice..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
+                className="saas-input"
+                style={{ width: '100%', paddingLeft: '38px', boxSizing: 'border-box' }}
+              />
+            </div>
+
+            {/* Middle Row: Scrollable Date Tabs + Grid/Table Toggle */}
+            <div style={{ display: 'flex', gap: '12px', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
+              <div className="saas-tab-container hide-scrollbar" style={{ margin: 0, padding: '4px', background: '#f1f5f9', border: 'none', boxShadow: 'none', display: 'flex', flexWrap: 'nowrap', overflowX: 'auto', flex: 1 }}>
+                {(['All', 'Today', 'This Week', 'This Month'] as FilterTab[]).map(tab => (
+                  <button
+                    key={tab}
+                    onClick={() => setFilterTab(tab)}
+                    className={`saas-tab ${filterTab === tab ? 'active' : ''}`}
+                    style={filterTab === tab ? { background: '#0f172a', color: '#fff', padding: '8px 16px', minWidth: 'max-content' } : { padding: '8px 16px', minWidth: 'max-content' }}
+                  >
+                    {tab}
+                  </button>
+                ))}
               </div>
 
-              <div className="saas-tab-container hide-scrollbar" style={{ margin: 0, padding: '4px', background: '#e2e8f0', border: 'none', boxShadow: 'none' }}>
+              <div className="saas-tab-container hide-scrollbar" style={{ margin: 0, padding: '4px', background: '#e2e8f0', border: 'none', boxShadow: 'none', display: 'flex', flexShrink: 0 }}>
                 <button onClick={() => setViewMode('grid')} className={`saas-tab ${viewMode === 'grid' ? 'active' : ''}`} style={viewMode === 'grid' ? { background: '#10b981', color: '#fff', padding: '8px 16px' } : { padding: '8px 16px' }}>Grid</button>
                 <button onClick={() => setViewMode('table')} className={`saas-tab ${viewMode === 'table' ? 'active' : ''}`} style={viewMode === 'table' ? { background: '#10b981', color: '#fff', padding: '8px 16px' } : { padding: '8px 16px' }}>Table</button>
               </div>
-              
             </div>
 
-            {/* Global Action Modifiers */}
-            <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', marginTop: '16px', borderTop: '1px solid #f1f5f9', paddingTop: '16px' }}>
-              <button onClick={toggleSelectAll} disabled={processedInvoices.length === 0} className="saas-btn saas-btn-secondary">
+            {/* Bottom Row: Action Modifiers */}
+            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '12px', paddingTop: '12px', borderTop: '1px dashed #e2e8f0' }}>
+              <button onClick={toggleSelectAll} disabled={processedInvoices.length === 0} className="saas-btn saas-btn-secondary" style={{ padding: '8px 12px', fontSize: '13px' }}>
                 {selectedInvoices.size === processedInvoices.length && processedInvoices.length > 0 ? 'Deselect All' : 'Select All'}
               </button>
 
               {selectedInvoices.size > 0 && (
                 <>
-                  <button onClick={deleteSelected} className="saas-btn saas-btn-danger">
+                  <button onClick={deleteSelected} className="saas-btn saas-btn-danger" style={{ padding: '8px 12px', fontSize: '13px' }}>
                     Clear Images ({selectedInvoices.size})
                   </button>
-                  <button onClick={handleBulkAction} className="saas-btn saas-btn-primary">
+                  <button onClick={handleBulkAction} className="saas-btn saas-btn-primary" style={{ padding: '8px 12px', fontSize: '13px' }}>
                     {isDeviceMobile ? `Share (${selectedInvoices.size})` : `Download (${selectedInvoices.size})`}
                   </button>
                 </>
               )}
             </div>
           </div>
-        </div>
 
-        {/* 🔥 3. SCROLLABLE CONTENT AREA: flex: 1 allows it to take remaining screen space and scroll */}
-        <div className="hide-scrollbar main-wrapper-scrollable" style={{ flex: 1, overflowY: 'auto', WebkitOverflowScrolling: 'touch' }}>
+          {/* CONTENT AREA */}
           {isLoading ? (
             viewMode === 'table' ? (
-              <div className="saas-table-wrapper">
+              <div className="saas-table-wrapper" style={{ margin: 0 }}>
                 <div className="saas-table-responsive">
                   <table className="saas-table">
                     <tbody>
@@ -684,7 +676,6 @@ export default function InvoiceGallery() {
                       <div style={{ fontSize: '13px', color: '#64748b', textAlign: 'center', fontWeight: 'bold' }}>{formatDate(inv.created_at)}</div>
                       
                       <div style={{ display: 'flex', gap: '8px' }}>
-                        {/* 🚨 VOID BUTTON FIRST IN ACTION GROUP */}
                         {!isVoided && (
                           <button onClick={(e) => { e.stopPropagation(); handleVoidInvoice(inv.invoice_id); }} disabled={isProcessing} className="saas-btn" style={{ flex: 1, padding: '8px 4px', background: '#fee2e2', color: '#dc2626', border: '1px solid #fca5a5', fontWeight: 'bold' }}>
                             🚨 Void
@@ -718,7 +709,6 @@ export default function InvoiceGallery() {
                       <th className="saas-th" style={{ width: '40px', textAlign: 'center', position: 'sticky', top: 0, zIndex: 30, backgroundColor: '#f8fafc', boxShadow: 'inset 0 -2px 0 0 #e2e8f0' }}>
                         <input type="checkbox" checked={selectedInvoices.size === processedInvoices.length && processedInvoices.length > 0} onChange={toggleSelectAll} style={{ cursor: 'pointer', width: '16px', height: '16px' }} />
                       </th>
-                      {/* 🚨 FIRST COLUMN: DEDICATED FOR VOID ONLY */}
                       <th className="saas-th" style={{ width: '80px', textAlign: 'center', position: 'sticky', top: 0, zIndex: 30, backgroundColor: '#f8fafc', boxShadow: 'inset 0 -2px 0 0 #e2e8f0' }}>Void</th>
                       <th className="saas-th" style={{ position: 'sticky', top: 0, zIndex: 30, backgroundColor: '#f8fafc', boxShadow: 'inset 0 -2px 0 0 #e2e8f0' }}>Invoice ID</th>
                       <th className="saas-th" style={{ position: 'sticky', top: 0, zIndex: 30, backgroundColor: '#f8fafc', boxShadow: 'inset 0 -2px 0 0 #e2e8f0' }}>Customer</th>
@@ -738,8 +728,6 @@ export default function InvoiceGallery() {
                           <td className="saas-td" style={{ textAlign: 'center' }}>
                             <input type="checkbox" checked={isSelected} onChange={() => toggleSelect(inv.invoice_id)} style={{ cursor: 'pointer', width: '16px', height: '16px' }} />
                           </td>
-                          
-                          {/* 🚨 FIRST COLUMN VOID BUTTON */}
                           <td className="saas-td" style={{ textAlign: 'center' }}>
                             {!isVoided ? (
                               <button onClick={(e) => { e.stopPropagation(); handleVoidInvoice(inv.invoice_id); }} disabled={isProcessing} className="saas-btn" style={{ padding: '6px 10px', background: '#fee2e2', color: '#dc2626', border: '1px solid #fca5a5', fontWeight: 'bold', fontSize: '11px', borderRadius: '6px', cursor: 'pointer' }}>
@@ -749,7 +737,6 @@ export default function InvoiceGallery() {
                               <span style={{ fontSize: '12px', fontWeight: 'bold', color: '#991b1b' }}>VOIDED</span>
                             )}
                           </td>
-
                           <td className={`saas-td ${isVoided ? 'voided-text' : ''}`} style={{ fontWeight: 'bold' }}>{inv.invoice_id}</td>
                           <td className="saas-td" style={{ fontWeight: 'bold' }}>{inv.customer_name}</td>
                           <td className="saas-td" style={{ maxWidth: '280px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: '#475569' }} title={inv.rice_types}>
@@ -778,15 +765,22 @@ export default function InvoiceGallery() {
             </div>
           )}
         </div>
-
       </div>
 
-      {/* --- PAGE SPECIFIC CSS --- */}
+      {/* --- GLOBAL CSS --- */}
       <style jsx global>{`
-        /* 🔥 PREVENTS IOS SAFARI FROM OVER-SCROLLING THE WHOLE PAGE 🔥 */
+        /* 🔥 BULLETPROOF SAFARI RUBBER-BANDING FIX 🔥 */
+        html, body {
+          overscroll-behavior: none !important;
+          height: 100dvh;
+          width: 100vw;
+          overflow: hidden;
+          margin: 0;
+          padding: 0;
+        }
+
         body {
           font-variant-numeric: tabular-nums lining-nums;
-          overscroll-behavior-y: none;
         }
 
         .hide-scrollbar::-webkit-scrollbar { display: none; }
@@ -881,6 +875,7 @@ export default function InvoiceGallery() {
           box-sizing: border-box; 
           width: 100%;
         }
+        
         .main-wrapper-scrollable { 
           padding: 0 24px 24px 24px; 
           font-family: Arial, sans-serif; 
@@ -897,10 +892,10 @@ export default function InvoiceGallery() {
           margin-top: 0;
           margin-left: 60px; 
           gap: 12px;
-          min-height: 42px; 
+          min-height: 48px; 
           width: 100%;
-          max-width: 1600px;
         }
+        
         .header-left {
           display: flex;
           align-items: center;
@@ -908,15 +903,15 @@ export default function InvoiceGallery() {
         }
 
         @media (max-width: 1023px) { 
-          /* 🔥 MOBILE PADDING: Keep bottom gap for the floating cart button */
+          /* 🔥 MOBILE PADDING: Keep bottom gap */
           .main-wrapper-frozen { 
             padding: 0 16px 0 16px !important; 
           }
           .main-wrapper-scrollable { 
-            padding: 16px 16px 140px 16px !important; 
+            padding: 16px 16px 80px 16px !important; 
             overscroll-behavior-y: contain;
           }
-
+          
           .header-container { 
             margin-left: 54px !important; 
             margin-right: 0 !important;
