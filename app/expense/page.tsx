@@ -180,6 +180,11 @@ export default function ExpenseDashboard() {
   const { activeBranchId } = useBranch(); // 🔥 CONNECTED TO GLOBAL MEMORY
   const [isMounted, setIsMounted] = useState(false);
 
+  // 🔥 ADD THIS BLOCK RIGHT HERE TO SET THE BROWSER TAB TITLE
+  useEffect(() => {
+    document.title = 'Expense and Payroll';
+  }, []);
+
   // --- Active Tab State ---
   const [activeTab, setActiveTab] = useState<'personal' | 'business' | 'staff' | 'database'>('personal')
 
