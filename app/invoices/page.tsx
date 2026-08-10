@@ -160,7 +160,6 @@ export default function InvoiceGallery() {
   const handleVoidInvoice = async (invoiceId: string) => {
     if (!confirm(`🚨 Are you sure you want to VOID transaction ${invoiceId}?\n\nThis will instantly:\n1. Verify and permanently delete the record\n2. Safely restore stock\n3. Reverse dashboard numbers`)) return;
 
-    // 🔥 FIX: Use isProcessing to prevent Grid View from unmounting mid-click
     setIsProcessing(true); 
     
     try {
@@ -199,7 +198,7 @@ export default function InvoiceGallery() {
 
       if (delErr) throw new Error(`Database blocked deletion: ${delErr.message}`);
 
-      // 🟢 3. RESTORE STOCK & BATCHES SAFELY (Only executes if deletion succeeded)
+      // 🟢 3. RESTORE STOCK & BATCHES SAFELY
       for (const item of items) {
         if (item.status === 'Voided' || item.delivery_status === 'Voided') continue;
 
@@ -251,7 +250,7 @@ export default function InvoiceGallery() {
                 product_name: riceName || 'Unknown Product',
                 cost_price: item.cogs_price || prod?.cost_price || 0,
                 remaining_qty: qty,
-                branch_id: activeBranchId // 🔥 STAMPED
+                branch_id: activeBranchId 
               }]);
             }
 
@@ -281,7 +280,6 @@ export default function InvoiceGallery() {
       // 🟢 4. CLEANUP SUMMARIES & PAYMENTS
       await supabase.from('invoice_payments').delete().eq('invoice_id', invoiceId).eq('branch_id', activeBranchId);
 
-      // We only update summaries for wholesale, retail summaries are already gone via row deletion.
       if (!isRetail) {
         await supabase.from('invoice_summaries').update({ 
           delivery_status: 'Voided',
@@ -465,138 +463,127 @@ export default function InvoiceGallery() {
   if (!mounted) return null;
 
   return (
-    <div style={{ display: 'flex', width: '100%', height: '100dvh', overflow: 'hidden', backgroundColor: '#f8fafc', boxSizing: 'border-box' }}>
+    // 🔥 EXACT Layout match with Rice Inventory / COGS. No custom wrappers!
+    <div className="main-wrapper" style={{ display: 'flex', flexDirection: 'column', height: '100dvh', overflow: 'hidden' }}>
       
-      {/* 🔥 1. FLEX COLUMN WRAPPER: Splits the panel into Top (Frozen) and Bottom (Scrollable) */}
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', height: '100%', minWidth: 0, overflow: 'hidden' }}>
-
-        {/* 🔥 2. FROZEN TOP SECTION: Title and Main Tabs (TouchAction pan-x allows side scroll, blocks Safari bounce) */}
-        <div className="main-wrapper-frozen" style={{ flexShrink: 0, zIndex: 10, touchAction: 'pan-x' }}>
-          
-          {/* HEADER */}
-          <div className="header-container" style={{ marginBottom: '16px', touchAction: 'none' }}>
-            <div className="header-left">
-              <h1 className="saas-page-title" style={{ margin: 0 }}>🖼️ Invoice Image Gallery</h1>
-            </div>
-          </div>
-
-          {/* 🟢 TOP TABS: NOW HORIZONTALLY SCROLLABLE (flexWrap: nowrap, overflowX: auto) */}
-          <div className="saas-tab-container hide-scrollbar" style={{ width: '100%', border: 'none', padding: 0, boxShadow: 'none', background: 'transparent', marginBottom: categoryTab === 'Voided' ? '8px' : '16px', display: 'flex', flexWrap: 'nowrap', overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
-            <button 
-              onClick={() => { setCategoryTab('All'); setSelectedInvoices(new Set()); setViewMode('table'); }} 
-              className={`saas-tab ${categoryTab === 'All' ? 'active' : ''}`}
-              style={categoryTab === 'All' ? { background: '#10b981', color: '#fff', minWidth: 'max-content' } : { border: '1px solid #cbd5e1', background: '#fff', minWidth: 'max-content' }}
-            >
-              ✅ All Active
-            </button>
-            <button 
-              onClick={() => { setCategoryTab('Wholesale'); setSelectedInvoices(new Set()); setViewMode('grid'); }} 
-              className={`saas-tab ${categoryTab === 'Wholesale' ? 'active' : ''}`}
-              style={categoryTab === 'Wholesale' ? { background: '#10b981', color: '#fff', minWidth: 'max-content' } : { border: '1px solid #cbd5e1', background: '#fff', minWidth: 'max-content' }}
-            >
-              🌾 Wholesale
-            </button>
-            <button 
-              onClick={() => { setCategoryTab('WalkinWholesale'); setSelectedInvoices(new Set()); setViewMode('table'); }} 
-              className={`saas-tab ${categoryTab === 'WalkinWholesale' ? 'active' : ''}`}
-              style={categoryTab === 'WalkinWholesale' ? { background: '#10b981', color: '#fff', minWidth: 'max-content' } : { border: '1px solid #cbd5e1', background: '#fff', minWidth: 'max-content' }}
-            >
-              🏬 Walk-in Wholesale
-            </button>
-            <button 
-              onClick={() => { setCategoryTab('WalkinRetail'); setSelectedInvoices(new Set()); setViewMode('table'); }} 
-              className={`saas-tab ${categoryTab === 'WalkinRetail' ? 'active' : ''}`}
-              style={categoryTab === 'WalkinRetail' ? { background: '#10b981', color: '#fff', minWidth: 'max-content' } : { border: '1px solid #cbd5e1', background: '#fff', minWidth: 'max-content' }}
-            >
-              🛍️ Walk-in Retail
-            </button>
-            <button 
-              onClick={() => { setCategoryTab('Voided'); setVoidSubTab('All'); setSelectedInvoices(new Set()); setViewMode('table'); }} 
-              className={`saas-tab ${categoryTab === 'Voided' ? 'active' : ''}`}
-              style={categoryTab === 'Voided' ? { background: '#ef4444', color: '#fff', minWidth: 'max-content' } : { border: '1px solid #cbd5e1', background: '#fff', minWidth: 'max-content' }}
-            >
-              ❌ Voided
-            </button>
-          </div>
-
-          {/* 🟢 3 SUB-TABS WHEN INSIDE 'VOIDED' TAB (Horizontally Scrollable) */}
-          {categoryTab === 'Voided' && (
-            <div className="saas-tab-container hide-scrollbar" style={{ width: '100%', border: 'none', padding: '4px 6px', boxShadow: 'none', background: '#fee2e2', borderRadius: '8px', marginBottom: '16px', display: 'flex', flexWrap: 'nowrap', overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
-              <button 
-                onClick={() => setVoidSubTab('All')} 
-                className={`saas-tab ${voidSubTab === 'All' ? 'active' : ''}`}
-                style={voidSubTab === 'All' ? { background: '#dc2626', color: '#fff', fontSize: '12px', padding: '6px 12px', minWidth: 'max-content' } : { background: 'transparent', color: '#991b1b', fontSize: '12px', padding: '6px 12px', border: 'none', minWidth: 'max-content' }}
-              >
-                All Voided
-              </button>
-              <button 
-                onClick={() => setVoidSubTab('Wholesale')} 
-                className={`saas-tab ${voidSubTab === 'Wholesale' ? 'active' : ''}`}
-                style={voidSubTab === 'Wholesale' ? { background: '#dc2626', color: '#fff', fontSize: '12px', padding: '6px 12px', minWidth: 'max-content' } : { background: 'transparent', color: '#991b1b', fontSize: '12px', padding: '6px 12px', border: 'none', minWidth: 'max-content' }}
-              >
-                Wholesale
-              </button>
-              <button 
-                onClick={() => setVoidSubTab('WalkinWholesale')} 
-                className={`saas-tab ${voidSubTab === 'WalkinWholesale' ? 'active' : ''}`}
-                style={voidSubTab === 'WalkinWholesale' ? { background: '#dc2626', color: '#fff', fontSize: '12px', padding: '6px 12px', minWidth: 'max-content' } : { background: 'transparent', color: '#991b1b', fontSize: '12px', padding: '6px 12px', border: 'none', minWidth: 'max-content' }}
-              >
-                Walk-in Wholesale
-              </button>
-              <button 
-                onClick={() => setVoidSubTab('WalkinRetail')} 
-                className={`saas-tab ${voidSubTab === 'WalkinRetail' ? 'active' : ''}`}
-                style={voidSubTab === 'WalkinRetail' ? { background: '#dc2626', color: '#fff', fontSize: '12px', padding: '6px 12px', minWidth: 'max-content' } : { background: 'transparent', color: '#991b1b', fontSize: '12px', padding: '6px 12px', border: 'none', minWidth: 'max-content' }}
-              >
-                Walk-in Retail
-              </button>
-            </div>
-          )}
+      {/* 🟢 1. HEADER (FROZEN): Exactly aligned with hamburger */}
+      <div className="header-container" style={{ flexShrink: 0 }}>
+        <div className="header-left">
+          <h1 className="saas-page-title" style={{ margin: 0 }}>🖼️ Invoice Image Gallery</h1>
         </div>
+      </div>
 
-        {/* 🔥 3. SCROLLABLE CONTENT AREA: Flex: 1 takes up remaining space and scrolls */}
-        <div className="hide-scrollbar main-wrapper-scrollable" style={{ flex: 1, overflowY: 'auto', WebkitOverflowScrolling: 'touch' }}>
+      {/* 🟢 2. CATEGORY TABS (FROZEN): TouchAction pan-x allows side scroll but blocks Safari bounce */}
+      <div className="saas-tab-container hide-scrollbar" style={{ flexShrink: 0, width: '100%', border: 'none', padding: 0, boxShadow: 'none', background: 'transparent', marginBottom: categoryTab === 'Voided' ? '8px' : '16px', display: 'flex', flexWrap: 'nowrap', overflowX: 'auto', WebkitOverflowScrolling: 'touch', gap: '8px', touchAction: 'pan-x' }}>
+        <button 
+          onClick={() => { setCategoryTab('All'); setSelectedInvoices(new Set()); setViewMode('table'); }} 
+          className={`saas-tab ${categoryTab === 'All' ? 'active' : ''}`}
+          style={{ ...(categoryTab === 'All' ? { background: '#10b981', color: '#fff' } : { border: '1px solid #cbd5e1', background: '#fff' }), minWidth: 'max-content', flexShrink: 0 }}
+        >
+          ✅ All Active
+        </button>
+        <button 
+          onClick={() => { setCategoryTab('Wholesale'); setSelectedInvoices(new Set()); setViewMode('grid'); }} 
+          className={`saas-tab ${categoryTab === 'Wholesale' ? 'active' : ''}`}
+          style={{ ...(categoryTab === 'Wholesale' ? { background: '#10b981', color: '#fff' } : { border: '1px solid #cbd5e1', background: '#fff' }), minWidth: 'max-content', flexShrink: 0 }}
+        >
+          🌾 Wholesale
+        </button>
+        <button 
+          onClick={() => { setCategoryTab('WalkinWholesale'); setSelectedInvoices(new Set()); setViewMode('table'); }} 
+          className={`saas-tab ${categoryTab === 'WalkinWholesale' ? 'active' : ''}`}
+          style={{ ...(categoryTab === 'WalkinWholesale' ? { background: '#10b981', color: '#fff' } : { border: '1px solid #cbd5e1', background: '#fff' }), minWidth: 'max-content', flexShrink: 0 }}
+        >
+          🏬 Walk-in Wholesale
+        </button>
+        <button 
+          onClick={() => { setCategoryTab('WalkinRetail'); setSelectedInvoices(new Set()); setViewMode('table'); }} 
+          className={`saas-tab ${categoryTab === 'WalkinRetail' ? 'active' : ''}`}
+          style={{ ...(categoryTab === 'WalkinRetail' ? { background: '#10b981', color: '#fff' } : { border: '1px solid #cbd5e1', background: '#fff' }), minWidth: 'max-content', flexShrink: 0 }}
+        >
+          🛍️ Walk-in Retail
+        </button>
+        <button 
+          onClick={() => { setCategoryTab('Voided'); setVoidSubTab('All'); setSelectedInvoices(new Set()); setViewMode('table'); }} 
+          className={`saas-tab ${categoryTab === 'Voided' ? 'active' : ''}`}
+          style={{ ...(categoryTab === 'Voided' ? { background: '#ef4444', color: '#fff' } : { border: '1px solid #cbd5e1', background: '#fff' }), minWidth: 'max-content', flexShrink: 0 }}
+        >
+          ❌ Voided
+        </button>
+      </div>
+
+      {/* 🟢 3. SUB-TABS WHEN INSIDE 'VOIDED' TAB (FROZEN) */}
+      {categoryTab === 'Voided' && (
+        <div className="saas-tab-container hide-scrollbar" style={{ flexShrink: 0, width: 'fit-content', border: 'none', padding: '4px 6px', boxShadow: 'none', background: '#fee2e2', borderRadius: '8px', marginBottom: '16px', display: 'flex', flexWrap: 'nowrap', overflowX: 'auto', WebkitOverflowScrolling: 'touch', gap: '6px', touchAction: 'pan-x' }}>
+          <button 
+            onClick={() => setVoidSubTab('All')} 
+            className={`saas-tab ${voidSubTab === 'All' ? 'active' : ''}`}
+            style={{ ...(voidSubTab === 'All' ? { background: '#dc2626', color: '#fff' } : { background: 'transparent', color: '#991b1b', border: 'none' }), fontSize: '12px', padding: '6px 12px', minWidth: 'max-content', flexShrink: 0 }}
+          >
+            All Voided
+          </button>
+          <button 
+            onClick={() => setVoidSubTab('Wholesale')} 
+            className={`saas-tab ${voidSubTab === 'Wholesale' ? 'active' : ''}`}
+            style={{ ...(voidSubTab === 'Wholesale' ? { background: '#dc2626', color: '#fff' } : { background: 'transparent', color: '#991b1b', border: 'none' }), fontSize: '12px', padding: '6px 12px', minWidth: 'max-content', flexShrink: 0 }}
+          >
+            Wholesale
+          </button>
+          <button 
+            onClick={() => setVoidSubTab('WalkinWholesale')} 
+            className={`saas-tab ${voidSubTab === 'WalkinWholesale' ? 'active' : ''}`}
+            style={{ ...(voidSubTab === 'WalkinWholesale' ? { background: '#dc2626', color: '#fff' } : { background: 'transparent', color: '#991b1b', border: 'none' }), fontSize: '12px', padding: '6px 12px', minWidth: 'max-content', flexShrink: 0 }}
+          >
+            Walk-in Wholesale
+          </button>
+          <button 
+            onClick={() => setVoidSubTab('WalkinRetail')} 
+            className={`saas-tab ${voidSubTab === 'WalkinRetail' ? 'active' : ''}`}
+            style={{ ...(voidSubTab === 'WalkinRetail' ? { background: '#dc2626', color: '#fff' } : { background: 'transparent', color: '#991b1b', border: 'none' }), fontSize: '12px', padding: '6px 12px', minWidth: 'max-content', flexShrink: 0 }}
+          >
+            Walk-in Retail
+          </button>
+        </div>
+      )}
+
+      {/* 🔥 4. SCROLLABLE AREA: Filters + Table/Grid Content */}
+      <div className="hide-scrollbar" style={{ flex: 1, overflowY: 'auto', WebkitOverflowScrolling: 'touch', display: 'flex', flexDirection: 'column', paddingBottom: '100px' }}>
+        
+        {/* 🔥 REDESIGNED FILTER CARD: Clean stacked layout on mobile, scrolls WITH the content! */}
+        <div className="saas-card" style={{ flexShrink: 0, marginBottom: '24px', padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
           
-          {/* 🔥 REDESIGNED FILTER CARD: Cleaner layout on mobile, scrolls WITH the content! */}
-          <div className="saas-card" style={{ marginBottom: '24px', padding: '16px' }}>
+          {/* Top Row: Search */}
+          <div style={{ width: '100%', position: 'relative' }}>
+            <span style={{ position: 'absolute', left: '14px', top: '50%', transform: 'translateY(-50%)', color: '#94a3b8', fontSize: '16px' }}>🔍</span>
+            <input 
+              type="text"
+              placeholder="Search ID, Customer, or Rice..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
+              className="saas-input"
+              style={{ width: '100%', paddingLeft: '38px', boxSizing: 'border-box' }}
+            />
+          </div>
+
+          {/* Middle Row: Date Filters (Scrollable horizontally on mobile) */}
+          <div className="saas-tab-container hide-scrollbar" style={{ margin: 0, padding: '4px', background: '#f1f5f9', borderRadius: '8px', display: 'flex', flexWrap: 'nowrap', overflowX: 'auto', width: '100%' }}>
+            {(['All', 'Today', 'This Week', 'This Month'] as FilterTab[]).map(tab => (
+              <button
+                key={tab}
+                onClick={() => setFilterTab(tab)}
+                className={`saas-tab ${filterTab === tab ? 'active' : ''}`}
+                style={{ ...(filterTab === tab ? { background: '#0f172a', color: '#fff' } : { background: 'transparent', color: '#475569', border: 'none' }), padding: '8px 16px', minWidth: 'max-content', flexShrink: 0 }}
+              >
+                {tab}
+              </button>
+            ))}
+          </div>
+
+          {/* Bottom Row: Action Modifiers & View Toggle */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px', borderTop: '1px dashed #e2e8f0', paddingTop: '12px', marginTop: '4px' }}>
             
-            {/* Top Row: Search */}
-            <div style={{ marginBottom: '12px', width: '100%', position: 'relative' }}>
-              <span style={{ position: 'absolute', left: '14px', top: '50%', transform: 'translateY(-50%)', color: '#94a3b8', fontSize: '16px' }}>🔍</span>
-              <input 
-                type="text"
-                placeholder="Search ID, Customer, or Rice..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
-                className="saas-input"
-                style={{ width: '100%', paddingLeft: '38px', boxSizing: 'border-box' }}
-              />
-            </div>
-
-            {/* Middle Row: Scrollable Date Tabs + Grid/Table Toggle */}
-            <div style={{ display: 'flex', gap: '12px', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
-              <div className="saas-tab-container hide-scrollbar" style={{ margin: 0, padding: '4px', background: '#f1f5f9', border: 'none', boxShadow: 'none', display: 'flex', flexWrap: 'nowrap', overflowX: 'auto', flex: 1 }}>
-                {(['All', 'Today', 'This Week', 'This Month'] as FilterTab[]).map(tab => (
-                  <button
-                    key={tab}
-                    onClick={() => setFilterTab(tab)}
-                    className={`saas-tab ${filterTab === tab ? 'active' : ''}`}
-                    style={filterTab === tab ? { background: '#0f172a', color: '#fff', padding: '8px 16px', minWidth: 'max-content' } : { padding: '8px 16px', minWidth: 'max-content' }}
-                  >
-                    {tab}
-                  </button>
-                ))}
-              </div>
-
-              <div className="saas-tab-container hide-scrollbar" style={{ margin: 0, padding: '4px', background: '#e2e8f0', border: 'none', boxShadow: 'none', display: 'flex', flexShrink: 0 }}>
-                <button onClick={() => setViewMode('grid')} className={`saas-tab ${viewMode === 'grid' ? 'active' : ''}`} style={viewMode === 'grid' ? { background: '#10b981', color: '#fff', padding: '8px 16px' } : { padding: '8px 16px' }}>Grid</button>
-                <button onClick={() => setViewMode('table')} className={`saas-tab ${viewMode === 'table' ? 'active' : ''}`} style={viewMode === 'table' ? { background: '#10b981', color: '#fff', padding: '8px 16px' } : { padding: '8px 16px' }}>Table</button>
-              </div>
-            </div>
-
-            {/* Bottom Row: Action Modifiers */}
-            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '12px', paddingTop: '12px', borderTop: '1px dashed #e2e8f0' }}>
+            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
               <button onClick={toggleSelectAll} disabled={processedInvoices.length === 0} className="saas-btn saas-btn-secondary" style={{ padding: '8px 12px', fontSize: '13px' }}>
                 {selectedInvoices.size === processedInvoices.length && processedInvoices.length > 0 ? 'Deselect All' : 'Select All'}
               </button>
@@ -604,7 +591,7 @@ export default function InvoiceGallery() {
               {selectedInvoices.size > 0 && (
                 <>
                   <button onClick={deleteSelected} className="saas-btn saas-btn-danger" style={{ padding: '8px 12px', fontSize: '13px' }}>
-                    Clear Images ({selectedInvoices.size})
+                    Clear ({selectedInvoices.size})
                   </button>
                   <button onClick={handleBulkAction} className="saas-btn saas-btn-primary" style={{ padding: '8px 12px', fontSize: '13px' }}>
                     {isDeviceMobile ? `Share (${selectedInvoices.size})` : `Download (${selectedInvoices.size})`}
@@ -612,9 +599,16 @@ export default function InvoiceGallery() {
                 </>
               )}
             </div>
-          </div>
 
-          {/* CONTENT AREA */}
+            <div className="saas-tab-container hide-scrollbar" style={{ margin: 0, padding: '4px', background: '#e2e8f0', borderRadius: '8px', display: 'flex', flexShrink: 0 }}>
+              <button onClick={() => setViewMode('grid')} className={`saas-tab ${viewMode === 'grid' ? 'active' : ''}`} style={viewMode === 'grid' ? { background: '#10b981', color: '#fff', padding: '8px 16px' } : { padding: '8px 16px', border: 'none', background: 'transparent' }}>Grid</button>
+              <button onClick={() => setViewMode('table')} className={`saas-tab ${viewMode === 'table' ? 'active' : ''}`} style={viewMode === 'table' ? { background: '#10b981', color: '#fff', padding: '8px 16px' } : { padding: '8px 16px', border: 'none', background: 'transparent' }}>Table</button>
+            </div>
+          </div>
+        </div>
+
+        {/* DATA AREA (Grid or Table) */}
+        <div style={{ flex: 1 }}>
           {isLoading ? (
             viewMode === 'table' ? (
               <div className="saas-table-wrapper" style={{ margin: 0 }}>
@@ -772,15 +766,6 @@ export default function InvoiceGallery() {
         /* 🔥 BULLETPROOF SAFARI RUBBER-BANDING FIX 🔥 */
         html, body {
           overscroll-behavior: none !important;
-          height: 100dvh;
-          width: 100vw;
-          overflow: hidden;
-          margin: 0;
-          padding: 0;
-        }
-
-        body {
-          font-variant-numeric: tabular-nums lining-nums;
         }
 
         .hide-scrollbar::-webkit-scrollbar { display: none; }
@@ -853,37 +838,7 @@ export default function InvoiceGallery() {
           box-shadow: 0 4px 10px rgba(0,0,0,0.1);
         }
 
-        /* 🔥 BULLETPROOF GLOBAL OVERRIDE FOR MOBILE TABS 🔥 */
-        .saas-tab-container {
-          flex-wrap: nowrap !important;
-          overflow-x: auto !important;
-          -webkit-overflow-scrolling: touch !important;
-          scrollbar-width: none !important;
-        }
-        .saas-tab-container::-webkit-scrollbar {
-          display: none !important;
-        }
-        .saas-tab {
-          flex-shrink: 0 !important;
-          white-space: nowrap !important;
-        }
-
-        /* 🔥 NEW FLEXBOX WRAPPERS FOR FREEZE STYLE */
-        .main-wrapper-frozen { 
-          padding: 24px 24px 0 24px; 
-          font-family: Arial, sans-serif; 
-          box-sizing: border-box; 
-          width: 100%;
-        }
-        
-        .main-wrapper-scrollable { 
-          padding: 0 24px 24px 24px; 
-          font-family: Arial, sans-serif; 
-          box-sizing: border-box; 
-          width: 100%;
-          overscroll-behavior-y: contain; /* Prevents scroll chaining to the body */
-        }
-
+        /* 🟢 EXACT HEADER MATCH WITH RICE CONTROL */
         .header-container { 
           display: flex;
           justify-content: flex-start;
@@ -893,19 +848,20 @@ export default function InvoiceGallery() {
           margin-left: 60px; 
           gap: 12px;
           min-height: 48px; 
-          width: 100%;
+          width: calc(100% - 60px); 
+          max-width: 1600px;
+          padding-right: 24px; 
         }
-        
         .header-left {
           display: flex;
-          align-items: center;
+          align-items: center; 
           gap: 12px;
         }
 
         @media (max-width: 1023px) { 
-          /* 🔥 MOBILE PADDING: Keep bottom gap */
+          /* 🔥 MOBILE PADDING: Added 8px top padding to nudge the title down to the exact middle! */
           .main-wrapper-frozen { 
-            padding: 0 16px 0 16px !important; 
+            padding: 8px 16px 0 16px !important; /* 👈 Change this '8px' if you need to micro-adjust it up or down */
           }
           .main-wrapper-scrollable { 
             padding: 16px 16px 80px 16px !important; 
@@ -915,7 +871,7 @@ export default function InvoiceGallery() {
           .header-container { 
             margin-left: 54px !important; 
             margin-right: 0 !important;
-            margin-bottom: 24px !important; 
+            margin-bottom: 16px !important; 
             margin-top: 0 !important;
             display: flex !important;
             flex-direction: row !important;

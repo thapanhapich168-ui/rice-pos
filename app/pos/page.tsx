@@ -1436,88 +1436,87 @@ export default function POSPage() {
     <div style={{ display: 'flex', width: '100%', height: '100dvh', overflow: 'hidden', backgroundColor: '#ffffff', boxSizing: 'border-box' }}>
       
       {/* SELECTION ENGINE VIEW GRID PANEL */}
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', height: '100%', backgroundColor: '#f8fafc', minWidth: 0, overflow: 'hidden' }}>
+      <div className="hide-scrollbar" style={{ flex: 1, height: '100%', overflowY: 'auto', backgroundColor: '#f8fafc', minWidth: 0, WebkitOverflowScrolling: 'touch' }}>
         
-        {/* 🟢 1. FROZEN TOP SECTION: Title and Retail/Wholesale Tabs (touchAction 'pan-x' blocks Safari pull-down but allows side scrolling) */}
-        <div className="main-wrapper-frozen" style={{ flexShrink: 0, zIndex: 10, touchAction: 'pan-x' }}>
+        <div className="main-wrapper">
           
-          <div className="header-container" style={{ marginBottom: '16px', touchAction: 'none' }}>
-            <div className="header-left">
-              <h1 className="saas-page-title">{editingInvoiceId ? `✏️ Editing: ${editingInvoiceId}` : `🛒 ${currentT.title}`}</h1>
-              {editingInvoiceId && (
-                <button 
-                  onClick={cancelEditMode} 
-                  className="saas-btn saas-btn-danger"
-                  style={{ marginLeft: '16px', padding: '6px 12px', fontSize: '13px' }}
-                >
-                  ❌ Cancel
+          {/* 🟢 STICKY HEADER WRAPPER AROUND TITLE & TABS */}
+          <div className="pos-sticky-header">
+            <div className="header-container" style={{ marginBottom: '16px' }}>
+              <div className="header-left">
+                <h1 className="saas-page-title">{editingInvoiceId ? `✏️ Editing: ${editingInvoiceId}` : `🛒 ${currentT.title}`}</h1>
+                {editingInvoiceId && (
+                  <button 
+                    onClick={cancelEditMode} 
+                    className="saas-btn saas-btn-danger"
+                    style={{ marginLeft: '16px', padding: '6px 12px', fontSize: '13px' }}
+                  >
+                    ❌ Cancel
+                  </button>
+                )}
+              </div>
+            </div>
+
+            <div style={{ marginBottom: '16px' }}>
+              <div className="saas-tab-container hide-scrollbar" style={{ display: 'flex', flexWrap: 'nowrap', overflowX: 'auto', marginBottom: activeTab === 'retail' ? '12px' : '0px', width: '100%' }}>
+                <button onClick={() => { 
+                  setActiveTab('retail'); 
+                  setSelectedCustomerId(''); 
+                  setCustomerSearchTerm(''); 
+                  loadProductsAndSettings();
+                  loadBatches();
+                }} className={`saas-tab ${activeTab === 'retail' ? 'active' : ''}`} style={{ flex: 1, minWidth: '120px', textAlign: 'center' }}>
+                  {currentT.retail}
                 </button>
+                
+                <button onClick={() => { 
+                  setActiveTab('wholesale');
+                  if (!selectedCustomerId) {
+                    const walkInCust = customers.find(c => c.name.toLowerCase() === 'walk-in' || c.name.toLowerCase() === 'walk in');
+                    if (walkInCust) setSelectedCustomerId(walkInCust.id.toString());
+                  }
+                  loadProductsAndSettings();
+                  loadBatches();
+                }} className={`saas-tab ${activeTab === 'wholesale' ? 'active' : ''}`} style={{ flex: 1, minWidth: '120px', textAlign: 'center' }}>
+                  {currentT.wholesale}
+                </button>
+              </div>
+
+              {activeTab === 'retail' && (
+                <div className="saas-tab-container hide-scrollbar" style={{ flexWrap: 'nowrap', overflowX: 'auto', marginBottom: '0px', background: '#f1f5f9', border: 'none', boxShadow: 'none' }}>
+                  <button 
+                    onClick={() => setRetailSubTab('active')} 
+                    onDragOver={(e) => e.preventDefault()} 
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      const pid = Number(e.dataTransfer.getData('product_id'));
+                      if (pid) toggleProductActiveStatus(pid, 'active');
+                    }}
+                    className={`saas-tab ${retailSubTab === 'active' ? 'active' : ''}`}
+                    style={{ minWidth: 'max-content' }}
+                  >
+                    Active ({products.filter(p => parseFloat(String(p.weight)) < 50 && !hiddenRetailIds.includes(p.id)).length})
+                  </button>
+                  
+                  <button 
+                    onClick={() => setRetailSubTab('inactive')} 
+                    onDragOver={(e) => e.preventDefault()} 
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      const pid = Number(e.dataTransfer.getData('product_id'));
+                      if (pid) toggleProductActiveStatus(pid, 'inactive');
+                    }}
+                    className={`saas-tab ${retailSubTab === 'inactive' ? 'active' : ''}`}
+                    style={retailSubTab === 'inactive' ? { background: '#ef4444', color: '#fff', minWidth: 'max-content' } : { minWidth: 'max-content' }}
+                  >
+                    Non-Active ({products.filter(p => parseFloat(String(p.weight)) < 50 && hiddenRetailIds.includes(p.id)).length})
+                  </button>
+                </div>
               )}
             </div>
           </div>
+          {/* 🟢 END STICKY HEADER WRAPPER */}
 
-          <div style={{ marginBottom: '16px' }}>
-            <div className="saas-tab-container hide-scrollbar" style={{ display: 'flex', flexWrap: 'nowrap', overflowX: 'auto', marginBottom: activeTab === 'retail' ? '12px' : '0px', width: '100%' }}>
-              <button onClick={() => { 
-                setActiveTab('retail'); 
-                setSelectedCustomerId(''); 
-                setCustomerSearchTerm(''); 
-                loadProductsAndSettings();
-                loadBatches();
-              }} className={`saas-tab ${activeTab === 'retail' ? 'active' : ''}`} style={{ flex: 1, minWidth: '120px', textAlign: 'center' }}>
-                {currentT.retail}
-              </button>
-              
-              <button onClick={() => { 
-                setActiveTab('wholesale');
-                if (!selectedCustomerId) {
-                  const walkInCust = customers.find(c => c.name.toLowerCase() === 'walk-in' || c.name.toLowerCase() === 'walk in');
-                  if (walkInCust) setSelectedCustomerId(walkInCust.id.toString());
-                }
-                loadProductsAndSettings();
-                loadBatches();
-              }} className={`saas-tab ${activeTab === 'wholesale' ? 'active' : ''}`} style={{ flex: 1, minWidth: '120px', textAlign: 'center' }}>
-                {currentT.wholesale}
-              </button>
-            </div>
-
-            {activeTab === 'retail' && (
-              <div className="saas-tab-container hide-scrollbar" style={{ flexWrap: 'nowrap', overflowX: 'auto', marginBottom: '0px', background: '#f1f5f9', border: 'none', boxShadow: 'none' }}>
-                <button 
-                  onClick={() => setRetailSubTab('active')} 
-                  onDragOver={(e) => e.preventDefault()} 
-                  onDrop={(e) => {
-                    e.preventDefault();
-                    const pid = Number(e.dataTransfer.getData('product_id'));
-                    if (pid) toggleProductActiveStatus(pid, 'active');
-                  }}
-                  className={`saas-tab ${retailSubTab === 'active' ? 'active' : ''}`}
-                  style={{ minWidth: 'max-content' }}
-                >
-                  Active ({products.filter(p => parseFloat(String(p.weight)) < 50 && !hiddenRetailIds.includes(p.id)).length})
-                </button>
-                
-                <button 
-                  onClick={() => setRetailSubTab('inactive')} 
-                  onDragOver={(e) => e.preventDefault()} 
-                  onDrop={(e) => {
-                    e.preventDefault();
-                    const pid = Number(e.dataTransfer.getData('product_id'));
-                    if (pid) toggleProductActiveStatus(pid, 'inactive');
-                  }}
-                  className={`saas-tab ${retailSubTab === 'inactive' ? 'active' : ''}`}
-                  style={retailSubTab === 'inactive' ? { background: '#ef4444', color: '#fff', minWidth: 'max-content' } : { minWidth: 'max-content' }}
-                >
-                  Non-Active ({products.filter(p => parseFloat(String(p.weight)) < 50 && hiddenRetailIds.includes(p.id)).length})
-                </button>
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* 🟢 2. SCROLLABLE BOTTOM SECTION: Search, Categories, and Product Grid */}
-        <div className="hide-scrollbar main-wrapper-scrollable" style={{ flex: 1, overflowY: 'auto', WebkitOverflowScrolling: 'touch' }}>
-          
           <div style={{ marginBottom: '24px' }}>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px', alignItems: 'flex-start', width: '100%' }}>
               
@@ -2623,22 +2622,12 @@ export default function POSPage() {
 
       {/* --- GLOBAL CSS --- */}
       <style jsx global>{`
-        /* 🔥 BULLETPROOF SAFARI RUBBER-BANDING FIX 🔥 */
-        html, body {
-          overscroll-behavior: none !important;
-          height: 100dvh;
-          width: 100vw;
-          overflow: hidden;
-          margin: 0;
-          padding: 0;
-        }
-
-        body {
-          font-variant-numeric: tabular-nums lining-nums;
-        }
-
         input, select, button, textarea {
           font-family: inherit;
+          font-variant-numeric: tabular-nums lining-nums;
+        }
+        
+        body {
           font-variant-numeric: tabular-nums lining-nums;
         }
 
@@ -2648,6 +2637,7 @@ export default function POSPage() {
         }
 
         /* 🟢 100% SURGICAL MODAL BACKDROP CENTERING */
+        /* Only targets overlays that contain an h2, h3, or modal close button, completely ignoring Logo/Splash screens! */
         [role="dialog"],
         [role="alert"],
         div[class*="modal" i],
@@ -2691,6 +2681,18 @@ export default function POSPage() {
           overflow-y: auto !important;
         }
 
+        /* 🟢 STICKY HEADER CSS FOR FREEZING TITLE AND MAIN TABS */
+        .pos-sticky-header {
+          position: sticky;
+          top: 0;
+          z-index: 40;
+          background-color: #f8fafc;
+          padding-top: max(20px, env(safe-area-inset-top, 20px));
+          padding-bottom: 8px;
+          margin-bottom: 8px;
+          box-shadow: 0 4px 10px -2px rgba(248, 250, 252, 1);
+        }
+
         /* 🔥 BULLETPROOF GLOBAL OVERRIDE FOR MOBILE TABS 🔥 */
         .saas-tab-container {
           flex-wrap: nowrap !important;
@@ -2706,20 +2708,12 @@ export default function POSPage() {
           white-space: nowrap !important;
         }
 
-        /* 🔥 NEW FLEXBOX WRAPPERS FOR FREEZE STYLE */
-        .main-wrapper-frozen { 
-          padding: 0 24px 0 24px; 
-          font-family: Arial, sans-serif; 
-          box-sizing: border-box; 
-          width: 100%;
-        }
-        
-        .main-wrapper-scrollable { 
+        .main-wrapper { 
           padding: 0 24px 24px 24px; 
           font-family: Arial, sans-serif; 
           box-sizing: border-box; 
           width: 100%;
-          overscroll-behavior-y: contain; /* Prevents scroll chaining to the body */
+          min-height: 100%;
         }
 
         .header-container { 
@@ -2762,13 +2756,8 @@ export default function POSPage() {
         @media (max-width: 1023px) { 
           .desktop-cart-panel { display: none !important; }
           
-          /* 🔥 MOBILE PADDING: Keep bottom gap for the floating cart button */
-          .main-wrapper-frozen { 
-            padding: 0 16px 0 16px !important; 
-          }
-          .main-wrapper-scrollable { 
-            padding: 16px 16px 140px 16px !important; 
-            overscroll-behavior-y: contain;
+          .main-wrapper { 
+            padding: 0 16px 140px 16px !important; 
           }
           
           .header-container { 
