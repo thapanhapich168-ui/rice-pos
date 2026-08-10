@@ -321,7 +321,7 @@ export default function ReportControlPage() {
   const thisMonthData = generateDailyArray(activeSalesData, isMTD)
   const lastMonthData = generateDailyArray(activeSalesData, isLastMonth)
 
-  // --- 5. TELEGRAM MESSAGE GENERATOR ---
+  // --- 5. TELEGRAM MESSAGE GENERATOR (DAILY ONLY) ---
   const generateTelegramMessage = () => {
     const { today, month } = reportMetrics
     const cleanUSD = (val: number) => (val === 0 ? '$0' : formatUSD(val))
@@ -429,7 +429,7 @@ export default function ReportControlPage() {
     }
   }
 
-  // --- 8. 🔥 SERVERLESS MULTI-PAGE PDF ENGINE (RESTORED!) ---
+  // --- 8. 🔥 SERVERLESS MULTI-PAGE PDF ENGINE (TELEGRAM) ---
   async function handleSendMonthlyTelegram() {
     const activeBotToken = TELEGRAM_CONFIG.botToken
     const activeChatId = TELEGRAM_CONFIG.chatId
@@ -481,7 +481,12 @@ export default function ReportControlPage() {
       const formData = new FormData();
       formData.append('chat_id', activeChatId);
       formData.append('document', pdfBlob, `Monthly_Report_Branch_${activeBranchId}.pdf`);
-      formData.append('caption', `📊 Executive Monthly Report (${activeBranchId === 0 ? 'Global HQ' : 'Branch ' + activeBranchId})`);
+      
+      // 🔥 CUSTOM DESCRIPTION ADDED HERE
+      const branchLabel = activeBranchId === 0 ? 'GLOBAL HQ' : `BRANCH ${activeBranchId}`;
+      const monthYear = new Date().toLocaleDateString('en-GB', { month: 'long', year: 'numeric' }).toUpperCase();
+      const caption = `📊 ${monthYear} — FULL EXECUTIVE BUSINESS REPORT (${branchLabel})\n\n📄 Complete multi-section statement attached (includes all MTD SaaS cards, Trend charts, and Expense categorization).`;
+      formData.append('caption', caption);
 
       // 4. Fire it directly to Telegram! Vercel is bypassed.
       const response = await fetch(`https://api.telegram.org/bot${activeBotToken}/sendDocument`, {
@@ -504,14 +509,56 @@ export default function ReportControlPage() {
     }
   }
 
+  // --- 9. 🔥 LOCALLY DOWNLOAD PDF ENGINE ---
+  async function handleDownloadPDF() {
+    if (!monthlyReportRef.current) return;
+
+    setIsSending(true)
+    showToast('info', 'Generating PDF...', 'Slicing A4 pages using device memory...')
+
+    try {
+      const canvas = await html2canvas(monthlyReportRef.current, { 
+        scale: 2, 
+        useCORS: true,
+        backgroundColor: '#ffffff'
+      });
+      
+      const imgData = canvas.toDataURL('image/png');
+      const pdf = new jsPDF('p', 'mm', 'a4');
+      
+      const pdfWidth = pdf.internal.pageSize.getWidth();
+      const pdfHeight = pdf.internal.pageSize.getHeight();
+      const renderHeight = (canvas.height * pdfWidth) / canvas.width;
+      
+      let heightLeft = renderHeight;
+      let position = 0;
+
+      pdf.addImage(imgData, 'PNG', 0, position, pdfWidth, renderHeight);
+      heightLeft -= pdfHeight;
+
+      while (heightLeft > 0) {
+        position -= pdfHeight; 
+        pdf.addPage();
+        pdf.addImage(imgData, 'PNG', 0, position, pdfWidth, renderHeight);
+        heightLeft -= pdfHeight;
+      }
+
+      // Download directly to device
+      pdf.save(`Monthly_Report_Branch_${activeBranchId}.pdf`);
+      showToast('success', 'PDF Downloaded!', 'Your A4 PDF has been saved to your device.')
+
+    } catch (e: any) {
+      showToast('error', 'Download Failed', e.message)
+      console.error(e)
+    } finally {
+      setIsSending(false)
+    }
+  }
+
   const copyToClipboard = () => {
     const msg = generateTelegramMessage()
     navigator.clipboard.writeText(msg)
     showToast('success', 'Copied!', 'Formatted report copied to clipboard.')
-  }
-
-  const handlePrintA4 = () => {
-    window.print()
   }
 
   return (
@@ -582,15 +629,17 @@ export default function ReportControlPage() {
                   </>
                 ) : (
                   <>
+                    {/* 🔥 RESTORED DOWNLOAD PDF BUTTON */}
                     <button
-                      onClick={handlePrintA4}
+                      onClick={handleDownloadPDF}
+                      disabled={isSending || loading}
                       className="saas-btn saas-btn-secondary controls-btn-secondary"
                       style={{ fontWeight: 'bold' }}
                     >
-                      <span className="desktop-only-inline">🖨️ Print A4 PDF</span>
-                      <span className="mobile-only-inline">🖨️ Print PDF</span>
+                      <span className="desktop-only-inline">📥 Download A4 PDF</span>
+                      <span className="mobile-only-inline">📥 Download PDF</span>
                     </button>
-                    {/* 🔥 RESTORED THE PDF SEND BUTTON HERE */}
+                    
                     <button
                       onClick={handleSendMonthlyTelegram}
                       disabled={isSending || loading}
@@ -659,7 +708,7 @@ export default function ReportControlPage() {
           {activeReportTab === 'monthly' && (
             <div 
               ref={monthlyReportRef} 
-              className="a4-report-container fade-in" 
+              className="a4-report-container" // 🔥 Removed fade-in so screenshot captures solid text
               style={{
                 background: '#ffffff',
                 width: '100%',
@@ -668,8 +717,12 @@ export default function ReportControlPage() {
                 padding: '24px',
                 borderRadius: '12px',
                 boxSizing: 'border-box',
-                // 🔥 THE FIX: Force the PDF engine to use clean Sans-Serif fonts
-                fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Noto Sans Khmer"' 
+                // 🔥 WHITE TEXT FIX: Forces rendering to be solid, properly spaced, and uses System font
+                fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Noto Sans Khmer"',
+                fontVariantLigatures: 'none', 
+                textRendering: 'geometricPrecision',
+                letterSpacing: 'normal',
+                opacity: 1 
             }}>
               
               {/* HEADER / BRANDING */}
@@ -827,9 +880,6 @@ export default function ReportControlPage() {
         </div>
 
         <style jsx global>{`
-          .fade-in { animation: fadeIn 0.3s ease-in-out; }
-          @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
-
           .header-container { 
             display: flex;
             justify-content: space-between;
