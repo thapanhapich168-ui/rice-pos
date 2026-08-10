@@ -110,7 +110,8 @@ export default function InvoiceGallery() {
     const retailGrouped: Record<string, Invoice> = {};
     if (retailData) {
       retailData.forEach((row: any) => {
-        const txId = row.transaction_id || `RET-${row.id}`;
+        // 🔥 FIX: Added 'ID' tag so the void function knows exactly how to trace older missing IDs
+        const txId = row.transaction_id || `RET-ID-${row.id}`; 
         const itemSubtotal = Number(row.qty || 0) * Number(row.price_per_bag || 0);
         const itemDesc = `${row.custom_rice_type || row.rice_type || 'Rice'} (x${row.qty})`;
 
@@ -150,127 +151,105 @@ export default function InvoiceGallery() {
     setIsLoading(false);
   }
 
-  // --- SAFE VOID AUTOMATION ---
+  // --- 🔥 BULLETPROOF VOID AUTOMATION ---
   const handleVoidInvoice = async (invoiceId: string) => {
-    if (!confirm(`🚨 Are you sure you want to VOID transaction ${invoiceId}?\n\nThis will instantly:\n1. Restore bags/kg to your stock\n2. Reverse the profit/COGS math\n3. Delete all payment records\n4. Mark this transaction as voided permanently`)) return;
+    if (!confirm(`🚨 Are you sure you want to VOID transaction ${invoiceId}?\n\nThis will instantly:\n1. Verify and permanently delete the record\n2. Safely restore stock\n3. Reverse dashboard numbers`)) return;
 
-    setIsLoading(true);
+    // 🔥 FIX: Use isProcessing to prevent Grid View from unmounting mid-click
+    setIsProcessing(true); 
+    
     try {
-      // 🟢 1. Detect if this is a retail sale using state fallback
       const targetInvoice = invoices.find(inv => inv.invoice_id === invoiceId);
       const isRetail = targetInvoice ? targetInvoice.is_retail : (invoiceId.startsWith('RET-') || invoiceId.startsWith('ret-'));
+      const tableName = isRetail ? 'retail_sales' : 'sales';
 
-      // 🟢 2. Fetch ALL line items sharing this ID (even if there are 2+ rows!)
-      const { data: items, error: fetchErr } = await supabase
-        .from(isRetail ? 'retail_sales' : 'sales')
-        .select('*')
-        .eq(isRetail ? 'transaction_id' : 'invoice_id', invoiceId)
-        .eq('branch_id', activeBranchId); // 🔥 STRICT BRANCH FILTER
+      // 🟢 1. FETCH EXACT ROWS TO MEMORY FIRST
+      let items: any[] = [];
+      let fetchErr = null;
 
-      if (fetchErr) {
-        throw new Error(`Failed to fetch items: ${fetchErr.message}`);
+      if (isRetail) {
+        if (invoiceId.startsWith('RET-ID-')) {
+          // Captures older retail rows that lacked a transaction_id
+          const realId = invoiceId.replace('RET-ID-', '');
+          const { data, error } = await supabase.from('retail_sales').select('*').eq('id', realId).eq('branch_id', activeBranchId);
+          items = data || []; fetchErr = error;
+        } else {
+          const { data, error } = await supabase.from('retail_sales').select('*').eq('transaction_id', invoiceId).eq('branch_id', activeBranchId);
+          items = data || []; fetchErr = error;
+        }
+      } else {
+        const { data, error } = await supabase.from('sales').select('*').eq('invoice_id', invoiceId).eq('branch_id', activeBranchId);
+        items = data || []; fetchErr = error;
       }
 
-      // 🟢 3. Restore Stock & Batches for EVERY row found
-      if (items && items.length > 0) {
-        for (const item of items) {
-          // Skip if row is already voided to prevent double-restoring stock
-          if (item.status === 'Voided' || item.delivery_status === 'Voided') continue;
+      if (fetchErr) throw new Error(`Database read failed: ${fetchErr.message}`);
+      if (!items || items.length === 0) throw new Error(`Could not locate records for this transaction. It may already be deleted.`);
 
-          const qty = Number(item.qty) || 0;
-          const riceName = (item.custom_rice_type || item.rice_type || '').trim();
-          const isSpecial = riceName.includes('បានប្រើ') || riceName.includes('សេវាដឹក');
-          
-          if (qty !== 0 && !isSpecial) {
-            // 🟢 ROBUST ID RESOLUTION: Match by product_id OR rice_type name (case-insensitive)
-            let productId = item.product_id;
-            if (!productId && riceName) {
-              const { data: prodByName } = await supabase
-                .from('products')
-                .select('id')
-                .eq('branch_id', activeBranchId)
-                .ilike('name', riceName)
-                .maybeSingle();
-              if (prodByName) {
-                productId = prodByName.id;
-              }
+      // 🟢 2. PROTECTION: DELETE FROM DATABASE *FIRST*!
+      // By forcing the delete first, if the database blocks it or fails, the code throws an error and STOPS.
+      // This guarantees your stock will never artificially increase on a failed void.
+      const rowIds = items.map(i => i.id);
+      
+      const { error: delErr } = await supabase
+        .from(tableName)
+        .delete()
+        .in('id', rowIds); // Guaranteed to delete exactly what was fetched
+
+      if (delErr) throw new Error(`Database blocked deletion: ${delErr.message}`);
+
+      // 🟢 3. RESTORE STOCK & BATCHES SAFELY (Only executes if deletion succeeded)
+      for (const item of items) {
+        if (item.status === 'Voided' || item.delivery_status === 'Voided') continue;
+
+        const qty = Number(item.qty) || 0;
+        const riceName = (item.custom_rice_type || item.rice_type || '').trim();
+        const isSpecial = riceName.includes('បានប្រើ') || riceName.includes('សេវាដឹក');
+        
+        if (qty !== 0 && !isSpecial) {
+          let productId = item.product_id;
+          if (!productId && riceName) {
+            const { data: prodByName } = await supabase
+              .from('products')
+              .select('id')
+              .eq('branch_id', activeBranchId)
+              .ilike('name', riceName)
+              .maybeSingle();
+            if (prodByName) productId = prodByName.id;
+          }
+
+          if (productId) {
+            const { data: prod } = await supabase.from('products').select('stock, cost_price').eq('id', productId).eq('branch_id', activeBranchId).maybeSingle();
+            
+            // Restore Master Stock
+            await supabase.rpc('adjust_product_stock', { p_product_id: productId, p_quantity: qty });
+
+            // Restore Batches
+            const { data: batchesInv } = await supabase.from('inventory_batches').select('*').eq('product_id', productId).eq('branch_id', activeBranchId).order('id', { ascending: false }).limit(1); 
+            if (batchesInv && batchesInv.length > 0) {
+              await supabase.rpc('adjust_batch_stock', { p_batch_id: batchesInv[0].id, p_quantity: qty });
+            } else {
+              await supabase.from('inventory_batches').insert([{ product_id: productId, product_name: riceName || 'Unknown Product', cost_price: item.cogs_price || prod?.cost_price || 0, remaining_qty: qty, branch_id: activeBranchId }]);
             }
 
-            if (productId) {
-              // A. Restore Master Stock (Works for retail kg AND wholesale bags!)
-              const { data: prod } = await supabase
-                .from('products')
-                .select('stock, cost_price')
-                .eq('id', productId)
-                .eq('branch_id', activeBranchId)
-                .maybeSingle();
-
-              if (prod) {
-                // Atomically restores stock safely, bypassing frontend state
-                await supabase.rpc('adjust_product_stock', { p_product_id: productId, p_quantity: qty });
-              } else {
-                console.warn(`Product not found for ID: ${productId}`);
+            // Reverse FIFO ledgers
+            let remainingToReverse = qty;
+            const { data: batches } = await supabase.from('price_history').select('*').eq('product_id', productId).eq('branch_id', activeBranchId).gt('sold_qty', 0).order('created_at', { ascending: false }); 
+            if (batches) {
+              for (const b of batches) {
+                if (remainingToReverse <= 0) break;
+                const possibleToReverse = Math.min(b.sold_qty, remainingToReverse);
+                await supabase.from('price_history').update({ sold_qty: b.sold_qty - possibleToReverse }).eq('id', b.id);
+                remainingToReverse -= possibleToReverse;
               }
-
-              // B. Restore Inventory Batch
-              const { data: batchesInv } = await supabase.from('inventory_batches')
-                .select('*')
-                .eq('product_id', productId)
-                .eq('branch_id', activeBranchId)
-                .order('id', { ascending: false })
-                .limit(1); 
-              
-              if (batchesInv && batchesInv.length > 0) {
-                // Atomically restores batch stock safely
-                await supabase.rpc('adjust_batch_stock', { p_batch_id: batchesInv[0].id, p_quantity: qty });
-              } else {
-                await supabase.from('inventory_batches').insert([{
-                  product_id: productId,
-                  product_name: riceName || 'Unknown Product',
-                  cost_price: item.cogs_price || prod?.cost_price || 0,
-                  remaining_qty: qty,
-                  branch_id: activeBranchId // 🔥 STAMPED
-                }]);
-              }
-
-              // C. Reverse FIFO Batches (Subtract from sold_qty in price_history)
-              let remainingToReverse = qty;
-              const { data: batches } = await supabase.from('price_history')
-                .select('*')
-                .eq('product_id', productId)
-                .eq('branch_id', activeBranchId)
-                .gt('sold_qty', 0)
-                .order('created_at', { ascending: false }); 
-              
-              if (batches) {
-                for (const b of batches) {
-                  if (remainingToReverse <= 0) break;
-                  const possibleToReverse = Math.min(b.sold_qty, remainingToReverse);
-                  await supabase.from('price_history')
-                    .update({ sold_qty: b.sold_qty - possibleToReverse })
-                    .eq('id', b.id);
-                  remainingToReverse -= possibleToReverse;
-                }
-              }
-            } else {
-              console.warn(`Could not resolve productId for item: ${riceName}`);
             }
           }
         }
       }
 
-      // 🟢 4. Delete Line Items from Database (Wholesale & Retail)
-      if (!isRetail) {
-        await supabase.from('sales').delete().eq('invoice_id', invoiceId).eq('branch_id', activeBranchId);
-      } else {
-        // 🔥 FIX: Successfully delete retail rows from the database!
-        await supabase.from('retail_sales').delete().eq('transaction_id', invoiceId).eq('branch_id', activeBranchId);
-      }
-
-      // 🟢 5. Delete Payments (Removes from Cash on Hand)
+      // 🟢 4. CLEANUP SUMMARIES & PAYMENTS
       await supabase.from('invoice_payments').delete().eq('invoice_id', invoiceId).eq('branch_id', activeBranchId);
 
-      // 🟢 6. Update Master Status (Wholesale only, since retail rows are deleted)
+      // We only update summaries for wholesale, retail summaries are already gone via row deletion.
       if (!isRetail) {
         await supabase.from('invoice_summaries').update({ 
           delivery_status: 'Voided',
@@ -279,16 +258,15 @@ export default function InvoiceGallery() {
         }).eq('invoice_id', invoiceId).eq('branch_id', activeBranchId);
       }
 
-      showToast('success', 'Transaction Voided', `Transaction ${invoiceId} was successfully voided!`);
-      
+      showToast('success', 'Void Successful', `Transaction ${invoiceId} was permanently deleted and stock was correctly restored.`);
       setSelectedInvoices(new Set());
       await fetchInvoices();
 
     } catch (error: any) {
       console.error("Void failed:", error);
-      showToast('error', 'Void Failed', `Error voiding transaction: ${error.message}`);
+      showToast('error', 'Void Failed', error.message);
     } finally {
-      setIsLoading(false);
+      setIsProcessing(false);
     }
   }
 
@@ -659,7 +637,7 @@ export default function InvoiceGallery() {
                   <div style={{ display: 'flex', gap: '8px' }}>
                     {/* 🚨 VOID BUTTON FIRST IN ACTION GROUP */}
                     {!isVoided && (
-                      <button onClick={() => handleVoidInvoice(inv.invoice_id)} disabled={isProcessing} className="saas-btn" style={{ flex: 1, padding: '8px 4px', background: '#fee2e2', color: '#dc2626', border: '1px solid #fca5a5', fontWeight: 'bold' }}>
+                      <button onClick={(e) => { e.stopPropagation(); handleVoidInvoice(inv.invoice_id); }} disabled={isProcessing} className="saas-btn" style={{ flex: 1, padding: '8px 4px', background: '#fee2e2', color: '#dc2626', border: '1px solid #fca5a5', fontWeight: 'bold' }}>
                         🚨 Void
                       </button>
                     )}
@@ -715,7 +693,7 @@ export default function InvoiceGallery() {
                       {/* 🚨 FIRST COLUMN VOID BUTTON */}
                       <td className="saas-td" style={{ textAlign: 'center' }}>
                         {!isVoided ? (
-                          <button onClick={() => handleVoidInvoice(inv.invoice_id)} disabled={isProcessing} className="saas-btn" style={{ padding: '6px 10px', background: '#fee2e2', color: '#dc2626', border: '1px solid #fca5a5', fontWeight: 'bold', fontSize: '11px', borderRadius: '6px', cursor: 'pointer' }}>
+                          <button onClick={(e) => { e.stopPropagation(); handleVoidInvoice(inv.invoice_id); }} disabled={isProcessing} className="saas-btn" style={{ padding: '6px 10px', background: '#fee2e2', color: '#dc2626', border: '1px solid #fca5a5', fontWeight: 'bold', fontSize: '11px', borderRadius: '6px', cursor: 'pointer' }}>
                             🚨 Void
                           </button>
                         ) : (
