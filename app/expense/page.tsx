@@ -182,7 +182,7 @@ export default function ExpenseDashboard() {
 
   // 🔥 ADD THIS BLOCK RIGHT HERE TO SET THE BROWSER TAB TITLE
   useEffect(() => {
-    document.title = 'Expense and Payroll';
+    document.title = 'Expenses and Staffs';
   }, []);
 
   // --- Active Tab State ---

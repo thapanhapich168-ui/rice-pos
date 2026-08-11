@@ -69,6 +69,11 @@ export default function BizDatabase() {
   const { showToast } = useToast();
   const { activeBranchId } = useBranch(); // 🔥 TUNED INTO RADIO TOWER
 
+  // 🔥 BROWSER TAB TITLE FIX
+  useEffect(() => {
+    document.title = 'Business Database';
+  }, []);
+
   // --- CORE STATE ---
   const [transactions, setTransactions] = useState<UnifiedTransaction[]>([])
   const [activeTab, setActiveTab] = useState<TabType>('Wholesale Invoice Summary')

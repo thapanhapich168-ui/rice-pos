@@ -16,7 +16,7 @@ export default function DeliveryPage() {
 
   // 🔥 BROWSER TAB TITLE FIX
   useEffect(() => {
-    document.title = 'Delivery & Credit Hub';
+    document.title = 'Delivery and Payment Status';
   }, []);
 
   const [deliveries, setDeliveries] = useState<any[]>([])

@@ -30,7 +30,7 @@ export default function RiceMixCalculator() {
 
   // 🔥 BROWSER TAB TITLE FIX
   useEffect(() => {
-    document.title = 'Rice Mix Calculator';
+    document.title = 'Mix Calculator';
   }, []);
 
   const [products, setProducts] = useState<Product[]>([])

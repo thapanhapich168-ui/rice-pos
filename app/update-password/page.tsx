@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@supabase/supabase-js'
 
@@ -16,6 +16,11 @@ export default function UpdatePassword() {
   const [message, setMessage] = useState('')
   const [errorMsg, setErrorMsg] = useState('')
   const [showPassword, setShowPassword] = useState(false)
+
+  // 🔥 BROWSER TAB TITLE FIX
+  useEffect(() => {
+    document.title = 'Update Password';
+  }, []);
 
   const handleUpdatePassword = async (e: React.FormEvent) => {
     e.preventDefault()

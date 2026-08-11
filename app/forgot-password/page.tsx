@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@supabase/supabase-js'
 
@@ -15,6 +15,11 @@ export default function ForgotPassword() {
   const [loading, setLoading] = useState(false)
   const [message, setMessage] = useState('')
   const [errorMsg, setErrorMsg] = useState('')
+
+  // 🔥 BROWSER TAB TITLE FIX
+  useEffect(() => {
+    document.title = 'Forgot Password';
+  }, []);
 
   const handleReset = async (e: React.FormEvent) => {
     e.preventDefault()

@@ -29,6 +29,11 @@ export default function CustomerDatabasePage() {
   const { showToast } = useToast();
   const { activeBranchId } = useBranch(); // 🔥 TUNED INTO RADIO TOWER
 
+  // 🔥 BROWSER TAB TITLE FIX
+  useEffect(() => {
+    document.title = 'Customer Database';
+  }, []);
+
   // --- CORE STATE ---
   const [customers, setCustomers] = useState<Customer[]>([])
   const [isLoading, setIsLoading] = useState(true)

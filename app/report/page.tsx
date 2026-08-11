@@ -15,6 +15,11 @@ export default function ReportControlPage() {
   const { showToast } = useToast()
   const { activeBranchId } = useBranch() 
 
+  // 🔥 BROWSER TAB TITLE FIX
+  useEffect(() => {
+    document.title = 'Business Reports';
+  }, []);
+
   const [loading, setLoading] = useState(true)
   const [isSending, setIsSending] = useState(false)
   const [activeReportTab, setActiveReportTab] = useState<'daily' | 'monthly'>('daily')
