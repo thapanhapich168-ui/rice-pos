@@ -10,9 +10,6 @@ import Modal from '@/components/Modal'
 import TableSkeleton from '@/components/TableSkeleton'
 import EmptyState from '@/components/EmptyState'
 import { useBranch } from '@/components/BranchContext' // 🔥 GLOBAL MEMORY IMPORTED
-export const metadata = {
-  title: 'Expenses and Staffs',
-};
 
 // --- Interfaces ---
 interface PaymentSplit {
