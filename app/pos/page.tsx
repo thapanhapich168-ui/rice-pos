@@ -6,11 +6,11 @@ import { supabase } from '@/lib/supabaseClient'
 import * as htmlToImage from 'html-to-image'
 import { formatRiel, formatUSD, EXCHANGE_RATE } from '@/utils/formatters'
 import { CurrencyInput } from '@/components/Inputs'
-import { Product, InventoryBatch, Customer, PaymentRow } from '@/types'
+import { Product, InventoryBatch, Customer } from '@/types'
 import { useToast } from '@/components/ToastProvider'
 import Modal from '@/components/Modal'
 import EmptyState from '@/components/EmptyState'
-import { useBranch } from '@/components/BranchContext' // 🔥 GLOBAL MEMORY IMPORTED
+import { useBranch } from '@/components/BranchContext' 
 
 // --- LOCAL TYPES ---
 interface CartItem extends Product {
@@ -28,9 +28,6 @@ interface CartItem extends Product {
   db_row_id?: number
 }
 
-// ==========================================
-// SAFARI IOS IMAGE FIX
-// ==========================================
 const LOGO_LEFT_SRC = "/logo-left.png";
 const LOGO_RIGHT_SRC = "/logo-right.png";
 const WATERMARK_SRC = "/watermark.png";
@@ -52,8 +49,8 @@ const fetchImageAsBase64 = async (path: string): Promise<string> => {
   }
 };
 
-const RICE_CATEGORIES = ['🔥 Hot', 'All', 'មិញ', 'ខុន', 'ខ្ញី', 'ម្លិះ', 'រំដួល', 'បីកំណាត់', 'ដំណើប', 'សម្រូប', 'ផ្សេងៗ', '❌ Out of Stock'];
-const MAIN_KEYWORDS = ['មិញ', 'ខុន', 'ខ្ញី', 'ម្លិះ', 'រំដួល', 'បីកំណាត់', 'ដំណើប', 'សម្រូប'];
+const RICE_CATEGORIES = ['🔥 Hot', 'All', 'មិញ', 'ខុន', 'ខ្ញី', 'ម្លិះ', 'រំដួល', 'សែនក្រអូប', '54151', 'បីកំណាត់', 'ដំណើប', 'សម្រូប', 'ផ្សេងៗ', '❌ Out of Stock'];
+const MAIN_KEYWORDS = ['មិញ', 'ខុន', 'ខ្ញី', 'ម្លិះ', 'រំដួល', 'សែនក្រអូប', '54151', 'បីកំណាត់', 'ដំណើប', 'សម្រូប'];
 
 const t: Record<'en' | 'kh', any> = {
   en: {
@@ -107,8 +104,8 @@ const t: Record<'en' | 'kh', any> = {
 export default function POSPage() {
   const { showToast } = useToast();
   const { activeBranchId } = useBranch(); 
+  const [isPosMounted, setIsPosMounted] = useState(false);
 
-  // 🔥 1. ADD THIS BLOCK TO SET THE BROWSER TAB TITLE
   useEffect(() => {
     document.title = 'Point of Sales';
   }, []);
@@ -169,6 +166,7 @@ export default function POSPage() {
   const [showAdjustmentMenu, setShowAdjustmentMenu] = useState(false);
   
   const [autoOpenModal, setAutoOpenModal] = useState<{ isOpen: boolean, items: (Product & { bags_needed: number })[] }>({ isOpen: false, items: [] });
+  const [repackSubstitutes, setRepackSubstitutes] = useState<Record<number, number>>({});
 
   const [saleSummary, setSaleSummary] = useState<{ total: number, receivedRiel: number, receivedUsd: number, totalReceivedInRiel: number, change: number, type?: 'retail' | 'wholesale', isCashless?: boolean, items?: any[], isDebt?: boolean } | null>(null)
   const [showInvoicePreview, setShowInvoicePreview] = useState(false)
@@ -178,6 +176,35 @@ export default function POSPage() {
   const [editingInvoiceId, setEditingInvoiceId] = useState<string | null>(null)
   
   const invoiceRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    setIsPosMounted(true);
+    try {
+      const urlParams = new URLSearchParams(window.location.search);
+      if (!urlParams.get('edit')) {
+        const savedCart = localStorage.getItem('pos_cart');
+        if (savedCart) setCart(JSON.parse(savedCart));
+        
+        const savedCust = localStorage.getItem('pos_customer');
+        if (savedCust) setSelectedCustomerId(savedCust);
+
+        const savedOverride = localStorage.getItem('pos_override');
+        if (savedOverride) setCartCustomerNameOverride(savedOverride);
+        
+        const savedTab = localStorage.getItem('pos_tab');
+        if (savedTab) setActiveTab(savedTab as 'retail' | 'wholesale');
+      }
+    } catch (e) { console.error('Error loading POS state', e) }
+  }, []);
+
+  useEffect(() => {
+    if (isPosMounted && !editingInvoiceId) {
+      localStorage.setItem('pos_cart', JSON.stringify(cart));
+      localStorage.setItem('pos_customer', selectedCustomerId);
+      localStorage.setItem('pos_override', cartCustomerNameOverride);
+      localStorage.setItem('pos_tab', activeTab);
+    }
+  }, [cart, selectedCustomerId, cartCustomerNameOverride, activeTab, isPosMounted, editingInvoiceId]);
 
   const totalRiel = cart.reduce((sum, item) => {
     const isNegativeItem = 
@@ -324,7 +351,7 @@ export default function POSPage() {
       supabase.removeChannel(posProductsChannel);
       supabase.removeChannel(posBatchesChannel);
     };
-  }, [activeBranchId]) // 🔥 RE-RUNS WHEN BRANCH CHANGES
+  }, [activeBranchId])
 
   useEffect(() => {
     if (selectedCustomer) setCartCustomerNameOverride(selectedCustomer.name || '');
@@ -403,7 +430,6 @@ export default function POSPage() {
   }, [completedSale, previewImageUrl, showInvoicePreview])
 
   async function loadProductsAndSettings() {
-    // 🔥 FILTERED BY BRANCH
     const { data: prodData } = await supabase.from('products').select('*').eq('is_archived', false).eq('branch_id', activeBranchId).order('id', { ascending: true })
     if (prodData) setProducts(prodData)
     
@@ -415,13 +441,11 @@ export default function POSPage() {
   }
 
   async function loadCustomers() {
-    // 🔥 FILTERED BY BRANCH
     const { data } = await supabase.from('customers').select('*').eq('branch_id', activeBranchId).order('name', { ascending: true })
     setCustomers(data || [])
   }
 
   async function loadBatches() {
-    // 🔥 FILTERED BY BRANCH
     const { data } = await supabase.from('inventory_batches').select('*').eq('branch_id', activeBranchId).order('created_at', { ascending: true });
     if (data) {
       const batchMap: Record<number, InventoryBatch[]> = {};
@@ -439,7 +463,6 @@ export default function POSPage() {
   async function loadMtdSales() {
     const today = new Date();
     const firstDay = new Date(today.getFullYear(), today.getMonth(), 1).toISOString();
-    // 🔥 FILTERED BY BRANCH
     const { data } = await supabase.from('sales').select('product_id, qty').gte('created_at', firstDay).eq('branch_id', activeBranchId);
     if (data) {
       const stats: Record<number, number> = {};
@@ -520,7 +543,6 @@ export default function POSPage() {
     setSelectedMobileProduct(null);
   }
 
-  // 🟢 Handle Cart Adjustments
   function handleAddCartAdjustment() {
     if (!adjustmentModal.type) return;
     const isCoveredBag = adjustmentModal.type === 'bag' && adjustmentModal.isCoveredByDepot;
@@ -563,7 +585,7 @@ export default function POSPage() {
       weight: 0,
       stock: 0,
       isSpecial: true,
-      bypass_stock: true,
+      bypass_stock: true, 
       sortOrder: adjustmentModal.type === 'bag' ? 3 : 99
     };
 
@@ -592,7 +614,7 @@ export default function POSPage() {
          const perKgCogs = Math.round(Number(prod.cost_price || 0) / 50);
 
          const { data: newProd, error } = await supabase.from('products').insert([{
-           branch_id: activeBranchId, // 🔥 ADDED BRANCH ID
+           branch_id: activeBranchId, 
            name: newRetailName,
            price: perKgPrice,
            cost_price: perKgCogs,
@@ -723,7 +745,7 @@ export default function POSPage() {
     const { data, error } = await supabase.from('customers').insert([{
       name: finalName, phone: newCustomerForm.phone.trim(), location: newCustomerForm.location.trim(),
       owner: newCustomerForm.owner.trim() || null, type: newCustomerForm.type.trim(),
-      branch_id: activeBranchId // 🔥 ADDED BRANCH ID
+      branch_id: activeBranchId 
     }]).select().single();
 
     if (!error && data) {
@@ -743,7 +765,7 @@ export default function POSPage() {
     const { data: batches } = await supabase.from('inventory_batches')
       .select('*')
       .eq('product_id', productId)
-      .eq('branch_id', activeBranchId) // 🔥 ADDED BRANCH ID
+      .eq('branch_id', activeBranchId) 
       .gt('remaining_qty', 0)
       .order('created_at', { ascending: true });
       
@@ -766,6 +788,7 @@ export default function POSPage() {
     setSelectedCustomerId('');
     setCartCustomerNameOverride('');
     setPaymentRows([{ id: Date.now(), method: 'Cash ៛', amount: '', isAuto: true }]);
+    localStorage.removeItem('pos_cart');
     window.history.replaceState({}, document.title, window.location.pathname);
   }
 
@@ -817,13 +840,6 @@ export default function POSPage() {
     }
 
     if (itemsNeedingBags.length > 0) {
-        for (const p of itemsNeedingBags) {
-            const wProd = products.find(w => w.id === p.linked_wholesale_id);
-            if (!wProd || wProd.stock < p.bags_needed) {
-                showToast('error', 'Out of Stock', `Cannot open a bag for ${p.name} because its wholesale bag (${wProd?.name || 'Unknown'}) is out of stock!`);
-                return;
-            }
-        }
         setAutoOpenModal({ isOpen: true, items: itemsNeedingBags });
         return;
     }
@@ -835,18 +851,23 @@ export default function POSPage() {
     setIsProcessing(true);
     try {
         for (const p of autoOpenModal.items) {
-            const wholesaleProd = products.find(w => w.id === p.linked_wholesale_id);
-            if (wholesaleProd && wholesaleProd.stock >= p.bags_needed) {
-                const { error } = await supabase.rpc('pull_wholesale_bags', {
-                    p_retail_id: p.id,
-                    p_wholesale_id: wholesaleProd.id,
-                    p_bags_needed: p.bags_needed
-                });
-                if (error) throw error;
+            const targetWholesaleId = repackSubstitutes[p.id] || p.linked_wholesale_id;
+            const wholesaleProd = products.find(w => w.id === targetWholesaleId);
+            
+            if (!wholesaleProd || wholesaleProd.stock < p.bags_needed) {
+                throw new Error(`Not enough stock in the selected bag to open for ${p.name}.`);
             }
+            
+            const { error } = await supabase.rpc('pull_wholesale_bags', {
+                p_retail_id: p.id,
+                p_wholesale_id: wholesaleProd.id,
+                p_bags_needed: p.bags_needed
+            });
+            if (error) throw error;
         }
         
         setAutoOpenModal({ isOpen: false, items: [] });
+        setRepackSubstitutes({});
         
         const { data: prodData } = await supabase.from('products').select('*').eq('is_archived', false).eq('branch_id', activeBranchId).order('id', { ascending: true });
         if (prodData) {
@@ -914,9 +935,6 @@ export default function POSPage() {
         return `${s.method}: ${s.face_amount}`;
       }).join(', ');
 
-      // ==========================================
-      // RETAIL CHECKOUT LOGIC
-      // ==========================================
       if (activeTab === 'retail') {
         const retailRows = [];
         const stockUpdates: Record<number, number> = {};
@@ -925,7 +943,6 @@ export default function POSPage() {
            const dbProduct = latestProducts.find(p => p.id === item.product_id);
            let retailCogsPerKg = Number(item.cost_price || 0);
 
-           // Auto-calculate retail COGS based on wholesale link
            if (dbProduct && dbProduct.linked_wholesale_id) {
                 const wholesaleProd = latestProducts.find(wp => wp.id === dbProduct.linked_wholesale_id);
                 if (wholesaleProd) {
@@ -937,7 +954,6 @@ export default function POSPage() {
                 }
              }
 
-           // 🔥 PROFESSIONAL ACCOUNTING MATH
            const isDiscount = item.custom_name.includes('បញ្ចុះតម្លៃ');
            const isDeposit = item.custom_name.includes('កក់');
            const isReturn = item.custom_name.includes('ដូរ');
@@ -945,15 +961,14 @@ export default function POSPage() {
            const isNegativeItem = isDiscount || isDeposit || isReturn;
            const finalQty = isNegativeItem ? -Math.abs(Number(item.quantity)) : Number(item.quantity);
 
-           // Apply COGS rules
            let finalCogs = retailCogsPerKg;
-           if (isDiscount) finalCogs = 0; // Discounts have no inventory cost
-           if (isDeposit) finalCogs = Number(item.custom_price_riel || 0); // Deposits equal their price to keep profit at 0
+           if (isDiscount) finalCogs = 0; 
+           if (isDeposit) finalCogs = Number(item.custom_price_riel || 0); 
 
            retailRows.push({
              transaction_id: activeTxId,
              branch_id: activeBranchId, 
-             product_id: item.product_id, // 🔥 Critical: Links to inventory
+             product_id: item.product_id, 
              rice_type: item.name,
              custom_rice_type: item.custom_name !== item.name ? item.custom_name : null,
              qty: finalQty,
@@ -975,9 +990,6 @@ export default function POSPage() {
             await supabase.rpc('adjust_product_stock', { p_product_id: Number(prodIdStr), p_quantity: delta });
         }
 
-      // ==========================================
-      // WHOLESALE CHECKOUT LOGIC
-      // ==========================================
       } else {
         const combinedRiceTypes = currentCart.map(item => `${item.custom_name} (x${item.quantity})`).join(', ');
         const baseSaleRows: any[] = [];
@@ -985,7 +997,6 @@ export default function POSPage() {
         const fifoUpdates: Record<number, number> = {}; 
 
         for (const item of currentCart) {
-           // 🔥 PROFESSIONAL ACCOUNTING MATH
            const isReturn = item.custom_name.includes('ដូរ');
            const isDiscount = item.custom_name.includes('បញ្ចុះតម្លៃ');
            const isDeposit = item.custom_name.includes('កក់');
@@ -996,8 +1007,8 @@ export default function POSPage() {
            const finalQty = isNegativeItem ? -Math.abs(Number(item.quantity)) : Number(item.quantity);
 
            let finalCogs = Number(item.cost_price || 0);
-           if (isDiscount) finalCogs = 0; // Discounts have no inventory cost
-           if (isDeposit) finalCogs = Number(item.custom_price_riel || 0); // Deposits equal their price to keep profit at 0
+           if (isDiscount) finalCogs = 0; 
+           if (isDeposit) finalCogs = Number(item.custom_price_riel || 0); 
 
           if (item.isReturnFullBag && !editingInvoiceId) {
              const { data: dbBatches } = await supabase.from('inventory_batches')
@@ -1089,12 +1100,10 @@ export default function POSPage() {
           await supabase.from('invoice_payments').delete().eq('invoice_id', editingInvoiceId);
         }
 
-        // Calculate the summary totals manually for the invoice_summaries table
         let splitCogsSum = baseSaleRows.reduce((sum, r) => sum + (Number(r.qty) * Number(r.cogs_price)), 0);
         let splitSalesSum = baseSaleRows.reduce((sum, r) => sum + (Number(r.qty) * Number(r.price_per_bag)), 0);
 
         const finalSaleRows = baseSaleRows.map(r => {
-          // Strip db_row_id before insertion/upsert
           const { db_row_id, ...cleanRow } = r;
           return { ...cleanRow, invoice_id: activeTxId, payment_method: primaryMethodStr };
         });
@@ -1129,9 +1138,6 @@ export default function POSPage() {
         }
       }
 
-      // ==========================================
-      // PAYMENTS & CLEANUP LOGIC
-      // ==========================================
       if (showPaymentSelector || !isSimpleCustomer) {
          for (const split of effectiveSplits) {
             if (split.method === 'Unpaid / Debt') continue;
@@ -1176,6 +1182,7 @@ export default function POSPage() {
       }
 
       setCart([]);
+      localStorage.removeItem('pos_cart'); 
       setIsMobileCartOpen(false);
       setEditingInvoiceId(null);
       window.history.replaceState({}, document.title, window.location.pathname);
@@ -1202,14 +1209,10 @@ export default function POSPage() {
     try {
       const res = await fetch(dataUrl);
       const blob = await res.blob();
-      
-      // 🔥 PHASE 3 SECURITY: Generate an unguessable cryptographic UUID
-      // Fallback used just in case older mobile browsers don't support crypto.randomUUID
       const secureUUID = typeof crypto !== 'undefined' && crypto.randomUUID 
         ? crypto.randomUUID() 
         : Math.random().toString(36).substring(2) + Date.now().toString(36);
         
-      // 🔥 SAFARI FIX: Extension and ContentType MUST perfectly match the PNG blob
       const fileName = `${invoiceId}-${secureUUID}.png`; 
       
       const { error: uploadError } = await supabase.storage.from('invoices').upload(fileName, blob, { 
@@ -1218,8 +1221,6 @@ export default function POSPage() {
       
       if (!uploadError) {
         const { data: publicUrlData } = supabase.storage.from('invoices').getPublicUrl(fileName);
-        
-        // Save the clean, short, unguessable public URL to the database
         await supabase.from('sales').update({ invoice_url: publicUrlData.publicUrl }).eq('invoice_id', invoiceId).eq('branch_id', activeBranchId);
         await supabase.from('invoice_summaries').update({ invoice_url: publicUrlData.publicUrl }).eq('invoice_id', invoiceId).eq('branch_id', activeBranchId);
       } else {
@@ -1229,6 +1230,7 @@ export default function POSPage() {
       console.error("Auto-capture cloud upload failed:", error);
     }
   }
+
   const handleDesktopDownloadPNG = () => {
     if (!previewImageUrl || !completedSale) return;
     const link = document.createElement('a');
@@ -1598,15 +1600,15 @@ export default function POSPage() {
               )}
             </div>
 
-            {/* SCROLLABLE CATEGORY TABS */}
+            {/* SCROLLABLE CATEGORY TABS (🔥 Grey pre-filter styling added) */}
             {activeTab !== 'retail' && (
-              <div className="saas-tab-container hide-scrollbar" style={{ display: 'flex', flexWrap: 'nowrap', overflowX: 'auto', marginTop: '16px', width: '100%', border: 'none', boxShadow: 'none', padding: 0, background: 'transparent' }}>
+              <div className="saas-tab-container hide-scrollbar" style={{ display: 'flex', flexWrap: 'nowrap', overflowX: 'auto', marginTop: '16px', width: '100%', border: 'none', boxShadow: 'none', padding: 0, background: 'transparent', gap: '8px' }}>
                 {RICE_CATEGORIES.map(cat => (
                   <button 
                     key={cat} 
                     onClick={() => setActiveCategory(cat)} 
                     className={`saas-tab ${activeCategory === cat ? 'active' : ''}`}
-                    style={activeCategory === cat ? { borderRadius: '20px', minWidth: 'max-content' } : { borderRadius: '20px', minWidth: 'max-content', border: '1px solid #cbd5e1', background: '#fff' }}
+                    style={activeCategory === cat ? { borderRadius: '20px', minWidth: 'max-content' } : { borderRadius: '20px', minWidth: 'max-content', border: '1px solid #e2e8f0', background: '#f1f5f9', color: '#475569' }}
                   >
                     {cat === 'All' ? (lang === 'kh' ? 'ទាំងអស់' : 'All') : cat}
                   </button>
@@ -1708,7 +1710,7 @@ export default function POSPage() {
                       value={item.custom_name} 
                       onChange={(e) => updateCartItem(item.id, 'custom_name', e.target.value)}
                       placeholder="Item Name"
-                      readOnly={isSpecial}
+                      disabled={isSpecial}
                       style={{ 
                         fontSize: '14px', color: isReturn ? '#dc2626' : isCharge ? '#b45309' : '#334155', fontWeight: 'normal',
                         flex: 1, border: 'none', background: 'transparent', outline: 'none', padding: 0
@@ -1724,7 +1726,6 @@ export default function POSPage() {
                         <option value="AUTO">▼ Auto FIFO</option>
                         {activeBatches[item.product_id]?.map((b: any) => {
                           const remaining = b.remaining_qty || 0;
-                          // 🔥 THIS NOW DISPLAYS THE RECIPE NOTE IF IT EXISTS
                           return (
                             <option key={b.id} value={b.id}>
                               {formatRiel(b.cost_price)} ({remaining} left) {b.notes ? ` | ${b.notes}` : ''}
@@ -1744,7 +1745,7 @@ export default function POSPage() {
                         onFocus={() => updateCartItem(item.id, 'quantity', '')} 
                         className="saas-input" 
                         style={{ textAlign: 'center', padding: '6px' }}
-                        readOnly={isSpecial}
+                        disabled={isSpecial}
                       />
                     </div>
                     
@@ -1862,12 +1863,31 @@ export default function POSPage() {
                         value={item.custom_name} 
                         onChange={(e) => updateCartItem(item.id, 'custom_name', e.target.value)}
                         placeholder="Item Name"
-                        readOnly={isSpecial}
+                        disabled={isSpecial}
                         style={{ 
                           fontSize: '14px', color: isReturn ? '#dc2626' : isCharge ? '#b45309' : '#334155', fontWeight: 'normal',
                           flex: 1, border: 'none', background: 'transparent', outline: 'none', padding: 0
                         }} 
                       />
+                      
+                      {/* 🔥 FIXED: Added Mobile Cart Batch Dropdown */}
+                      {!isSpecial && activeTab === 'wholesale' && (
+                        <select
+                          value={item.selected_batch_id || 'AUTO'}
+                          onChange={(e) => updateCartItem(item.id, 'selected_batch_id', e.target.value === 'AUTO' ? null : Number(e.target.value))}
+                          style={{ marginLeft: '8px', padding: '4px 6px', background: '#f8fafc', border: '1px solid #cbd5e1', borderRadius: '4px', fontSize: '11px', color: '#b58a3d', outline: 'none', cursor: 'pointer', maxWidth: '140px' }}
+                        >
+                          <option value="AUTO">▼ Auto FIFO</option>
+                          {activeBatches[item.product_id]?.map((b: any) => {
+                            const remaining = b.remaining_qty || 0;
+                            return (
+                              <option key={b.id} value={b.id}>
+                                {formatRiel(b.cost_price)} ({remaining} left) {b.notes ? ` | ${b.notes}` : ''}
+                              </option>
+                            );
+                          })}
+                        </select>
+                      )}
                     </div>
 
                     <div style={{ display: 'flex', gap: activeTab === 'retail' ? '6px' : '8px', alignItems: 'center' }}>
@@ -1879,7 +1899,7 @@ export default function POSPage() {
                           onFocus={() => updateCartItem(item.id, 'quantity', '')} 
                           className="saas-input" 
                           style={{ textAlign: 'center', padding: '6px' }}
-                          readOnly={isSpecial}
+                          disabled={isSpecial}
                         />
                       </div>
                       
@@ -1948,21 +1968,42 @@ export default function POSPage() {
         </div>
       )}
 
-      {/* AUTO OPEN BAG MODAL */}
-      <Modal isOpen={autoOpenModal.isOpen} onClose={() => setAutoOpenModal({ isOpen: false, items: [] })} title="Auto-Open Bag Required" icon="⚠️" maxWidth="400px">
+      {/* AUTO OPEN BAG MODAL (🔥 FIXED: Now supports manual bag selection) */}
+      <Modal isOpen={autoOpenModal.isOpen} onClose={() => { setAutoOpenModal({ isOpen: false, items: [] }); setRepackSubstitutes({}); }} title="Auto-Open Bag Required" icon="⚠️" maxWidth="400px">
         <p style={{ color: '#475569', fontSize: '14px', lineHeight: '1.5', margin: '0 0 16px 0' }}>
           You do not have enough loose retail rice for this sale. Proceeding will automatically open a wholesale bag to restock the loose bin.
         </p>
         <div style={{ background: '#f8fafc', padding: '12px', borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '13px', color: '#64748b' }}>
           Items needing restocking:
           <ul style={{ paddingLeft: '20px', marginTop: '8px', marginBottom: 0 }}>
-            {autoOpenModal.items.map((p) => (
-                <li key={p.id}>{p.name} (Needs {p.bags_needed} bag)</li>
-            ))}
+            {autoOpenModal.items.map((p) => {
+              const defaultW = products.find(w => w.id === p.linked_wholesale_id);
+              const isOutOfStock = !defaultW || defaultW.stock < p.bags_needed;
+              return (
+                <li key={p.id} style={{ marginBottom: isOutOfStock ? '12px' : '4px' }}>
+                  <span style={{ fontWeight: 'bold', color: '#0f172a' }}>{p.name}</span> (Needs {p.bags_needed} bag)
+                  {isOutOfStock && (
+                    <div style={{ marginTop: '8px', padding: '8px', background: '#fee2e2', borderRadius: '6px', border: '1px solid #fca5a5' }}>
+                      <div style={{ color: '#dc2626', marginBottom: '6px', fontWeight: 'bold' }}>⚠️ Default bag out of stock!</div>
+                      <select 
+                        onChange={(e) => setRepackSubstitutes({...repackSubstitutes, [p.id]: Number(e.target.value)})} 
+                        className="saas-input"
+                        style={{ width: '100%', padding: '6px', fontSize: '12px' }}
+                      >
+                        <option value="">-- Select Alternative Bag to Open --</option>
+                        {products.filter(prod => Number(prod.weight) >= 50 && prod.stock >= p.bags_needed).map(sub => (
+                           <option key={sub.id} value={sub.id}>{sub.name} (Stock: {sub.stock})</option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+                </li>
+              );
+            })}
           </ul>
         </div>
         <div style={{ marginTop: '24px', display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
-          <button onClick={() => setAutoOpenModal({ isOpen: false, items: [] })} className="saas-btn saas-btn-secondary">Cancel</button>
+          <button onClick={() => { setAutoOpenModal({ isOpen: false, items: [] }); setRepackSubstitutes({}); }} className="saas-btn saas-btn-secondary">Cancel</button>
           <button onClick={handleConfirmAutoOpen} disabled={isProcessing} className="saas-btn saas-btn-primary">{isProcessing ? 'Processing...' : 'Yes, Open Bag'}</button>
         </div>
       </Modal>
