@@ -85,7 +85,7 @@ export default function RiceMixCalculator() {
   const targetProd = products.find(p => p.id.toString() === targetProductId)
   const bagProd = products.find(p => p.id.toString() === bagId)
 
-  // 🧠 SMART MATH ENGINE (Now absorbs Bag Cost into COGS)
+  // 🧠 SMART MATH ENGINE (Absorbs Bag Cost into COGS)
   useEffect(() => {
     const q1 = Number(rice1Qty) || 0;
     const q2 = Number(rice2Qty) || 0;
@@ -167,11 +167,13 @@ export default function RiceMixCalculator() {
   // 🟢 Filter Products for the active Dropdown Box
   const dropdownFilteredProducts = products.filter(p => {
     if (dropdownSearch && !p.name.toLowerCase().includes(dropdownSearch.toLowerCase())) return false;
-    const isWholesale = Number(p.weight) >= 50;
     
-    // Bags are typically tracked differently, often light weight. If targeting bag, allow all types or specific search.
-    if (activeDropdown === 'bag') return true; 
+    // 🔥 BAG FILTER: Only show items that contain the word "បាវ"
+    if (activeDropdown === 'bag') {
+      return p.name.includes('បាវ');
+    }
 
+    const isWholesale = Number(p.weight) >= 50;
     if (dropdownTab === 'wholesale' && !isWholesale) return false;
     if (dropdownTab === 'retail' && isWholesale) return false;
     return true;
@@ -524,7 +526,7 @@ export default function RiceMixCalculator() {
                   <div style={{ display: 'flex', gap: '16px', marginBottom: '20px', flexWrap: 'wrap' }}>
                     <div style={{ flex: 1, minWidth: '200px' }}>
                       <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '6px' }}>New Product Name</label>
-                      <input type="text" placeholder={`e.g. Mix ${rice1?.name.split(' ')[0]}-${rice2?.name.split(' ')[0]}`} value={newMixName} onChange={e => setNewMixName(e.target.value)} className="saas-input" />
+                      <input type="text" placeholder="New product name..." value={newMixName} onChange={e => setNewMixName(e.target.value)} className="saas-input" />
                     </div>
                     <div style={{ flex: 1, minWidth: '150px' }}>
                       <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '6px' }}>Size Type</label>
@@ -562,8 +564,6 @@ export default function RiceMixCalculator() {
                         }}
                         className="saas-input"
                         style={{ 
-                          color: targetProd ? '#1e293b' : '#3b82f6', 
-                          fontWeight: 'bold', 
                           paddingRight: '30px',
                           borderColor: activeDropdown === 'target' ? '#3b82f6' : undefined,
                           boxShadow: activeDropdown === 'target' ? '0 0 0 2px rgba(59, 130, 246, 0.2)' : undefined 
@@ -589,7 +589,7 @@ export default function RiceMixCalculator() {
                       <div style={{ position: 'relative', zIndex: activeDropdown === 'bag' ? 100 : 1 }}>
                         <input 
                           type="text"
-                          placeholder="🔍 Search empty bag (e.g., ថ្លៃបាវ)..."
+                          placeholder="🔍 Search empty bag..."
                           value={activeDropdown === 'bag' ? dropdownSearch : (bagProd ? `${bagProd.name} (Cost: ${formatRiel(bagProd.cost_price)})` : '')}
                           onClick={() => {
                             if (activeDropdown !== 'bag') {
@@ -602,7 +602,7 @@ export default function RiceMixCalculator() {
                             setDropdownSearch(e.target.value);
                           }}
                           className="saas-input"
-                          style={{ paddingRight: '30px', borderColor: activeDropdown === 'bag' ? '#f59e0b' : undefined }}
+                          style={{ paddingRight: '30px', borderColor: activeDropdown === 'bag' ? '#f59e0b' : undefined, boxShadow: activeDropdown === 'bag' ? '0 0 0 2px rgba(245, 158, 11, 0.2)' : undefined }}
                         />
                         <span style={{ position: 'absolute', right: '14px', top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: '#f59e0b', fontSize: '12px' }}>▼</span>
                       </div>
