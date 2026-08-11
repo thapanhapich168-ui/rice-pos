@@ -21,16 +21,15 @@ interface MixHistory {
   rice3Ratio?: number
   mixedCogs: number
   yieldStr: string
-  bagUsed?: string       // 🔥 Added for Bag Tracking
-  bagQty?: number        // 🔥 Added for Bag Tracking
-  branch_id?: number // 🔥 ADDED FOR JSON FILTERING
+  bagUsed?: string       
+  bagQty?: number        
+  branch_id?: number 
 }
 
 export default function RiceMixCalculator() {
   const { showToast } = useToast();
-  const { activeBranchId } = useBranch(); // 🔥 TUNED INTO RADIO TOWER
+  const { activeBranchId } = useBranch(); 
 
-  // 🔥 BROWSER TAB TITLE FIX
   useEffect(() => {
     document.title = 'Mix Calculator';
   }, []);
@@ -56,7 +55,6 @@ export default function RiceMixCalculator() {
   // Auto-Calc Results & History
   const [calcResult, setCalcResult] = useState<{ blendedCogsPerKg: number, totalYieldKg: number, totalCost: number } | null>(null)
   
-  // 🔥 SMART HISTORY STATES
   const [globalHistory, setGlobalHistory] = useState<MixHistory[]>([])
   const [history, setHistory] = useState<MixHistory[]>([])
   
@@ -71,13 +69,13 @@ export default function RiceMixCalculator() {
   const [bagQty, setBagQty] = useState<number | ''>('')
 
   const [newMixName, setNewMixName] = useState('')
-  const [newMixPrice, setNewMixPrice] = useState<number | ''>('')
+  const [newMixPrice, setNewMixPrice] = useState<number | ''>(0) // 🔥 DEFAULTED TO 0
   const [newMixType, setNewMixType] = useState<'wholesale' | 'retail'>('wholesale')
 
   useEffect(() => {
     fetchProducts()
     fetchHistory()
-  }, [activeBranchId]) // 🔥 RE-RUNS ON BRANCH SWITCH
+  }, [activeBranchId])
 
   const rice1 = products.find(p => p.id.toString() === rice1Id)
   const rice2 = products.find(p => p.id.toString() === rice2Id)
@@ -99,13 +97,11 @@ export default function RiceMixCalculator() {
       const w2 = Number(rice2.weight) >= 50 ? 50 : 1;
       const w3 = rice3 ? (Number(rice3.weight) >= 50 ? 50 : 1) : 1;
 
-      // Convert all inputs to raw Kg to find true blend
       const kg1 = q1 * w1;
       const kg2 = q2 * w2;
       const kg3 = q3 * w3;
       const totalYieldKg = kg1 + kg2 + kg3;
 
-      // Calculate total physical cost of the mixture (Rice + Bag)
       const cost1 = q1 * rice1.cost_price;
       const cost2 = q2 * rice2.cost_price;
       const cost3 = rice3 ? (q3 * rice3.cost_price) : 0;
@@ -123,7 +119,6 @@ export default function RiceMixCalculator() {
   }, [rice1Id, rice2Id, rice3Id, rice1Qty, rice2Qty, rice3Qty, showThirdRice, bagQty, products, rice1, rice2, rice3, bagProd])
 
   async function fetchProducts() {
-    // 🔥 FILTERED BY BRANCH
     const { data } = await supabase.from('products').select('*').eq('is_archived', false).eq('branch_id', activeBranchId).order('name', { ascending: true })
     if (data) setProducts(data)
   }
@@ -132,7 +127,6 @@ export default function RiceMixCalculator() {
     const { data } = await supabase.from('app_settings').select('setting_value').eq('setting_key', 'calculator_history').single()
     if (data && data.setting_value) {
       setGlobalHistory(data.setting_value);
-      // 🔥 LOCALLY FILTER THE GLOBAL JSON SO WE ONLY SEE THIS BRANCH'S HISTORY
       setHistory(data.setting_value.filter((h: any) => h.branch_id === activeBranchId || !h.branch_id));
     }
   }
@@ -144,15 +138,13 @@ export default function RiceMixCalculator() {
     setShowThirdRice(false);
     setCalcResult(null);
     setSyncMode('none');
-    setNewMixName(''); setNewMixPrice(''); setTargetProductId('');
+    setNewMixName(''); setNewMixPrice(0); setTargetProductId('');
     setBagId(''); setBagQty('');
     setActiveDropdown(null);
   }
 
   const clearHistory = async () => {
     if (!confirm('Are you sure you want to clear all calculator history for this branch?')) return
-    
-    // 🔥 PRESERVE OTHER BRANCHES' HISTORY WHEN CLEARING
     const keptHistory = globalHistory.filter(h => h.branch_id !== activeBranchId && h.branch_id !== undefined);
     
     setGlobalHistory(keptHistory);
@@ -164,15 +156,11 @@ export default function RiceMixCalculator() {
     }, { onConflict: 'setting_key' })
   }
 
-  // 🟢 Filter Products for the active Dropdown Box
   const dropdownFilteredProducts = products.filter(p => {
     if (dropdownSearch && !p.name.toLowerCase().includes(dropdownSearch.toLowerCase())) return false;
-    
-    // 🔥 BAG FILTER: Only show items that contain the word "បាវ"
     if (activeDropdown === 'bag') {
       return p.name.includes('បាវ');
     }
-
     const isWholesale = Number(p.weight) >= 50;
     if (dropdownTab === 'wholesale' && !isWholesale) return false;
     if (dropdownTab === 'retail' && isWholesale) return false;
@@ -188,7 +176,6 @@ export default function RiceMixCalculator() {
     setActiveDropdown(null);
   }
 
-  // 🧮 DYNAMIC OUTPUT YIELD CALCULATION
   let outputUnit = 'Kg';
   let outputMultiplier = 1;
   let finalYield = 0;
@@ -202,16 +189,13 @@ export default function RiceMixCalculator() {
       outputMultiplier = Number(targetProd.weight) >= 50 ? 50 : 1;
       outputUnit = Number(targetProd.weight) >= 50 ? 'Bags' : 'Kg';
     } else {
-      // Default generic display
       outputMultiplier = 50;
       outputUnit = 'Bags';
     }
-    
     finalYield = calcResult.totalYieldKg / outputMultiplier;
     finalCogs = calcResult.blendedCogsPerKg * outputMultiplier;
   }
 
-  // Auto-fill bag quantity based on final yield if user hasn't typed anything
   useEffect(() => {
     if (bagId && finalYield > 0 && bagQty === '') {
       setBagQty(Math.ceil(finalYield));
@@ -230,8 +214,9 @@ export default function RiceMixCalculator() {
     const qtyToDeduct3 = showThirdRice ? (Number(rice3Qty) || 0) : 0;
     const qtyToDeductBag = Number(bagQty) || 0;
 
-    if (syncMode === 'new' && (!newMixName || !newMixPrice)) {
-      showToast('error', 'Missing Information', 'Please enter a name and selling price for the new mix.');
+    // 🔥 FIXED: ALLOWS 0 AS A VALID PRICE
+    if (syncMode === 'new' && (!newMixName || newMixPrice === '')) {
+      showToast('error', 'Missing Information', 'Please enter a name for the new mix.');
       return;
     }
     if (syncMode === 'existing' && !targetProductId) {
@@ -242,19 +227,21 @@ export default function RiceMixCalculator() {
     setIsProcessing(true);
 
     try {
-      // 1. DEDUCT: Take ingredients out of stock
+      // 1. DEDUCT BASE INGREDIENTS
       if (qtyToDeduct1 > 0) await supabase.from('products').update({ stock: rice1.stock - qtyToDeduct1 }).eq('id', rice1.id);
       if (qtyToDeduct2 > 0) await supabase.from('products').update({ stock: rice2.stock - qtyToDeduct2 }).eq('id', rice2.id);
       if (showThirdRice && qtyToDeduct3 > 0 && rice3) {
         await supabase.from('products').update({ stock: rice3.stock - qtyToDeduct3 }).eq('id', rice3.id);
       }
 
-      // 2. DEDUCT BAG (Capitalized COGS approach: No expense logged, bag cost is absorbed into new COGS)
+      // 2. DEDUCT BAGS
       if (bagProd && qtyToDeductBag > 0) {
         await supabase.from('products').update({ stock: bagProd.stock - qtyToDeductBag }).eq('id', bagProd.id);
       }
 
-      // 3. ADD: Put mixed result into target
+      let finalTargetId = targetProductId;
+
+      // 3. ADD MIXED RICE
       if (syncMode === 'new') {
         const payload = {
           name: newMixName,
@@ -262,10 +249,13 @@ export default function RiceMixCalculator() {
           cost_price: Math.round(finalCogs),
           weight: newMixType === 'wholesale' ? 50 : 1, 
           stock: finalYield,
-          branch_id: activeBranchId // 🔥 STAMPED
+          branch_id: activeBranchId 
         }
-        const { error } = await supabase.from('products').insert([payload]);
+        // 🔥 Get the new ID back
+        const { data: newProd, error } = await supabase.from('products').insert([payload]).select().single();
         if (error) throw error;
+        finalTargetId = newProd.id.toString();
+
       } else if (targetProd) {
         const newStock = targetProd.stock + finalYield;
         const { error } = await supabase.from('products').update({ 
@@ -273,9 +263,21 @@ export default function RiceMixCalculator() {
           cost_price: Math.round(finalCogs) 
         }).eq('id', targetProd.id);
         if (error) throw error;
+        finalTargetId = targetProd.id.toString();
       }
 
-      // 4. LOG HISTORY (Safely injecting Branch ID)
+      // 4. 🔥 CREATE BATCH RECORD WITH RECIPE NOTE SO THE POS CAN READ IT!
+      const recipeString = `Recipe: ${qtyToDeduct1}x ${rice1.name} + ${qtyToDeduct2}x ${rice2.name}${showThirdRice && rice3 ? ` + ${qtyToDeduct3}x ${rice3.name}` : ''}`;
+
+      await supabase.from('inventory_batches').insert([{
+        product_id: Number(finalTargetId),
+        cost_price: Math.round(finalCogs),
+        remaining_qty: finalYield,
+        branch_id: activeBranchId,
+        notes: recipeString // Passes the string to the database
+      }]);
+
+      // 5. UPDATE INTERNAL APP HISTORY
       const yieldStr = `${finalYield.toLocaleString('en-US', { maximumFractionDigits: 2 })} ${outputUnit}`;
       const newRecord: MixHistory = {
         id: Date.now().toString(),
@@ -290,7 +292,7 @@ export default function RiceMixCalculator() {
         yieldStr: yieldStr,
         bagUsed: bagProd ? bagProd.name : undefined,
         bagQty: bagProd ? qtyToDeductBag : undefined,
-        branch_id: activeBranchId // 🔥 STAMPED IN JSON
+        branch_id: activeBranchId
       }
       
       const updatedGlobalHistory = [newRecord, ...globalHistory].slice(0, 100); 
@@ -299,7 +301,7 @@ export default function RiceMixCalculator() {
       
       await supabase.from('app_settings').upsert({ setting_key: 'calculator_history', setting_value: updatedGlobalHistory }, { onConflict: 'setting_key' })
 
-      showToast('success', 'Sync Successful', 'Inventory successfully synced and updated!');
+      showToast('success', 'Sync Successful', 'Inventory synced and Recipe stored in batch!');
       handleReset();
       fetchProducts();
 
@@ -315,8 +317,6 @@ export default function RiceMixCalculator() {
     if (activeDropdown !== target) return null;
     return (
       <div className="dropdown-menu-container">
-        
-        {/* Category Tabs using Global SaaS Classes - HIDE TABS IF SEARCHING FOR BAG */}
         {target !== 'bag' && (
           <div className="saas-tab-container" style={{ margin: '8px', marginBottom: 0, padding: '4px', border: 'none', boxShadow: 'none', background: '#f1f5f9' }}>
             <button 
@@ -335,8 +335,6 @@ export default function RiceMixCalculator() {
             </button>
           </div>
         )}
-        
-        {/* Scrollable Results */}
         <div className="dropdown-results-container hide-scrollbar">
           {dropdownFilteredProducts.length === 0 ? (
             <div style={{ padding: '16px', textAlign: 'center', color: '#94a3b8', fontSize: '13px' }}>No products found</div>
@@ -360,82 +358,8 @@ export default function RiceMixCalculator() {
     )
   }
 
-  // 🟢 RICE INGREDIENT CARD GENERATOR
-  const renderRiceCard = (label: string, riceData: Product | undefined, qty: number | '', setQty: any, target: 'rice1' | 'rice2' | 'rice3') => {
-    const isWholesale = riceData ? Number(riceData.weight) >= 50 : true;
-    const unitLabel = isWholesale ? 'Bags' : 'Kg';
-
-    return (
-      <div className="saas-card fade-in" style={{ flex: 1, minWidth: '250px' }}>
-        <h2 className="saas-card-title">{label}</h2>
-        <div className="input-group" style={{ position: 'relative' }}>
-          <label className="saas-card-title" style={{ fontSize: '11px', marginBottom: '6px', display: 'block' }}>Select Rice Ingredient</label>
-          
-          {/* Invisible Overlay to catch outside clicks and close the dropdown */}
-          {activeDropdown === target && (
-            <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, zIndex: 99 }} onClick={() => setActiveDropdown(null)}></div>
-          )}
-
-          {/* Trigger Box - NOW ACTS AS THE SEARCH INPUT */}
-          <div style={{ position: 'relative', zIndex: activeDropdown === target ? 100 : 1 }}>
-            <input 
-              type="text"
-              placeholder="🔍 Search rice..."
-              value={activeDropdown === target ? dropdownSearch : (riceData ? riceData.name : '')}
-              onClick={() => {
-                if (activeDropdown !== target) {
-                  setActiveDropdown(target);
-                  setDropdownSearch('');
-                  setDropdownTab('wholesale');
-                }
-              }}
-              onChange={(e) => {
-                setActiveDropdown(target);
-                setDropdownSearch(e.target.value);
-              }}
-              className="saas-input"
-              style={{ 
-                paddingRight: '30px', 
-                borderColor: activeDropdown === target ? '#b58a3d' : undefined,
-                boxShadow: activeDropdown === target ? '0 0 0 2px rgba(181, 138, 61, 0.2)' : undefined 
-              }}
-            />
-            <span style={{ position: 'absolute', right: '14px', top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: '#94a3b8', fontSize: '12px' }}>▼</span>
-          </div>
-
-          {/* Dropdown Menu */}
-          {renderDropdownMenu(target)}
-        </div>
-        
-        {riceData && (
-          <div className="price-display fade-in">
-            <span className="label">Current Cost (COGS)</span>
-            <span className="value">{formatRiel(riceData.cost_price)}</span>
-            <div style={{ fontSize: '11px', color: '#64748b', marginTop: '4px' }}>
-              Current Stock: <b style={{ color: riceData.stock > 0 ? '#10b981' : '#ef4444'}}>{riceData.stock} {unitLabel}</b>
-            </div>
-          </div>
-        )}
-
-        <div className="input-group" style={{ marginTop: '16px' }}>
-          <label className="saas-card-title" style={{ fontSize: '11px', marginBottom: '6px', display: 'block' }}>Portion / Quantity ({unitLabel})</label>
-          <CurrencyInput 
-            placeholder="0" 
-            value={qty} 
-            onChange={(v: any) => setQty(v)} 
-            className="saas-input"
-          />
-        </div>
-      </div>
-    );
-  }
-
   return (
-    // 🔥 EXACT Layout Match with Rice Inventory & COGS.
-    // Relies on your global.css `.main-wrapper` for the top boundary padding.
     <div className="main-wrapper" style={{ display: 'flex', flexDirection: 'column', height: '100dvh', overflow: 'hidden' }}>
-      
-      {/* 🟢 HEADER (Frozen): Perfectly aligns with the absolute hamburger icon */}
       <div className="header-container" style={{ flexShrink: 0 }}>
         <div className="header-left">
           <h1 className="saas-page-title" style={{ margin: 0 }}>🧮 Rice Mix Calculator</h1>
@@ -443,24 +367,102 @@ export default function RiceMixCalculator() {
         <button className="saas-btn saas-btn-secondary" onClick={handleReset}>↺ Reset</button>
       </div>
 
-      {/* 🟢 SCROLLABLE BOTTOM SECTION */}
       <div className="hide-scrollbar" style={{ flex: 1, overflowY: 'auto', WebkitOverflowScrolling: 'touch', paddingBottom: '80px' }}>
-        
-        {/* CALCULATOR WORKSPACE */}
         <div className="calculator-grid">
-          {renderRiceCard('Base Rice A', rice1, rice1Qty, setRice1Qty, 'rice1')}
+          {/* Base Rice A */}
+          <div className="saas-card fade-in" style={{ flex: 1, minWidth: '250px' }}>
+            <h2 className="saas-card-title">Base Rice A</h2>
+            <div className="input-group" style={{ position: 'relative' }}>
+              <label className="saas-card-title" style={{ fontSize: '11px', marginBottom: '6px', display: 'block' }}>Select Rice Ingredient</label>
+              {activeDropdown === 'rice1' && <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, zIndex: 99 }} onClick={() => setActiveDropdown(null)}></div>}
+              <div style={{ position: 'relative', zIndex: activeDropdown === 'rice1' ? 100 : 1 }}>
+                <input 
+                  type="text" placeholder="🔍 Search rice..." value={activeDropdown === 'rice1' ? dropdownSearch : (rice1 ? rice1.name : '')}
+                  onClick={() => { if (activeDropdown !== 'rice1') { setActiveDropdown('rice1'); setDropdownSearch(''); setDropdownTab('wholesale'); } }}
+                  onChange={(e) => { setActiveDropdown('rice1'); setDropdownSearch(e.target.value); }} className="saas-input"
+                  style={{ paddingRight: '30px', borderColor: activeDropdown === 'rice1' ? '#b58a3d' : undefined, boxShadow: activeDropdown === 'rice1' ? '0 0 0 2px rgba(181, 138, 61, 0.2)' : undefined }}
+                />
+                <span style={{ position: 'absolute', right: '14px', top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: '#94a3b8', fontSize: '12px' }}>▼</span>
+              </div>
+              {renderDropdownMenu('rice1')}
+            </div>
+            {rice1 && (
+              <div className="price-display fade-in">
+                <span className="label">Current Cost (COGS)</span><span className="value">{formatRiel(rice1.cost_price)}</span>
+                <div style={{ fontSize: '11px', color: '#64748b', marginTop: '4px' }}>Current Stock: <b style={{ color: rice1.stock > 0 ? '#10b981' : '#ef4444'}}>{rice1.stock} Bags</b></div>
+              </div>
+            )}
+            <div className="input-group" style={{ marginTop: '16px' }}>
+              <label className="saas-card-title" style={{ fontSize: '11px', marginBottom: '6px', display: 'block' }}>Portion / Quantity</label>
+              <CurrencyInput placeholder="0" value={rice1Qty} onChange={(v: any) => setRice1Qty(v)} className="saas-input" />
+            </div>
+          </div>
+
           <div className="math-symbol">+</div>
-          {renderRiceCard('Base Rice B', rice2, rice2Qty, setRice2Qty, 'rice2')}
+
+          {/* Base Rice B */}
+          <div className="saas-card fade-in" style={{ flex: 1, minWidth: '250px' }}>
+            <h2 className="saas-card-title">Base Rice B</h2>
+            <div className="input-group" style={{ position: 'relative' }}>
+              <label className="saas-card-title" style={{ fontSize: '11px', marginBottom: '6px', display: 'block' }}>Select Rice Ingredient</label>
+              {activeDropdown === 'rice2' && <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, zIndex: 99 }} onClick={() => setActiveDropdown(null)}></div>}
+              <div style={{ position: 'relative', zIndex: activeDropdown === 'rice2' ? 100 : 1 }}>
+                <input 
+                  type="text" placeholder="🔍 Search rice..." value={activeDropdown === 'rice2' ? dropdownSearch : (rice2 ? rice2.name : '')}
+                  onClick={() => { if (activeDropdown !== 'rice2') { setActiveDropdown('rice2'); setDropdownSearch(''); setDropdownTab('wholesale'); } }}
+                  onChange={(e) => { setActiveDropdown('rice2'); setDropdownSearch(e.target.value); }} className="saas-input"
+                  style={{ paddingRight: '30px', borderColor: activeDropdown === 'rice2' ? '#b58a3d' : undefined, boxShadow: activeDropdown === 'rice2' ? '0 0 0 2px rgba(181, 138, 61, 0.2)' : undefined }}
+                />
+                <span style={{ position: 'absolute', right: '14px', top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: '#94a3b8', fontSize: '12px' }}>▼</span>
+              </div>
+              {renderDropdownMenu('rice2')}
+            </div>
+            {rice2 && (
+              <div className="price-display fade-in">
+                <span className="label">Current Cost (COGS)</span><span className="value">{formatRiel(rice2.cost_price)}</span>
+                <div style={{ fontSize: '11px', color: '#64748b', marginTop: '4px' }}>Current Stock: <b style={{ color: rice2.stock > 0 ? '#10b981' : '#ef4444'}}>{rice2.stock} Bags</b></div>
+              </div>
+            )}
+            <div className="input-group" style={{ marginTop: '16px' }}>
+              <label className="saas-card-title" style={{ fontSize: '11px', marginBottom: '6px', display: 'block' }}>Portion / Quantity</label>
+              <CurrencyInput placeholder="0" value={rice2Qty} onChange={(v: any) => setRice2Qty(v)} className="saas-input" />
+            </div>
+          </div>
           
           {showThirdRice && (
             <>
               <div className="math-symbol">+</div>
-              {renderRiceCard('Base Rice C', rice3, rice3Qty, setRice3Qty, 'rice3')}
+              <div className="saas-card fade-in" style={{ flex: 1, minWidth: '250px' }}>
+                <h2 className="saas-card-title">Base Rice C</h2>
+                <div className="input-group" style={{ position: 'relative' }}>
+                  <label className="saas-card-title" style={{ fontSize: '11px', marginBottom: '6px', display: 'block' }}>Select Rice Ingredient</label>
+                  {activeDropdown === 'rice3' && <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, zIndex: 99 }} onClick={() => setActiveDropdown(null)}></div>}
+                  <div style={{ position: 'relative', zIndex: activeDropdown === 'rice3' ? 100 : 1 }}>
+                    <input 
+                      type="text" placeholder="🔍 Search rice..." value={activeDropdown === 'rice3' ? dropdownSearch : (rice3 ? rice3.name : '')}
+                      onClick={() => { if (activeDropdown !== 'rice3') { setActiveDropdown('rice3'); setDropdownSearch(''); setDropdownTab('wholesale'); } }}
+                      onChange={(e) => { setActiveDropdown('rice3'); setDropdownSearch(e.target.value); }} className="saas-input"
+                      style={{ paddingRight: '30px', borderColor: activeDropdown === 'rice3' ? '#b58a3d' : undefined, boxShadow: activeDropdown === 'rice3' ? '0 0 0 2px rgba(181, 138, 61, 0.2)' : undefined }}
+                    />
+                    <span style={{ position: 'absolute', right: '14px', top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: '#94a3b8', fontSize: '12px' }}>▼</span>
+                  </div>
+                  {renderDropdownMenu('rice3')}
+                </div>
+                {rice3 && (
+                  <div className="price-display fade-in">
+                    <span className="label">Current Cost (COGS)</span><span className="value">{formatRiel(rice3.cost_price)}</span>
+                    <div style={{ fontSize: '11px', color: '#64748b', marginTop: '4px' }}>Current Stock: <b style={{ color: rice3.stock > 0 ? '#10b981' : '#ef4444'}}>{rice3.stock} Bags</b></div>
+                  </div>
+                )}
+                <div className="input-group" style={{ marginTop: '16px' }}>
+                  <label className="saas-card-title" style={{ fontSize: '11px', marginBottom: '6px', display: 'block' }}>Portion / Quantity</label>
+                  <CurrencyInput placeholder="0" value={rice3Qty} onChange={(v: any) => setRice3Qty(v)} className="saas-input" />
+                </div>
+              </div>
             </>
           )}
         </div>
 
-        {/* TOGGLE 3RD RICE BUTTON */}
         <div style={{ display: 'flex', justifyContent: 'center', marginTop: '24px' }}>
           {!showThirdRice ? (
              <button onClick={() => setShowThirdRice(true)} className="saas-btn saas-btn-secondary" style={{ border: '1px dashed #cbd5e1' }}>
@@ -473,7 +475,6 @@ export default function RiceMixCalculator() {
           )}
         </div>
 
-        {/* AUTO-CALCULATED RESULT PANEL */}
         {calcResult && (
           <div className="saas-card mint fade-in" style={{ marginTop: '30px', border: '2px solid #bbf7d0' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px', flexWrap: 'wrap', gap: '12px' }}>
@@ -503,7 +504,6 @@ export default function RiceMixCalculator() {
                 </span>
               </div>
               
-              {/* Dynamic View showing exactly what this makes */}
               <div className="stat-box highlight" style={{ flex: 2 }}>
                 <span className="saas-card-title" style={{ color: '#8a7650' }}>Will Generate Output of:</span>
                 <span className="saas-card-metric" style={{ display: 'flex', alignItems: 'baseline', gap: '8px', color: '#b58a3d' }}>
@@ -515,7 +515,6 @@ export default function RiceMixCalculator() {
               </div>
             </div>
 
-            {/* INLINE INVENTORY SYNC FORM */}
             {syncMode !== 'none' && (
               <div className="saas-card fade-in" style={{ background: '#f8fafc', padding: '20px', border: '1px solid #e2e8f0', boxShadow: 'none' }}>
                 <div style={{ fontSize: '14px', fontWeight: 'bold', color: '#1e293b', marginBottom: '16px' }}>
@@ -545,7 +544,6 @@ export default function RiceMixCalculator() {
                     {activeDropdown === 'target' && (
                       <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, zIndex: 99 }} onClick={() => setActiveDropdown(null)}></div>
                     )}
-                    {/* Target Trigger Box - NOW ACTS AS THE SEARCH INPUT */}
                     <div style={{ position: 'relative', zIndex: activeDropdown === 'target' ? 100 : 1 }}>
                       <input 
                         type="text"
@@ -563,20 +561,15 @@ export default function RiceMixCalculator() {
                           setDropdownSearch(e.target.value);
                         }}
                         className="saas-input"
-                        style={{ 
-                          paddingRight: '30px',
-                          borderColor: activeDropdown === 'target' ? '#3b82f6' : undefined,
-                          boxShadow: activeDropdown === 'target' ? '0 0 0 2px rgba(59, 130, 246, 0.2)' : undefined 
-                        }}
+                        style={{ paddingRight: '30px' }}
                       />
-                      <span style={{ position: 'absolute', right: '14px', top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: '#3b82f6', fontSize: '12px' }}>▼</span>
+                      <span style={{ position: 'absolute', right: '14px', top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: '#94a3b8', fontSize: '12px' }}>▼</span>
                     </div>
-                    
                     {renderDropdownMenu('target')}
                   </div>
                 )}
 
-                {/* 🔥 NEW: BAG DEDUCTION SELECTOR */}
+                {/* 🔥 BAG DEDUCTION SELECTOR */}
                 <div style={{ borderTop: '1px dashed #cbd5e1', paddingTop: '16px', marginBottom: '16px', position: 'relative' }}>
                   <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '6px', color: '#b45309' }}>
                     Optional: Packaging Bag Used (Cost will be absorbed into the new Mix COGS)
@@ -602,9 +595,9 @@ export default function RiceMixCalculator() {
                             setDropdownSearch(e.target.value);
                           }}
                           className="saas-input"
-                          style={{ paddingRight: '30px', borderColor: activeDropdown === 'bag' ? '#f59e0b' : undefined, boxShadow: activeDropdown === 'bag' ? '0 0 0 2px rgba(245, 158, 11, 0.2)' : undefined }}
+                          style={{ paddingRight: '30px' }}
                         />
-                        <span style={{ position: 'absolute', right: '14px', top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: '#f59e0b', fontSize: '12px' }}>▼</span>
+                        <span style={{ position: 'absolute', right: '14px', top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: '#94a3b8', fontSize: '12px' }}>▼</span>
                       </div>
                       {renderDropdownMenu('bag')}
                     </div>
@@ -629,7 +622,6 @@ export default function RiceMixCalculator() {
                 </div>
               </div>
             )}
-
           </div>
         )}
 
@@ -689,103 +681,46 @@ export default function RiceMixCalculator() {
             </div>
           </div>
         </div>
-
       </div>
 
       {/* --- PAGE-SPECIFIC CSS --- */}
       <style jsx global>{`
-        /* EXACT Copy from RiceControl for perfect alignment */
         .header-container { 
-          display: flex;
-          justify-content: space-between;
-          align-items: center; 
-          margin-bottom: 24px; 
-          margin-top: 0;
-          margin-left: 60px; 
-          gap: 12px;
-          min-height: 48px; 
-          width: calc(100% - 60px); 
-          max-width: 1600px;
-          padding-right: 24px; 
+          display: flex; justify-content: space-between; align-items: center; 
+          margin-bottom: 24px; margin-top: 0; margin-left: 60px; gap: 12px;
+          min-height: 48px; width: calc(100% - 60px); max-width: 1600px; padding-right: 24px; 
         }
-        
-        .header-left {
-          display: flex;
-          align-items: center; 
-          height: 100%;
-          gap: 12px;
-        }
-
+        .header-left { display: flex; align-items: center; height: 100%; gap: 12px; }
         .dropdown-menu-container {
           position: absolute; top: calc(100% + 4px); left: 0; right: 0; background-color: #fff;
           border: 1px solid #cbd5e1; border-radius: 12px; box-shadow: 0 10px 25px rgba(0,0,0,0.15);
           z-index: 101; overflow: hidden; display: flex; flex-direction: column;
         }
-        .dropdown-results-container {
-          max-height: 220px; overflow-y: auto; padding: 8px; display: flex; flex-direction: column; gap: 4px;
-        }
-        .dropdown-result-item {
-          padding: 12px; border-bottom: 1px solid #f1f5f9; cursor: pointer; border-radius: 8px; transition: background 0.2s;
-        }
-        .dropdown-result-item:hover {
-          background-color: #f8fafc;
-        }
-
-        .fade-in {
-          animation: fadeIn 0.3s ease-in-out;
-        }
-        @keyframes fadeIn {
-          from { opacity: 0; transform: translateY(5px); }
-          to { opacity: 1; transform: translateY(0); }
-        }
-
+        .dropdown-results-container { max-height: 220px; overflow-y: auto; padding: 8px; display: flex; flex-direction: column; gap: 4px; }
+        .dropdown-result-item { padding: 12px; border-bottom: 1px solid #f1f5f9; cursor: pointer; border-radius: 8px; transition: background 0.2s; }
+        .dropdown-result-item:hover { background-color: #f8fafc; }
+        .fade-in { animation: fadeIn 0.3s ease-in-out; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
         .calculator-grid { display: flex; align-items: flex-start; gap: 20px; flex-wrap: wrap; }
         .math-symbol { font-size: 32px; font-weight: bold; color: #cbd5e1; margin-top: 40px; }
-        
         .price-display { margin-top: 16px; padding: 16px; background: #fefcf3; border: 1px solid #eadeca; border-radius: 8px; }
         .price-display .label { display: block; font-size: 11px; color: #8a7650; text-transform: uppercase; font-weight: bold; margin-bottom: 4px; }
         .price-display .value { font-size: 18px; color: #b58a3d; font-weight: bold; }
-
         .result-stats { display: flex; gap: 20px; flex-wrap: wrap; }
         .stat-box { flex: 1; min-width: 200px; padding: 16px 24px; background: #f8fafc; border-radius: 8px; border: 1px solid #e2e8f0; }
         .stat-box.highlight { background: #fefcf3; border-color: #fde047; }
-
         .hide-scrollbar::-webkit-scrollbar { display: none; }
         .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
-
-        input[type="text"].no-spinners::-webkit-inner-spin-button,
-        input[type="text"].no-spinners::-webkit-outer-spin-button {
-          -webkit-appearance: none;
-          margin: 0;
-        }
-
+        input[type="text"].no-spinners::-webkit-inner-spin-button, input[type="text"].no-spinners::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
         @media (max-width: 1023px) {
-          /* EXACT Copy from RiceControl for perfect mobile alignment */
           .header-container { 
-            margin-left: 54px !important; 
-            margin-right: 0 !important;
-            margin-bottom: 24px !important; 
-            margin-top: 0 !important; 
-            display: flex !important;
-            flex-direction: row !important;
-            justify-content: space-between !important;
-            align-items: center !important; 
-            height: 44px !important;
-            width: calc(100% - 54px) !important;
+            margin-left: 54px !important; margin-right: 0 !important; margin-bottom: 24px !important; margin-top: 0 !important; 
+            display: flex !important; flex-direction: row !important; justify-content: space-between !important;
+            align-items: center !important; height: 44px !important; width: calc(100% - 54px) !important;
           }
-
-          .calculator-grid {
-            flex-direction: column;
-            align-items: stretch;
-            gap: 16px;
-          }
-          .math-symbol {
-            display: none;
-          }
-          .result-stats {
-            flex-direction: column;
-            gap: 12px;
-          }
+          .calculator-grid { flex-direction: column; align-items: stretch; gap: 16px; }
+          .math-symbol { display: none; }
+          .result-stats { flex-direction: column; gap: 12px; }
         }
       `}</style>
     </div>

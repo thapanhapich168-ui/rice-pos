@@ -1719,12 +1719,17 @@ export default function POSPage() {
                       <select
                         value={item.selected_batch_id || 'AUTO'}
                         onChange={(e) => updateCartItem(item.id, 'selected_batch_id', e.target.value === 'AUTO' ? null : Number(e.target.value))}
-                        style={{ marginLeft: '8px', padding: '2px 4px', background: '#f8fafc', border: '1px solid #cbd5e1', borderRadius: '4px', fontSize: '11px', color: '#b58a3d', outline: 'none', cursor: 'pointer', maxWidth: '90px' }}
+                        style={{ marginLeft: '8px', padding: '4px 6px', background: '#f8fafc', border: '1px solid #cbd5e1', borderRadius: '4px', fontSize: '11px', color: '#b58a3d', outline: 'none', cursor: 'pointer', maxWidth: '200px' }}
                       >
-                        <option value="AUTO">▼ Auto</option>
-                        {activeBatches[item.product_id]?.map((b: InventoryBatch) => {
+                        <option value="AUTO">▼ Auto FIFO</option>
+                        {activeBatches[item.product_id]?.map((b: any) => {
                           const remaining = b.remaining_qty || 0;
-                          return <option key={b.id} value={b.id}>{formatRiel(b.cost_price)} ({remaining})</option>;
+                          // 🔥 THIS NOW DISPLAYS THE RECIPE NOTE IF IT EXISTS
+                          return (
+                            <option key={b.id} value={b.id}>
+                              {formatRiel(b.cost_price)} ({remaining} left) {b.notes ? ` | ${b.notes}` : ''}
+                            </option>
+                          );
                         })}
                       </select>
                     )}
