@@ -21,6 +21,8 @@ interface MixHistory {
   rice3Ratio?: number
   mixedCogs: number
   yieldStr: string
+  bagUsed?: string       // 🔥 Added for Bag Tracking
+  bagQty?: number        // 🔥 Added for Bag Tracking
   branch_id?: number // 🔥 ADDED FOR JSON FILTERING
 }
 
@@ -47,7 +49,7 @@ export default function RiceMixCalculator() {
   const [rice3Qty, setRice3Qty] = useState<number | ''>('')
 
   // 🟢 INLINE DROPDOWN STATES
-  const [activeDropdown, setActiveDropdown] = useState<'rice1' | 'rice2' | 'rice3' | 'target' | null>(null)
+  const [activeDropdown, setActiveDropdown] = useState<'rice1' | 'rice2' | 'rice3' | 'target' | 'bag' | null>(null)
   const [dropdownSearch, setDropdownSearch] = useState('')
   const [dropdownTab, setDropdownTab] = useState<'wholesale' | 'retail'>('wholesale')
 
@@ -64,6 +66,10 @@ export default function RiceMixCalculator() {
   const [syncMode, setSyncMode] = useState<'none' | 'existing' | 'new'>('none')
   const [targetProductId, setTargetProductId] = useState<string>('')
   
+  // 🔥 BAG DEDUCTION STATES
+  const [bagId, setBagId] = useState<string>('')
+  const [bagQty, setBagQty] = useState<number | ''>('')
+
   const [newMixName, setNewMixName] = useState('')
   const [newMixPrice, setNewMixPrice] = useState<number | ''>('')
   const [newMixType, setNewMixType] = useState<'wholesale' | 'retail'>('wholesale')
@@ -77,12 +83,14 @@ export default function RiceMixCalculator() {
   const rice2 = products.find(p => p.id.toString() === rice2Id)
   const rice3 = products.find(p => p.id.toString() === rice3Id)
   const targetProd = products.find(p => p.id.toString() === targetProductId)
+  const bagProd = products.find(p => p.id.toString() === bagId)
 
-  // 🧠 SMART MATH ENGINE
+  // 🧠 SMART MATH ENGINE (Now absorbs Bag Cost into COGS)
   useEffect(() => {
     const q1 = Number(rice1Qty) || 0;
     const q2 = Number(rice2Qty) || 0;
     const q3 = showThirdRice ? (Number(rice3Qty) || 0) : 0;
+    const qBag = Number(bagQty) || 0;
 
     const hasValidThird = showThirdRice ? rice3 : true;
 
@@ -97,11 +105,13 @@ export default function RiceMixCalculator() {
       const kg3 = q3 * w3;
       const totalYieldKg = kg1 + kg2 + kg3;
 
-      // Calculate total physical cost of the mixture
+      // Calculate total physical cost of the mixture (Rice + Bag)
       const cost1 = q1 * rice1.cost_price;
       const cost2 = q2 * rice2.cost_price;
       const cost3 = rice3 ? (q3 * rice3.cost_price) : 0;
-      const totalCost = cost1 + cost2 + cost3;
+      const costBag = bagProd ? (qBag * bagProd.cost_price) : 0;
+      
+      const totalCost = cost1 + cost2 + cost3 + costBag;
 
       const blendedCogsPerKg = totalYieldKg > 0 ? (totalCost / totalYieldKg) : 0;
       
@@ -110,7 +120,7 @@ export default function RiceMixCalculator() {
       setCalcResult(null);
       setSyncMode('none');
     }
-  }, [rice1Id, rice2Id, rice3Id, rice1Qty, rice2Qty, rice3Qty, showThirdRice, products, rice1, rice2, rice3])
+  }, [rice1Id, rice2Id, rice3Id, rice1Qty, rice2Qty, rice3Qty, showThirdRice, bagQty, products, rice1, rice2, rice3, bagProd])
 
   async function fetchProducts() {
     // 🔥 FILTERED BY BRANCH
@@ -135,6 +145,7 @@ export default function RiceMixCalculator() {
     setCalcResult(null);
     setSyncMode('none');
     setNewMixName(''); setNewMixPrice(''); setTargetProductId('');
+    setBagId(''); setBagQty('');
     setActiveDropdown(null);
   }
 
@@ -157,6 +168,10 @@ export default function RiceMixCalculator() {
   const dropdownFilteredProducts = products.filter(p => {
     if (dropdownSearch && !p.name.toLowerCase().includes(dropdownSearch.toLowerCase())) return false;
     const isWholesale = Number(p.weight) >= 50;
+    
+    // Bags are typically tracked differently, often light weight. If targeting bag, allow all types or specific search.
+    if (activeDropdown === 'bag') return true; 
+
     if (dropdownTab === 'wholesale' && !isWholesale) return false;
     if (dropdownTab === 'retail' && isWholesale) return false;
     return true;
@@ -167,6 +182,7 @@ export default function RiceMixCalculator() {
     if (target === 'rice2') setRice2Id(p.id.toString());
     if (target === 'rice3') setRice3Id(p.id.toString());
     if (target === 'target') setTargetProductId(p.id.toString());
+    if (target === 'bag') setBagId(p.id.toString());
     setActiveDropdown(null);
   }
 
@@ -193,6 +209,13 @@ export default function RiceMixCalculator() {
     finalCogs = calcResult.blendedCogsPerKg * outputMultiplier;
   }
 
+  // Auto-fill bag quantity based on final yield if user hasn't typed anything
+  useEffect(() => {
+    if (bagId && finalYield > 0 && bagQty === '') {
+      setBagQty(Math.ceil(finalYield));
+    }
+  }, [finalYield, bagId]);
+
   const handleExecuteInventorySync = async () => {
     if (!calcResult || !rice1 || !rice2) return;
     if (showThirdRice && !rice3) {
@@ -203,6 +226,7 @@ export default function RiceMixCalculator() {
     const qtyToDeduct1 = Number(rice1Qty) || 0;
     const qtyToDeduct2 = Number(rice2Qty) || 0;
     const qtyToDeduct3 = showThirdRice ? (Number(rice3Qty) || 0) : 0;
+    const qtyToDeductBag = Number(bagQty) || 0;
 
     if (syncMode === 'new' && (!newMixName || !newMixPrice)) {
       showToast('error', 'Missing Information', 'Please enter a name and selling price for the new mix.');
@@ -223,7 +247,12 @@ export default function RiceMixCalculator() {
         await supabase.from('products').update({ stock: rice3.stock - qtyToDeduct3 }).eq('id', rice3.id);
       }
 
-      // 2. ADD: Put mixed result into target
+      // 2. DEDUCT BAG (Capitalized COGS approach: No expense logged, bag cost is absorbed into new COGS)
+      if (bagProd && qtyToDeductBag > 0) {
+        await supabase.from('products').update({ stock: bagProd.stock - qtyToDeductBag }).eq('id', bagProd.id);
+      }
+
+      // 3. ADD: Put mixed result into target
       if (syncMode === 'new') {
         const payload = {
           name: newMixName,
@@ -244,7 +273,7 @@ export default function RiceMixCalculator() {
         if (error) throw error;
       }
 
-      // 3. LOG HISTORY (Safely injecting Branch ID)
+      // 4. LOG HISTORY (Safely injecting Branch ID)
       const yieldStr = `${finalYield.toLocaleString('en-US', { maximumFractionDigits: 2 })} ${outputUnit}`;
       const newRecord: MixHistory = {
         id: Date.now().toString(),
@@ -257,6 +286,8 @@ export default function RiceMixCalculator() {
         rice3Ratio: showThirdRice ? qtyToDeduct3 : undefined,
         mixedCogs: finalCogs,
         yieldStr: yieldStr,
+        bagUsed: bagProd ? bagProd.name : undefined,
+        bagQty: bagProd ? qtyToDeductBag : undefined,
         branch_id: activeBranchId // 🔥 STAMPED IN JSON
       }
       
@@ -283,23 +314,25 @@ export default function RiceMixCalculator() {
     return (
       <div className="dropdown-menu-container">
         
-        {/* Category Tabs using Global SaaS Classes */}
-        <div className="saas-tab-container" style={{ margin: '8px', marginBottom: 0, padding: '4px', border: 'none', boxShadow: 'none', background: '#f1f5f9' }}>
-          <button 
-            onClick={(e) => { e.stopPropagation(); setDropdownTab('wholesale'); }} 
-            className={`saas-tab ${dropdownTab === 'wholesale' ? 'active' : ''}`}
-            style={{ flex: 1, textAlign: 'center', padding: '8px' }}
-          >
-            🌾 Wholesale
-          </button>
-          <button 
-            onClick={(e) => { e.stopPropagation(); setDropdownTab('retail'); }} 
-            className={`saas-tab ${dropdownTab === 'retail' ? 'active' : ''}`}
-            style={{ flex: 1, textAlign: 'center', padding: '8px' }}
-          >
-            🛍️ Retail
-          </button>
-        </div>
+        {/* Category Tabs using Global SaaS Classes - HIDE TABS IF SEARCHING FOR BAG */}
+        {target !== 'bag' && (
+          <div className="saas-tab-container" style={{ margin: '8px', marginBottom: 0, padding: '4px', border: 'none', boxShadow: 'none', background: '#f1f5f9' }}>
+            <button 
+              onClick={(e) => { e.stopPropagation(); setDropdownTab('wholesale'); }} 
+              className={`saas-tab ${dropdownTab === 'wholesale' ? 'active' : ''}`}
+              style={{ flex: 1, textAlign: 'center', padding: '8px' }}
+            >
+              🌾 Wholesale
+            </button>
+            <button 
+              onClick={(e) => { e.stopPropagation(); setDropdownTab('retail'); }} 
+              className={`saas-tab ${dropdownTab === 'retail' ? 'active' : ''}`}
+              style={{ flex: 1, textAlign: 'center', padding: '8px' }}
+            >
+              🛍️ Retail
+            </button>
+          </div>
+        )}
         
         {/* Scrollable Results */}
         <div className="dropdown-results-container hide-scrollbar">
@@ -543,6 +576,52 @@ export default function RiceMixCalculator() {
                   </div>
                 )}
 
+                {/* 🔥 NEW: BAG DEDUCTION SELECTOR */}
+                <div style={{ borderTop: '1px dashed #cbd5e1', paddingTop: '16px', marginBottom: '16px', position: 'relative' }}>
+                  <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '6px', color: '#b45309' }}>
+                    Optional: Packaging Bag Used (Cost will be absorbed into the new Mix COGS)
+                  </label>
+                  <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap' }}>
+                    <div style={{ flex: 2, minWidth: '200px', position: 'relative' }}>
+                      {activeDropdown === 'bag' && (
+                        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, zIndex: 99 }} onClick={() => setActiveDropdown(null)}></div>
+                      )}
+                      <div style={{ position: 'relative', zIndex: activeDropdown === 'bag' ? 100 : 1 }}>
+                        <input 
+                          type="text"
+                          placeholder="🔍 Search empty bag (e.g., ថ្លៃបាវ)..."
+                          value={activeDropdown === 'bag' ? dropdownSearch : (bagProd ? `${bagProd.name} (Cost: ${formatRiel(bagProd.cost_price)})` : '')}
+                          onClick={() => {
+                            if (activeDropdown !== 'bag') {
+                              setActiveDropdown('bag');
+                              setDropdownSearch('');
+                            }
+                          }}
+                          onChange={(e) => {
+                            setActiveDropdown('bag');
+                            setDropdownSearch(e.target.value);
+                          }}
+                          className="saas-input"
+                          style={{ paddingRight: '30px', borderColor: activeDropdown === 'bag' ? '#f59e0b' : undefined }}
+                        />
+                        <span style={{ position: 'absolute', right: '14px', top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: '#f59e0b', fontSize: '12px' }}>▼</span>
+                      </div>
+                      {renderDropdownMenu('bag')}
+                    </div>
+                    
+                    <div style={{ flex: 1, minWidth: '100px' }}>
+                      <CurrencyInput 
+                        placeholder="Qty" 
+                        value={bagQty} 
+                        onChange={(v: any) => setBagQty(v)} 
+                        className="saas-input" 
+                        disabled={!bagId}
+                        style={{ backgroundColor: !bagId ? '#f1f5f9' : '#fff' }}
+                      />
+                    </div>
+                  </div>
+                </div>
+
                 <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '24px' }}>
                   <button onClick={handleExecuteInventorySync} disabled={isProcessing} className="saas-btn saas-btn-primary" style={{ padding: '14px 24px', fontSize: '15px' }}>
                     {isProcessing ? 'Processing...' : `✅ Sync and Inject ${finalYield.toLocaleString('en-US', { maximumFractionDigits: 2 })} ${outputUnit}`}
@@ -571,13 +650,14 @@ export default function RiceMixCalculator() {
                     <th className="saas-th">Time</th>
                     <th className="saas-th">Recipe Formula</th>
                     <th className="saas-th">Final Yield</th>
+                    <th className="saas-th">Bag Used</th>
                     <th className="saas-th">Mixed COGS</th>
                   </tr>
                 </thead>
                 <tbody>
                   {history.length === 0 ? (
                     <tr>
-                      <td colSpan={4} style={{ padding: 0 }}>
+                      <td colSpan={5} style={{ padding: 0 }}>
                         <EmptyState 
                           icon="🕒" 
                           title="No history yet" 
@@ -597,6 +677,9 @@ export default function RiceMixCalculator() {
                           ) : null}
                         </td>
                         <td className="saas-td" style={{ color: '#10b981', fontWeight: 'bold', fontSize: '13px' }}>{h.yieldStr || '-'}</td>
+                        <td className="saas-td" style={{ color: '#b45309', fontSize: '13px' }}>
+                          {h.bagUsed ? `${h.bagQty}x ${h.bagUsed}` : '-'}
+                        </td>
                         <td className="saas-td" style={{ color: '#b58a3d', fontWeight: 'bold', fontSize: '14px' }}>{formatRiel(h.mixedCogs)}</td>
                       </tr>
                     ))
