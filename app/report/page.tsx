@@ -50,14 +50,21 @@ export default function ReportControlPage() {
         { data: payData }
       ] = await Promise.all([
         buildQNarrow('sales', 'id, created_at, qty, price_per_bag, cogs_price, owner, custom_rice_type, rice_type').gte('created_at', firstDayOfLastMonth),
-        buildQNarrow('invoice_summaries', 'invoice_id, created_at, owner, total_sales, total_profit').gte('created_at', firstDayOfLastMonth),
+        
+        // 🔥 FIX 1: Added 'delivery_status' to the SELECT query so we can identify voids
+        buildQNarrow('invoice_summaries', 'invoice_id, created_at, owner, total_sales, total_profit, delivery_status').gte('created_at', firstDayOfLastMonth),
+        
         buildQNarrow('retail_sales', 'id, created_at, qty, price_per_bag, cogs_price, owner, custom_rice_type, rice_type').gte('created_at', firstDayOfLastMonth),
         buildQNarrow('expenses', 'id, created_at, amount_riel, amount_usd, spender, category, description, expense_date').gte('created_at', firstDayOfLastMonth),
         buildQNarrow('invoice_payments', 'invoice_id, amount_paid_usd, amount_paid_riel, payment_method, payment_date').gte('payment_date', firstDayOfLastMonth)
       ])
 
       setWholesaleSales(salesData || [])
-      setInvoices(invData || [])
+      
+      // 🔥 FIX 2: Strictly filter out any invoice marked as 'Voided' before saving to state
+      const activeInvoices = (invData || []).filter((inv: any) => inv.delivery_status !== 'Voided');
+      setInvoices(activeInvoices);
+      
       setRetailSales(retData || [])
       setExpenses(expData || [])
       setInvoicePayments(payData || [])
