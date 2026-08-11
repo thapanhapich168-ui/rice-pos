@@ -227,21 +227,48 @@ export default function RiceMixCalculator() {
     setIsProcessing(true);
 
     try {
-      // 1. DEDUCT BASE INGREDIENTS
-      if (qtyToDeduct1 > 0) await supabase.from('products').update({ stock: rice1.stock - qtyToDeduct1 }).eq('id', rice1.id);
-      if (qtyToDeduct2 > 0) await supabase.from('products').update({ stock: rice2.stock - qtyToDeduct2 }).eq('id', rice2.id);
-      if (showThirdRice && qtyToDeduct3 > 0 && rice3) {
-        await supabase.from('products').update({ stock: rice3.stock - qtyToDeduct3 }).eq('id', rice3.id);
-      }
+      // 🟢 HELPER: DEDUCT FROM MASTER STOCK AND FIFO BATCHES
+      const processDeduction = async (prodId: number, qty: number) => {
+        if (qty <= 0) return;
+        
+        // 1. Deduct from Master Product Stock safely
+        await supabase.rpc('adjust_product_stock', { p_product_id: prodId, p_quantity: -qty });
 
-      // 2. DEDUCT BAGS
-      if (bagProd && qtyToDeductBag > 0) {
-        await supabase.from('products').update({ stock: bagProd.stock - qtyToDeductBag }).eq('id', bagProd.id);
-      }
+        // 2. Deduct from Inventory Batches (FIFO - Oldest First)
+        const { data: batches } = await supabase.from('inventory_batches')
+          .select('*')
+          .eq('product_id', prodId)
+          .eq('branch_id', activeBranchId)
+          .gt('remaining_qty', 0)
+          .order('id', { ascending: true }); // Oldest batch first
+            
+        let leftToDeduct = qty;
+        if (batches) {
+            for (const b of batches) {
+                if (leftToDeduct <= 0) break;
+                const available = b.remaining_qty;
+                const take = Math.min(available, leftToDeduct);
+                
+                // Reduce the specific batch amount
+                await supabase.rpc('adjust_batch_stock', { p_batch_id: b.id, p_quantity: -take });
+                leftToDeduct -= take;
+            }
+        }
+      };
 
+      // 1. EXECUTE INGREDIENT DEDUCTIONS
+      if (rice1 && qtyToDeduct1 > 0) await processDeduction(rice1.id, qtyToDeduct1);
+      if (rice2 && qtyToDeduct2 > 0) await processDeduction(rice2.id, qtyToDeduct2);
+      if (showThirdRice && rice3 && qtyToDeduct3 > 0) await processDeduction(rice3.id, qtyToDeduct3);
+
+      // 2. EXECUTE BAG DEDUCTION
+      if (bagProd && qtyToDeductBag > 0) await processDeduction(bagProd.id, qtyToDeductBag);
+
+      // 🔥 TRACK BOTH ID AND NAME FOR THE BATCH RECORD
       let finalTargetId = targetProductId;
+      let finalTargetName = targetProd?.name || ''; 
 
-      // 3. ADD MIXED RICE
+      // 3. ADD MIXED RICE TO TARGET
       if (syncMode === 'new') {
         const payload = {
           name: newMixName,
@@ -251,30 +278,31 @@ export default function RiceMixCalculator() {
           stock: finalYield,
           branch_id: activeBranchId 
         }
-        // 🔥 Get the new ID back
         const { data: newProd, error } = await supabase.from('products').insert([payload]).select().single();
         if (error) throw error;
         finalTargetId = newProd.id.toString();
+        finalTargetName = newMixName; // Assign new name
 
       } else if (targetProd) {
-        const newStock = targetProd.stock + finalYield;
-        const { error } = await supabase.from('products').update({ 
-          stock: newStock, 
-          cost_price: Math.round(finalCogs) 
-        }).eq('id', targetProd.id);
+        // Increment target product stock safely
+        await supabase.rpc('adjust_product_stock', { p_product_id: targetProd.id, p_quantity: finalYield });
+        // Update new Blended COGS
+        const { error } = await supabase.from('products').update({ cost_price: Math.round(finalCogs) }).eq('id', targetProd.id);
         if (error) throw error;
         finalTargetId = targetProd.id.toString();
+        finalTargetName = targetProd.name; // Assign existing name
       }
 
-      // 4. 🔥 CREATE BATCH RECORD WITH RECIPE NOTE SO THE POS CAN READ IT!
+      // 4. CREATE NEW BATCH RECORD WITH RECIPE NOTE AND PRODUCT NAME
       const recipeString = `Recipe: ${qtyToDeduct1}x ${rice1.name} + ${qtyToDeduct2}x ${rice2.name}${showThirdRice && rice3 ? ` + ${qtyToDeduct3}x ${rice3.name}` : ''}`;
 
       await supabase.from('inventory_batches').insert([{
         product_id: Number(finalTargetId),
+        product_name: finalTargetName, // 🔥 FIXED: Now explicitly mapping the name
         cost_price: Math.round(finalCogs),
         remaining_qty: finalYield,
         branch_id: activeBranchId,
-        notes: recipeString // Passes the string to the database
+        notes: recipeString 
       }]);
 
       // 5. UPDATE INTERNAL APP HISTORY
