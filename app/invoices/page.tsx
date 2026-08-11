@@ -1,918 +1,893 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabaseClient'
 import { useFocusRefresh } from '@/lib/useFocusRefresh'
-import { formatRiel, formatUSD, formatNumber, EXCHANGE_RATE } from '@/utils/formatters'
-import { CurrencyInput } from '@/components/Inputs'
 import { useToast } from '@/components/ToastProvider'
+import { formatRiel } from '@/utils/formatters'
 import { useDebounce } from '@/lib/useDebounce'
 import TableSkeleton from '@/components/TableSkeleton'
 import EmptyState from '@/components/EmptyState'
 import { useBranch } from '@/components/BranchContext' // 🔥 GLOBAL MEMORY IMPORTED
-import AdminGuard from '@/components/AdminGuard' // 🔒 NEW: IMPORT THE BOUNCER
 
-// Formats headers beautifully
-const formatHeader = (key: string) => {
-  if (key === 'qty') return 'Quantity';
-  if (key === 'cogs_price') return 'COGS Price';
-  if (key === 'invoice_id') return 'Invoice ID';
-  if (key === 'transaction_id') return 'Transaction ID';
-  if (key === 'amount_riel') return 'Amount (៛)';
-  if (key === 'amount_usd') return 'Amount ($)';
-  return key.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
-}
-
-// Helper to convert ISO dates to the local format needed by <input type="datetime-local">
-const toLocalDatetimeString = (dateStr: string) => {
-  if (!dateStr) return '';
-  const d = new Date(dateStr);
-  if (isNaN(d.getTime())) return '';
-  const pad = (n: number) => n.toString().padStart(2, '0');
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
-
-// --- UNIFIED TRANSACTION TYPE ---
-type TabType = 'Wholesale Invoice Summary' | 'Walk-in Wholesale' | 'Non-Walk-in Wholesale' | 'Retails only' | 'Biz Expense' | 'Personal Expense' | 'Staff Debt';
-
-interface UnifiedTransaction {
-  [key: string]: any; 
+// --- TYPESCRIPT INTERFACES ---
+interface Invoice {
   id: string;
-  raw_db_id: string | number;
-  product_id?: number | string; 
-  invoice_id?: string;
-  source: TabType;
+  invoice_id: string;
+  invoice_url: string;
   created_at: string;
+  customer_name: string;
+  total_sales: number;
+  delivery_status: string;
+  rice_types?: string;
+  is_retail?: boolean;
 }
 
-type SortConfig = {
-  key: string;
-  direction: 'asc' | 'desc';
-} | null;
+type FilterTab = 'All' | 'Today' | 'This Week' | 'This Month';
+type CategoryTab = 'All' | 'Wholesale' | 'WalkinWholesale' | 'WalkinRetail' | 'Voided';
+type VoidSubTab = 'All' | 'Wholesale' | 'WalkinWholesale' | 'WalkinRetail';
 
-type TimeFilter = 'Today' | 'This Week' | 'This Month' | 'All Time';
-
-// Standardized initial widths for all possible columns
-const DEFAULT_WIDTHS: Record<string, number> = {
-  invoice_id: 140, transaction_id: 140, created_at: 180, customer_name: 160, owner: 100,
-  rice_types: 250, rice_type: 180, qty: 100, price_per_bag: 130, cogs_price: 130,
-  total_sales: 140, total_cogs: 140, total_profit: 140, description: 200, 
-  amount_riel: 140, amount_usd: 140, category: 140, status: 120
-}
-
-const DEFAULT_SUMMARY_COLS = ['invoice_id', 'created_at', 'customer_name', 'owner', 'rice_types', 'total_sales', 'total_cogs', 'total_profit'];
-const DEFAULT_DAILY_COLS = ['invoice_id', 'created_at', 'customer_name', 'owner', 'rice_type', 'qty', 'price_per_bag', 'cogs_price', 'total_sales', 'total_cogs', 'total_profit'];
-const DEFAULT_RETAIL_COLS = ['transaction_id', 'created_at', 'rice_type', 'qty', 'price_per_bag', 'cogs_price', 'total_sales', 'total_cogs', 'total_profit'];
-const DEFAULT_EXPENSE_COLS = ['created_at', 'description', 'amount_riel', 'amount_usd', 'category', 'status', 'owner'];
-
-export default function BizDatabase() {
+export default function InvoiceGallery() {
   const { showToast } = useToast();
   const { activeBranchId } = useBranch(); // 🔥 TUNED INTO RADIO TOWER
 
-  // 🔥 BROWSER TAB TITLE FIX
+  // 🔥 SETS THE SAFARI BROWSER TAB TITLE
   useEffect(() => {
-    document.title = 'Business Database';
+    document.title = 'Invoice Gallery';
   }, []);
 
-  // --- CORE STATE ---
-  const [transactions, setTransactions] = useState<UnifiedTransaction[]>([])
-  const [activeTab, setActiveTab] = useState<TabType>('Wholesale Invoice Summary')
-  const [searchQuery, setSearchQuery] = useState('')
+  const [invoices, setInvoices] = useState<Invoice[]>([])
+  const [isLoading, setIsLoading] = useState<boolean>(true)
+  const [isProcessing, setIsProcessing] = useState<boolean>(false)
+  const [isDeviceMobile, setIsDeviceMobile] = useState<boolean>(false)
+  const [mounted, setMounted] = useState<boolean>(false)
+  
+  const [selectedInvoices, setSelectedInvoices] = useState<Set<string>>(new Set())
+  const [filterTab, setFilterTab] = useState<FilterTab>('All')
+  const [categoryTab, setCategoryTab] = useState<CategoryTab>('All')
+  const [voidSubTab, setVoidSubTab] = useState<VoidSubTab>('All')
+  
+  const [searchQuery, setSearchQuery] = useState<string>('')
   const debouncedSearch = useDebounce(searchQuery, 300)
-  const [timeFilter, setTimeFilter] = useState<TimeFilter>('Today')
-  const [isLoading, setIsLoading] = useState(true)
 
-  // --- SELECTION & EDITING STATE ---
-  const [selectedToDelete, setSelectedToDelete] = useState<Set<string>>(new Set())
-  const [editingCell, setEditingCell] = useState<{id: string, col: string} | null>(null)
-  const [edits, setEdits] = useState<Record<string, Partial<UnifiedTransaction>>>({})
-  
-  // --- PREFERENCES ---
-  const [columnWidths, setColumnWidths] = useState<Record<string, number>>(DEFAULT_WIDTHS)
-  const [summaryCols, setSummaryCols] = useState<string[]>(DEFAULT_SUMMARY_COLS)
-  const [dailyCols, setDailyCols] = useState<string[]>(DEFAULT_DAILY_COLS)
-  const [retailCols, setRetailCols] = useState<string[]>(DEFAULT_RETAIL_COLS)
-  const [expenseCols, setExpenseCols] = useState<string[]>(DEFAULT_EXPENSE_COLS)
-  
-  const widthsRef = useRef(columnWidths)
-  widthsRef.current = columnWidths
+  // 🟢 DEFAULT TO TABLE VIEW
+  const [viewMode, setViewMode] = useState<'grid' | 'table'>('table')
 
-  // --- SORT STATE ---
-  const [sortConfig, setSortConfig] = useState<SortConfig>(null)
+  useEffect(() => {
+    setMounted(true);
+    const isMobile = window.innerWidth < 1024 || /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+    setIsDeviceMobile(isMobile);
+    fetchInvoices();
+  }, [filterTab, categoryTab, voidSubTab, activeBranchId]) // 🔥 RE-RUNS ON BRANCH SWITCH
 
-  // Dynamic active columns based on tab
-  const activeColumns = activeTab === 'Wholesale Invoice Summary' ? summaryCols 
-                      : (activeTab === 'Walk-in Wholesale' || activeTab === 'Non-Walk-in Wholesale') ? dailyCols 
-                      : activeTab === 'Retails only' ? retailCols 
-                      : expenseCols;
+  // 🚀 Window Focus Auto-Refresh
+  useFocusRefresh(fetchInvoices);
 
-  // --- LIFECYCLE ---
-  useEffect(() => { 
-    fetchData(false)
-    fetchSettings()
-  }, [activeBranchId]) // 🔥 RE-RUNS ON BRANCH SWITCH
+  async function fetchInvoices() {
+    setIsLoading(true)
+    const now = new Date()
 
-  useFocusRefresh(() => fetchData(true));
+    // --- 1. FETCH WHOLESALE & STANDARD INVOICES ---
+    let query = supabase.from('invoice_summaries').select('*').eq('branch_id', activeBranchId) // 🔥 FILTERED BY BRANCH
 
-  // --- DATABASE OPERATIONS ---
-  async function fetchSettings() {
-    const { data } = await supabase.from('app_settings').select('*').in('setting_key', ['biz_col_widths', 'biz_sum_cols', 'biz_daily_cols', 'biz_retail_cols', 'biz_exp_cols'])
-    if (data) {
-      const widths = data.find(d => d.setting_key === 'biz_col_widths')
-      const sumCols = data.find(d => d.setting_key === 'biz_sum_cols')
-      const dalCols = data.find(d => d.setting_key === 'biz_daily_cols')
-      const retCols = data.find(d => d.setting_key === 'biz_retail_cols')
-      const expCols = data.find(d => d.setting_key === 'biz_exp_cols')
-      
-      if (widths?.setting_value) setColumnWidths(widths.setting_value)
-      if (sumCols?.setting_value) setSummaryCols(sumCols.setting_value)
-      if (dalCols?.setting_value) setDailyCols(dalCols.setting_value)
-      if (retCols?.setting_value) setRetailCols(retCols.setting_value)
-      
-      if (expCols?.setting_value) {
-        let cols = expCols.setting_value;
-        // Auto-migration: if the user had the old single 'amount' column saved, split it into two
-        if (cols.includes('amount')) {
-          cols = cols.flatMap((c: string) => c === 'amount' ? ['amount_riel', 'amount_usd'] : c);
-        }
-        setExpenseCols(cols);
-      }
+    if (filterTab === 'Today') {
+      const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString()
+      query = query.gte('created_at', todayStart)
+    } else if (filterTab === 'This Week') {
+      const currentDay = now.getDay()
+      const dayDifference = now.getDate() - currentDay + (currentDay === 0 ? -6 : 1) 
+      const weekStart = new Date(now.getFullYear(), now.getMonth(), dayDifference)
+      weekStart.setHours(0, 0, 0, 0)
+      query = query.gte('created_at', weekStart.toISOString())
+    } else if (filterTab === 'This Month') {
+      const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString()
+      query = query.gte('created_at', monthStart)
     }
-  }
 
-  async function fetchData(isSilent = false) {
-    if (!isSilent) setIsLoading(true)
+    const { data: summaryData, error: summaryError } = await query
+    if (summaryError) {
+      console.error("Error fetching invoice summaries:", summaryError.message)
+    }
+
+    // --- 2. FETCH WALK-IN RETAIL SALES (Grouped into single rows per transaction_id) ---
+    let retailQuery = supabase.from('retail_sales').select('*').eq('branch_id', activeBranchId) // 🔥 FILTERED BY BRANCH
     
-    // 🔥 ALL FETCHES SECURELY FILTERED BY BRANCH
-    const { data: summaryData } = await supabase.from('invoice_summaries').select('*').eq('branch_id', activeBranchId)
-    const { data: dailyData } = await supabase.from('sales').select('*').eq('branch_id', activeBranchId)
-    
-    let retailData: any[] = []
-    try {
-      const { data, error } = await supabase.from('retail_sales').select('*').eq('branch_id', activeBranchId)
-      if (data && !error) retailData = data;
-    } catch (e) {
-      console.warn("Retail table not found", e)
+    if (filterTab === 'Today') {
+      const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString()
+      retailQuery = retailQuery.gte('created_at', todayStart)
+    } else if (filterTab === 'This Week') {
+      const currentDay = now.getDay()
+      const dayDifference = now.getDate() - currentDay + (currentDay === 0 ? -6 : 1) 
+      const weekStart = new Date(now.getFullYear(), now.getMonth(), dayDifference)
+      weekStart.setHours(0, 0, 0, 0)
+      retailQuery = retailQuery.gte('created_at', weekStart.toISOString())
+    } else if (filterTab === 'This Month') {
+      const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString()
+      retailQuery = retailQuery.gte('created_at', monthStart)
     }
 
-    let allExpenses: any[] = []
-    try {
-      const { data, error } = await supabase.from('expenses').select('*').eq('branch_id', activeBranchId)
-      if (data && !error) allExpenses = data;
-    } catch (e) {
-      console.warn("Expenses table not found", e)
+    const { data: retailData, error: retailError } = await retailQuery
+    if (retailError) {
+      console.error("Error fetching retail sales:", retailError.message)
     }
 
-    const unified: UnifiedTransaction[] = []
-    const invoiceDict: Record<string, any> = {};
-
-    if (summaryData) {
-      summaryData.forEach(s => {
-        if (s.invoice_id) invoiceDict[s.invoice_id] = s;
-        const custName = s.customer_name || 'Walk-in';
-        const isWalkIn = custName.trim().toLowerCase() === 'walk-in';
-
-        if (isWalkIn) return;
-
-        unified.push({
-          id: `sum_${s.id}`,
-          raw_db_id: s.id, 
-          source: 'Wholesale Invoice Summary',
-          created_at: s.created_at,
-          invoice_id: s.invoice_id,
-          customer_name: custName,
-          owner: s.owner || '-',
-          rice_types: s.rice_types,
-          total_sales: Number(s.total_sales || 0),
-          total_cogs: Number(s.total_cogs || 0),
-          total_profit: Number(s.total_profit || 0)
-        })
-      })
-    }
-
-    if (dailyData) {
-      dailyData.forEach(d => {
-        const qty = Number(d.qty || 0);
-        const price = Number(d.price_per_bag || 0);
-        const cogs = Number(d.cogs_price || 0);
-        
-        const parentInvoice = invoiceDict[d.invoice_id] || {};
-        const custName = d.customer_name || parentInvoice.customer_name || 'Walk-in';
-        const ownerName = d.owner || parentInvoice.owner || '-';
-
-        const isWalkIn = !custName || custName.trim().toLowerCase() === 'walk-in';
-
-        unified.push({
-          id: `daily_${d.id}`,
-          raw_db_id: d.id,
-          product_id: d.product_id,
-          invoice_id: d.invoice_id,
-          source: isWalkIn ? 'Walk-in Wholesale' : 'Non-Walk-in Wholesale',
-          created_at: d.created_at,
-          customer_name: custName,
-          owner: ownerName,
-          rice_type: d.custom_rice_type || d.rice_type,
-          qty: qty,
-          price_per_bag: price,
-          cogs_price: cogs,
-          total_sales: qty * price,
-          total_cogs: qty * cogs,
-          total_profit: (price - cogs) * qty
-        })
-      })
-    }
-
+    // 🟢 AGGREGATE RETAIL LINE ITEMS INTO SINGLE TRANSACTION ROWS
+    const retailGrouped: Record<string, Invoice> = {};
     if (retailData) {
-      retailData.forEach(r => {
-        const qty = Number(r.qty || 0);
-        const price = Number(r.price_per_bag || 0);
-        const cogs = Number(r.cogs_price || 0);
+      retailData.forEach((row: any) => {
+        // 🔥 FIX: Added 'ID' tag so the void function knows exactly how to trace older missing IDs
+        const txId = row.transaction_id || `RET-ID-${row.id}`; 
+        const itemSubtotal = Number(row.qty || 0) * Number(row.price_per_bag || 0);
+        const itemDesc = `${row.custom_rice_type || row.rice_type || 'Rice'} (x${row.qty})`;
 
-        unified.push({
-          id: `ret_${r.id}`,
-          raw_db_id: r.id, 
-          product_id: r.product_id,
-          source: 'Retails only',
-          created_at: r.created_at,
-          transaction_id: r.transaction_id,
-          rice_type: r.custom_rice_type || r.rice_type,
-          qty: qty,
-          price_per_bag: price,
-          cogs_price: cogs,
-          total_sales: qty * price,
-          total_cogs: qty * cogs,
-          total_profit: (price - cogs) * qty
-        })
-      })
-    }
-
-    // 🔥 SORTING THE "ONE TABLE" INTO 3 SEPARATE TABS & SEPARATING RIEL VS USD
-    if (allExpenses && allExpenses.length > 0) {
-      allExpenses.forEach(e => {
-        let targetSource: TabType = 'Biz Expense';
-        if (e.description === 'PERSONAL') targetSource = 'Personal Expense';
-        else if (e.description === 'STAFF_DEBT') targetSource = 'Staff Debt';
-        else targetSource = 'Biz Expense';
-
-        unified.push({
-          id: `exp_${e.id}`, // Unified prefix for expenses
-          raw_db_id: e.id, 
-          source: targetSource,
-          created_at: e.created_at,
-          description: e.remarks || `Expense #${e.id}`, // Maps UI Description -> DB Remarks
-          amount_riel: Number(e.amount_riel || 0),
-          amount_usd: Number(e.amount_usd || 0),
-          category: e.category || 'Uncategorized',     // Maps UI Category -> DB Category
-          status: e.payment_method || e.status || 'cleared',
-          owner: e.spender || e.owner || '-'
-        })
-      })
-    }
-
-    unified.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
-    setTransactions(unified)
-    setIsLoading(false)
-  }
-
-  // --- RAW BULK DELETE WITH CASCADING FOREIGN KEY SAFETY ---
-  const handleDelete = async () => {
-    if (!confirm(`🚨 Are you sure you want to PERMANENTLY DELETE ${selectedToDelete.size} records?\n\nThis will completely erase the transaction and physically return the items to your inventory stock.`)) return;
-    
-    setTransactions(prev => prev.filter(t => !selectedToDelete.has(t.id)));
-
-    const sumIds: any[] = [];
-    const dailyIds: any[] = [];
-    const retIds: any[] = [];
-    const expenseIds: any[] = []; 
-
-    const itemsToRestore: UnifiedTransaction[] = [];
-    const invoiceIdsToCascade = new Set<string>(); 
-    const summaryIdsToCascade = new Set<string>(); 
-
-    transactions.forEach(t => {
-      if (selectedToDelete.has(t.id)) {
-        if (t.source === 'Wholesale Invoice Summary') {
-          sumIds.push(t.raw_db_id);
-          if (t.invoice_id) invoiceIdsToCascade.add(t.invoice_id);
+        if (!retailGrouped[txId]) {
+          retailGrouped[txId] = {
+            id: `ret-${row.id}`,
+            invoice_id: txId,
+            invoice_url: '',
+            created_at: row.created_at,
+            customer_name: 'Walk-in Retail',
+            total_sales: itemSubtotal,
+            delivery_status: row.status || 'Delivered',
+            rice_types: itemDesc,
+            is_retail: true
+          };
+        } else {
+          retailGrouped[txId].total_sales += itemSubtotal;
+          retailGrouped[txId].rice_types += `, ${itemDesc}`;
         }
-        else if (t.source === 'Walk-in Wholesale') {
-          dailyIds.push(t.raw_db_id);
-          itemsToRestore.push(t);
-          if (t.invoice_id) summaryIdsToCascade.add(t.invoice_id);
-        }
-        else if (t.source === 'Non-Walk-in Wholesale') {
-          dailyIds.push(t.raw_db_id);
-          itemsToRestore.push(t);
-        }
-        else if (t.source === 'Retails only') {
-          retIds.push(t.raw_db_id);
-          itemsToRestore.push(t);
-        }
-        else if (t.source === 'Biz Expense' || t.source === 'Personal Expense' || t.source === 'Staff Debt') {
-          expenseIds.push(t.raw_db_id);
-        }
-      }
-    });
-
-    if (invoiceIdsToCascade.size > 0) {
-      const children = transactions.filter(t => (t.source === 'Non-Walk-in Wholesale' || t.source === 'Walk-in Wholesale') && t.invoice_id && invoiceIdsToCascade.has(t.invoice_id) && !selectedToDelete.has(t.id));
-      children.forEach(c => {
-        dailyIds.push(c.raw_db_id);
-        itemsToRestore.push(c);
       });
     }
 
+    const wholesaleInvoices: Invoice[] = (summaryData || []).map((row: any) => ({
+      id: String(row.id),
+      invoice_id: row.invoice_id,
+      invoice_url: row.invoice_url || '',
+      created_at: row.created_at,
+      customer_name: row.customer_name || 'Walk-in',
+      total_sales: Number(row.total_sales || 0),
+      delivery_status: row.delivery_status || 'Delivered',
+      rice_types: row.rice_types || '-',
+      is_retail: false
+    }));
+
+    const allCombined = [...wholesaleInvoices, ...Object.values(retailGrouped)];
+    setInvoices(allCombined);
+    setIsLoading(false);
+  }
+
+  // --- 🔥 BULLETPROOF VOID AUTOMATION ---
+  const handleVoidInvoice = async (invoiceId: string) => {
+    if (!confirm(`🚨 Are you sure you want to VOID transaction ${invoiceId}?\n\nThis will instantly:\n1. Verify and permanently delete the record\n2. Safely restore stock\n3. Reverse dashboard numbers`)) return;
+
+    setIsProcessing(true); 
+    
     try {
-      for (const item of itemsToRestore) {
+      const targetInvoice = invoices.find(inv => inv.invoice_id === invoiceId);
+      const isRetail = targetInvoice ? targetInvoice.is_retail : (invoiceId.startsWith('RET-') || invoiceId.startsWith('ret-'));
+      const tableName = isRetail ? 'retail_sales' : 'sales';
+
+      // 🟢 1. FETCH EXACT ROWS TO MEMORY FIRST
+      let items: any[] = [];
+      let fetchErr = null;
+
+      if (isRetail) {
+        if (invoiceId.startsWith('RET-ID-')) {
+          const realId = invoiceId.replace('RET-ID-', '');
+          const { data, error } = await supabase.from('retail_sales').select('*').eq('id', realId).eq('branch_id', activeBranchId);
+          items = data || []; fetchErr = error;
+        } else {
+          const { data, error } = await supabase.from('retail_sales').select('*').eq('transaction_id', invoiceId).eq('branch_id', activeBranchId);
+          items = data || []; fetchErr = error;
+        }
+      } else {
+        const { data, error } = await supabase.from('sales').select('*').eq('invoice_id', invoiceId).eq('branch_id', activeBranchId);
+        items = data || []; fetchErr = error;
+      }
+
+      if (fetchErr) throw new Error(`Database read failed: ${fetchErr.message}`);
+      if (!items || items.length === 0) throw new Error(`Could not locate records for this transaction. It may already be deleted.`);
+
+      // 🟢 2. PROTECTION: DELETE FROM DATABASE *FIRST*!
+      const rowIds = items.map(i => i.id);
+      
+      const { error: delErr } = await supabase
+        .from(tableName)
+        .delete()
+        .in('id', rowIds); // Guaranteed to delete exactly what was fetched
+
+      if (delErr) throw new Error(`Database blocked deletion: ${delErr.message}`);
+
+      // 🟢 3. RESTORE STOCK & BATCHES SAFELY
+      for (const item of items) {
+        if (item.status === 'Voided' || item.delivery_status === 'Voided') continue;
+
         const qty = Number(item.qty) || 0;
-        const isSpecial = (item.rice_type || '').includes('បានប្រើ') || (item.rice_type || '').includes('សេវាដឹក');
+        const riceName = (item.custom_rice_type || item.rice_type || '').trim();
+        const isSpecial = riceName.includes('បានប្រើ') || riceName.includes('សេវាដឹក');
         
-        if (qty !== 0 && !isSpecial && item.product_id) {
-          // 🔥 BRANCH FILTER ON PRODUCT
-          const { data: prod } = await supabase.from('products').select('stock').eq('id', item.product_id).eq('branch_id', activeBranchId).single();
-          if (prod) {
-            await supabase.from('products').update({ stock: Number(prod.stock) + qty }).eq('id', item.product_id).eq('branch_id', activeBranchId);
+        if (qty !== 0 && !isSpecial) {
+          // 🟢 ROBUST ID RESOLUTION: Match by product_id OR rice_type name (case-insensitive)
+          let productId = item.product_id;
+          if (!productId && riceName) {
+            const { data: prodByName } = await supabase
+              .from('products')
+              .select('id')
+              .eq('branch_id', activeBranchId)
+              .ilike('name', riceName)
+              .maybeSingle();
+            if (prodByName) {
+              productId = prodByName.id;
+            }
           }
 
-          let remainingToReverse = qty;
-          // 🔥 BRANCH FILTER ON BATCHES
-          const { data: batches } = await supabase.from('price_history')
-            .select('*')
-            .eq('product_id', item.product_id)
-            .eq('branch_id', activeBranchId)
-            .gt('sold_qty', 0)
-            .order('created_at', { ascending: false }); 
-          
-          if (batches) {
-            for (const b of batches) {
-              if (remainingToReverse <= 0) break;
-              const possibleToReverse = Math.min(b.sold_qty, remainingToReverse);
-              await supabase.from('price_history').update({ sold_qty: b.sold_qty - possibleToReverse }).eq('id', b.id);
-              remainingToReverse -= possibleToReverse;
+          if (productId) {
+            // A. Restore Master Stock (Works for retail kg AND wholesale bags!)
+            const { data: prod } = await supabase
+              .from('products')
+              .select('stock, cost_price')
+              .eq('id', productId)
+              .eq('branch_id', activeBranchId)
+              .maybeSingle();
+
+            if (prod) {
+              await supabase.rpc('adjust_product_stock', { p_product_id: productId, p_quantity: qty });
+            }
+
+            // B. Restore Inventory Batch
+            const { data: batchesInv } = await supabase.from('inventory_batches')
+              .select('*')
+              .eq('product_id', productId)
+              .eq('branch_id', activeBranchId)
+              .order('id', { ascending: false })
+              .limit(1); 
+            
+            if (batchesInv && batchesInv.length > 0) {
+              await supabase.rpc('adjust_batch_stock', { p_batch_id: batchesInv[0].id, p_quantity: qty });
+            } else {
+              await supabase.from('inventory_batches').insert([{
+                product_id: productId,
+                product_name: riceName || 'Unknown Product',
+                cost_price: item.cogs_price || prod?.cost_price || 0,
+                remaining_qty: qty,
+                branch_id: activeBranchId 
+              }]);
+            }
+
+            // C. Reverse FIFO Batches
+            let remainingToReverse = qty;
+            const { data: batches } = await supabase.from('price_history')
+              .select('*')
+              .eq('product_id', productId)
+              .eq('branch_id', activeBranchId)
+              .gt('sold_qty', 0)
+              .order('created_at', { ascending: false }); 
+            
+            if (batches) {
+              for (const b of batches) {
+                if (remainingToReverse <= 0) break;
+                const possibleToReverse = Math.min(b.sold_qty, remainingToReverse);
+                await supabase.from('price_history')
+                  .update({ sold_qty: b.sold_qty - possibleToReverse })
+                  .eq('id', b.id);
+                remainingToReverse -= possibleToReverse;
+              }
             }
           }
         }
       }
 
-      const allInvoicesToDelete = new Set([...Array.from(invoiceIdsToCascade), ...Array.from(summaryIdsToCascade)]);
-      
-      // 🔥 ALL DELETIONS LOCKED TO BRANCH ID
-      if (allInvoicesToDelete.size > 0) {
-        await supabase.from('invoice_payments').delete().in('invoice_id', Array.from(allInvoicesToDelete)).eq('branch_id', activeBranchId);
+      // 🟢 4. CLEANUP SUMMARIES & PAYMENTS
+      await supabase.from('invoice_payments').delete().eq('invoice_id', invoiceId).eq('branch_id', activeBranchId);
+
+      if (!isRetail) {
+        await supabase.from('invoice_summaries').update({ 
+          delivery_status: 'Voided',
+          balance_due: 0,
+          is_done: true
+        }).eq('invoice_id', invoiceId).eq('branch_id', activeBranchId);
       }
 
-      if (dailyIds.length > 0) await supabase.from('sales').delete().in('id', dailyIds).eq('branch_id', activeBranchId);
-      if (retIds.length > 0) await supabase.from('retail_sales').delete().in('id', retIds).eq('branch_id', activeBranchId);
-      
-      if (expenseIds.length > 0) await supabase.from('expenses').delete().in('id', expenseIds).eq('branch_id', activeBranchId);
-      
-      if (sumIds.length > 0) await supabase.from('invoice_summaries').delete().in('id', sumIds).eq('branch_id', activeBranchId);
-      if (summaryIdsToCascade.size > 0) {
-        await supabase.from('invoice_summaries').delete().in('invoice_id', Array.from(summaryIdsToCascade)).eq('branch_id', activeBranchId);
-      }
-      
-      setSelectedToDelete(new Set());
-      showToast('success', 'Deleted Successfully', 'Records and inventory restored.');
-      fetchData(true);
-    } catch (e: any) {
-      showToast('error', 'Deletion Failed', e.message);
-      fetchData(true);
+      showToast('success', 'Void Successful', `Transaction ${invoiceId} was permanently deleted and stock was correctly restored.`);
+      setSelectedInvoices(new Set());
+      await fetchInvoices();
+
+    } catch (error: any) {
+      console.error("Void failed:", error);
+      showToast('error', 'Void Failed', error.message);
+    } finally {
+      setIsProcessing(false);
     }
   }
 
-  const toggleSelect = (id: string) => {
-    const next = new Set(selectedToDelete);
-    next.has(id) ? next.delete(id) : next.add(id);
-    setSelectedToDelete(next);
+  // --- SELECTION & BULK ACTIONS ---
+  const toggleSelect = (invoiceId: string) => {
+    const next = new Set(selectedInvoices)
+    next.has(invoiceId) ? next.delete(invoiceId) : next.add(invoiceId)
+    setSelectedInvoices(next)
   }
 
   const toggleSelectAll = () => {
-    if (selectedToDelete.size === processedTransactions.length && processedTransactions.length > 0) {
-      setSelectedToDelete(new Set());
+    if (selectedInvoices.size === processedInvoices.length && processedInvoices.length > 0) {
+      setSelectedInvoices(new Set())
     } else {
-      setSelectedToDelete(new Set(processedTransactions.map(t => t.id)));
+      setSelectedInvoices(new Set(processedInvoices.map(inv => inv.invoice_id)))
     }
   }
 
-  // --- SAVE EDIT LOGIC ---
-  const handleSaveRecord = async (id: string) => {
-    if (!edits[id]) {
-      setEditingCell(null);
+  const deleteSelected = async () => {
+    if (!confirm(`Are you sure you want to permanently delete the image files for ${selectedInvoices.size} invoice(s)?`)) return;
+    
+    setIsLoading(true);
+    const idsToUpdate = Array.from(selectedInvoices);
+    
+    const filesToDelete = invoices
+      .filter(inv => selectedInvoices.has(inv.invoice_id) && inv.invoice_url)
+      .map(inv => {
+        const parts = inv.invoice_url.split('/');
+        return parts[parts.length - 1]; 
+      });
+
+    try {
+      if (filesToDelete.length > 0) {
+        const { error: storageError } = await supabase.storage.from('invoices').remove(filesToDelete);
+        if (storageError) console.error("Storage deletion warning:", storageError);
+      }
+
+      const { error: salesError } = await supabase.from('sales').update({ invoice_url: null }).in('invoice_id', idsToUpdate).eq('branch_id', activeBranchId);
+      const { error: summaryError } = await supabase.from('invoice_summaries').update({ invoice_url: null }).in('invoice_id', idsToUpdate).eq('branch_id', activeBranchId);
+
+      if (salesError || summaryError) {
+        showToast('error', 'Deletion Failed', 'Database Blocked the Update!');
+      } else {
+        setSelectedInvoices(new Set());
+        showToast('success', 'Images Cleared', 'Selected invoice images were successfully removed.');
+        await fetchInvoices(); 
+      }
+    } catch (error: any) {
+      console.error("Deletion failed:", error);
+    } finally {
+      setIsLoading(false);
+    }
+  }
+
+  const forceDownload = async (url: string, id: string) => {
+    try {
+      const res = await fetch(url);
+      const blob = await res.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = blobUrl;
+      link.download = `Invoice-${id}.jpg`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(blobUrl);
+    } catch (err) {
+      console.error("Failed to download silently", err);
+    }
+  }
+
+  const handleAction = async (url: string, id: string) => {
+    if (!url) {
+      showToast('error', 'No Image', 'No image exists for this walk-in transaction.');
       return;
     }
-
-    const payload = { ...edits[id] } as any;
-    const baseTx = transactions.find(t => t.id === id);
-    if (!baseTx) return;
-
-    let targetTable = '';
-    const dbPayload: any = {};
-
-    if (payload.created_at !== undefined) dbPayload.created_at = payload.created_at;
-    if (payload.invoice_id !== undefined) dbPayload.invoice_id = payload.invoice_id;
-    if (payload.transaction_id !== undefined) dbPayload.transaction_id = payload.transaction_id;
-
-    const newQty = payload.qty !== undefined ? Number(payload.qty) : Number(baseTx.qty || 0);
-    const newPrice = payload.price_per_bag !== undefined ? Number(payload.price_per_bag) : Number(baseTx.price_per_bag || 0);
-    const newCogs = payload.cogs_price !== undefined ? Number(payload.cogs_price) : Number(baseTx.cogs_price || 0);
-
-    if (baseTx.source === 'Wholesale Invoice Summary') {
-      targetTable = 'invoice_summaries';
-      if (payload.customer_name !== undefined) dbPayload.customer_name = payload.customer_name;
-      if (payload.owner !== undefined) dbPayload.owner = payload.owner;
-      if (payload.rice_types !== undefined) dbPayload.rice_types = payload.rice_types;
-      if (payload.total_sales !== undefined) dbPayload.total_sales = payload.total_sales;
-      if (payload.total_cogs !== undefined) dbPayload.total_cogs = payload.total_cogs;
-      if (payload.total_profit !== undefined) dbPayload.total_profit = payload.total_profit;
-    } 
-    else if (baseTx.source === 'Walk-in Wholesale' || baseTx.source === 'Non-Walk-in Wholesale') {
-      targetTable = 'sales';
-      if (payload.rice_type !== undefined) dbPayload.custom_rice_type = payload.rice_type; 
-      
-      dbPayload.qty = newQty;
-      dbPayload.price_per_bag = newPrice;
-      dbPayload.cogs_price = newCogs;
-      dbPayload.total_sales = newQty * newPrice;
-      dbPayload.total_cogs = newQty * newCogs;
-      dbPayload.total_profit = (newPrice - newCogs) * newQty;
-    }
-    else if (baseTx.source === 'Retails only') {
-      targetTable = 'retail_sales';
-      if (payload.rice_type !== undefined) dbPayload.custom_rice_type = payload.rice_type; 
-      
-      dbPayload.qty = newQty;
-      dbPayload.price_per_bag = newPrice;
-      dbPayload.cogs_price = newCogs;
-      dbPayload.total_sales = newQty * newPrice;
-      dbPayload.total_cogs = newQty * newCogs;
-      dbPayload.total_profit = (newPrice - newCogs) * newQty;
-    }
-    else if (baseTx.source === 'Biz Expense' || baseTx.source === 'Personal Expense' || baseTx.source === 'Staff Debt') {
-      targetTable = 'expenses';
-      if (payload.description !== undefined) dbPayload.remarks = payload.description; // UI Description saves to DB remarks
-      if (payload.category !== undefined) dbPayload.category = payload.category; 
-      if (payload.owner !== undefined) dbPayload.spender = payload.owner; 
-      if (payload.status !== undefined) dbPayload.payment_method = payload.status; 
-      if (payload.amount_riel !== undefined) dbPayload.amount_riel = payload.amount_riel;
-      if (payload.amount_usd !== undefined) dbPayload.amount_usd = payload.amount_usd;
-    }
-
-    if (Object.keys(dbPayload).length > 0) {
-      // 🔥 UPDATE LOCKED TO BRANCH ID
-      const { error } = await supabase.from(targetTable).update(dbPayload).eq('id', baseTx.raw_db_id).eq('branch_id', activeBranchId);
-      if (error) {
-        showToast('error', 'Save Failed', error.message);
-        return;
+    if (isDeviceMobile && typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
+      try {
+        const res = await fetch(url);
+        const blob = await res.blob();
+        const file = new File([blob], `Invoice-${id}.jpg`, { type: 'image/jpeg' });
+        
+        await navigator.share({
+          files: [file],
+          title: `Invoice ${id}`
+        });
+      } catch (err) {
+        forceDownload(url, id); 
       }
-    }
-
-    setEdits(prev => { const n = { ...prev }; delete n[id]; return n });
-    setEditingCell(null);
-    showToast('success', 'Saved', 'Record updated successfully.');
-    fetchData(true); 
-  }
-
-  // --- TIME FILTER LOGIC ---
-  const isWithinTimeFilter = (dateString: string) => {
-    if (timeFilter === 'All Time') return true;
-    
-    const d = new Date(dateString);
-    const now = new Date();
-    
-    if (timeFilter === 'Today') {
-      return d.getDate() === now.getDate() && d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
-    }
-    
-    if (timeFilter === 'This Month') {
-      return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
-    }
-    
-    if (timeFilter === 'This Week') {
-      const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-      const dayOfWeek = today.getDay(); 
-      const diff = today.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1);
-      const startOfWeek = new Date(today.setDate(diff));
-      return d >= startOfWeek;
-    }
-    
-    return true;
-  }
-
-  // --- HEADER SORT LOGIC ---
-  const handleSort = (key: string) => {
-    let direction: 'asc' | 'desc' = 'asc';
-    if (sortConfig && sortConfig.key === key && sortConfig.direction === 'asc') {
-      direction = 'desc';
-    }
-    setSortConfig({ key, direction });
-  }
-
-  // --- COLUMN DRAG & DROP LOGIC ---
-  const handleDragStart = (e: React.DragEvent, col: string) => {
-    e.dataTransfer.setData('text/plain', col)
-    e.dataTransfer.effectAllowed = 'move'
-  }
-
-  const handleDragOver = (e: React.DragEvent) => {
-    e.preventDefault() 
-    e.dataTransfer.dropEffect = 'move'
-  }
-
-  const handleDrop = async (e: React.DragEvent, targetCol: string) => {
-    e.preventDefault()
-    const sourceCol = e.dataTransfer.getData('text/plain')
-    if (!sourceCol || sourceCol === targetCol) return
-
-    const reorder = (prev: string[]) => {
-      const newOrder = prev.filter(c => c !== sourceCol)
-      const targetIdx = newOrder.indexOf(targetCol)
-      newOrder.splice(targetIdx, 0, sourceCol)
-      return newOrder
-    }
-
-    if (activeTab === 'Wholesale Invoice Summary') {
-      const updated = reorder(summaryCols)
-      setSummaryCols(updated)
-      supabase.from('app_settings').upsert({ setting_key: 'biz_sum_cols', setting_value: updated }, { onConflict: 'setting_key' }).then()
-    } else if (activeTab === 'Walk-in Wholesale' || activeTab === 'Non-Walk-in Wholesale') {
-      const updated = reorder(dailyCols)
-      setDailyCols(updated)
-      supabase.from('app_settings').upsert({ setting_key: 'biz_daily_cols', setting_value: updated }, { onConflict: 'setting_key' }).then()
-    } else if (activeTab === 'Retails only') {
-      const updated = reorder(retailCols)
-      setRetailCols(updated)
-      supabase.from('app_settings').upsert({ setting_key: 'biz_retail_cols', setting_value: updated }, { onConflict: 'setting_key' }).then()
     } else {
-      const updated = reorder(expenseCols)
-      setExpenseCols(updated)
-      supabase.from('app_settings').upsert({ setting_key: 'biz_exp_cols', setting_value: updated }, { onConflict: 'setting_key' }).then()
+      forceDownload(url, id); 
     }
   }
 
-  // --- COLUMN RESIZE LOGIC ---
-  const handleResizeStart = (e: React.MouseEvent | React.TouchEvent, columnKey: string) => {
-    e.preventDefault()
-    e.stopPropagation()
-    const startX = 'touches' in e ? e.touches[0].pageX : e.pageX
-    const startWidth = widthsRef.current[columnKey] || 150
+  const handleBulkAction = async () => {
+    const selectedData = invoices.filter(inv => selectedInvoices.has(inv.invoice_id) && inv.invoice_url);
 
-    const handleMove = (moveEvent: MouseEvent | TouchEvent) => {
-      const currentX = 'touches' in moveEvent ? moveEvent.touches[0].pageX : moveEvent.pageX
-      const newWidth = Math.max(60, startWidth + (currentX - startX))
-      setColumnWidths(prev => ({ ...prev, [columnKey]: newWidth }))
+    if (isDeviceMobile && typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
+      try {
+        const files = await Promise.all(selectedData.map(async (inv) => {
+          const res = await fetch(inv.invoice_url);
+          const blob = await res.blob();
+          return new File([blob], `Invoice-${inv.invoice_id}.jpg`, { type: 'image/jpeg' });
+        }));
+
+        await navigator.share({ 
+          files, 
+          title: `Saved Invoices (${files.length})` 
+        });
+      } catch (err) {
+        console.error("Bulk share error:", err);
+      }
+    } else {
+      selectedData.forEach((inv, index) => {
+        setTimeout(() => forceDownload(inv.invoice_url, inv.invoice_id), index * 400);
+      });
     }
-
-    const handleUp = async () => {
-      document.removeEventListener('mousemove', handleMove)
-      document.removeEventListener('mouseup', handleUp)
-      document.removeEventListener('touchmove', handleMove)
-      document.removeEventListener('touchmove', handleMove)
-      document.removeEventListener('touchend', handleUp)
-      
-      await supabase.from('app_settings').upsert({ setting_key: 'biz_col_widths', setting_value: widthsRef.current }, { onConflict: 'setting_key' })
-    }
-
-    document.addEventListener('mousemove', handleMove)
-    document.addEventListener('mouseup', handleUp)
-    document.addEventListener('touchmove', handleMove, { passive: false })
-    document.addEventListener('touchmove', handleMove, { passive: false })
-    document.addEventListener('touchmove', handleUp)
   }
 
-  // --- DATA PROCESSING (USING DEBOUNCED SEARCH!) ---
-  const processedTransactions = transactions
-    .filter(t => {
-      if (t.source !== activeTab) return false;
-      if (!isWithinTimeFilter(t.created_at)) return false;
+  const getInvoiceCategory = (inv: Invoice): 'Wholesale' | 'WalkinWholesale' | 'WalkinRetail' => {
+    if (inv.is_retail) return 'WalkinRetail';
+    const name = (inv.customer_name || '').toLowerCase().trim();
+    if (name === 'walk-in' || name === 'walk in') {
+      return 'WalkinWholesale';
+    }
+    return 'Wholesale';
+  };
 
-      if (debouncedSearch) {
-        const query = debouncedSearch.toLowerCase()
-        const searchableText = `${t.invoice_id || ''} ${t.transaction_id || ''} ${t.customer_name || ''} ${t.rice_types || ''} ${t.rice_type || ''} ${t.description || ''} ${t.category || ''}`.toLowerCase()
-        if (!searchableText.includes(query)) return false
+  const processedInvoices = invoices
+    .filter(inv => {
+      const isVoided = inv.delivery_status === 'Voided';
+      const cat = getInvoiceCategory(inv);
+
+      // 1. Hide voided items when viewing active category tabs
+      if (categoryTab !== 'Voided' && isVoided) return false;
+
+      // 2. Filter by active category tab
+      if (categoryTab === 'Wholesale' && cat !== 'Wholesale') return false;
+      if (categoryTab === 'WalkinWholesale' && cat !== 'WalkinWholesale') return false;
+      if (categoryTab === 'WalkinRetail' && cat !== 'WalkinRetail') return false;
+
+      // 3. Filter by sub-tabs when inside the 'Voided' tab
+      if (categoryTab === 'Voided') {
+        if (!isVoided) return false;
+        if (voidSubTab === 'Wholesale' && cat !== 'Wholesale') return false;
+        if (voidSubTab === 'WalkinWholesale' && cat !== 'WalkinWholesale') return false;
+        if (voidSubTab === 'WalkinRetail' && cat !== 'WalkinRetail') return false;
       }
 
-      return true
+      if (!debouncedSearch) return true;
+      const term = debouncedSearch.toLowerCase().trim();
+      return (
+        inv.invoice_id?.toLowerCase().includes(term) ||
+        inv.customer_name?.toLowerCase().includes(term) ||
+        inv.rice_types?.toLowerCase().includes(term)
+      );
     })
-    .sort((a, b) => {
-      if (!sortConfig) return 0;
-      const { key, direction } = sortConfig;
-      
-      let valA = a[key];
-      let valB = b[key];
-      
-      if (valA === undefined || valA === null) valA = '';
-      if (valB === undefined || valB === null) valB = '';
+    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 
-      if (valA < valB) return direction === 'asc' ? -1 : 1;
-      if (valA > valB) return direction === 'asc' ? 1 : -1;
-      return 0;
-    })
-
-  // --- HELPERS ---
-  const formatDate = (dateString: string) => {
-    const d = new Date(dateString)
-    return d.toLocaleDateString('en-GB', { 
-      day: '2-digit', 
-      month: 'short', 
-      year: 'numeric', 
-      hour: '2-digit', 
-      minute: '2-digit' 
-    })
+  const formatDate = (dateStr: string) => {
+    return new Date(dateStr).toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
   }
 
-  const Resizer = ({ columnKey }: { columnKey: string }) => (
-    <div
-      className="resizer-handle"
-      onMouseDown={(e) => handleResizeStart(e, columnKey)}
-      onTouchStart={(e) => handleResizeStart(e, columnKey)}
-    />
-  )
+  if (!mounted) return null;
 
   return (
-    <AdminGuard>
-      {/* 🔥 APP LAYOUT: Flex Column + Overflow Hidden locks the outer page */}
-      <div className="main-wrapper" style={{ display: 'flex', flexDirection: 'column', height: '100dvh', overflow: 'hidden' }}>
+    // 🔥 EXACT Layout match with Rice Inventory / COGS. No custom wrappers!
+    <div className="main-wrapper" style={{ display: 'flex', flexDirection: 'column', height: '100dvh', overflow: 'hidden' }}>
       
-      {/* HEADER (Frozen) */}
+      {/* 🟢 1. HEADER (FROZEN): Exactly aligned with hamburger */}
       <div className="header-container" style={{ flexShrink: 0 }}>
         <div className="header-left">
-          <h1 className="saas-page-title">🔐 Business Database</h1>
-        </div>
-        <div className="header-actions" style={{ display: 'flex', gap: '12px' }}>
-          {selectedToDelete.size > 0 && (
-            <button onClick={handleDelete} className="saas-btn saas-btn-danger">
-              🗑️ Delete ({selectedToDelete.size})
-            </button>
-          )}
-          <button className="saas-btn saas-btn-secondary" onClick={() => fetchData(false)}>
-            {isLoading ? '🔄 Loading...' : '🔄 Refresh Data'}
-          </button>
+          <h1 className="saas-page-title" style={{ margin: 0 }}>🖼️ Invoice Image Gallery</h1>
         </div>
       </div>
 
-      {/* TOOLBAR (Frozen) */}
-      <div className="saas-card" style={{ padding: '16px', marginBottom: '24px', flexShrink: 0 }}>
-        
-        {/* TOP ROW: TABS */}
-        <div className="saas-tab-container" style={{ border: 'none', padding: 0, boxShadow: 'none', borderBottom: '1px solid #e2e8f0', borderRadius: 0, paddingBottom: '12px', marginBottom: '16px' }}>
-          <button className={`saas-tab ${activeTab === 'Wholesale Invoice Summary' ? 'active' : ''}`} onClick={() => {setActiveTab('Wholesale Invoice Summary'); setSortConfig(null); setEditingCell(null); setSelectedToDelete(new Set());}}>
-            🌾 Wholesale Invoice Summary
+      {/* 🟢 2. CATEGORY TABS (FROZEN): TouchAction pan-x allows side scroll but blocks Safari bounce */}
+      <div className="saas-tab-container hide-scrollbar" style={{ flexShrink: 0, width: '100%', border: 'none', padding: 0, boxShadow: 'none', background: 'transparent', marginBottom: categoryTab === 'Voided' ? '8px' : '16px', display: 'flex', flexWrap: 'nowrap', overflowX: 'auto', WebkitOverflowScrolling: 'touch', gap: '8px', touchAction: 'pan-x' }}>
+        <button 
+          onClick={() => { setCategoryTab('All'); setSelectedInvoices(new Set()); setViewMode('table'); }} 
+          className={`saas-tab ${categoryTab === 'All' ? 'active' : ''}`}
+          style={{ ...(categoryTab === 'All' ? { background: '#10b981', color: '#fff' } : { border: '1px solid #cbd5e1', background: '#fff' }), minWidth: 'max-content', flexShrink: 0 }}
+        >
+          ✅ All Active
+        </button>
+        <button 
+          onClick={() => { setCategoryTab('Wholesale'); setSelectedInvoices(new Set()); setViewMode('grid'); }} 
+          className={`saas-tab ${categoryTab === 'Wholesale' ? 'active' : ''}`}
+          style={{ ...(categoryTab === 'Wholesale' ? { background: '#10b981', color: '#fff' } : { border: '1px solid #cbd5e1', background: '#fff' }), minWidth: 'max-content', flexShrink: 0 }}
+        >
+          🌾 Wholesale
+        </button>
+        <button 
+          onClick={() => { setCategoryTab('WalkinWholesale'); setSelectedInvoices(new Set()); setViewMode('table'); }} 
+          className={`saas-tab ${categoryTab === 'WalkinWholesale' ? 'active' : ''}`}
+          style={{ ...(categoryTab === 'WalkinWholesale' ? { background: '#10b981', color: '#fff' } : { border: '1px solid #cbd5e1', background: '#fff' }), minWidth: 'max-content', flexShrink: 0 }}
+        >
+          🏬 Walk-in Wholesale
+        </button>
+        <button 
+          onClick={() => { setCategoryTab('WalkinRetail'); setSelectedInvoices(new Set()); setViewMode('table'); }} 
+          className={`saas-tab ${categoryTab === 'WalkinRetail' ? 'active' : ''}`}
+          style={{ ...(categoryTab === 'WalkinRetail' ? { background: '#10b981', color: '#fff' } : { border: '1px solid #cbd5e1', background: '#fff' }), minWidth: 'max-content', flexShrink: 0 }}
+        >
+          🛍️ Walk-in Retail
+        </button>
+        <button 
+          onClick={() => { setCategoryTab('Voided'); setVoidSubTab('All'); setSelectedInvoices(new Set()); setViewMode('table'); }} 
+          className={`saas-tab ${categoryTab === 'Voided' ? 'active' : ''}`}
+          style={{ ...(categoryTab === 'Voided' ? { background: '#ef4444', color: '#fff' } : { border: '1px solid #cbd5e1', background: '#fff' }), minWidth: 'max-content', flexShrink: 0 }}
+        >
+          ❌ Voided
+        </button>
+      </div>
+
+      {/* 🟢 3. SUB-TABS WHEN INSIDE 'VOIDED' TAB (FROZEN) */}
+      {categoryTab === 'Voided' && (
+        <div className="saas-tab-container hide-scrollbar" style={{ flexShrink: 0, width: 'fit-content', border: 'none', padding: '4px 6px', boxShadow: 'none', background: '#fee2e2', borderRadius: '8px', marginBottom: '16px', display: 'flex', flexWrap: 'nowrap', overflowX: 'auto', WebkitOverflowScrolling: 'touch', gap: '6px', touchAction: 'pan-x' }}>
+          <button 
+            onClick={() => setVoidSubTab('All')} 
+            className={`saas-tab ${voidSubTab === 'All' ? 'active' : ''}`}
+            style={{ ...(voidSubTab === 'All' ? { background: '#dc2626', color: '#fff' } : { background: 'transparent', color: '#991b1b', border: 'none' }), fontSize: '12px', padding: '6px 12px', minWidth: 'max-content', flexShrink: 0 }}
+          >
+            All Voided
           </button>
-          <button className={`saas-tab ${activeTab === 'Walk-in Wholesale' ? 'active' : ''}`} onClick={() => {setActiveTab('Walk-in Wholesale'); setSortConfig(null); setEditingCell(null); setSelectedToDelete(new Set());}}>
-            🚶 Walk-in Wholesale
+          <button 
+            onClick={() => setVoidSubTab('Wholesale')} 
+            className={`saas-tab ${voidSubTab === 'Wholesale' ? 'active' : ''}`}
+            style={{ ...(voidSubTab === 'Wholesale' ? { background: '#dc2626', color: '#fff' } : { background: 'transparent', color: '#991b1b', border: 'none' }), fontSize: '12px', padding: '6px 12px', minWidth: 'max-content', flexShrink: 0 }}
+          >
+            Wholesale
           </button>
-          <button className={`saas-tab ${activeTab === 'Non-Walk-in Wholesale' ? 'active' : ''}`} onClick={() => {setActiveTab('Non-Walk-in Wholesale'); setSortConfig(null); setEditingCell(null); setSelectedToDelete(new Set());}}>
-            🚚 Non-Walk-in Wholesale
+          <button 
+            onClick={() => setVoidSubTab('WalkinWholesale')} 
+            className={`saas-tab ${voidSubTab === 'WalkinWholesale' ? 'active' : ''}`}
+            style={{ ...(voidSubTab === 'WalkinWholesale' ? { background: '#dc2626', color: '#fff' } : { background: 'transparent', color: '#991b1b', border: 'none' }), fontSize: '12px', padding: '6px 12px', minWidth: 'max-content', flexShrink: 0 }}
+          >
+            Walk-in Wholesale
           </button>
-          <button className={`saas-tab ${activeTab === 'Retails only' ? 'active' : ''}`} onClick={() => {setActiveTab('Retails only'); setSortConfig(null); setEditingCell(null); setSelectedToDelete(new Set());}}>
-            🛍️ Retails only
-          </button>
-          <button className={`saas-tab ${activeTab === 'Biz Expense' ? 'active' : ''}`} onClick={() => {setActiveTab('Biz Expense'); setSortConfig(null); setEditingCell(null); setSelectedToDelete(new Set());}}>
-            📉 Biz Expense
-          </button>
-          <button className={`saas-tab ${activeTab === 'Personal Expense' ? 'active' : ''}`} onClick={() => {setActiveTab('Personal Expense'); setSortConfig(null); setEditingCell(null); setSelectedToDelete(new Set());}}>
-            🍕 Personal Expense
-          </button>
-          <button className={`saas-tab ${activeTab === 'Staff Debt' ? 'active' : ''}`} onClick={() => {setActiveTab('Staff Debt'); setSortConfig(null); setEditingCell(null); setSelectedToDelete(new Set());}}>
-            💸 Staff Debt
+          <button 
+            onClick={() => setVoidSubTab('WalkinRetail')} 
+            className={`saas-tab ${voidSubTab === 'WalkinRetail' ? 'active' : ''}`}
+            style={{ ...(voidSubTab === 'WalkinRetail' ? { background: '#dc2626', color: '#fff' } : { background: 'transparent', color: '#991b1b', border: 'none' }), fontSize: '12px', padding: '6px 12px', minWidth: 'max-content', flexShrink: 0 }}
+          >
+            Walk-in Retail
           </button>
         </div>
+      )}
 
-        {/* BOTTOM ROW: FILTERS & SEARCH */}
-        <div className="toolbar-bottom-row">
-          <div className="time-filters-wrapper">
-            <button className={`time-btn ${timeFilter === 'Today' ? 'active' : ''}`} onClick={() => setTimeFilter('Today')}>Today</button>
-            <button className={`time-btn ${timeFilter === 'This Week' ? 'active' : ''}`} onClick={() => setTimeFilter('This Week')}>This Week</button>
-            <button className={`time-btn ${timeFilter === 'This Month' ? 'active' : ''}`} onClick={() => setTimeFilter('This Month')}>This Month</button>
-            <button className={`time-btn ${timeFilter === 'All Time' ? 'active' : ''}`} onClick={() => setTimeFilter('All Time')}>All Time</button>
+      {/* 🔥 4. SCROLLABLE AREA: Filters + Table/Grid Content */}
+      <div className="hide-scrollbar" style={{ flex: 1, overflowY: 'auto', WebkitOverflowScrolling: 'touch', display: 'flex', flexDirection: 'column', paddingBottom: '100px' }}>
+        
+        {/* 🔥 REDESIGNED FILTER CARD: Clean stacked layout on mobile, scrolls WITH the content! */}
+        <div className="saas-card" style={{ flexShrink: 0, marginBottom: '24px', padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+          
+          {/* Top Row: Search */}
+          <div style={{ width: '100%', position: 'relative' }}>
+            <span style={{ position: 'absolute', left: '14px', top: '50%', transform: 'translateY(-50%)', color: '#94a3b8', fontSize: '16px' }}>🔍</span>
+            <input 
+              type="text"
+              placeholder="Search ID, Customer, or Rice..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
+              className="saas-input"
+              style={{ width: '100%', paddingLeft: '38px', boxSizing: 'border-box' }}
+            />
           </div>
 
-          <input 
-            className="saas-input" 
-            placeholder="🔍 Search records..." 
-            value={searchQuery} 
-            onChange={(e) => setSearchQuery(e.target.value)} 
-            onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
-            style={{ flex: 1, minWidth: '200px' }}
-          />
+          {/* Middle Row: Date Filters (Scrollable horizontally on mobile) */}
+          <div className="saas-tab-container hide-scrollbar" style={{ margin: 0, padding: '4px', background: '#f1f5f9', borderRadius: '8px', display: 'flex', flexWrap: 'nowrap', overflowX: 'auto', width: '100%' }}>
+            {(['All', 'Today', 'This Week', 'This Month'] as FilterTab[]).map(tab => (
+              <button
+                key={tab}
+                onClick={() => setFilterTab(tab)}
+                className={`saas-tab ${filterTab === tab ? 'active' : ''}`}
+                style={{ ...(filterTab === tab ? { background: '#0f172a', color: '#fff' } : { background: 'transparent', color: '#475569', border: 'none' }), padding: '8px 16px', minWidth: 'max-content', flexShrink: 0 }}
+              >
+                {tab}
+              </button>
+            ))}
+          </div>
+
+          {/* Bottom Row: Action Modifiers & View Toggle */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px', borderTop: '1px dashed #e2e8f0', paddingTop: '12px', marginTop: '4px' }}>
+            
+            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+              <button onClick={toggleSelectAll} disabled={processedInvoices.length === 0} className="saas-btn saas-btn-secondary" style={{ padding: '8px 12px', fontSize: '13px' }}>
+                {selectedInvoices.size === processedInvoices.length && processedInvoices.length > 0 ? 'Deselect All' : 'Select All'}
+              </button>
+
+              {selectedInvoices.size > 0 && (
+                <>
+                  <button onClick={deleteSelected} className="saas-btn saas-btn-danger" style={{ padding: '8px 12px', fontSize: '13px' }}>
+                    Clear ({selectedInvoices.size})
+                  </button>
+                  <button onClick={handleBulkAction} className="saas-btn saas-btn-primary" style={{ padding: '8px 12px', fontSize: '13px' }}>
+                    {isDeviceMobile ? `Share (${selectedInvoices.size})` : `Download (${selectedInvoices.size})`}
+                  </button>
+                </>
+              )}
+            </div>
+
+            <div className="saas-tab-container hide-scrollbar" style={{ margin: 0, padding: '4px', background: '#e2e8f0', borderRadius: '8px', display: 'flex', flexShrink: 0 }}>
+              <button onClick={() => setViewMode('grid')} className={`saas-tab ${viewMode === 'grid' ? 'active' : ''}`} style={viewMode === 'grid' ? { background: '#10b981', color: '#fff', padding: '8px 16px' } : { padding: '8px 16px', border: 'none', background: 'transparent' }}>Grid</button>
+              <button onClick={() => setViewMode('table')} className={`saas-tab ${viewMode === 'table' ? 'active' : ''}`} style={viewMode === 'table' ? { background: '#10b981', color: '#fff', padding: '8px 16px' } : { padding: '8px 16px', border: 'none', background: 'transparent' }}>Table</button>
+            </div>
+          </div>
         </div>
-      </div>
 
-      {/* RECORD COUNT BADGE (Frozen) */}
-      <div className="record-count-badge" style={{ flexShrink: 0 }}>
-        Showing {processedTransactions.length} records for {timeFilter}
-      </div>
+        {/* DATA AREA (Grid or Table) */}
+        <div style={{ flex: 1 }}>
+          {isLoading ? (
+            viewMode === 'table' ? (
+              <div className="saas-table-wrapper" style={{ margin: 0 }}>
+                <div className="saas-table-responsive">
+                  <table className="saas-table">
+                    <tbody>
+                      <TableSkeleton columns={7} rows={6} />
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            ) : (
+              <div style={{ textAlign: 'center', padding: '40px', color: '#94a3b8' }}>Loading records...</div>
+            )
+          ) : processedInvoices.length === 0 ? (
+            <EmptyState 
+              icon="🖼️" 
+              title="No records found" 
+              message="Adjust your tabs, search term, or date ranges to see more results." 
+            />
+          ) : viewMode === 'grid' ? (
+            
+            /* --- GRID VIEW --- */
+            <div className="grid-layout">
+              {processedInvoices.map((inv) => {
+                const isSelected = selectedInvoices.has(inv.invoice_id);
+                const isVoided = inv.delivery_status === 'Voided';
 
-      {/* 🔥 MAIN SPREADSHEET (Fills remaining space and scrolls internally) */}
-      <div className="saas-table-wrapper" style={{ flex: 1, minHeight: 0, marginBottom: 0, display: 'flex', flexDirection: 'column' }}>
-        <div className="saas-table-responsive" style={{ flex: 1, overflow: 'auto' }}>
-          <table className="saas-table" style={{ minWidth: '100%', tableLayout: 'fixed' }}>
-            <thead>
-              <tr>
-                {/* Checkbox Header Column (Sticky) */}
-                <th className="saas-th" style={{ width: '50px', textAlign: 'center', borderRight: '1px solid #f1f5f9', position: 'sticky', top: 0, zIndex: 30, backgroundColor: '#f8fafc', boxShadow: 'inset 0 -2px 0 0 #e2e8f0' }}>
-                  <input 
-                    type="checkbox" 
-                    className="biz-checkbox"
-                    checked={selectedToDelete.size === processedTransactions.length && processedTransactions.length > 0} 
-                    onChange={toggleSelectAll} 
-                  />
-                </th>
+                return (
+                  <div key={inv.id} className={`saas-card ${isSelected ? 'selected-grid-card' : ''} ${isVoided ? 'voided-grid-card' : ''}`} style={{ padding: 0, overflow: 'hidden', position: 'relative' }}>
+                    
+                    <input type="checkbox" checked={isSelected} onChange={() => toggleSelect(inv.invoice_id)} className="card-checkbox" />
 
-                {/* Dynamic Data Headers (Sticky) */}
-                {activeColumns.map(key => (
-                  <th 
-                    key={key} 
-                    className="saas-th"
-                    draggable 
-                    onDragStart={(e) => handleDragStart(e, key)}
-                    onDragOver={handleDragOver}
-                    onDrop={(e) => handleDrop(e, key)}
-                    onClick={() => handleSort(key)}
-                    style={{ 
-                      width: columnWidths[key] || 150, 
-                      borderRight: '1px solid #f1f5f9', 
-                      cursor: 'pointer', 
-                      position: 'sticky', 
-                      top: 0, 
-                      zIndex: 30, 
-                      backgroundColor: '#f8fafc', 
-                      boxShadow: 'inset 0 -2px 0 0 #e2e8f0'
-                    }}
-                    title="Click to sort, Drag to reorder"
-                  >
-                    {formatHeader(key)}
-                    <span className="sort-icon" style={{ opacity: sortConfig?.key === key ? 1 : 0.3 }}>
-                      {sortConfig?.key === key ? (sortConfig.direction === 'asc' ? '↑' : '↓') : '↕'}
-                    </span>
-                    <Resizer columnKey={key} />
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {isLoading && transactions.length === 0 ? (
-                <TableSkeleton columns={activeColumns.length + 1} rows={8} />
-              ) : processedTransactions.length === 0 ? (
-                <tr>
-                  <td colSpan={activeColumns.length + 1} style={{ padding: 0 }}>
-                    <EmptyState 
-                      icon="🔍" 
-                      title="No records found" 
-                      message="We couldn't find any transactions matching your current search or date filters." 
-                    />
-                  </td>
-                </tr>
-              ) : (
-                processedTransactions.map(t => {
-                  const isRowSelected = selectedToDelete.has(t.id);
-                  const isRowEditing = edits[t.id] ? true : false;
-                  
-                  return (
-                    <tr key={t.id} className={`saas-tr ${isRowSelected ? 'selected' : ''} ${isRowEditing ? 'editing' : ''}`}>
-                      <td className="saas-td" style={{ textAlign: 'center', borderRight: '1px solid #f1f5f9', padding: '14px 12px' }}>
-                        <input 
-                          type="checkbox" 
-                          className="biz-checkbox"
-                          checked={isRowSelected} 
-                          onChange={() => toggleSelect(t.id)} 
-                        />
-                      </td>
+                    <div onClick={() => toggleSelect(inv.invoice_id)} className="card-image-box">
+                      {inv.invoice_url ? (
+                        <img src={inv.invoice_url} alt="Invoice Document" className={`card-img ${isSelected ? 'img-selected' : ''}`} />
+                      ) : (
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#94a3b8', fontSize: '14px', background: '#f8fafc' }}>
+                          No Image (Retail Sale)
+                        </div>
+                      )}
+                      {isVoided && (
+                        <div className="void-overlay">
+                          <span className="void-stamp">VOID</span>
+                        </div>
+                      )}
+                    </div>
 
-                      {activeColumns.map(col => {
-                        const isEditing = editingCell?.id === t.id && editingCell?.col === col;
-                        const val = edits[t.id]?.[col] ?? t[col] ?? '';
+                    <div style={{ padding: '16px', borderBottom: '1px solid #e2e8f0' }}>
+                      <div className={`saas-card-title ${isVoided ? 'voided-text' : ''}`} style={{ fontSize: '15px', color: '#0f172a', margin: 0 }}>{inv.invoice_id}</div>
+                      <div style={{ fontSize: '14px', color: '#475569', marginTop: '6px', fontWeight: 'bold' }}>Customer: {inv.customer_name}</div>
+                      <div style={{ fontSize: '13px', color: '#64748b', marginTop: '6px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={inv.rice_types}>
+                        🌾 {inv.rice_types}
+                      </div>
+                      <div style={{ fontSize: '16px', color: '#b58a3d', marginTop: '8px', fontWeight: 'bold' }}>💰 {formatRiel(inv.total_sales)}</div>
+                    </div>
 
-                        const isParentFieldOnChild = (t.source === 'Walk-in Wholesale' || t.source === 'Non-Walk-in Wholesale') && ['customer_name', 'owner'].includes(col);
-                        const isUneditable = ['created_at', 'invoice_id', 'transaction_id'].includes(col) || isParentFieldOnChild;
+                    <div style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px', background: '#f8fafc', marginTop: 'auto' }}>
+                      <div style={{ fontSize: '13px', color: '#64748b', textAlign: 'center', fontWeight: 'bold' }}>{formatDate(inv.created_at)}</div>
+                      
+                      <div style={{ display: 'flex', gap: '8px' }}>
+                        {!isVoided && (
+                          <button onClick={(e) => { e.stopPropagation(); handleVoidInvoice(inv.invoice_id); }} disabled={isProcessing} className="saas-btn" style={{ flex: 1, padding: '8px 4px', background: '#fee2e2', color: '#dc2626', border: '1px solid #fca5a5', fontWeight: 'bold' }}>
+                            🚨 Void
+                          </button>
+                        )}
+                        {!isVoided && !inv.is_retail && (
+                          <button onClick={(e) => { e.stopPropagation(); window.location.href = `/pos?edit=${inv.invoice_id}`; }} className="saas-btn" style={{ flex: 1, padding: '8px 4px', background: '#fef3c7', color: '#b45309', border: '1px solid #fde047' }}>
+                            Edit
+                          </button>
+                        )}
+                        {inv.invoice_url && (
+                          <button onClick={(e) => { e.stopPropagation(); handleAction(inv.invoice_url, inv.invoice_id); }} className="saas-btn saas-btn-secondary" style={{ flex: 1, padding: '8px 4px' }}>
+                            {isDeviceMobile ? 'Share' : 'Download'}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
 
-                        return (
-                          <td 
-                            key={col} 
-                            className={`saas-td ${isEditing ? 'cell-editing' : ''}`}
-                            style={{ padding: 0, borderRight: '1px solid #f1f5f9', position: 'relative' }}
-                            onClick={() => { if (!isUneditable) setEditingCell({ id: t.id, col: col }) }}
-                          >
-                            {isEditing ? (
-                              ['price_per_bag', 'cogs_price', 'total_sales', 'total_cogs', 'total_profit', 'amount_riel', 'amount_usd'].includes(col) ? (
-                                <CurrencyInput 
-                                  autoFocus 
-                                  value={val} 
-                                  onChange={(v: any) => setEdits(prev => ({ ...prev, [t.id]: { ...(prev[t.id] || {}), [col]: v } }))} 
-                                  onEnter={() => handleSaveRecord(t.id)}
-                                />
-                              ) : col === 'created_at' ? (
-                                <input 
-                                  autoFocus
-                                  type="datetime-local"
-                                  className="cell-input"
-                                  value={toLocalDatetimeString(val)}
-                                  onChange={(e) => {
-                                    const dateObj = new Date(e.target.value);
-                                    if (!isNaN(dateObj.getTime())) {
-                                      setEdits(prev => ({ ...prev, [t.id]: { ...(prev[t.id] || {}), [col]: dateObj.toISOString() } }));
-                                    }
-                                  }}
-                                  onBlur={() => handleSaveRecord(t.id)}
-                                  onKeyDown={(e) => { 
-                                    if (e.key === 'Enter') { e.currentTarget.blur(); handleSaveRecord(t.id); } 
-                                    if (e.key === 'Escape') { 
-                                      setEdits(prev => { const n = { ...prev }; delete n[t.id]; return n }); 
-                                      setEditingCell(null); 
-                                    } 
-                                  }}
-                                />
-                              ) : (
-                                <input 
-                                  autoFocus 
-                                  type={col === 'qty' ? 'number' : 'text'} 
-                                  className="cell-input no-spinners" 
-                                  value={val} 
-                                  onChange={(e) => {
-                                    const newVal = e.target.type === 'number' ? (e.target.value === '' ? '' : Number(e.target.value)) : e.target.value;
-                                    setEdits(prev => ({ ...prev, [t.id]: { ...(prev[t.id] || {}), [col]: newVal } }))
-                                  }} 
-                                  onBlur={() => handleSaveRecord(t.id)} 
-                                  onKeyDown={(e) => { 
-                                    if (e.key === 'Enter') { e.currentTarget.blur(); handleSaveRecord(t.id); } 
-                                    if (e.key === 'Escape') { 
-                                      setEdits(prev => { const n = { ...prev }; delete n[t.id]; return n }); 
-                                      setEditingCell(null); 
-                                    } 
-                                  }} 
-                                />
-                              )
+          ) : (
+
+            /* --- TABLE VIEW --- */
+            <div className="saas-table-wrapper" style={{ margin: 0 }}>
+              <div className="saas-table-responsive">
+                <table className="saas-table">
+                  <thead>
+                    <tr>
+                      <th className="saas-th" style={{ width: '40px', textAlign: 'center', position: 'sticky', top: 0, zIndex: 30, backgroundColor: '#f8fafc', boxShadow: 'inset 0 -2px 0 0 #e2e8f0' }}>
+                        <input type="checkbox" checked={selectedInvoices.size === processedInvoices.length && processedInvoices.length > 0} onChange={toggleSelectAll} style={{ cursor: 'pointer', width: '16px', height: '16px' }} />
+                      </th>
+                      <th className="saas-th" style={{ width: '80px', textAlign: 'center', position: 'sticky', top: 0, zIndex: 30, backgroundColor: '#f8fafc', boxShadow: 'inset 0 -2px 0 0 #e2e8f0' }}>Void</th>
+                      <th className="saas-th" style={{ position: 'sticky', top: 0, zIndex: 30, backgroundColor: '#f8fafc', boxShadow: 'inset 0 -2px 0 0 #e2e8f0' }}>Invoice ID</th>
+                      <th className="saas-th" style={{ position: 'sticky', top: 0, zIndex: 30, backgroundColor: '#f8fafc', boxShadow: 'inset 0 -2px 0 0 #e2e8f0' }}>Customer</th>
+                      <th className="saas-th" style={{ position: 'sticky', top: 0, zIndex: 30, backgroundColor: '#f8fafc', boxShadow: 'inset 0 -2px 0 0 #e2e8f0' }}>Items Sold</th>
+                      <th className="saas-th" style={{ textAlign: 'right', position: 'sticky', top: 0, zIndex: 30, backgroundColor: '#f8fafc', boxShadow: 'inset 0 -2px 0 0 #e2e8f0' }}>Total Amount</th>
+                      <th className="saas-th" style={{ position: 'sticky', top: 0, zIndex: 30, backgroundColor: '#f8fafc', boxShadow: 'inset 0 -2px 0 0 #e2e8f0' }}>Date</th>
+                      <th className="saas-th" style={{ textAlign: 'center', position: 'sticky', top: 0, zIndex: 30, backgroundColor: '#f8fafc', boxShadow: 'inset 0 -2px 0 0 #e2e8f0' }}>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {processedInvoices.map((inv) => {
+                      const isSelected = selectedInvoices.has(inv.invoice_id);
+                      const isVoided = inv.delivery_status === 'Voided';
+
+                      return (
+                        <tr key={inv.id} className={`saas-tr ${isSelected ? 'selected' : ''} ${isVoided ? 'row-voided' : ''}`}>
+                          <td className="saas-td" style={{ textAlign: 'center' }}>
+                            <input type="checkbox" checked={isSelected} onChange={() => toggleSelect(inv.invoice_id)} style={{ cursor: 'pointer', width: '16px', height: '16px' }} />
+                          </td>
+                          <td className="saas-td" style={{ textAlign: 'center' }}>
+                            {!isVoided ? (
+                              <button onClick={(e) => { e.stopPropagation(); handleVoidInvoice(inv.invoice_id); }} disabled={isProcessing} className="saas-btn" style={{ padding: '6px 10px', background: '#fee2e2', color: '#dc2626', border: '1px solid #fca5a5', fontWeight: 'bold', fontSize: '11px', borderRadius: '6px', cursor: 'pointer' }}>
+                                🚨 Void
+                              </button>
                             ) : (
-                              <div className="cell-display" style={{ cursor: isUneditable ? 'default' : 'text' }}>
-                                {['invoice_id', 'transaction_id', 'customer_name', 'rice_types', 'rice_type', 'description'].includes(col) && (
-                                  <span style={{ fontWeight: ['invoice_id', 'transaction_id'].includes(col) ? 'bold' : 'normal', color: ['invoice_id', 'transaction_id'].includes(col) ? '#1e293b' : 'inherit' }}>
-                                    {val || '-'}
-                                  </span>
-                                )}
-                                
-                                {col === 'owner' && <span className="badge-owner">{val || '-'}</span>}
-                                {col === 'category' && <span className="badge-category">{val || '-'}</span>}
-                                {col === 'status' && <span className="badge-status">{val || '-'}</span>}
-                                
-                                {col === 'created_at' && formatDate(t.created_at)}
-                                {col === 'qty' && formatNumber(val || 0)}
-
-                                {['price_per_bag', 'cogs_price', 'total_sales', 'total_cogs', 'total_profit', 'amount_riel', 'amount_usd'].includes(col) && (
-                                  <span style={{ 
-                                    fontWeight: 'bold', 
-                                    color: (col === 'total_profit' && val < 0) || col === 'total_cogs' || col === 'cogs_price' || col === 'amount_riel' || col === 'amount_usd' ? '#ef4444' : '#10b981' 
-                                  }}>
-                                    {col === 'amount_usd' ? formatUSD(val || 0) : formatRiel(val || 0)}
-                                  </span>
-                                )}
-                              </div>
+                              <span style={{ fontSize: '12px', fontWeight: 'bold', color: '#991b1b' }}>VOIDED</span>
                             )}
                           </td>
-                        )
-                      })}
-                    </tr>
-                  )
-                })
-              )}
-            </tbody>
-          </table>
+                          <td className={`saas-td ${isVoided ? 'voided-text' : ''}`} style={{ fontWeight: 'bold' }}>{inv.invoice_id}</td>
+                          <td className="saas-td" style={{ fontWeight: 'bold' }}>{inv.customer_name}</td>
+                          <td className="saas-td" style={{ maxWidth: '280px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: '#475569' }} title={inv.rice_types}>
+                            {inv.rice_types}
+                          </td>
+                          <td className="saas-td" style={{ textAlign: 'right', fontWeight: 'bold', color: '#b58a3d' }}>{formatRiel(inv.total_sales)}</td>
+                          <td className="saas-td" style={{ color: '#475569' }}>{formatDate(inv.created_at)}</td>
+                          <td className="saas-td" style={{ textAlign: 'center' }}>
+                            <div style={{ display: 'flex', gap: '8px', justifyContent: 'center' }}>
+                              {!isVoided && !inv.is_retail && (
+                                <button onClick={(e) => { e.stopPropagation(); window.location.href = `/pos?edit=${inv.invoice_id}`; }} className="saas-btn" style={{ padding: '6px 12px', background: '#fef3c7', color: '#b45309', border: 'none', fontSize: '12px' }}>Edit</button>
+                              )}
+                              {inv.invoice_url && (
+                                <button onClick={(e) => { e.stopPropagation(); handleAction(inv.invoice_url, inv.invoice_id); }} className="saas-btn saas-btn-secondary" style={{ padding: '6px 12px', fontSize: '12px' }}>
+                                  {isDeviceMobile ? 'Share' : 'Download'}
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
-      {/* --- PRESERVED PAGE-SPECIFIC UTILITY STYLES --- */}
+      {/* --- GLOBAL CSS --- */}
       <style jsx global>{`
-        .toolbar-bottom-row { display: flex; width: 100%; gap: 12px; flex-wrap: wrap; align-items: center; }
-        .time-filters-wrapper { display: flex; background: #f1f5f9; padding: 4px; border-radius: 8px; gap: 4px; }
-        .record-count-badge { margin-bottom: 12px; color: #64748b; font-size: 13px; font-weight: bold; }
-        .time-btn { padding: 8px 12px; border-radius: 6px; border: none; background: transparent; font-weight: bold; font-size: 13px; color: #64748b; cursor: pointer; }
-        .time-btn.active { background: #fff; color: #b58a3d; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
-        
-        .biz-checkbox { width: 18px; height: 18px; cursor: pointer; accent-color: #b58a3d; }
-        .sort-icon { margin-left: 6px; font-size: 12px; }
-        .resizer-handle { position: absolute; right: 0; top: 0; bottom: 0; width: 14px; cursor: col-resize; background: transparent; z-index: 10; transform: translateX(50%); }
-        
-        .badge-owner { text-transform: capitalize; font-weight: bold; color: #64748b; }
-        .badge-category { text-transform: capitalize; color: #475569; }
-        .badge-status { color: #64748b; font-style: italic; }
+        /* 🔥 BULLETPROOF SAFARI RUBBER-BANDING FIX 🔥 */
+        html, body {
+          overscroll-behavior: none !important;
+        }
 
-        .cell-display { padding: 14px 12px; width: 100%; height: 100%; box-sizing: border-box; display: flex; align-items: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-        .cell-input { width: 100%; height: 100%; padding: 14px 12px; font-size: 14px; border: none; outline: 2px solid #b58a3d; box-shadow: 0 0 5px rgba(181, 138, 61, 0.3); background: #fff; position: absolute; top: 0; left: 0; z-index: 20; box-sizing: border-box; color: #0f172a; }
-        .cell-editing { z-index: 20; position: relative; }
-        input[type="number"].no-spinners::-webkit-inner-spin-button, input[type="number"].no-spinners::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
-        input[type="number"].no-spinners { -moz-appearance: textfield; }
+        .hide-scrollbar::-webkit-scrollbar { display: none; }
+        .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
 
-        .header-container { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; margin-top: 0; margin-left: 60px; gap: 12px; height: 42px; width: calc(100% - 60px); max-width: 1600px; }
-        .header-left { display: flex; align-items: center; gap: 12px; }
+        .img-selected { opacity: 0.7; }
+        .voided-text { text-decoration: line-through; }
+        .row-voided { background: #fef2f2 !important; opacity: 0.8; }
+        .row-voided td { color: #991b1b !important; }
 
-        @media (max-width: 1023px) {
-          .header-container { margin-left: 54px !important; margin-right: 0 !important; margin-bottom: 24px !important; margin-top: 0 !important; display: flex !important; flex-direction: row !important; justify-content: space-between !important; align-items: center !important; height: 44px !important; width: calc(100% - 54px) !important; }
-          .header-left { display: flex !important; flex-direction: row !important; align-items: center !important; gap: 12px !important; }
-          .toolbar-bottom-row { flex-direction: column; align-items: stretch; }
-          .time-filters-wrapper { display: flex; width: 100%; }
-          .time-btn { flex: 1; padding: 10px 4px; font-size: 12px; text-align: center; }
+        .selected-grid-card {
+          border: 2px solid #b58a3d !important;
+          background: #fefcf3 !important;
+          box-shadow: 0 4px 12px rgba(181, 138, 61, 0.15) !important;
+        }
+        .voided-grid-card {
+          border-color: #fca5a5 !important;
+          background: #fef2f2 !important;
+        }
+
+        .grid-layout {
+          display: grid;
+          grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+          gap: 20px;
+        }
+        .card-checkbox {
+          position: absolute;
+          top: 12px;
+          left: 12px;
+          z-index: 10;
+          cursor: pointer;
+          accent-color: #b58a3d;
+          width: 22px;
+          height: 22px;
+        }
+        .card-image-box {
+          width: 100%;
+          height: 220px;
+          overflow: hidden;
+          background: #f8fafc;
+          border-bottom: 1px solid #e2e8f0;
+          cursor: pointer;
+          position: relative;
+        }
+        .card-img {
+          width: 100%;
+          height: 100%;
+          object-fit: contain;
+        }
+        .void-overlay {
+          position: absolute;
+          top: 0; left: 0; right: 0; bottom: 0;
+          background: rgba(239, 68, 68, 0.15);
+          backdrop-filter: blur(2px);
+          -webkit-backdrop-filter: blur(2px);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          z-index: 5;
+        }
+        .void-stamp {
+          color: #ef4444;
+          font-weight: 900;
+          font-size: 32px;
+          border: 4px solid #ef4444;
+          padding: 8px 16px;
+          border-radius: 8px;
+          transform: rotate(-30deg);
+          background: rgba(255,255,255,0.85);
+          box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+        }
+
+        /* 🟢 EXACT HEADER MATCH WITH RICE CONTROL */
+        .header-container { 
+          display: flex;
+          justify-content: flex-start;
+          align-items: center; 
+          margin-bottom: 24px; 
+          margin-top: 0;
+          margin-left: 60px; 
+          gap: 12px;
+          min-height: 48px; 
+          width: calc(100% - 60px); 
+          max-width: 1600px;
+          padding-right: 24px; 
+        }
+        .header-left {
+          display: flex;
+          align-items: center; 
+          gap: 12px;
+        }
+
+        @media (max-width: 1023px) { 
+          /* 🔥 MOBILE PADDING: Added 8px top padding to nudge the title down to the exact middle! */
+          .main-wrapper-frozen { 
+            padding: 8px 16px 0 16px !important; /* 👈 Change this '8px' if you need to micro-adjust it up or down */
+          }
+          .main-wrapper-scrollable { 
+            padding: 16px 16px 80px 16px !important; 
+            overscroll-behavior-y: contain;
+          }
+          
+          .header-container { 
+            margin-left: 54px !important; 
+            margin-right: 0 !important;
+            margin-bottom: 16px !important; 
+            margin-top: 0 !important;
+            display: flex !important;
+            flex-direction: row !important;
+            justify-content: flex-start !important;
+            align-items: center !important; 
+            min-height: 44px !important;
+            width: calc(100% - 54px) !important;
+          }
+          .header-left {
+            display: flex !important;
+            flex-direction: row !important;
+            align-items: center !important;
+            gap: 12px !important;
+          }
         }
       `}</style>
-      </div>
-    </AdminGuard>
+    </div>
   )
 }
