@@ -10,6 +10,9 @@ import Modal from '@/components/Modal'
 import TableSkeleton from '@/components/TableSkeleton'
 import EmptyState from '@/components/EmptyState'
 import { useBranch } from '@/components/BranchContext' // 🔥 GLOBAL MEMORY IMPORTED
+export const metadata = {
+  title: 'Expenses and Staffs',
+};
 
 // --- Interfaces ---
 interface PaymentSplit {
@@ -179,11 +182,6 @@ export default function ExpenseDashboard() {
   const { showToast } = useToast();
   const { activeBranchId } = useBranch(); // 🔥 CONNECTED TO GLOBAL MEMORY
   const [isMounted, setIsMounted] = useState(false);
-
-  // 🔥 ADD THIS BLOCK RIGHT HERE TO SET THE BROWSER TAB TITLE
-  useEffect(() => {
-    document.title = 'Expenses and Staffs';
-  }, []);
 
   // --- Active Tab State ---
   const [activeTab, setActiveTab] = useState<'personal' | 'business' | 'staff' | 'database'>('personal')
