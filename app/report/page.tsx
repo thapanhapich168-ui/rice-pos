@@ -513,7 +513,8 @@ export default function ReportControlPage() {
         
         <div className="header-container no-print" style={{ flexShrink: 0 }}>
           <div className="header-left">
-            <h1 className="saas-page-title">📲 Report Automation & Dispatch</h1>
+            {/* 🔥 UPDATED PAGE TITLE WITH STANDARD ALIGNMENT STYLE */}
+            <h1 className="saas-page-title" style={{ margin: 0 }}>📄 Business Report</h1>
           </div>
           <div className="header-actions">
             <button onClick={fetchReportData} className="saas-btn saas-btn-secondary" title="Refresh Numbers">
@@ -887,11 +888,6 @@ export default function ReportControlPage() {
               gap: 12px !important;
             }
 
-            .saas-page-title {
-              font-size: 16px !important;
-              margin: 0 !important;
-            }
-
             .header-actions {
               margin-left: auto !important;
             }
@@ -935,9 +931,6 @@ export default function ReportControlPage() {
           }
 
           @media (max-width: 480px) {
-            .saas-page-title {
-              font-size: 14px !important;
-            }
             .saas-btn {
               padding: 8px 12px !important;
               font-size: 13px !important;
