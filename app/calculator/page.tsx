@@ -2,12 +2,12 @@
 
 import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabaseClient'
-import { Product } from '@/types'
+import { Product, InventoryBatch } from '@/types'
 import { formatRiel } from '@/utils/formatters'
 import { CurrencyInput } from '@/components/Inputs'
 import { useToast } from '@/components/ToastProvider'
 import EmptyState from '@/components/EmptyState'
-import { useBranch } from '@/components/BranchContext' // 🔥 GLOBAL MEMORY IMPORTED
+import { useBranch } from '@/components/BranchContext' 
 
 // --- LOCAL TYPES ---
 interface MixHistory {
@@ -35,17 +35,21 @@ export default function RiceMixCalculator() {
   }, []);
 
   const [products, setProducts] = useState<Product[]>([])
+  const [activeBatches, setActiveBatches] = useState<Record<number, InventoryBatch[]>>({})
   
   // Selection States
   const [rice1Id, setRice1Id] = useState<string>('')
   const [rice1Qty, setRice1Qty] = useState<number | ''>('')
+  const [rice1BatchId, setRice1BatchId] = useState<number | null>(null)
   
   const [rice2Id, setRice2Id] = useState<string>('')
   const [rice2Qty, setRice2Qty] = useState<number | ''>('')
+  const [rice2BatchId, setRice2BatchId] = useState<number | null>(null)
 
   const [showThirdRice, setShowThirdRice] = useState(false)
   const [rice3Id, setRice3Id] = useState<string>('')
   const [rice3Qty, setRice3Qty] = useState<number | ''>('')
+  const [rice3BatchId, setRice3BatchId] = useState<number | null>(null)
 
   // 🟢 INLINE DROPDOWN STATES
   const [activeDropdown, setActiveDropdown] = useState<'rice1' | 'rice2' | 'rice3' | 'target' | 'bag' | null>(null)
@@ -69,11 +73,12 @@ export default function RiceMixCalculator() {
   const [bagQty, setBagQty] = useState<number | ''>('')
 
   const [newMixName, setNewMixName] = useState('')
-  const [newMixPrice, setNewMixPrice] = useState<number | ''>(0) // 🔥 DEFAULTED TO 0
-  const [newMixType, setNewMixType] = useState<'wholesale' | 'retail'>('wholesale')
+  const [newMixPrice, setNewMixPrice] = useState<number | ''>(0) 
+  const [newMixType, setNewMixType] = useState<'wholesale' | 'half' | 'retail'>('wholesale')
 
   useEffect(() => {
     fetchProducts()
+    fetchBatches()
     fetchHistory()
   }, [activeBranchId])
 
@@ -83,7 +88,15 @@ export default function RiceMixCalculator() {
   const targetProd = products.find(p => p.id.toString() === targetProductId)
   const bagProd = products.find(p => p.id.toString() === bagId)
 
-  // 🧠 SMART MATH ENGINE (Absorbs Bag Cost into COGS)
+  const getCogs = (prod: Product, batchId: number | null) => {
+    if (batchId) {
+      const batch = activeBatches[prod.id]?.find(b => b.id === batchId);
+      if (batch) return batch.cost_price;
+    }
+    return prod.cost_price;
+  }
+
+  // 🧠 SMART MATH ENGINE
   useEffect(() => {
     const q1 = Number(rice1Qty) || 0;
     const q2 = Number(rice2Qty) || 0;
@@ -102,9 +115,9 @@ export default function RiceMixCalculator() {
       const kg3 = q3 * w3;
       const totalYieldKg = kg1 + kg2 + kg3;
 
-      const cost1 = q1 * rice1.cost_price;
-      const cost2 = q2 * rice2.cost_price;
-      const cost3 = rice3 ? (q3 * rice3.cost_price) : 0;
+      const cost1 = q1 * getCogs(rice1, rice1BatchId);
+      const cost2 = q2 * getCogs(rice2, rice2BatchId);
+      const cost3 = rice3 ? (q3 * getCogs(rice3, rice3BatchId)) : 0;
       const costBag = bagProd ? (qBag * bagProd.cost_price) : 0;
       
       const totalCost = cost1 + cost2 + cost3 + costBag;
@@ -116,11 +129,28 @@ export default function RiceMixCalculator() {
       setCalcResult(null);
       setSyncMode('none');
     }
-  }, [rice1Id, rice2Id, rice3Id, rice1Qty, rice2Qty, rice3Qty, showThirdRice, bagQty, products, rice1, rice2, rice3, bagProd])
+  }, [rice1Id, rice2Id, rice3Id, rice1Qty, rice2Qty, rice3Qty, rice1BatchId, rice2BatchId, rice3BatchId, showThirdRice, bagQty, products, rice1, rice2, rice3, bagProd, activeBatches])
 
   async function fetchProducts() {
     const { data } = await supabase.from('products').select('*').eq('is_archived', false).eq('branch_id', activeBranchId).order('name', { ascending: true })
     if (data) setProducts(data)
+  }
+
+  async function fetchBatches() {
+    const { data } = await supabase.from('inventory_batches')
+      .select('*')
+      .eq('branch_id', activeBranchId)
+      .gt('remaining_qty', 0)
+      .order('id', { ascending: true });
+      
+    if (data) {
+      const bMap: Record<number, InventoryBatch[]> = {}
+      data.forEach(b => {
+        if (!bMap[b.product_id]) bMap[b.product_id] = []
+        bMap[b.product_id].push(b)
+      })
+      setActiveBatches(bMap)
+    }
   }
 
   async function fetchHistory() {
@@ -132,9 +162,9 @@ export default function RiceMixCalculator() {
   }
 
   const handleReset = () => {
-    setRice1Id(''); setRice1Qty('');
-    setRice2Id(''); setRice2Qty('');
-    setRice3Id(''); setRice3Qty('');
+    setRice1Id(''); setRice1Qty(''); setRice1BatchId(null);
+    setRice2Id(''); setRice2Qty(''); setRice2BatchId(null);
+    setRice3Id(''); setRice3Qty(''); setRice3BatchId(null);
     setShowThirdRice(false);
     setCalcResult(null);
     setSyncMode('none');
@@ -158,19 +188,30 @@ export default function RiceMixCalculator() {
 
   const dropdownFilteredProducts = products.filter(p => {
     if (dropdownSearch && !p.name.toLowerCase().includes(dropdownSearch.toLowerCase())) return false;
+    
     if (activeDropdown === 'bag') {
       return p.name.includes('បាវ');
     }
-    const isWholesale = Number(p.weight) >= 50;
-    if (dropdownTab === 'wholesale' && !isWholesale) return false;
-    if (dropdownTab === 'retail' && isWholesale) return false;
+    
+    if (activeDropdown === 'rice1' || activeDropdown === 'rice2' || activeDropdown === 'rice3') {
+       if (p.stock <= 0) return false;
+       if (p.weight < 50) return false;
+       return true;
+    }
+
+    if (activeDropdown === 'target') {
+       const isWholesale = Number(p.weight) >= 50;
+       if (dropdownTab === 'wholesale' && !isWholesale) return false;
+       if (dropdownTab === 'retail' && isWholesale) return false;
+       return true;
+    }
     return true;
   });
 
   const handleSelectProduct = (p: Product, target: string) => {
-    if (target === 'rice1') setRice1Id(p.id.toString());
-    if (target === 'rice2') setRice2Id(p.id.toString());
-    if (target === 'rice3') setRice3Id(p.id.toString());
+    if (target === 'rice1') { setRice1Id(p.id.toString()); setRice1BatchId(null); }
+    if (target === 'rice2') { setRice2Id(p.id.toString()); setRice2BatchId(null); }
+    if (target === 'rice3') { setRice3Id(p.id.toString()); setRice3BatchId(null); }
     if (target === 'target') setTargetProductId(p.id.toString());
     if (target === 'bag') setBagId(p.id.toString());
     setActiveDropdown(null);
@@ -183,8 +224,8 @@ export default function RiceMixCalculator() {
 
   if (calcResult) {
     if (syncMode === 'new') {
-      outputMultiplier = newMixType === 'wholesale' ? 50 : 1;
-      outputUnit = newMixType === 'wholesale' ? 'Bags' : 'Kg';
+      outputMultiplier = newMixType === 'wholesale' ? 50 : newMixType === 'half' ? 25 : 1;
+      outputUnit = newMixType === 'wholesale' ? 'Bags' : newMixType === 'half' ? '25kg Bags' : 'Kg';
     } else if (syncMode === 'existing' && targetProd) {
       outputMultiplier = Number(targetProd.weight) >= 50 ? 50 : 1;
       outputUnit = Number(targetProd.weight) >= 50 ? 'Bags' : 'Kg';
@@ -214,7 +255,6 @@ export default function RiceMixCalculator() {
     const qtyToDeduct3 = showThirdRice ? (Number(rice3Qty) || 0) : 0;
     const qtyToDeductBag = Number(bagQty) || 0;
 
-    // 🔥 FIXED: ALLOWS 0 AS A VALID PRICE
     if (syncMode === 'new' && (!newMixName || newMixPrice === '')) {
       showToast('error', 'Missing Information', 'Please enter a name for the new mix.');
       return;
@@ -228,43 +268,50 @@ export default function RiceMixCalculator() {
 
     try {
       // 🟢 HELPER: DEDUCT FROM MASTER STOCK AND FIFO BATCHES
-      const processDeduction = async (prodId: number, qty: number) => {
+      const processDeduction = async (prodId: number, qty: number, specificBatchId: number | null) => {
         if (qty <= 0) return;
+
+        if (specificBatchId) {
+             const batchCheck = activeBatches[prodId]?.find(b => b.id === specificBatchId);
+             if (batchCheck && batchCheck.remaining_qty < qty) {
+                 throw new Error(`The selected batch for ${products.find(p=>p.id===prodId)?.name} only has ${batchCheck.remaining_qty} bags left, but you are trying to use ${qty}.`);
+             }
+        }
         
-        // 1. Deduct from Master Product Stock safely
         await supabase.rpc('adjust_product_stock', { p_product_id: prodId, p_quantity: -qty });
 
-        // 2. Deduct from Inventory Batches (FIFO - Oldest First)
-        const { data: batches } = await supabase.from('inventory_batches')
-          .select('*')
-          .eq('product_id', prodId)
-          .eq('branch_id', activeBranchId)
-          .gt('remaining_qty', 0)
-          .order('id', { ascending: true }); // Oldest batch first
-            
-        let leftToDeduct = qty;
-        if (batches) {
-            for (const b of batches) {
-                if (leftToDeduct <= 0) break;
-                const available = b.remaining_qty;
-                const take = Math.min(available, leftToDeduct);
+        if (specificBatchId) {
+            await supabase.rpc('adjust_batch_stock', { p_batch_id: specificBatchId, p_quantity: -qty });
+        } else {
+            const { data: batches } = await supabase.from('inventory_batches')
+              .select('*')
+              .eq('product_id', prodId)
+              .eq('branch_id', activeBranchId)
+              .gt('remaining_qty', 0)
+              .order('id', { ascending: true }); 
                 
-                // Reduce the specific batch amount
-                await supabase.rpc('adjust_batch_stock', { p_batch_id: b.id, p_quantity: -take });
-                leftToDeduct -= take;
+            let leftToDeduct = qty;
+            if (batches) {
+                for (const b of batches) {
+                    if (leftToDeduct <= 0) break;
+                    const available = b.remaining_qty;
+                    const take = Math.min(available, leftToDeduct);
+                    
+                    await supabase.rpc('adjust_batch_stock', { p_batch_id: b.id, p_quantity: -take });
+                    leftToDeduct -= take;
+                }
             }
         }
       };
 
       // 1. EXECUTE INGREDIENT DEDUCTIONS
-      if (rice1 && qtyToDeduct1 > 0) await processDeduction(rice1.id, qtyToDeduct1);
-      if (rice2 && qtyToDeduct2 > 0) await processDeduction(rice2.id, qtyToDeduct2);
-      if (showThirdRice && rice3 && qtyToDeduct3 > 0) await processDeduction(rice3.id, qtyToDeduct3);
+      if (rice1 && qtyToDeduct1 > 0) await processDeduction(rice1.id, qtyToDeduct1, rice1BatchId);
+      if (rice2 && qtyToDeduct2 > 0) await processDeduction(rice2.id, qtyToDeduct2, rice2BatchId);
+      if (showThirdRice && rice3 && qtyToDeduct3 > 0) await processDeduction(rice3.id, qtyToDeduct3, rice3BatchId);
 
-      // 2. EXECUTE BAG DEDUCTION
-      if (bagProd && qtyToDeductBag > 0) await processDeduction(bagProd.id, qtyToDeductBag);
+      // 2. EXECUTE BAG DEDUCTION (Bags always default to auto-FIFO)
+      if (bagProd && qtyToDeductBag > 0) await processDeduction(bagProd.id, qtyToDeductBag, null);
 
-      // 🔥 TRACK BOTH ID AND NAME FOR THE BATCH RECORD
       let finalTargetId = targetProductId;
       let finalTargetName = targetProd?.name || ''; 
 
@@ -274,31 +321,29 @@ export default function RiceMixCalculator() {
           name: newMixName,
           price: Number(newMixPrice),
           cost_price: Math.round(finalCogs),
-          weight: newMixType === 'wholesale' ? 50 : 1, 
+          weight: newMixType === 'wholesale' ? 50 : newMixType === 'half' ? 25 : 1, 
           stock: finalYield,
           branch_id: activeBranchId 
         }
         const { data: newProd, error } = await supabase.from('products').insert([payload]).select().single();
         if (error) throw error;
         finalTargetId = newProd.id.toString();
-        finalTargetName = newMixName; // Assign new name
+        finalTargetName = newMixName; 
 
       } else if (targetProd) {
-        // Increment target product stock safely
         await supabase.rpc('adjust_product_stock', { p_product_id: targetProd.id, p_quantity: finalYield });
-        // Update new Blended COGS
         const { error } = await supabase.from('products').update({ cost_price: Math.round(finalCogs) }).eq('id', targetProd.id);
         if (error) throw error;
         finalTargetId = targetProd.id.toString();
-        finalTargetName = targetProd.name; // Assign existing name
+        finalTargetName = targetProd.name; 
       }
 
-      // 4. CREATE NEW BATCH RECORD WITH RECIPE NOTE AND PRODUCT NAME
+      // 4. CREATE NEW BATCH RECORD WITH RECIPE NOTE
       const recipeString = `Recipe: ${qtyToDeduct1}x ${rice1.name} + ${qtyToDeduct2}x ${rice2.name}${showThirdRice && rice3 ? ` + ${qtyToDeduct3}x ${rice3.name}` : ''}`;
 
       await supabase.from('inventory_batches').insert([{
         product_id: Number(finalTargetId),
-        product_name: finalTargetName, // 🔥 FIXED: Now explicitly mapping the name
+        product_name: finalTargetName, 
         cost_price: Math.round(finalCogs),
         remaining_qty: finalYield,
         branch_id: activeBranchId,
@@ -332,6 +377,7 @@ export default function RiceMixCalculator() {
       showToast('success', 'Sync Successful', 'Inventory synced and Recipe stored in batch!');
       handleReset();
       fetchProducts();
+      fetchBatches();
 
     } catch (err: any) {
       showToast('error', 'Sync Failed', err.message);
@@ -345,7 +391,7 @@ export default function RiceMixCalculator() {
     if (activeDropdown !== target) return null;
     return (
       <div className="dropdown-menu-container">
-        {target !== 'bag' && (
+        {target === 'target' && (
           <div className="saas-tab-container" style={{ margin: '8px', marginBottom: 0, padding: '4px', border: 'none', boxShadow: 'none', background: '#f1f5f9' }}>
             <button 
               onClick={(e) => { e.stopPropagation(); setDropdownTab('wholesale'); }} 
@@ -415,9 +461,31 @@ export default function RiceMixCalculator() {
               {renderDropdownMenu('rice1')}
             </div>
             {rice1 && (
-              <div className="price-display fade-in">
-                <span className="label">Current Cost (COGS)</span><span className="value">{formatRiel(rice1.cost_price)}</span>
-                <div style={{ fontSize: '11px', color: '#64748b', marginTop: '4px' }}>Current Stock: <b style={{ color: rice1.stock > 0 ? '#10b981' : '#ef4444'}}>{rice1.stock} Bags</b></div>
+              <div className="price-display fade-in" style={{ padding: '12px' }}>
+                <label className="saas-card-title" style={{ fontSize: '11px', marginBottom: '6px', display: 'block' }}>Select Batch (Optional)</label>
+                <select
+                  value={rice1BatchId || 'AUTO'}
+                  onChange={(e) => setRice1BatchId(e.target.value === 'AUTO' ? null : Number(e.target.value))}
+                  className="saas-input"
+                  style={{ width: '100%', padding: '6px', fontSize: '13px', marginBottom: '12px', cursor: 'pointer' }}
+                >
+                  <option value="AUTO">▼ Auto FIFO (Oldest First)</option>
+                  {activeBatches[rice1.id]?.map((b: any) => (
+                    <option key={b.id} value={b.id}>
+                      {formatRiel(b.cost_price)} ({b.remaining_qty} left) {b.notes ? `| ${b.notes}` : ''}
+                    </option>
+                  ))}
+                </select>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div>
+                    <span className="label" style={{ marginBottom: 0 }}>Active COGS</span>
+                    <span className="value" style={{ fontSize: '16px' }}>{formatRiel(rice1BatchId ? activeBatches[rice1.id]?.find(b=>b.id===rice1BatchId)?.cost_price || rice1.cost_price : rice1.cost_price)}</span>
+                  </div>
+                  <div style={{ fontSize: '11px', color: '#64748b', textAlign: 'right' }}>
+                    Total Stock:<br/>
+                    <b style={{ color: rice1.stock > 0 ? '#10b981' : '#ef4444', fontSize: '14px' }}>{rice1.stock}</b>
+                  </div>
+                </div>
               </div>
             )}
             <div className="input-group" style={{ marginTop: '16px' }}>
@@ -446,9 +514,31 @@ export default function RiceMixCalculator() {
               {renderDropdownMenu('rice2')}
             </div>
             {rice2 && (
-              <div className="price-display fade-in">
-                <span className="label">Current Cost (COGS)</span><span className="value">{formatRiel(rice2.cost_price)}</span>
-                <div style={{ fontSize: '11px', color: '#64748b', marginTop: '4px' }}>Current Stock: <b style={{ color: rice2.stock > 0 ? '#10b981' : '#ef4444'}}>{rice2.stock} Bags</b></div>
+              <div className="price-display fade-in" style={{ padding: '12px' }}>
+                <label className="saas-card-title" style={{ fontSize: '11px', marginBottom: '6px', display: 'block' }}>Select Batch (Optional)</label>
+                <select
+                  value={rice2BatchId || 'AUTO'}
+                  onChange={(e) => setRice2BatchId(e.target.value === 'AUTO' ? null : Number(e.target.value))}
+                  className="saas-input"
+                  style={{ width: '100%', padding: '6px', fontSize: '13px', marginBottom: '12px', cursor: 'pointer' }}
+                >
+                  <option value="AUTO">▼ Auto FIFO (Oldest First)</option>
+                  {activeBatches[rice2.id]?.map((b: any) => (
+                    <option key={b.id} value={b.id}>
+                      {formatRiel(b.cost_price)} ({b.remaining_qty} left) {b.notes ? `| ${b.notes}` : ''}
+                    </option>
+                  ))}
+                </select>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div>
+                    <span className="label" style={{ marginBottom: 0 }}>Active COGS</span>
+                    <span className="value" style={{ fontSize: '16px' }}>{formatRiel(rice2BatchId ? activeBatches[rice2.id]?.find(b=>b.id===rice2BatchId)?.cost_price || rice2.cost_price : rice2.cost_price)}</span>
+                  </div>
+                  <div style={{ fontSize: '11px', color: '#64748b', textAlign: 'right' }}>
+                    Total Stock:<br/>
+                    <b style={{ color: rice2.stock > 0 ? '#10b981' : '#ef4444', fontSize: '14px' }}>{rice2.stock}</b>
+                  </div>
+                </div>
               </div>
             )}
             <div className="input-group" style={{ marginTop: '16px' }}>
@@ -477,9 +567,31 @@ export default function RiceMixCalculator() {
                   {renderDropdownMenu('rice3')}
                 </div>
                 {rice3 && (
-                  <div className="price-display fade-in">
-                    <span className="label">Current Cost (COGS)</span><span className="value">{formatRiel(rice3.cost_price)}</span>
-                    <div style={{ fontSize: '11px', color: '#64748b', marginTop: '4px' }}>Current Stock: <b style={{ color: rice3.stock > 0 ? '#10b981' : '#ef4444'}}>{rice3.stock} Bags</b></div>
+                  <div className="price-display fade-in" style={{ padding: '12px' }}>
+                    <label className="saas-card-title" style={{ fontSize: '11px', marginBottom: '6px', display: 'block' }}>Select Batch (Optional)</label>
+                    <select
+                      value={rice3BatchId || 'AUTO'}
+                      onChange={(e) => setRice3BatchId(e.target.value === 'AUTO' ? null : Number(e.target.value))}
+                      className="saas-input"
+                      style={{ width: '100%', padding: '6px', fontSize: '13px', marginBottom: '12px', cursor: 'pointer' }}
+                    >
+                      <option value="AUTO">▼ Auto FIFO (Oldest First)</option>
+                      {activeBatches[rice3.id]?.map((b: any) => (
+                        <option key={b.id} value={b.id}>
+                          {formatRiel(b.cost_price)} ({b.remaining_qty} left) {b.notes ? `| ${b.notes}` : ''}
+                        </option>
+                      ))}
+                    </select>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <div>
+                        <span className="label" style={{ marginBottom: 0 }}>Active COGS</span>
+                        <span className="value" style={{ fontSize: '16px' }}>{formatRiel(rice3BatchId ? activeBatches[rice3.id]?.find(b=>b.id===rice3BatchId)?.cost_price || rice3.cost_price : rice3.cost_price)}</span>
+                      </div>
+                      <div style={{ fontSize: '11px', color: '#64748b', textAlign: 'right' }}>
+                        Total Stock:<br/>
+                        <b style={{ color: rice3.stock > 0 ? '#10b981' : '#ef4444', fontSize: '14px' }}>{rice3.stock}</b>
+                      </div>
+                    </div>
                   </div>
                 )}
                 <div className="input-group" style={{ marginTop: '16px' }}>
@@ -497,7 +609,7 @@ export default function RiceMixCalculator() {
                ➕ Add 3rd Rice to Mix
              </button>
           ) : (
-             <button onClick={() => { setShowThirdRice(false); setRice3Id(''); setRice3Qty(''); }} className="saas-btn saas-btn-danger" style={{ background: '#fef2f2', color: '#ef4444', border: '1px dashed #fca5a5' }}>
+             <button onClick={() => { setShowThirdRice(false); setRice3Id(''); setRice3Qty(''); setRice3BatchId(null); }} className="saas-btn saas-btn-danger" style={{ background: '#fef2f2', color: '#ef4444', border: '1px dashed #fca5a5' }}>
                ➖ Remove 3rd Rice
              </button>
           )}
@@ -538,7 +650,7 @@ export default function RiceMixCalculator() {
                    {finalYield.toLocaleString('en-US', { maximumFractionDigits: 2 })} <span style={{ fontSize: '16px', fontWeight: 'bold' }}>{outputUnit}</span>
                 </span>
                 <div style={{ fontSize: '12px', color: '#64748b', marginTop: '6px', fontWeight: 'bold' }}>
-                  At new COGS: <span style={{ color: '#0f172a' }}>{formatRiel(finalCogs)} per {outputUnit.slice(0,-1)}</span>
+                  At new COGS: <span style={{ color: '#0f172a' }}>{formatRiel(finalCogs)} per {outputUnit.replace(/s$/, '')}</span>
                 </div>
               </div>
             </div>
@@ -559,6 +671,7 @@ export default function RiceMixCalculator() {
                       <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '6px' }}>Size Type</label>
                       <select value={newMixType} onChange={(e: any) => setNewMixType(e.target.value)} className="saas-input" style={{ cursor: 'pointer' }}>
                         <option value="wholesale">Wholesale (50kg Bag)</option>
+                        <option value="half">Half Size (25kg Bag)</option>
                         <option value="retail">Retail (1kg)</option>
                       </select>
                     </div>
@@ -731,7 +844,7 @@ export default function RiceMixCalculator() {
         @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
         .calculator-grid { display: flex; align-items: flex-start; gap: 20px; flex-wrap: wrap; }
         .math-symbol { font-size: 32px; font-weight: bold; color: #cbd5e1; margin-top: 40px; }
-        .price-display { margin-top: 16px; padding: 16px; background: #fefcf3; border: 1px solid #eadeca; border-radius: 8px; }
+        .price-display { margin-top: 16px; background: #fefcf3; border: 1px solid #eadeca; border-radius: 8px; }
         .price-display .label { display: block; font-size: 11px; color: #8a7650; text-transform: uppercase; font-weight: bold; margin-bottom: 4px; }
         .price-display .value { font-size: 18px; color: #b58a3d; font-weight: bold; }
         .result-stats { display: flex; gap: 20px; flex-wrap: wrap; }
