@@ -166,7 +166,10 @@ export default function POSPage() {
   const [showAdjustmentMenu, setShowAdjustmentMenu] = useState(false);
   
   const [autoOpenModal, setAutoOpenModal] = useState<{ isOpen: boolean, items: (Product & { bags_needed: number })[] }>({ isOpen: false, items: [] });
+  // 🔥 UPDATED: Added states for the searchable dropdown
   const [repackSubstitutes, setRepackSubstitutes] = useState<Record<number, number>>({});
+  const [repackSearch, setRepackSearch] = useState<Record<number, string>>({});
+  const [repackMenuOpen, setRepackMenuOpen] = useState<Record<number, boolean>>({});
 
   const [saleSummary, setSaleSummary] = useState<{ total: number, receivedRiel: number, receivedUsd: number, totalReceivedInRiel: number, change: number, type?: 'retail' | 'wholesale', isCashless?: boolean, items?: any[], isDebt?: boolean } | null>(null)
   const [showInvoicePreview, setShowInvoicePreview] = useState(false)
@@ -1645,7 +1648,12 @@ export default function POSPage() {
 
                     <div style={{ borderTop: '1px dashed #f1f5f9', paddingTop: '8px', marginTop: 'auto', position: 'relative', minHeight: activeTab === 'wholesale' ? '35px' : 'auto' }}>
                       <div style={{ fontSize: '14px', color: '#b58a3d', fontWeight: 'bold' }}>
-                        {formatRielSymbol(activeTab === 'retail' ? (p.price || 0) : (p.cost_price || 0))}
+                        {/* 🔥 Display Oldest Batch COGS for Wholesale, fallback to Master COGS */}
+                        {formatRielSymbol(
+                          activeTab === 'retail' 
+                            ? (p.price || 0) 
+                            : (activeBatches[p.id]?.[0]?.cost_price || p.cost_price || 0)
+                        )}
                       </div>
                       
                       {activeTab === 'retail' && (
@@ -1875,7 +1883,8 @@ export default function POSPage() {
                         <select
                           value={item.selected_batch_id || 'AUTO'}
                           onChange={(e) => updateCartItem(item.id, 'selected_batch_id', e.target.value === 'AUTO' ? null : Number(e.target.value))}
-                          style={{ marginLeft: '8px', padding: '4px 6px', background: '#f8fafc', border: '1px solid #cbd5e1', borderRadius: '4px', fontSize: '11px', color: '#b58a3d', outline: 'none', cursor: 'pointer', maxWidth: '140px' }}
+                          className="mobile-batch-select"
+                          style={{ marginLeft: '8px', padding: '4px 6px', background: '#f8fafc', border: '1px solid #cbd5e1', borderRadius: '4px', color: '#b58a3d', outline: 'none', cursor: 'pointer', maxWidth: '140px' }}
                         >
                           <option value="AUTO">▼ Auto FIFO</option>
                           {activeBatches[item.product_id]?.map((b: any) => {
@@ -1968,8 +1977,8 @@ export default function POSPage() {
         </div>
       )}
 
-      {/* AUTO OPEN BAG MODAL (🔥 FIXED: Now supports manual bag selection) */}
-      <Modal isOpen={autoOpenModal.isOpen} onClose={() => { setAutoOpenModal({ isOpen: false, items: [] }); setRepackSubstitutes({}); }} title="Auto-Open Bag Required" icon="⚠️" maxWidth="400px">
+      {/* AUTO OPEN BAG MODAL (🔥 FIXED: Now supports searchable manual bag selection) */}
+      <Modal isOpen={autoOpenModal.isOpen} onClose={() => { setAutoOpenModal({ isOpen: false, items: [] }); setRepackSubstitutes({}); setRepackSearch({}); setRepackMenuOpen({}); }} title="Auto-Open Bag Required" icon="⚠️" maxWidth="400px">
         <p style={{ color: '#475569', fontSize: '14px', lineHeight: '1.5', margin: '0 0 16px 0' }}>
           You do not have enough loose retail rice for this sale. Proceeding will automatically open a wholesale bag to restock the loose bin.
         </p>
@@ -1979,31 +1988,84 @@ export default function POSPage() {
             {autoOpenModal.items.map((p) => {
               const defaultW = products.find(w => w.id === p.linked_wholesale_id);
               const isOutOfStock = !defaultW || defaultW.stock < p.bags_needed;
+              
+              const currentSelectedId = repackSubstitutes[p.id] || p.linked_wholesale_id;
+              const currentSelectedName = products.find(prod => prod.id === currentSelectedId)?.name || '-- Select Alternative Bag --';
+              const searchTerm = repackSearch[p.id] || '';
+              
+              const availableBags = products.filter(prod => 
+                Number(prod.weight) >= 50 && 
+                prod.stock >= p.bags_needed &&
+                (!searchTerm || prod.name.toLowerCase().includes(searchTerm.toLowerCase()))
+              );
+
               return (
-                <li key={p.id} style={{ marginBottom: isOutOfStock ? '12px' : '4px' }}>
+                <li key={p.id} style={{ marginBottom: '12px' }}>
                   <span style={{ fontWeight: 'bold', color: '#0f172a' }}>{p.name}</span> (Needs {p.bags_needed} bag)
-                  {isOutOfStock && (
-                    <div style={{ marginTop: '8px', padding: '8px', background: '#fee2e2', borderRadius: '6px', border: '1px solid #fca5a5' }}>
-                      <div style={{ color: '#dc2626', marginBottom: '6px', fontWeight: 'bold' }}>⚠️ Default bag out of stock!</div>
-                      <select 
-                        onChange={(e) => setRepackSubstitutes({...repackSubstitutes, [p.id]: Number(e.target.value)})} 
+                  
+                  <div style={{ marginTop: '8px', padding: '8px', background: isOutOfStock ? '#fee2e2' : '#ffffff', borderRadius: '6px', border: `1px solid ${isOutOfStock ? '#fca5a5' : '#cbd5e1'}` }}>
+                    {isOutOfStock && <div style={{ color: '#dc2626', marginBottom: '6px', fontWeight: 'bold' }}>⚠️ Default bag out of stock! Select alternative:</div>}
+                    {!isOutOfStock && <div style={{ color: '#475569', marginBottom: '6px', fontSize: '12px' }}>Select bag to open (Default: {defaultW?.name}):</div>}
+                    
+                    <div style={{ position: 'relative' }}>
+                      {/* Dropdown Overlay / Backdrop */}
+                      {repackMenuOpen[p.id] && (
+                        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, zIndex: 99 }} onMouseDown={() => setRepackMenuOpen({...repackMenuOpen, [p.id]: false})}></div>
+                      )}
+
+                      {/* Dropdown Trigger */}
+                      <div 
+                        onClick={() => setRepackMenuOpen({...repackMenuOpen, [p.id]: !repackMenuOpen[p.id]})}
                         className="saas-input"
-                        style={{ width: '100%', padding: '6px', fontSize: '12px' }}
+                        style={{ width: '100%', padding: '8px 12px', fontSize: '13px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', backgroundColor: '#fff', position: 'relative', zIndex: repackMenuOpen[p.id] ? 100 : 1, margin: 0 }}
                       >
-                        <option value="">-- Select Alternative Bag to Open --</option>
-                        {products.filter(prod => Number(prod.weight) >= 50 && prod.stock >= p.bags_needed).map(sub => (
-                           <option key={sub.id} value={sub.id}>{sub.name} (Stock: {sub.stock})</option>
-                        ))}
-                      </select>
+                        <span style={{ color: currentSelectedName === '-- Select Alternative Bag --' ? '#94a3b8' : '#0f172a', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                          {currentSelectedName}
+                        </span>
+                        <span style={{ color: '#94a3b8', fontSize: '10px', marginLeft: '8px' }}>{repackMenuOpen[p.id] ? '▲' : '▼'}</span>
+                      </div>
+
+                      {/* Dropdown Menu */}
+                      {repackMenuOpen[p.id] && (
+                        <div style={{ position: 'absolute', top: 'calc(100% + 4px)', left: 0, right: 0, zIndex: 101, backgroundColor: '#fff', border: '1px solid #cbd5e1', borderRadius: '8px', boxShadow: '0 10px 25px rgba(0,0,0,0.1)', overflow: 'hidden' }}>
+                          <input 
+                            type="text"
+                            placeholder="🔍 Search bag..."
+                            value={searchTerm}
+                            onChange={(e) => setRepackSearch({...repackSearch, [p.id]: e.target.value})}
+                            autoFocus
+                            className="saas-input"
+                            style={{ width: '100%', padding: '8px 12px', border: 'none', borderBottom: '1px solid #e2e8f0', outline: 'none', fontSize: '13px', borderRadius: '0', margin: 0 }}
+                          />
+                          <div className="hide-scrollbar" style={{ maxHeight: '180px', overflowY: 'auto' }}>
+                            {availableBags.map(sub => (
+                              <div 
+                                key={sub.id}
+                                onClick={() => {
+                                  setRepackSubstitutes({...repackSubstitutes, [p.id]: sub.id});
+                                  setRepackMenuOpen({...repackMenuOpen, [p.id]: false});
+                                  setRepackSearch({...repackSearch, [p.id]: ''}); 
+                                }}
+                                style={{ padding: '10px 12px', fontSize: '13px', cursor: 'pointer', borderBottom: '1px solid #f8fafc', backgroundColor: currentSelectedId === sub.id ? '#f1f5f9' : '#fff', color: '#334155' }}
+                              >
+                                {sub.name} <span style={{ color: '#10b981', fontWeight: 'bold' }}>(Stock: {sub.stock})</span>
+                              </div>
+                            ))}
+                            {availableBags.length === 0 && (
+                              <div style={{ padding: '12px', fontSize: '13px', color: '#94a3b8', textAlign: 'center' }}>No bags found</div>
+                            )}
+                          </div>
+                        </div>
+                      )}
                     </div>
-                  )}
+                  </div>
                 </li>
               );
             })}
           </ul>
         </div>
         <div style={{ marginTop: '24px', display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
-          <button onClick={() => { setAutoOpenModal({ isOpen: false, items: [] }); setRepackSubstitutes({}); }} className="saas-btn saas-btn-secondary">Cancel</button>
+          <button onClick={() => { setAutoOpenModal({ isOpen: false, items: [] }); setRepackSubstitutes({}); setRepackSearch({}); setRepackMenuOpen({}); }} className="saas-btn saas-btn-secondary">Cancel</button>
           <button onClick={handleConfirmAutoOpen} disabled={isProcessing} className="saas-btn saas-btn-primary">{isProcessing ? 'Processing...' : 'Yes, Open Bag'}</button>
         </div>
       </Modal>
@@ -2800,6 +2862,12 @@ export default function POSPage() {
         .mobile-fab { display: none; }
 
         @media (max-width: 1023px) { 
+          /* 🔥 Add this rule right here inside the mobile media query */
+          .mobile-batch-select {
+            font-size: 10px !important; /* Change this number to make it bigger or smaller */
+            padding: 2px 4px !important; /* Makes the box itself a bit tighter */
+          }
+          
           .desktop-cart-panel { display: none !important; }
           
           .main-wrapper { 
