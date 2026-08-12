@@ -135,7 +135,6 @@ export default function POSPage() {
   const [customerSearchTerm, setCustomerSearchTerm] = useState('')
   const [isCustomerModalOpen, setIsCustomerModalOpen] = useState(false) 
 
-  // 🔥 UPDATED: Delivery Info States (Now with Phone)
   const [cartCustomerNameOverride, setCartCustomerNameOverride] = useState('')
   const [cartCustomerLocationOverride, setCartCustomerLocationOverride] = useState('')
   const [cartCustomerMapOverride, setCartCustomerMapOverride] = useState('')
@@ -173,10 +172,12 @@ export default function POSPage() {
   const [showAdjustmentMenu, setShowAdjustmentMenu] = useState(false);
   
   const [autoOpenModal, setAutoOpenModal] = useState<{ isOpen: boolean, items: (Product & { bags_needed: number })[] }>({ isOpen: false, items: [] });
-  // 🔥 UPDATED: Added states for the searchable dropdown
+  
   const [repackSubstitutes, setRepackSubstitutes] = useState<Record<number, number>>({});
   const [repackSearch, setRepackSearch] = useState<Record<number, string>>({});
   const [repackMenuOpen, setRepackMenuOpen] = useState<Record<number, boolean>>({});
+  // 🔥 ADDED: Tracks which cart item has its custom batch dropdown open
+  const [openBatchMenuId, setOpenBatchMenuId] = useState<number | null>(null);
 
   const [saleSummary, setSaleSummary] = useState<{ total: number, receivedRiel: number, receivedUsd: number, totalReceivedInRiel: number, change: number, type?: 'retail' | 'wholesale', isCashless?: boolean, items?: any[], isDebt?: boolean } | null>(null)
   const [showInvoicePreview, setShowInvoicePreview] = useState(false)
@@ -1756,21 +1757,59 @@ export default function POSPage() {
                     />
                     
                     {!isSpecial && activeTab === 'wholesale' && (
-                      <select
-                        value={item.selected_batch_id || 'AUTO'}
-                        onChange={(e) => updateCartItem(item.id, 'selected_batch_id', e.target.value === 'AUTO' ? null : Number(e.target.value))}
-                        style={{ marginLeft: '8px', padding: '4px 6px', background: '#f8fafc', border: '1px solid #cbd5e1', borderRadius: '4px', fontSize: '11px', color: '#b58a3d', outline: 'none', cursor: 'pointer', maxWidth: '200px' }}
-                      >
-                        <option value="AUTO">▼ Auto FIFO</option>
-                        {activeBatches[item.product_id]?.map((b: any) => {
-                          const remaining = b.remaining_qty || 0;
-                          return (
-                            <option key={b.id} value={b.id}>
-                              {formatRiel(b.cost_price)} ({remaining} left) {b.notes ? ` | ${b.notes}` : ''}
-                            </option>
-                          );
-                        })}
-                      </select>
+                      <div style={{ position: 'relative', marginLeft: '8px' }}>
+                        {/* Transparent Backdrop to close on outside click */}
+                        {openBatchMenuId === item.id && (
+                          <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, zIndex: 99 }} onMouseDown={(e) => { e.preventDefault(); setOpenBatchMenuId(null); }}></div>
+                        )}
+                        
+                        {/* Trigger Button */}
+                        <div 
+                          onClick={(e) => { e.preventDefault(); setOpenBatchMenuId(openBatchMenuId === item.id ? null : item.id); }}
+                          className="saas-input"
+                          style={{ padding: '6px 10px', background: '#f8fafc', border: '1px solid #cbd5e1', borderRadius: '6px', fontSize: '12px', color: '#b58a3d', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px', maxWidth: '160px' }}
+                        >
+                          <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', fontWeight: 'normal' }}>
+                            {item.selected_batch_id 
+                              ? (() => {
+                                  const b = activeBatches[item.product_id]?.find(x => x.id === item.selected_batch_id);
+                                  return b ? `${formatRiel(b.cost_price)} (${b.remaining_qty})` : '▼ Auto FIFO';
+                                })()
+                              : '▼ Auto FIFO'}
+                          </span>
+                          <span style={{ fontSize: '10px', color: '#94a3b8', flexShrink: 0 }}>{openBatchMenuId === item.id ? '▲' : '▼'}</span>
+                        </div>
+
+                        {/* Custom Dropdown Menu Tray */}
+                        {openBatchMenuId === item.id && (
+                          <div style={{ position: 'absolute', top: 'calc(100% + 6px)', right: 0, zIndex: 100, backgroundColor: '#ffffff', border: '1px solid #cbd5e1', borderRadius: '8px', boxShadow: '0 10px 30px rgba(0,0,0,0.15)', minWidth: '240px', maxWidth: '280px', overflow: 'hidden' }}>
+                            <div 
+                              onMouseDown={(e) => { e.preventDefault(); updateCartItem(item.id, 'selected_batch_id', null); setOpenBatchMenuId(null); }}
+                              style={{ padding: '12px 14px', fontSize: '13px', cursor: 'pointer', borderBottom: '1px solid #f1f5f9', backgroundColor: !item.selected_batch_id ? '#f8fafc' : '#ffffff', color: '#0f172a', fontWeight: 'normal' }}
+                            >
+                              ▼ Auto FIFO (Default)
+                            </div>
+                            <div className="hide-scrollbar" style={{ maxHeight: '220px', overflowY: 'auto' }}>
+                              {activeBatches[item.product_id]?.map((b: any) => {
+                                const remaining = b.remaining_qty || 0;
+                                const isSelected = item.selected_batch_id === b.id;
+                                return (
+                                  <div 
+                                    key={b.id}
+                                    onMouseDown={(e) => { e.preventDefault(); updateCartItem(item.id, 'selected_batch_id', b.id); setOpenBatchMenuId(null); }}
+                                    style={{ padding: '12px 14px', cursor: 'pointer', borderBottom: '1px solid #f1f5f9', backgroundColor: isSelected ? '#f8fafc' : '#ffffff', transition: 'background-color 0.1s' }}
+                                  >
+                                    <div style={{ fontSize: '14px', fontWeight: 'bold', color: '#b58a3d', marginBottom: b.notes ? '4px' : '0' }}>
+                                      {formatRiel(b.cost_price)} <span style={{ color: '#64748b', fontWeight: 'normal', fontSize: '12px' }}>({remaining} left)</span>
+                                    </div>
+                                    {b.notes && <div style={{ fontSize: '12px', color: '#475569', lineHeight: 1.4 }}>{b.notes}</div>}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
+                      </div>
                     )}
                   </div>
                   
@@ -1917,22 +1956,59 @@ export default function POSPage() {
                       />
                       
                       {!isSpecial && activeTab === 'wholesale' && (
-                        <select
-                          value={item.selected_batch_id || 'AUTO'}
-                          onChange={(e) => updateCartItem(item.id, 'selected_batch_id', e.target.value === 'AUTO' ? null : Number(e.target.value))}
-                          className="mobile-batch-select"
-                          style={{ marginLeft: '8px', padding: '4px 6px', background: '#f8fafc', border: '1px solid #cbd5e1', borderRadius: '4px', color: '#b58a3d', outline: 'none', cursor: 'pointer', maxWidth: '140px' }}
-                        >
-                          <option value="AUTO">▼ Auto FIFO</option>
-                          {activeBatches[item.product_id]?.map((b: any) => {
-                            const remaining = b.remaining_qty || 0;
-                            return (
-                              <option key={b.id} value={b.id}>
-                                {formatRiel(b.cost_price)} ({remaining} left) {b.notes ? ` | ${b.notes}` : ''}
-                              </option>
-                            );
-                          })}
-                        </select>
+                        <div style={{ position: 'relative', marginLeft: '8px' }}>
+                          {/* Transparent Backdrop to close on outside click */}
+                          {openBatchMenuId === item.id && (
+                            <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, zIndex: 99 }} onMouseDown={(e) => { e.preventDefault(); setOpenBatchMenuId(null); }}></div>
+                          )}
+                          
+                          {/* Trigger Button */}
+                          <div 
+                            onClick={(e) => { e.preventDefault(); setOpenBatchMenuId(openBatchMenuId === item.id ? null : item.id); }}
+                            className="saas-input"
+                            style={{ padding: '6px 10px', background: '#f8fafc', border: '1px solid #cbd5e1', borderRadius: '6px', fontSize: '12px', color: '#b58a3d', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px', maxWidth: '140px' }}
+                          >
+                            <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', fontWeight: 'normal' }}>
+                              {item.selected_batch_id 
+                                ? (() => {
+                                    const b = activeBatches[item.product_id]?.find(x => x.id === item.selected_batch_id);
+                                    return b ? `${formatRiel(b.cost_price)} (${b.remaining_qty})` : '▼ Auto FIFO';
+                                  })()
+                                : '▼ Auto FIFO'}
+                            </span>
+                            <span style={{ fontSize: '10px', color: '#94a3b8', flexShrink: 0 }}>{openBatchMenuId === item.id ? '▲' : '▼'}</span>
+                          </div>
+
+                          {/* Custom Dropdown Menu Tray */}
+                          {openBatchMenuId === item.id && (
+                            <div style={{ position: 'absolute', top: 'calc(100% + 6px)', right: 0, zIndex: 100, backgroundColor: '#ffffff', border: '1px solid #cbd5e1', borderRadius: '8px', boxShadow: '0 10px 30px rgba(0,0,0,0.15)', minWidth: '240px', maxWidth: '280px', overflow: 'hidden' }}>
+                              <div 
+                                onMouseDown={(e) => { e.preventDefault(); updateCartItem(item.id, 'selected_batch_id', null); setOpenBatchMenuId(null); }}
+                                style={{ padding: '12px 14px', fontSize: '13px', cursor: 'pointer', borderBottom: '1px solid #f1f5f9', backgroundColor: !item.selected_batch_id ? '#f8fafc' : '#ffffff', color: '#0f172a', fontWeight: 'normal' }}
+                              >
+                                ▼ Auto FIFO (Default)
+                              </div>
+                              <div className="hide-scrollbar" style={{ maxHeight: '220px', overflowY: 'auto' }}>
+                                {activeBatches[item.product_id]?.map((b: any) => {
+                                  const remaining = b.remaining_qty || 0;
+                                  const isSelected = item.selected_batch_id === b.id;
+                                  return (
+                                    <div 
+                                      key={b.id}
+                                      onMouseDown={(e) => { e.preventDefault(); updateCartItem(item.id, 'selected_batch_id', b.id); setOpenBatchMenuId(null); }}
+                                      style={{ padding: '12px 14px', cursor: 'pointer', borderBottom: '1px solid #f1f5f9', backgroundColor: isSelected ? '#f8fafc' : '#ffffff', transition: 'background-color 0.1s' }}
+                                    >
+                                      <div style={{ fontSize: '14px', fontWeight: 'bold', color: '#b58a3d', marginBottom: b.notes ? '4px' : '0' }}>
+                                        {formatRiel(b.cost_price)} <span style={{ color: '#64748b', fontWeight: 'normal', fontSize: '12px' }}>({remaining} left)</span>
+                                      </div>
+                                      {b.notes && <div style={{ fontSize: '12px', color: '#475569', lineHeight: 1.4 }}>{b.notes}</div>}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          )}
+                        </div>
                       )}
                     </div>
 
@@ -2111,19 +2187,19 @@ export default function POSPage() {
       <Modal isOpen={isCartCustomerEditOpen} onClose={() => setIsCartCustomerEditOpen(false)} title="Edit Delivery Info" icon="🚚" maxWidth="400px">
         <div style={{ marginBottom: '16px' }}>
           <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '8px' }}>Customer / Invoice Name</label>
-          <input type="text" value={cartCustomerEditForm.name} onChange={(e) => setCartCustomerEditForm({...cartCustomerEditForm, name: e.target.value})} className="saas-input" placeholder="Name" />
+          <input type="text" value={cartCustomerEditForm.name} onChange={(e) => setCartCustomerEditForm({...cartCustomerEditForm, name: e.target.value})} className="saas-input" />
         </div>
         <div style={{ marginBottom: '16px' }}>
           <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '8px' }}>Phone Number</label>
-          <input type="text" value={cartCustomerEditForm.phone} onChange={(e) => setCartCustomerEditForm({...cartCustomerEditForm, phone: e.target.value})} className="saas-input" placeholder="Phone Number" />
+          <input type="text" value={cartCustomerEditForm.phone} onChange={(e) => setCartCustomerEditForm({...cartCustomerEditForm, phone: e.target.value})} className="saas-input" />
         </div>
         <div style={{ marginBottom: '16px' }}>
           <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '8px' }}>Delivery Location</label>
-          <input type="text" value={cartCustomerEditForm.location} onChange={(e) => setCartCustomerEditForm({...cartCustomerEditForm, location: e.target.value})} className="saas-input" placeholder="Location" />
+          <input type="text" value={cartCustomerEditForm.location} onChange={(e) => setCartCustomerEditForm({...cartCustomerEditForm, location: e.target.value})} className="saas-input" />
         </div>
         <div style={{ marginBottom: '24px' }}>
           <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '8px' }}>Google Map Link</label>
-          <input type="text" value={cartCustomerEditForm.google_map} onChange={(e) => setCartCustomerEditForm({...cartCustomerEditForm, google_map: e.target.value})} className="saas-input" placeholder="Map Link" />
+          <input type="text" value={cartCustomerEditForm.google_map} onChange={(e) => setCartCustomerEditForm({...cartCustomerEditForm, google_map: e.target.value})} className="saas-input" />
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
@@ -2969,12 +3045,6 @@ export default function POSPage() {
         .mobile-fab { display: none; }
 
         @media (max-width: 1023px) { 
-          /* 🔥 Add this rule right here inside the mobile media query */
-          .mobile-batch-select {
-            font-size: 10px !important; /* Change this number to make it bigger or smaller */
-            padding: 2px 4px !important; /* Makes the box itself a bit tighter */
-          }
-          
           .desktop-cart-panel { display: none !important; }
           
           .main-wrapper { 
