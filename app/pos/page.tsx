@@ -1573,7 +1573,7 @@ export default function POSPage() {
                         onChange={e => setCustomerSearchTerm(e.target.value)}
                         onFocus={() => setIsCustomerModalOpen(true)}
                         className="saas-input"
-                        style={{ paddingLeft: '38px', width: '100%', position: 'relative', zIndex: isCustomerModalOpen ? 100 : 1, borderColor: isCustomerModalOpen ? '#b58a3d' : undefined, fontSize: '16px' }}
+                        style={{ paddingLeft: '38px', width: '100%', position: 'relative', zIndex: isCustomerModalOpen ? 100 : 1, borderColor: isCustomerModalOpen ? '#b58a3d' : undefined }}
                       />
 
                       {/* Inline Dropdown Menu */}
