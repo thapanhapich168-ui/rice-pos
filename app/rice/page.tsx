@@ -271,7 +271,8 @@ export default function RiceControl() {
     const { data } = await supabase.from('app_settings').select('*').in('setting_key', [
       'column_widths', 'column_order', 'category_order', 
       'pending_col_widths', 'pending_col_order',
-      'supplier_col_widths', 'supplier_col_order'
+      'supplier_col_widths', 'supplier_col_order',
+      'product_sort', 'pending_sort', 'supplier_sort' // 🔥 Added sort keys to fetch
     ])
     if (data) {
       const widths = data.find((d: any) => d.setting_key === 'column_widths')
@@ -281,6 +282,10 @@ export default function RiceControl() {
       const pendOrder = data.find((d: any) => d.setting_key === 'pending_col_order')
       const supWidths = data.find((d: any) => d.setting_key === 'supplier_col_widths')
       const supOrder = data.find((d: any) => d.setting_key === 'supplier_col_order')
+      
+      const prodSort = data.find((d: any) => d.setting_key === 'product_sort')
+      const pendSort = data.find((d: any) => d.setting_key === 'pending_sort')
+      const supSort = data.find((d: any) => d.setting_key === 'supplier_sort')
 
       if (widths?.setting_value) setColumnWidths(widths.setting_value)
       if (order?.setting_value) {
@@ -304,6 +309,11 @@ export default function RiceControl() {
         cleanOrder.unshift('select');
         setSupplierColOrder(cleanOrder);
       }
+
+      // 🔥 Load Sort Preferences
+      if (prodSort?.setting_value) setSortConfig(prodSort.setting_value);
+      if (pendSort?.setting_value) setPendingSort(pendSort.setting_value);
+      if (supSort?.setting_value) setSupplierSort(supSort.setting_value);
     }
   }
 
@@ -986,21 +996,30 @@ export default function RiceControl() {
     if (key === 'linked_wholesale' || key === 'actions' || key === 'expand') return;
     let direction: 'asc' | 'desc' = 'asc';
     if (sortConfig && sortConfig.key === key && sortConfig.direction === 'asc') direction = 'desc';
-    setSortConfig({ key, direction });
+    const newSort = { key, direction };
+    setSortConfig(newSort);
+    // 🔥 Save preference to DB
+    supabase.from('app_settings').upsert({ setting_key: 'product_sort', setting_value: newSort }, { onConflict: 'setting_key' }).then();
   }
 
   const handlePendingSort = (key: string) => {
     if (key === 'actions') return;
     let direction: 'asc' | 'desc' = 'asc';
     if (pendingSort && pendingSort.key === key && pendingSort.direction === 'asc') direction = 'desc';
-    setPendingSort({ key, direction });
+    const newSort = { key, direction };
+    setPendingSort(newSort);
+    // 🔥 Save preference to DB
+    supabase.from('app_settings').upsert({ setting_key: 'pending_sort', setting_value: newSort }, { onConflict: 'setting_key' }).then();
   }
 
   const handleSupplierSort = (key: string) => {
     if (key === 'select') return;
     let direction: 'asc' | 'desc' = 'asc';
     if (supplierSort && supplierSort.key === key && supplierSort.direction === 'asc') direction = 'desc';
-    setSupplierSort({ key, direction });
+    const newSort = { key, direction };
+    setSupplierSort(newSort);
+    // 🔥 Save preference to DB
+    supabase.from('app_settings').upsert({ setting_key: 'supplier_sort', setting_value: newSort }, { onConflict: 'setting_key' }).then();
   }
 
   const processedProducts = products
@@ -1335,6 +1354,8 @@ export default function RiceControl() {
                             let val = edits[p.id]?.[col as keyof Product] ?? p[col as keyof Product] ?? '';
                             if (activeView === 'wholesale' && currentBatch) {
                                if (col === 'cost_price') val = edits[p.id]?.cost_price ?? currentBatch.cost_price;
+                               // 🔥 Displays the individual FIFO current batch remaining quantity instead of Master Stock
+                               if (col === 'stock') val = edits[p.id]?.stock ?? currentBatch.remaining_qty;
                             }
 
                             if (!isEditing && !edits[p.id] && activeView === 'retail' && col === 'cost_price' && p.linked_wholesale_id) {
@@ -2229,8 +2250,8 @@ export default function RiceControl() {
         .cell-input {
           width: 100%;
           height: 100%;
-          padding: 16px 12px;
-          font-size: 16px;
+          padding: 0 12px; /* 🔥 Fixed massive box by removing excessive vertical padding */
+          font-size: 14px; /* 🔥 Matched the normal surrounding text size */
           border: none;
           outline: 2px solid #b58a3d;
           box-shadow: 0 0 5px rgba(181, 138, 61, 0.3);
