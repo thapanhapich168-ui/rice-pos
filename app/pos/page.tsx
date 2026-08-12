@@ -618,10 +618,11 @@ export default function POSPage() {
     if (!exchangeModal.product) return;
     const prod = exchangeModal.product;
     const consumedKg = Number(exchangeModal.consumedKg) || 0;
+    const wWeight = Number(prod.weight) || 50;
     let linkedRetail = products.find(p => p.linked_wholesale_id === prod.id);
 
-    if (consumedKg >= 50) {
-       showToast('error', 'Invalid Amount', 'Consumed amount cannot be 50kg or more for a single bag return.');
+    if (consumedKg >= wWeight) {
+       showToast('error', 'Invalid Amount', `Consumed amount cannot be ${wWeight}kg or more for a single bag return.`);
        return;
     }
 
@@ -630,8 +631,8 @@ export default function POSPage() {
     try {
       if (consumedKg > 0 && !linkedRetail) {
          const newRetailName = prod.name; 
-         const perKgPrice = Math.round(Number(prod.price || 0) / 50);
-         const perKgCogs = Math.round(Number(prod.cost_price || 0) / 50);
+         const perKgPrice = Math.round(Number(prod.price || 0) / wWeight);
+         const perKgCogs = Math.round(Number(prod.cost_price || 0) / wWeight);
 
          const { data: newProd, error } = await supabase.from('products').insert([{
            branch_id: activeBranchId, 
@@ -716,7 +717,8 @@ export default function POSPage() {
       if (editedItem && editedItem.custom_name.startsWith('ដូរ ')) {
         const baseName = editedItem.custom_name.replace('ដូរ ', '');
         const consumedName = `បានប្រើ ${baseName}`;
-        const newPerKgPrice = Math.round(Number(value) / 50) || 0;
+        const wWeight = Number(editedItem.weight) || 50;
+        const newPerKgPrice = Math.round(Number(value) / wWeight) || 0;
 
         updatedCart = updatedCart.map(item => {
           if (item.custom_name === consumedName) {
@@ -846,13 +848,16 @@ export default function POSPage() {
     for (const [prodId, finalStock] of Object.entries(simulatedStockUpdates)) {
         if (finalStock <= -1) {
             const p = products.find(x => x.id === Number(prodId));
-            if (p && p.weight < 50 && p.linked_wholesale_id) {
-                const bagsNeeded = Math.ceil(Math.abs(finalStock) / 50);
+            const pWeight = Number(p?.weight || 0);
+            if (p && pWeight < 25 && p.linked_wholesale_id) {
+                const wholesaleProd = products.find(w => w.id === p.linked_wholesale_id);
+                const wholesaleWeight = wholesaleProd ? Number(wholesaleProd.weight) : 50;
+                const bagsNeeded = Math.ceil(Math.abs(finalStock) / wholesaleWeight);
                 itemsNeedingBags.push({ ...p, bags_needed: bagsNeeded });
-            } else if (p && p.weight < 50 && !p.linked_wholesale_id) {
+            } else if (p && pWeight < 25 && !p.linked_wholesale_id) {
                 showToast('error', 'Out of Stock', `Not enough stock for ${p.name} and no linked wholesale bag to open!`);
                 return;
-            } else if (p && p.weight >= 50) {
+            } else if (p && pWeight >= 25) {
                 showToast('error', 'Out of Stock', `Not enough stock for wholesale bag ${p.name}!`);
                 return;
             }
@@ -1290,8 +1295,8 @@ export default function POSPage() {
   const filteredProducts = orderedProducts.filter(p => {
     if (searchQuery && !p.name?.toLowerCase().includes(searchQuery.toLowerCase())) return false;
     const weightVal = parseFloat(String(p.weight) || '0');
-    if (activeTab === 'wholesale' && weightVal < 50) return false;
-    if (activeTab === 'retail' && weightVal >= 50) return false;
+    if (activeTab === 'wholesale' && weightVal < 25) return false; // 🔥 Catches 25kg+ bags
+    if (activeTab === 'retail' && weightVal >= 25) return false; // 🔥 Catches 25kg+ bags
 
     if (activeTab === 'retail') {
       const isHidden = hiddenRetailIds.includes(p.id);

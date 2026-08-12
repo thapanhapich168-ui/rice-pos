@@ -1027,8 +1027,8 @@ export default function RiceControl() {
     .filter(p => {
       const isEditingThisRow = editingCell?.id === p.id;
       if (debouncedSearch && !p.name?.toLowerCase().includes(debouncedSearch.toLowerCase())) return false;
-      if (activeView === 'retail' && p.weight >= 50) return false;
-      if (activeView === 'wholesale' && p.weight < 50) return false;
+      if (activeView === 'retail' && p.weight >= 25) return false; // 🔥 Changed to 25
+      if (activeView === 'wholesale' && p.weight < 25) return false; // 🔥 Changed to 25
       if (activeView === 'wholesale') {
         if (activeCategory === '❌ Out of Stock') {
             if (!isEditingThisRow && Number(p.stock) > 0) return false;
@@ -1377,10 +1377,10 @@ export default function RiceControl() {
                                   <td className="saas-td" key={col} style={{ borderRight: '1px solid #f1f5f9', position: 'relative', padding: '6px 12px', overflow: 'visible' }}>
                                     {isDropdownOpen ? (
                                       <div style={{ position: 'relative', zIndex: 100 }}>
-                                        <input autoFocus className="saas-input" placeholder="Search 50kg bag..." value={dropdownSearch} onChange={e => setDropdownSearch(e.target.value)} onBlur={() => setTimeout(() => setActiveDropdownId(null), 200)} onKeyDown={e => e.key === 'Escape' && setActiveDropdownId(null)} />
-                                        <div className="dropdown-results-tray">
-                                          <div className="dropdown-row clear-option" onMouseDown={(e) => { e.stopPropagation(); handleLinkWholesaleBag(p.id, null); }}>❌ Clear Linked Bag</div>
-                                          {products.filter(wp => wp.weight >= 50 && wp.name.toLowerCase().includes(dropdownSearch.toLowerCase())).map(wp => (
+                                        <input autoFocus className="saas-input" placeholder="Search Wholesale bag..." value={dropdownSearch} onChange={e => setDropdownSearch(e.target.value)} onBlur={() => setTimeout(() => setActiveDropdownId(null), 200)} onKeyDown={e => e.key === 'Escape' && setActiveDropdownId(null)} />
+<div className="dropdown-results-tray">
+  <div className="dropdown-row clear-option" onMouseDown={(e) => { e.stopPropagation(); handleLinkWholesaleBag(p.id, null); }}>❌ Clear Linked Bag</div>
+  {products.filter(wp => wp.weight >= 25 && wp.name.toLowerCase().includes(dropdownSearch.toLowerCase())).map(wp => (
                                             <div key={wp.id} className="dropdown-row" onMouseDown={(e) => { e.stopPropagation(); handleLinkWholesaleBag(p.id, wp); }}>
                                               <span style={{ fontWeight: 'normal', color: '#334155' }}>{wp.name}</span>
                                               <span style={{ fontSize: '11px', color: '#64748b' }}> ({formatRiel(wp.cost_price)})</span>
@@ -1391,7 +1391,7 @@ export default function RiceControl() {
                                     ) : (
                                       <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
                                         <div className="interactive-select-trigger" onClick={(e) => { e.stopPropagation(); setActiveDropdownId(p.id); setDropdownSearch(''); }} style={{ flex: 1 }}>
-                                          {linkedProduct ? `🌾 ${linkedProduct.name}` : '🔍 Click to link 50kg Bag...'}
+                                          {linkedProduct ? `🌾 ${linkedProduct.name}` : '🔍 Click to link Wholesale Bag...'}
                                         </div>
                                       </div>
                                     )}
@@ -1457,20 +1457,27 @@ export default function RiceControl() {
                                         )}
                                         {formatDisplayValue(col as string, val)}
                                         
-                                        {activeView === 'retail' && p.stock >= 50 && p.linked_wholesale_id && (
-                                          <button 
-                                            onClick={(e) => { 
-                                              e.preventDefault(); 
-                                              e.stopPropagation(); 
-                                              setRepackModal({ isOpen: true, product: p }); 
-                                            }}
-                                            onMouseDown={(e) => e.stopPropagation()} 
-                                            className="saas-btn"
-                                            style={{ marginLeft: '12px', padding: '4px 8px', background: '#f0fdf4', color: '#166534', border: '1px solid #bbf7d0', fontSize: '11px' }}
-                                          >
-                                            📦 Repack 50kg
-                                          </button>
-                                        )}
+                                        {activeView === 'retail' && p.linked_wholesale_id && (() => {
+                                          const wProd = products.find(wp => wp.id === p.linked_wholesale_id);
+                                          const wWeight = wProd ? Number(wProd.weight) : 50;
+                                          if (p.stock >= wWeight) {
+                                            return (
+                                              <button 
+                                                onClick={(e) => { 
+                                                  e.preventDefault(); 
+                                                  e.stopPropagation(); 
+                                                  setRepackModal({ isOpen: true, product: p }); 
+                                                }}
+                                                onMouseDown={(e) => e.stopPropagation()} 
+                                                className="saas-btn"
+                                                style={{ marginLeft: '12px', padding: '4px 8px', background: '#f0fdf4', color: '#166534', border: '1px solid #bbf7d0', fontSize: '11px' }}
+                                              >
+                                                📦 Repack {wWeight}kg
+                                              </button>
+                                            );
+                                          }
+                                          return null;
+                                        })()}
                                       </span>
                                     ) : (
                                       formatDisplayValue(col as string, val)
@@ -2063,15 +2070,16 @@ export default function RiceControl() {
       <Modal isOpen={repackModal.isOpen && !!repackModal.product} onClose={() => setRepackModal({ isOpen: false, product: null })} title="📦 Confirm Repack" maxWidth="400px">
         {repackModal.product && (() => {
             const wholesaleProd = products.find(wp => wp.id === repackModal.product?.linked_wholesale_id);
+            const wWeight = wholesaleProd ? Number(wholesaleProd.weight) : 50;
             return (
               <>
                 <p style={{ color: '#475569', fontSize: '14px', lineHeight: '1.5' }}>
-                  Are you sure you want to convert <b>50kg</b> of loose <span style={{ color: '#b58a3d', fontWeight: 'bold' }}>{repackModal.product.name}</span> into 1 sealed wholesale bag of <span style={{ color: '#10b981', fontWeight: 'bold' }}>{wholesaleProd?.name}</span>?
+                  Are you sure you want to convert <b>{wWeight}kg</b> of loose <span style={{ color: '#b58a3d', fontWeight: 'bold' }}>{repackModal.product.name}</span> into 1 sealed wholesale bag of <span style={{ color: '#10b981', fontWeight: 'bold' }}>{wholesaleProd?.name}</span>?
                 </p>
                 <div style={{ background: '#f8fafc', padding: '12px', borderRadius: '8px', border: '1px solid #e2e8f0', marginTop: '16px', fontSize: '13px', color: '#64748b' }}>
                   This action will:
                   <ul style={{ paddingLeft: '20px', marginTop: '8px', marginBottom: 0 }}>
-                    <li>Deduct 50kg from Retail Stock</li>
+                    <li>Deduct {wWeight}kg from Retail Stock</li>
                     <li>Add 1 Bag to Wholesale Stock</li>
                     <li>Log to Repack History</li>
                   </ul>
