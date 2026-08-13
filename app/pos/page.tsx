@@ -1556,8 +1556,32 @@ export default function POSPage() {
                   value={searchQuery} 
                   onChange={(e) => setSearchQuery(e.target.value)} 
                   className="saas-input"
-                  style={{ paddingLeft: '38px', width: '100%' }} 
+                  style={{ paddingLeft: '38px', paddingRight: searchQuery ? '38px' : '14px', width: '100%' }} 
                 />
+                {searchQuery && (
+                  <button
+                    onClick={() => setSearchQuery('')}
+                    style={{
+                      position: 'absolute',
+                      right: '10px',
+                      top: '50%',
+                      transform: 'translateY(-50%)',
+                      background: 'none',
+                      border: 'none',
+                      color: '#94a3b8',
+                      cursor: 'pointer',
+                      fontSize: '16px',
+                      zIndex: 2,
+                      padding: '4px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center'
+                    }}
+                    title="Clear search"
+                  >
+                    ✕
+                  </button>
+                )}
               </div>
               
               {/* CUSTOMER SEARCH */}

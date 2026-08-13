@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { supabase } from '@/lib/supabaseClient'
 import { formatRiel, EXCHANGE_RATE } from '@/utils/formatters'
 import { CurrencyInput } from '@/components/Inputs'
@@ -9,6 +9,9 @@ import { useToast } from '@/components/ToastProvider'
 import TableSkeleton from '@/components/TableSkeleton'
 import EmptyState from '@/components/EmptyState'
 import { useBranch } from '@/components/BranchContext' // 🔥 GLOBAL MEMORY IMPORTED
+
+// 🔥 ADD YOUR TELEGRAM CONFIG IMPORT HERE:
+import { TELEGRAM_CONFIG } from '@/lib/telegramConfig'
 
 export default function DeliveryPage() {
   const { showToast } = useToast();
@@ -32,6 +35,94 @@ export default function DeliveryPage() {
   // --- 100k LOAD PROBLEM FIX (PAGINATION STATES) ---
   const [loadLimit, setLoadLimit] = useState(100);
   const [hasMore, setHasMore] = useState(true);
+
+ // 🔥 TABLE DYNAMICS (DRAG, DROP, HIDE, SORT, RESIZE)
+  const DEFAULT_DELIVERY_COLS = ['customer', 'date', 'items', 'total', 'status', 'method', 'pay', 'action'];
+  const COL_LABELS: Record<string, string> = { customer: 'Customer', date: 'Date & INV', items: 'Items Ordered', total: 'Total (៛)', status: 'Status', method: 'Payment Method', pay: 'Pay Amount', action: 'Complete' };
+  const DEFAULT_WIDTHS: Record<string, number> = { customer: 200, date: 150, items: 300, total: 120, status: 120, method: 160, pay: 180, action: 120 };
+  
+  const [colOrder, setColOrder] = useState<string[]>(DEFAULT_DELIVERY_COLS);
+  const [hiddenCols, setHiddenCols] = useState<string[]>([]);
+  const [sortConfig, setSortConfig] = useState<{key: string, direction: 'asc'|'desc'} | null>(null);
+  const [showColMenu, setShowColMenu] = useState(false);
+  
+  // Resizing State
+  const [colWidths, setColWidths] = useState<Record<string, number>>(DEFAULT_WIDTHS);
+  const widthsRef = useRef(colWidths);
+  widthsRef.current = colWidths;
+
+  // Load saved preferences on mount
+  useEffect(() => {
+    async function loadTablePrefs() {
+      const { data } = await supabase.from('app_settings').select('*').in('setting_key', ['delivery_col_order', 'delivery_hidden_cols', 'delivery_col_widths']);
+      if (data) {
+        const orderPref = data.find(d => d.setting_key === 'delivery_col_order');
+        const hiddenPref = data.find(d => d.setting_key === 'delivery_hidden_cols');
+        const widthPref = data.find(d => d.setting_key === 'delivery_col_widths');
+        
+        if (orderPref?.setting_value) setColOrder(orderPref.setting_value);
+        if (hiddenPref?.setting_value) setHiddenCols(hiddenPref.setting_value);
+        if (widthPref?.setting_value) {
+          // 🔥 Safely merge saved widths with defaults so user preferences persist across refreshes
+          setColWidths(prev => ({ ...prev, ...widthPref.setting_value }));
+        }
+      }
+    }
+    loadTablePrefs();
+  }, []);
+
+  const toggleCol = (col: string) => {
+    setHiddenCols(prev => {
+      const newHidden = prev.includes(col) ? prev.filter(c => c !== col) : [...prev, col];
+      supabase.from('app_settings').upsert({ setting_key: 'delivery_hidden_cols', setting_value: newHidden }, { onConflict: 'setting_key' }).then();
+      return newHidden;
+    });
+  };
+
+  const handleDragStart = (e: React.DragEvent, col: string) => { e.dataTransfer.setData('col', col); };
+  const handleDrop = (e: React.DragEvent, targetCol: string) => {
+    const sourceCol = e.dataTransfer.getData('col');
+    if (!sourceCol || sourceCol === targetCol) return;
+    setColOrder(prev => {
+      const newOrder = [...prev];
+      newOrder.splice(newOrder.indexOf(sourceCol), 1);
+      newOrder.splice(newOrder.indexOf(targetCol), 0, sourceCol);
+      supabase.from('app_settings').upsert({ setting_key: 'delivery_col_order', setting_value: newOrder }, { onConflict: 'setting_key' }).then();
+      return newOrder;
+    });
+  };
+  const handleSort = (key: string) => {
+    let direction: 'asc' | 'desc' = 'asc';
+    if (sortConfig && sortConfig.key === key && sortConfig.direction === 'asc') direction = 'desc';
+    setSortConfig({ key, direction });
+  };
+
+  const handleResizeStart = (e: React.MouseEvent | React.TouchEvent, col: string) => {
+    e.preventDefault(); e.stopPropagation();
+    const startX = 'touches' in e ? e.touches[0].pageX : e.pageX;
+    const startWidth = widthsRef.current[col] || DEFAULT_WIDTHS[col] || 150;
+    
+    const handleMove = (moveEvent: MouseEvent | TouchEvent) => {
+      const currentX = 'touches' in moveEvent ? (moveEvent as TouchEvent).touches[0].pageX : (moveEvent as MouseEvent).pageX;
+      const newWidth = Math.max(60, startWidth + (currentX - startX)); // min-width 60px
+      setColWidths(prev => ({ ...prev, [col]: newWidth }));
+    }
+    
+    const handleUp = async () => {
+      document.removeEventListener('mousemove', handleMove as any); 
+      document.removeEventListener('mouseup', handleUp);
+      document.removeEventListener('touchmove', handleMove as any); 
+      document.removeEventListener('touchend', handleUp);
+      
+      // Save new widths to DB
+      await supabase.from('app_settings').upsert({ setting_key: 'delivery_col_widths', setting_value: widthsRef.current }, { onConflict: 'setting_key' });
+    }
+    
+    document.addEventListener('mousemove', handleMove as any); 
+    document.addEventListener('mouseup', handleUp);
+    document.addEventListener('touchmove', handleMove as any, { passive: false }); 
+    document.addEventListener('touchend', handleUp);
+  };
 
   useEffect(() => {
     fetchDeliveries();
@@ -188,6 +279,23 @@ export default function DeliveryPage() {
             delivery_status: 'Delivered'
         })
         .eq('invoice_id', d.invoice_id);
+
+      // 🔥 TELEGRAM NOTIFICATION INTEGRATION
+      try {
+        let message = `📦 *Delivery Payment Update*\n\n`;
+        message += `👤 *Customer name:* ${d.customer_name}\n`;
+        message += `🚚 *Delivery Status:* Delivered\n`;
+        message += `💵 *Paid amount:* ${formatRiel(totalRielEq)}\n`;
+        if (newBalance > 0) {
+          message += `⏳ *Unpaid amount:* ${formatRiel(newBalance)}\n`;
+        }
+
+        fetch(`https://api.telegram.org/bot${TELEGRAM_CONFIG.botToken}/sendMessage`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ chat_id: TELEGRAM_CONFIG.chatId, text: message, parse_mode: 'Markdown' })
+        });
+      } catch (teleErr) { console.error("Telegram Error", teleErr); }
 
       showToast('success', 'Payment Saved', 'Delivery payment logged successfully.');
 
@@ -374,13 +482,27 @@ export default function DeliveryPage() {
   const isFullyComplete = (d: any) => d.is_done === true;
   const isDeliveredVisual = (d: any) => d.delivery_status === 'Delivered';
 
-  // Rule: Sort Delivered invoices entirely to the bottom of the delivery tab.
+  // 🔥 DYNAMIC SORT ENGINE
   const sortedDeliveries = [...deliveries].sort((a: any, b: any) => {
-    const aDone = isDeliveredVisual(a);
-    const bDone = isDeliveredVisual(b);
-    if (!aDone && bDone) return -1;
-    if (aDone && !bDone) return 1;
-    return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+    if (sortConfig) {
+      let valA = a[sortConfig.key] || '';
+      let valB = b[sortConfig.key] || '';
+      if (sortConfig.key === 'customer') { valA = a.customer_name; valB = b.customer_name; }
+      if (sortConfig.key === 'date') { valA = new Date(a.created_at).getTime(); valB = new Date(b.created_at).getTime(); }
+      if (sortConfig.key === 'total') { valA = Number(a.total_sales); valB = Number(b.total_sales); }
+      if (sortConfig.key === 'items') { valA = a.rice_types; valB = b.rice_types; }
+      if (sortConfig.key === 'status') { valA = a.delivery_status; valB = b.delivery_status; }
+      if (sortConfig.key === 'method') { valA = a.payment_method; valB = b.payment_method; }
+      if (valA < valB) return sortConfig.direction === 'asc' ? -1 : 1;
+      if (valA > valB) return sortConfig.direction === 'asc' ? 1 : -1;
+      return 0;
+    } else {
+      const aDone = isDeliveredVisual(a);
+      const bDone = isDeliveredVisual(b);
+      if (!aDone && bDone) return -1;
+      if (aDone && !bDone) return 1;
+      return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+    }
   });
 
   const debtorsMap = deliveries.reduce((acc: any, curr: any) => {
@@ -435,31 +557,84 @@ export default function DeliveryPage() {
     if (activeTab === 'delivery') {
       return (
         <div className="saas-table-wrapper" style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, marginBottom: 0 }}>
-          <div className="saas-table-responsive" style={{ flex: 1, overflow: 'auto' }}>
-            <table className="saas-table" style={{ minWidth: '1050px' }}>
+          <div className="saas-table-responsive hide-scrollbar" style={{ flex: 1, overflow: 'auto' }}>
+            {/* 🔥 CRITICAL FIX 1: tableLayout MUST be 'fixed' and width 'max-content' for resizable columns */}
+            <table className="saas-table" style={{ minWidth: '100%', tableLayout: 'fixed', width: 'max-content' }}>
               <thead>
                 <tr>
-                  <th className="saas-th" style={{ position: 'sticky', top: 0, zIndex: 30, backgroundColor: '#f8fafc', boxShadow: 'inset 0 -2px 0 0 #e2e8f0' }}>Date & INV</th>
-                  <th className="saas-th" style={{ position: 'sticky', top: 0, zIndex: 30, backgroundColor: '#f8fafc', boxShadow: 'inset 0 -2px 0 0 #e2e8f0' }}>Customer</th>
-                  <th className="saas-th" style={{ position: 'sticky', top: 0, zIndex: 30, backgroundColor: '#f8fafc', boxShadow: 'inset 0 -2px 0 0 #e2e8f0', width: '25%' }}>Items Ordered</th>
-                  <th className="saas-th" style={{ position: 'sticky', top: 0, zIndex: 30, backgroundColor: '#f8fafc', boxShadow: 'inset 0 -2px 0 0 #e2e8f0', textAlign: 'right' }}>Total (៛)</th>
-                  <th className="saas-th" style={{ position: 'sticky', top: 0, zIndex: 30, backgroundColor: '#f8fafc', boxShadow: 'inset 0 -2px 0 0 #e2e8f0', textAlign: 'center' }}>Status</th>
-                  <th className="saas-th" style={{ position: 'sticky', top: 0, zIndex: 30, backgroundColor: '#f8fafc', boxShadow: 'inset 0 -2px 0 0 #e2e8f0', textAlign: 'center', width: '160px' }}>Payment Method</th>
-                  <th className="saas-th" style={{ position: 'sticky', top: 0, zIndex: 30, backgroundColor: '#f8fafc', boxShadow: 'inset 0 -2px 0 0 #e2e8f0', textAlign: 'right', width: '180px' }}>Pay Amount</th>
-                  <th className="saas-th" style={{ position: 'sticky', top: 0, zIndex: 30, backgroundColor: '#f8fafc', boxShadow: 'inset 0 -2px 0 0 #e2e8f0', textAlign: 'center', width: '120px' }}>Complete</th>
+                  {colOrder.filter(c => !hiddenCols.includes(c)).map((col, index) => {
+                    const isSticky = col === 'customer'; // 🔥 FREEZES CUSTOMER COLUMN
+                    return (
+                      <th 
+                        key={col} 
+                        className="saas-th" 
+                        style={{ 
+                          position: isSticky ? 'sticky' : 'static', 
+                          top: 0, 
+                          left: isSticky ? 0 : undefined,
+                          zIndex: isSticky ? 40 : 30, 
+                          backgroundColor: '#f8fafc', 
+                          boxShadow: isSticky ? '2px 0 5px -2px rgba(0,0,0,0.1), inset 0 -2px 0 0 #e2e8f0' : 'inset 0 -2px 0 0 #e2e8f0',
+                          borderRight: '1px solid #cbd5e1', // 🔥 ADDED: Right side border
+                          borderLeft: index === 0 ? '1px solid #cbd5e1' : 'none', // 🔥 ADDED: Left border ONLY for the first column
+                          padding: 0, // Remove padding from TH so inner div fills it completely
+                          // 🔥 Strict bounds to ensure table cells obey the resize widths
+                          width: colWidths[col] || DEFAULT_WIDTHS[col] || 150,
+                          minWidth: colWidths[col] || DEFAULT_WIDTHS[col] || 150,
+                          maxWidth: colWidths[col] || DEFAULT_WIDTHS[col] || 150,
+                        }}
+                      >
+                        <div style={{ display: 'flex', position: 'relative', width: '100%', height: '100%', alignItems: 'stretch' }}>
+                          
+                          {/* 🔥 INNER DRAG TARGET: Isolates the drag action from the resize handle so it doesn't drag a giant ghost */}
+                          <div
+                            draggable
+                            onDragStart={(e) => handleDragStart(e, col)}
+                            onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }}
+                            onDrop={(e) => handleDrop(e, col)}
+                            onClick={() => handleSort(col)}
+                            style={{ 
+                              flex: 1, 
+                              padding: '12px 16px', // Standard saas-th padding moved here
+                              display: 'flex', 
+                              alignItems: 'center', 
+                              justifyContent: ['total', 'pay'].includes(col) ? 'flex-end' : ['status', 'method', 'action'].includes(col) ? 'center' : 'flex-start',
+                              cursor: 'grab',
+                              overflow: 'hidden',
+                              whiteSpace: 'nowrap',
+                              userSelect: 'none'
+                            }}
+                          >
+                            <span>{COL_LABELS[col]}</span>
+                            <span style={{ marginLeft: '6px', fontSize: '10px', opacity: sortConfig?.key === col ? 1 : 0.3 }}>
+                              {sortConfig?.key === col ? (sortConfig.direction === 'asc' ? '↑' : '↓') : '↕'}
+                            </span>
+                          </div>
+                          
+                          {/* 🔥 ISOLATED RESIZE HANDLE: No draggable attribute here! */}
+                          <div 
+                            onMouseDown={(e) => { e.stopPropagation(); handleResizeStart(e, col); }} 
+                            onTouchStart={(e) => { e.stopPropagation(); handleResizeStart(e, col); }} 
+                            onClick={(e) => e.stopPropagation()} 
+                            style={{ 
+                              position: 'absolute', right: 0, top: 0, bottom: 0, 
+                              width: '14px', cursor: 'col-resize', background: 'transparent', 
+                              zIndex: 50, transform: 'translateX(50%)' 
+                            }} 
+                          />
+                        </div>
+                      </th>
+                    )
+                  })}
                 </tr>
               </thead>
               <tbody>
                 {loading && sortedDeliveries.length === 0 ? (
-                  <TableSkeleton columns={8} rows={6} />
+                  <TableSkeleton columns={colOrder.filter(c => !hiddenCols.includes(c)).length} rows={6} />
                 ) : sortedDeliveries.length === 0 ? (
                   <tr>
-                    <td colSpan={8} style={{ padding: 0 }}>
-                      <EmptyState 
-                        icon="🚚" 
-                        title="No active deliveries" 
-                        message="All wholesale deliveries are perfectly cleared!" 
-                      />
+                    <td colSpan={colOrder.filter(c => !hiddenCols.includes(c)).length} style={{ padding: 0 }}>
+                      <EmptyState icon="🚚" title="No active deliveries" message="All wholesale deliveries are perfectly cleared!" />
                     </td>
                   </tr>
                 ) : (
@@ -471,99 +646,101 @@ export default function DeliveryPage() {
                     
                     return (
                       <tr key={d.invoice_id} className="saas-tr" style={{ opacity: isDoneVisual ? 0.6 : 1, transition: 'all 0.3s ease' }}>
-                        <td className="saas-td" style={{ verticalAlign: 'top' }}>
-                          <div style={{ color: '#3b82f6', marginBottom: '4px', fontWeight: 'bold' }}>{d.invoice_id}</div>
-                          <div style={{ fontSize: '12px', color: '#64748b' }}>{new Date(d.created_at).toLocaleDateString('en-GB')}</div>
-                        </td>
-                        <td className="saas-td" style={{ verticalAlign: 'top' }}>
-                          <div style={{ color: '#334155', fontSize: '15px', marginBottom: '4px', fontWeight: 'bold' }}>{d.customer_name}</div>
-                          <div style={{ color: '#64748b', fontSize: '12px' }}>📍 {d.customer_location || 'No location'}</div>
-                        </td>
-                        <td className="saas-td" style={{ lineHeight: '1.6', fontSize: '13px', verticalAlign: 'top' }}>{d.rice_types}</td>
-                        
-                        <td className="saas-td" style={{ textAlign: 'right', color: '#334155', fontSize: '15px', verticalAlign: 'top', fontWeight: 'bold' }}>{formatRiel(totalSale)}</td>
-                        
-                        <td className="saas-td" style={{ textAlign: 'center', verticalAlign: 'top' }}>
-                          <button 
-                            onClick={() => updateInvoiceField(d.invoice_id, 'delivery_status', d.delivery_status === 'Pending' ? 'Delivered' : 'Pending')}
-                            style={{
-                              padding: '6px 12px', borderRadius: '20px', border: 'none', fontSize: '12px', cursor: 'pointer',
-                              background: d.delivery_status === 'Pending' ? '#fef3c7' : '#dcfce7',
-                              color: d.delivery_status === 'Pending' ? '#d97706' : '#15803d',
-                              fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '6px', width: '100px', justifyContent: 'center', margin: '0 auto'
-                            }}
-                          >
-                            {d.delivery_status === 'Pending' ? '🟡 Pending' : '🟢 Delivered'}
-                          </button>
-                        </td>
+                        {colOrder.filter(c => !hiddenCols.includes(c)).map(col => {
+                          const isSticky = col === 'customer';
+                          const tdStyle: any = { 
+                            verticalAlign: 'top',
+                            position: isSticky ? 'sticky' : 'static',
+                            left: isSticky ? 0 : undefined,
+                            zIndex: isSticky ? 20 : 'auto',
+                            backgroundColor: isSticky ? '#ffffff' : 'inherit',
+                            boxShadow: isSticky ? '2px 0 5px -2px rgba(0,0,0,0.05)' : 'none',
+                            // 🔥 CRITICAL FIX 3: Force text to wrap inside the newly strict fixed columns
+                            overflow: 'hidden',
+                            wordWrap: 'break-word',
+                            whiteSpace: 'normal'
+                          };
 
-                        {/* PAYMENT METHOD COLUMN */}
-                        <td className="saas-td" style={{ textAlign: 'center', verticalAlign: 'top' }}>
-                          {balanceDue > 0 && !isDoneVisual ? (
-                             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                               {paymentState.map((row) => (
-                                 <select 
-                                   key={row.id}
-                                   value={row.method}
-                                   onChange={(e) => updateInlineRow(d.invoice_id, row.id, 'method', e.target.value, balanceDue)}
-                                   className="saas-input"
-                                   style={{ padding: '8px', cursor: 'pointer', height: '40px' }}
-                                 >
-                                    <option value="Cash ៛">💵 Cash ៛</option>
-                                    <option value="Cash $">💵 Cash $</option>
-                                    <option value="QR ៛">📱 QR ៛</option>
-                                    <option value="QR $">📱 QR $</option>
-                                    <option value="Mom QR ៛">👩 Mom QR ៛</option>
-                                    <option value="Mom QR $">👩 Mom QR $</option>
-                                 </select>
-                               ))}
-                               <button onClick={() => addInlineSplit(d.invoice_id, balanceDue)} style={{ background: 'none', border: 'none', color: '#3b82f6', fontSize: '12px', cursor: 'pointer', textAlign: 'left', fontWeight: 'bold' }}>+ Add Split</button>
-                             </div>
-                          ) : (
-                            <div style={{ color: '#475569', fontSize: '13px' }}>{d.payment_method}</div>
-                          )}
-                        </td>
-
-                        {/* PAY AMOUNT COLUMN */}
-                        <td className="saas-td" style={{ textAlign: 'right', verticalAlign: 'top' }}>
-                          {balanceDue > 0 && !isDoneVisual ? (
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                              {paymentState.map((row) => (
-                                <div key={row.id} style={{ display: 'flex', alignItems: 'center', gap: '6px', height: '40px' }}>
-                                  <CurrencyInput
-                                    placeholder={formatRiel(balanceDue)}
-                                    value={row.amount}
-                                    onChange={(v: any) => updateInlineRow(d.invoice_id, row.id, 'amount', v, balanceDue)}
-                                    onEnter={() => handleInlineProcess(d, paymentState)}
-                                    className="saas-input"
-                                    style={{ padding: '8px', textAlign: 'right', height: '100%' }}
-                                  />
-                                  {paymentState.length > 1 && (
-                                    <button onClick={() => removeInlineSplit(d.invoice_id, row.id, balanceDue)} style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', fontSize: '16px', padding: '0 4px', fontWeight: 'bold' }}>✕</button>
-                                  )}
+                          if (col === 'date') return (
+                            <td key={col} className="saas-td" style={tdStyle}>
+                              <div style={{ color: '#3b82f6', marginBottom: '4px', fontWeight: 'bold' }}>{d.invoice_id}</div>
+                              <div style={{ fontSize: '12px', color: '#64748b' }}>{new Date(d.created_at).toLocaleDateString('en-GB')}</div>
+                            </td>
+                          );
+                          if (col === 'customer') return (
+                            <td key={col} className="saas-td" style={tdStyle}>
+                              <div style={{ color: '#334155', fontSize: '15px', marginBottom: '4px', fontWeight: 'bold' }}>{d.customer_name}</div>
+                              <div style={{ color: '#64748b', fontSize: '12px' }}>📍 {d.customer_location || 'No location'}</div>
+                            </td>
+                          );
+                          if (col === 'items') return <td key={col} className="saas-td" style={{ ...tdStyle, lineHeight: '1.6', fontSize: '13px' }}>{d.rice_types}</td>;
+                          if (col === 'total') return <td key={col} className="saas-td" style={{ ...tdStyle, textAlign: 'right', color: '#334155', fontSize: '15px', fontWeight: 'bold' }}>{formatRiel(totalSale)}</td>;
+                          if (col === 'status') return (
+                            <td key={col} className="saas-td" style={{ ...tdStyle, textAlign: 'center' }}>
+                              <button 
+                                onClick={() => updateInvoiceField(d.invoice_id, 'delivery_status', d.delivery_status === 'Pending' ? 'Delivered' : 'Pending')}
+                                style={{
+                                  padding: '6px 12px', borderRadius: '20px', border: 'none', fontSize: '12px', cursor: 'pointer',
+                                  background: d.delivery_status === 'Pending' ? '#fef3c7' : '#dcfce7',
+                                  color: d.delivery_status === 'Pending' ? '#d97706' : '#15803d',
+                                  fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '6px', width: 'auto', minWidth: '40px', justifyContent: 'center', margin: '0 auto'
+                                }}
+                              >
+                                {d.delivery_status === 'Pending' ? <>🟡 <span className="desktop-text">Pending</span></> : <>🟢 <span className="desktop-text">Delivered</span></>}
+                              </button>
+                            </td>
+                          );
+                          if (col === 'method') return (
+                            <td key={col} className="saas-td" style={{ ...tdStyle, textAlign: 'center' }}>
+                              {balanceDue > 0 && !isDoneVisual ? (
+                                 <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                   {paymentState.map((row) => (
+                                     <select key={row.id} value={row.method} onChange={(e) => updateInlineRow(d.invoice_id, row.id, 'method', e.target.value, balanceDue)} className="saas-input" style={{ padding: '8px', cursor: 'pointer', height: '40px' }}>
+                                        <option value="Cash ៛">💵 Cash ៛</option>
+                                        <option value="Cash $">💵 Cash $</option>
+                                        <option value="QR ៛">📱 QR ៛</option>
+                                        <option value="QR $">📱 QR $</option>
+                                        <option value="Mom QR ៛">👩 Mom QR ៛</option>
+                                        <option value="Mom QR $">👩 Mom QR $</option>
+                                     </select>
+                                   ))}
+                                   <button onClick={() => addInlineSplit(d.invoice_id, balanceDue)} style={{ background: 'none', border: 'none', color: '#3b82f6', fontSize: '12px', cursor: 'pointer', textAlign: 'left', fontWeight: 'bold' }}>+ Add Split</button>
+                                 </div>
+                              ) : (
+                                <div style={{ color: '#475569', fontSize: '13px' }}>{d.payment_method}</div>
+                              )}
+                            </td>
+                          );
+                          if (col === 'pay') return (
+                            <td key={col} className="saas-td" style={{ ...tdStyle, textAlign: 'right' }}>
+                              {balanceDue > 0 && !isDoneVisual ? (
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                  {paymentState.map((row) => (
+                                    <div key={row.id} style={{ display: 'flex', alignItems: 'center', gap: '6px', height: '40px' }}>
+                                      <CurrencyInput placeholder={formatRiel(balanceDue)} value={row.amount} onChange={(v: any) => updateInlineRow(d.invoice_id, row.id, 'amount', v, balanceDue)} onEnter={() => handleInlineProcess(d, paymentState)} className="saas-input" style={{ padding: '8px', textAlign: 'right', height: '100%' }} />
+                                      {paymentState.length > 1 && (
+                                        <button onClick={() => removeInlineSplit(d.invoice_id, row.id, balanceDue)} style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', fontSize: '16px', padding: '0 4px', fontWeight: 'bold' }}>✕</button>
+                                      )}
+                                    </div>
+                                  ))}
                                 </div>
-                              ))}
-                            </div>
-                          ) : null}
-                        </td>
-
-                        <td className="saas-td" style={{ textAlign: 'center', verticalAlign: 'top' }}>
-                          <button 
-                            onClick={() => {
-                              if (isDoneVisual) {
-                                handleUndoProcess(d);
-                              } else {
-                                handleInlineProcess(d, paymentState);
-                              }
-                            }}
-                            disabled={isProcessing}
-                            className={`saas-btn ${isDoneVisual ? 'saas-btn-secondary' : 'saas-btn-primary'}`}
-                            style={{ width: '100%', height: '40px' }}
-                          >
-                            {isProcessing ? '...' : isDoneVisual ? 'Undo' : '✔ Done'}
-                          </button>
-                        </td>
-
+                              ) : null}
+                            </td>
+                          );
+                          if (col === 'action') return (
+                            <td key={col} className="saas-td" style={{ ...tdStyle, textAlign: 'center' }}>
+                              <button 
+                                onClick={() => { if (isDoneVisual) handleUndoProcess(d); else handleInlineProcess(d, paymentState); }}
+                                disabled={isProcessing}
+                                className={`saas-btn ${isDoneVisual ? 'saas-btn-secondary' : 'saas-btn-primary'}`}
+                                style={{ width: '100%', height: '40px' }}
+                              >
+                                {isProcessing ? '...' : isDoneVisual ? 'Undo' : '✔'}
+                              </button>
+                            </td>
+                          );
+                          return null;
+                        })}
                       </tr>
                     )
                   })
@@ -575,11 +752,7 @@ export default function DeliveryPage() {
           {/* LOAD MORE BUTTON */}
           {hasMore && (
             <div style={{ textAlign: 'center', padding: '20px', backgroundColor: '#f8fafc', borderTop: '1px solid #e2e8f0', flexShrink: 0 }}>
-              <button 
-                onClick={() => setLoadLimit(prev => prev + 100)}
-                className="saas-btn saas-btn-secondary"
-                style={{ borderRadius: '20px', boxShadow: '0 2px 4px rgba(0,0,0,0.02)' }}
-              >
+              <button onClick={() => setLoadLimit(prev => prev + 100)} className="saas-btn saas-btn-secondary" style={{ borderRadius: '20px', boxShadow: '0 2px 4px rgba(0,0,0,0.02)' }}>
                 ⬇️ Load More Completed Invoices
               </button>
             </div>
@@ -742,10 +915,29 @@ export default function DeliveryPage() {
     <div className="main-wrapper" style={{ display: 'flex', flexDirection: 'column', height: '100dvh', overflow: 'hidden', backgroundColor: '#f8fafc', boxSizing: 'border-box' }}>
       
       {/* 🟢 1. HEADER (FROZEN): Perfectly aligns with the absolute hamburger icon */}
-      <div className="header-container" style={{ flexShrink: 0 }}>
+      <div className="header-container" style={{ flexShrink: 0, position: 'relative' }}>
         <div className="header-left">
           <h1 className="saas-page-title" style={{ margin: 0 }}>🚚 Delivery & Credit Hub</h1>
         </div>
+        
+        {/* 🔥 NEW: COLUMN HIDE/SHOW MENU */}
+        {activeTab === 'delivery' && (
+          <div className="header-actions" style={{ marginLeft: 'auto', position: 'relative' }}>
+            <button onClick={() => setShowColMenu(!showColMenu)} className="saas-btn saas-btn-secondary" style={{ fontSize: '13px', padding: '6px 12px' }}>
+              ⚙️ Columns
+            </button>
+            {showColMenu && (
+              <div style={{ position: 'absolute', right: 0, top: 'calc(100% + 4px)', background: '#fff', border: '1px solid #e2e8f0', padding: '8px', zIndex: 999, borderRadius: '8px', width: '200px', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)' }}>
+                 {DEFAULT_DELIVERY_COLS.map(col => (
+                   <label key={col} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '6px', cursor: 'pointer', fontSize: '13px', color: '#334155', borderBottom: '1px solid #f8fafc' }}>
+                     <input type="checkbox" checked={!hiddenCols.includes(col)} onChange={() => toggleCol(col)} style={{ accentColor: '#3b82f6', width: '14px', height: '14px' }} />
+                     {COL_LABELS[col]}
+                   </label>
+                 ))}
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* 🟢 2. TABS (FROZEN): TouchAction pan-x allows side scroll but blocks Safari bounce */}
@@ -820,6 +1012,8 @@ export default function DeliveryPage() {
 
         /* 🔥 MOBILE LAYOUT FIXES */
         @media (max-width: 1023px) { 
+          .desktop-text { display: none !important; } /* Removes text like 'Pending' on mobile */
+
           .content-container {
             padding: 0 16px !important;
           }

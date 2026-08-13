@@ -24,6 +24,12 @@ interface MixHistory {
   bagUsed?: string       
   bagQty?: number        
   branch_id?: number 
+  // 🔥 NEW FIELDS FOR EDIT & VOID
+  targetProductId?: number;
+  targetBatchId?: number;
+  yieldKg?: number;
+  ingredients?: { id: number; qty: number; batchId?: number | null }[];
+  bagId?: number;
 }
 
 export default function RiceMixCalculator() {
@@ -36,6 +42,10 @@ export default function RiceMixCalculator() {
 
   const [products, setProducts] = useState<Product[]>([])
   const [activeBatches, setActiveBatches] = useState<Record<number, InventoryBatch[]>>({})
+  
+  // 🔥 NEW STATES FOR HISTORY EDITING
+  const [editingHistoryId, setEditingHistoryId] = useState<string | null>(null);
+  const [historyEdits, setHistoryEdits] = useState<Record<string, { yieldKg: number, mixedCogs: number }>>({});
   
   // Selection States
   const [rice1Id, setRice1Id] = useState<string>('')
@@ -264,9 +274,32 @@ export default function RiceMixCalculator() {
       return;
     }
 
+    // 🔥 1. MANDATORY BAG VALIDATION
+    if (!bagId || qtyToDeductBag <= 0) {
+      showToast('error', 'Missing Bag', 'Please select a packaging bag and enter the quantity.');
+      return;
+    }
+
     setIsProcessing(true);
 
     try {
+      // 🔥 2. DUPLICATE NAME PREVENTION
+      if (syncMode === 'new') {
+        const { data: existingProd } = await supabase
+          .from('products')
+          .select('id')
+          .ilike('name', newMixName.trim())
+          .eq('branch_id', activeBranchId)
+          .eq('is_archived', false)
+          .maybeSingle();
+          
+        if (existingProd) {
+          showToast('error', 'Duplicate Name', 'A product with this name already exists. Please use a different name or select "Add to Existing".');
+          setIsProcessing(false);
+          return;
+        }
+      }
+
       // 🟢 HELPER: DEDUCT FROM MASTER STOCK AND FIFO BATCHES
       const processDeduction = async (prodId: number, qty: number, specificBatchId: number | null) => {
         if (qty <= 0) return;
@@ -309,7 +342,7 @@ export default function RiceMixCalculator() {
       if (rice2 && qtyToDeduct2 > 0) await processDeduction(rice2.id, qtyToDeduct2, rice2BatchId);
       if (showThirdRice && rice3 && qtyToDeduct3 > 0) await processDeduction(rice3.id, qtyToDeduct3, rice3BatchId);
 
-      // 2. EXECUTE BAG DEDUCTION (Bags always default to auto-FIFO)
+      // 2. EXECUTE BAG DEDUCTION
       if (bagProd && qtyToDeductBag > 0) await processDeduction(bagProd.id, qtyToDeductBag, null);
 
       let finalTargetId = targetProductId;
@@ -319,7 +352,7 @@ export default function RiceMixCalculator() {
       if (syncMode === 'new') {
         const payload = {
           name: newMixName,
-          price: Number(newMixPrice),
+          price: Number(newMixPrice) || 0,
           cost_price: Math.round(finalCogs),
           weight: newMixType === 'wholesale' ? 50 : newMixType === 'half' ? 25 : 1, 
           stock: finalYield,
@@ -338,17 +371,25 @@ export default function RiceMixCalculator() {
         finalTargetName = targetProd.name; 
       }
 
-      // 4. CREATE NEW BATCH RECORD WITH RECIPE NOTE
+      // 4. CREATE NEW BATCH RECORD (🔥 Now we capture the returned ID)
       const recipeString = `Recipe: ${qtyToDeduct1}x ${rice1.name} + ${qtyToDeduct2}x ${rice2.name}${showThirdRice && rice3 ? ` + ${qtyToDeduct3}x ${rice3.name}` : ''}`;
 
-      await supabase.from('inventory_batches').insert([{
+      const { data: generatedBatch, error: batchErr } = await supabase.from('inventory_batches').insert([{
         product_id: Number(finalTargetId),
         product_name: finalTargetName, 
         cost_price: Math.round(finalCogs),
         remaining_qty: finalYield,
         branch_id: activeBranchId,
         notes: recipeString 
-      }]);
+      }]).select().single();
+      
+      if (batchErr) throw batchErr;
+
+      // 🔥 COLLECT INGREDIENT TRACKING FOR POTENTIAL VOID
+      const usedIngredients: {id: number, qty: number, batchId?: number | null}[] = [];
+      if (rice1 && qtyToDeduct1 > 0) usedIngredients.push({ id: rice1.id, qty: qtyToDeduct1, batchId: rice1BatchId });
+      if (rice2 && qtyToDeduct2 > 0) usedIngredients.push({ id: rice2.id, qty: qtyToDeduct2, batchId: rice2BatchId });
+      if (showThirdRice && rice3 && qtyToDeduct3 > 0) usedIngredients.push({ id: rice3.id, qty: qtyToDeduct3, batchId: rice3BatchId });
 
       // 5. UPDATE INTERNAL APP HISTORY
       const yieldStr = `${finalYield.toLocaleString('en-US', { maximumFractionDigits: 2 })} ${outputUnit}`;
@@ -365,7 +406,13 @@ export default function RiceMixCalculator() {
         yieldStr: yieldStr,
         bagUsed: bagProd ? bagProd.name : undefined,
         bagQty: bagProd ? qtyToDeductBag : undefined,
-        branch_id: activeBranchId
+        branch_id: activeBranchId,
+        // 🔥 STORE TRACKING IDs
+        targetProductId: Number(finalTargetId),
+        targetBatchId: generatedBatch.id,
+        yieldKg: finalYield,
+        ingredients: usedIngredients,
+        bagId: bagProd ? bagProd.id : undefined,
       }
       
       const updatedGlobalHistory = [newRecord, ...globalHistory].slice(0, 100); 
@@ -385,6 +432,119 @@ export default function RiceMixCalculator() {
       setIsProcessing(false);
     }
   }
+
+// 🔥 NEW: VOID MIX HISTORY
+  const handleVoidMix = async (historyId: string) => {
+    const record = globalHistory.find(h => h.id === historyId);
+    if (!record) return;
+    if (!record.targetProductId || !record.targetBatchId) {
+      showToast('error', 'Legacy Record', 'Cannot automatically void this older record.');
+      return;
+    }
+    if (!confirm('🚨 Are you sure you want to VOID this mix?\n\nThis will instantly:\n1. Delete the generated batch\n2. Deduct the output stock\n3. Restore all original ingredients back to inventory.')) return;
+    
+    setIsProcessing(true);
+    try {
+      // 1. Reverse Target Product & Batch
+      await supabase.rpc('adjust_product_stock', { p_product_id: record.targetProductId, p_quantity: -(record.yieldKg || 0) });
+      await supabase.from('inventory_batches').delete().eq('id', record.targetBatchId);
+
+      // 2. Restore Ingredients
+      if (record.ingredients) {
+        for (const ing of record.ingredients) {
+          await supabase.rpc('adjust_product_stock', { p_product_id: ing.id, p_quantity: ing.qty });
+          if (ing.batchId) {
+            await supabase.rpc('adjust_batch_stock', { p_batch_id: ing.batchId, p_quantity: ing.qty });
+          } else {
+             // If Auto-FIFO was used during mix, we just inject a new batch back into the system to restore the raw Kg
+             const prodData = products.find(p => p.id === ing.id);
+             if (prodData) {
+               await supabase.from('inventory_batches').insert([{
+                 product_id: ing.id,
+                 product_name: prodData.name,
+                 cost_price: prodData.cost_price,
+                 remaining_qty: ing.qty,
+                 branch_id: activeBranchId,
+                 notes: `Restored from Voided Mix`
+               }]);
+             }
+          }
+        }
+      }
+      
+      // 3. Restore Bags
+      if (record.bagId && record.bagQty) {
+        await supabase.rpc('adjust_product_stock', { p_product_id: record.bagId, p_quantity: record.bagQty });
+      }
+
+      // 4. Remove from history JSON
+      const updatedHistory = globalHistory.filter(h => h.id !== historyId);
+      setGlobalHistory(updatedHistory);
+      setHistory(updatedHistory.filter(h => h.branch_id === activeBranchId || !h.branch_id));
+      await supabase.from('app_settings').upsert({ setting_key: 'calculator_history', setting_value: updatedHistory }, { onConflict: 'setting_key' });
+
+      showToast('success', 'Mix Voided', 'Inventory has been fully restored.');
+      fetchProducts();
+      fetchBatches();
+    } catch(err:any) {
+       showToast('error', 'Void Failed', err.message);
+    } finally {
+       setIsProcessing(false);
+    }
+  };
+
+  // 🔥 NEW: SAVE HISTORY EDIT (Updates Batch + History JSON)
+  const handleSaveHistoryEdit = async (historyId: string) => {
+    const edits = historyEdits[historyId];
+    const record = globalHistory.find(h => h.id === historyId);
+    if (!edits || !record || !record.targetProductId || !record.targetBatchId) {
+       setEditingHistoryId(null);
+       return;
+    }
+    setIsProcessing(true);
+    try {
+       const yieldDiff = edits.yieldKg - (record.yieldKg || 0);
+       
+       // Update Target Product Stock Master
+       if (yieldDiff !== 0) {
+         await supabase.rpc('adjust_product_stock', { p_product_id: record.targetProductId, p_quantity: yieldDiff });
+       }
+
+       // Update Batch Record
+       const batchPayload: any = {};
+       if (yieldDiff !== 0) {
+           const { data: currentBatch } = await supabase.from('inventory_batches').select('remaining_qty').eq('id', record.targetBatchId).single();
+           if (currentBatch) {
+               batchPayload.remaining_qty = Math.max(0, Number(currentBatch.remaining_qty) + yieldDiff);
+           }
+       }
+       batchPayload.cost_price = edits.mixedCogs;
+
+       await supabase.from('inventory_batches').update(batchPayload).eq('id', record.targetBatchId);
+
+       // Update local history JSON
+       const updatedHistory = globalHistory.map(h => {
+          if (h.id === historyId) {
+             const newUnit = h.yieldStr.replace(/[0-9.,]+/, '').trim(); 
+             return { ...h, mixedCogs: edits.mixedCogs, yieldKg: edits.yieldKg, yieldStr: `${edits.yieldKg.toLocaleString('en-US', { maximumFractionDigits: 2 })} ${newUnit}` };
+          }
+          return h;
+       });
+
+       setGlobalHistory(updatedHistory);
+       setHistory(updatedHistory.filter(h => h.branch_id === activeBranchId || !h.branch_id));
+       await supabase.from('app_settings').upsert({ setting_key: 'calculator_history', setting_value: updatedHistory }, { onConflict: 'setting_key' });
+
+       showToast('success', 'History Updated', 'The mix record and database have been updated.');
+       setEditingHistoryId(null);
+       fetchProducts();
+       fetchBatches();
+    } catch(err:any) {
+       showToast('error', 'Update Failed', err.message);
+    } finally {
+       setIsProcessing(false);
+    }
+  };
 
   // 🟢 REUSABLE DROPDOWN COMPONENT
   const renderDropdownMenu = (target: string) => {
@@ -713,7 +873,7 @@ export default function RiceMixCalculator() {
                 {/* 🔥 BAG DEDUCTION SELECTOR */}
                 <div style={{ borderTop: '1px dashed #cbd5e1', paddingTop: '16px', marginBottom: '16px', position: 'relative' }}>
                   <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '6px', color: '#b45309' }}>
-                    Optional: Packaging Bag Used (Cost will be absorbed into the new Mix COGS)
+                    Packaging Bag Used (Cost will be absorbed into the new Mix COGS)
                   </label>
                   <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap' }}>
                     <div style={{ flex: 2, minWidth: '200px', position: 'relative' }}>
@@ -785,12 +945,13 @@ export default function RiceMixCalculator() {
                     <th className="saas-th">Final Yield</th>
                     <th className="saas-th">Bag Used</th>
                     <th className="saas-th">Mixed COGS</th>
+                    <th className="saas-th" style={{ textAlign: 'center' }}>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {history.length === 0 ? (
                     <tr>
-                      <td colSpan={5} style={{ padding: 0 }}>
+                      <td colSpan={6} style={{ padding: 0 }}>
                         <EmptyState 
                           icon="🕒" 
                           title="No history yet" 
@@ -799,23 +960,57 @@ export default function RiceMixCalculator() {
                       </td>
                     </tr>
                   ) : (
-                    history.map(h => (
-                      <tr key={h.id} className="saas-tr">
-                        <td className="saas-td" style={{ color: '#64748b', fontSize: '13px' }}>{h.time}</td>
-                        <td className="saas-td" style={{ color: '#334155', fontSize: '14px' }}>
-                          ({h.rice1Ratio} × <span style={{ fontWeight: 'bold', color: '#1e293b' }}>{h.rice1Name}</span>) 
-                          + ({h.rice2Ratio} × <span style={{ fontWeight: 'bold', color: '#1e293b' }}>{h.rice2Name}</span>)
-                          {h.rice3Name && h.rice3Ratio ? (
-                            <> + ({h.rice3Ratio} × <span style={{ fontWeight: 'bold', color: '#1e293b' }}>{h.rice3Name}</span>)</>
-                          ) : null}
-                        </td>
-                        <td className="saas-td" style={{ color: '#10b981', fontWeight: 'bold', fontSize: '13px' }}>{h.yieldStr || '-'}</td>
-                        <td className="saas-td" style={{ color: '#b45309', fontSize: '13px' }}>
-                          {h.bagUsed ? `${h.bagQty}x ${h.bagUsed}` : '-'}
-                        </td>
-                        <td className="saas-td" style={{ color: '#b58a3d', fontWeight: 'bold', fontSize: '14px' }}>{formatRiel(h.mixedCogs)}</td>
-                      </tr>
-                    ))
+                    history.map(h => {
+                      const isEditing = editingHistoryId === h.id;
+                      const editData = historyEdits[h.id] || { yieldKg: h.yieldKg || 0, mixedCogs: h.mixedCogs || 0 };
+                      
+                      return (
+                        <tr key={h.id} className="saas-tr" style={{ background: isEditing ? '#fefcf3' : 'transparent' }}>
+                          <td className="saas-td" style={{ color: '#64748b', fontSize: '13px' }}>{h.time}</td>
+                          <td className="saas-td" style={{ color: '#334155', fontSize: '14px' }}>
+                            ({h.rice1Ratio} × <span style={{ fontWeight: 'bold', color: '#1e293b' }}>{h.rice1Name}</span>) 
+                            + ({h.rice2Ratio} × <span style={{ fontWeight: 'bold', color: '#1e293b' }}>{h.rice2Name}</span>)
+                            {h.rice3Name && h.rice3Ratio ? (
+                              <> + ({h.rice3Ratio} × <span style={{ fontWeight: 'bold', color: '#1e293b' }}>{h.rice3Name}</span>)</>
+                            ) : null}
+                          </td>
+                          <td className="saas-td" style={{ color: '#10b981', fontWeight: 'bold', fontSize: '13px' }}>
+                            {isEditing ? (
+                              <CurrencyInput value={editData.yieldKg} onChange={(v:any) => setHistoryEdits({...historyEdits, [h.id]: {...editData, yieldKg: v}})} className="saas-input no-spinners" style={{ width: '80px', padding: '4px 8px', fontSize: '13px' }} />
+                            ) : (
+                              h.yieldStr || '-'
+                            )}
+                          </td>
+                          <td className="saas-td" style={{ color: '#b45309', fontSize: '13px' }}>
+                            {h.bagUsed ? `${h.bagQty}x ${h.bagUsed}` : '-'}
+                          </td>
+                          <td className="saas-td" style={{ color: '#b58a3d', fontWeight: 'bold', fontSize: '14px' }}>
+                            {isEditing ? (
+                              <CurrencyInput value={editData.mixedCogs} onChange={(v:any) => setHistoryEdits({...historyEdits, [h.id]: {...editData, mixedCogs: v}})} className="saas-input no-spinners" style={{ width: '100px', padding: '4px 8px', fontSize: '13px' }} />
+                            ) : (
+                              formatRiel(h.mixedCogs)
+                            )}
+                          </td>
+                          <td className="saas-td" style={{ textAlign: 'center' }}>
+                            {h.targetProductId && h.targetBatchId ? (
+                              isEditing ? (
+                                <div style={{ display: 'flex', gap: '6px', justifyContent: 'center' }}>
+                                  <button onClick={() => handleSaveHistoryEdit(h.id)} disabled={isProcessing} className="saas-btn saas-btn-primary" style={{ padding: '4px 8px', fontSize: '11px' }}>Save</button>
+                                  <button onClick={() => setEditingHistoryId(null)} className="saas-btn saas-btn-secondary" style={{ padding: '4px 8px', fontSize: '11px' }}>Cancel</button>
+                                </div>
+                              ) : (
+                                <div style={{ display: 'flex', gap: '6px', justifyContent: 'center' }}>
+                                  <button onClick={() => { setEditingHistoryId(h.id); setHistoryEdits({ [h.id]: { yieldKg: h.yieldKg || parseFloat(h.yieldStr), mixedCogs: h.mixedCogs }}); }} className="saas-btn" style={{ padding: '4px 8px', background: '#e0f2fe', color: '#0284c7', border: '1px solid #bae6fd', fontSize: '11px' }}>✏️ Edit</button>
+                                  <button onClick={() => handleVoidMix(h.id)} disabled={isProcessing} className="saas-btn saas-btn-danger" style={{ padding: '4px 8px', fontSize: '11px' }}>❌ Void</button>
+                                </div>
+                              )
+                            ) : (
+                              <span style={{ fontSize: '11px', color: '#94a3b8' }}>Legacy Record</span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })
                   )}
                 </tbody>
               </table>
