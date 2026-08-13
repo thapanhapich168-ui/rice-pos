@@ -566,9 +566,10 @@ export default function DeliveryPage() {
     if (activeTab === 'delivery') {
       return (
         <div className="saas-table-wrapper" style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, marginBottom: 0, marginTop: isMobile ? '16px' : '0' }}>
-          {/* 🔥 FIXED 'Figma Scroll': overflowY is now hidden so it only scrolls left/right! */}
-          <div className="saas-table-responsive hide-scrollbar" style={{ flex: 1, overflowX: 'auto', overflowY: 'hidden' }}>
-            <table className="saas-table" style={{ minWidth: '100%', tableLayout: 'fixed', width: 'max-content' }}>
+          {/* 🔥 RESTORED Vertical Scroll */}
+          <div className="saas-table-responsive hide-scrollbar" style={{ flex: 1, overflow: 'auto' }}>
+            {/* 🔥 ADDED borderCollapse: 'separate' - REQUIRED for sticky columns to work! */}
+            <table className="saas-table" style={{ minWidth: '100%', tableLayout: 'fixed', width: 'max-content', borderCollapse: 'separate', borderSpacing: 0 }}>
               <thead>
                 <tr>
                   {colOrder.filter(c => !hiddenCols.includes(c)).map((col, index) => {
@@ -656,10 +657,10 @@ export default function DeliveryPage() {
                         {colOrder.filter(c => !hiddenCols.includes(c)).map((col, index) => {
                           const isSticky = index === 0; // 🔥 UNCONDITIONAL FREEZE
                           const tdStyle: any = { 
-                            verticalAlign: 'middle', // 🔥 CRITICAL FIX: Changed from 'top' to 'middle' to center all columns
-                            position: isSticky ? 'sticky' : 'relative', // 🔥 Force relative so zIndex works for non-sticky columns
+                            verticalAlign: 'middle',
+                            position: isSticky ? 'sticky' : undefined, // 🔥 Removed 'relative' to stop overlap bugs
                             left: isSticky ? 0 : undefined,
-                            zIndex: isSticky ? 20 : 1, // 🔥 Sticky column sits at zIndex 20, sliding over the others
+                            zIndex: isSticky ? 20 : undefined, // 🔥 Removed zIndex 1 to stop overlap bugs
                             backgroundColor: isSticky ? '#ffffff' : 'inherit',
                             boxShadow: isSticky ? '2px 0 5px -2px rgba(0,0,0,0.1)' : 'none',
                             borderRight: isSticky ? '1px solid #e2e8f0' : 'none', // 🔥 Visual barrier for the freeze
@@ -787,8 +788,8 @@ export default function DeliveryPage() {
 
     return (
       <div className="saas-table-wrapper" style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, marginBottom: 0, marginTop: isMobile ? '16px' : '0' }}>
-        {/* 🔥 FIXED 'Figma Scroll' here as well */}
-        <div className="saas-table-responsive hide-scrollbar" style={{ flex: 1, overflowX: 'auto', overflowY: 'hidden' }}>
+        {/* 🔥 RESTORED Vertical Scroll */}
+        <div className="saas-table-responsive hide-scrollbar" style={{ flex: 1, overflow: 'auto' }}>
           <table className="saas-table" style={{ minWidth: '950px', borderCollapse: 'separate', borderSpacing: 0 }}>
             <thead style={{ background: '#fff1f2' }}>
               <tr>
@@ -845,8 +846,8 @@ export default function DeliveryPage() {
                             <div style={{ fontWeight: 'bold', color: '#334155' }}>{new Date(debtor.oldestDate).toLocaleDateString('en-GB')}</div>
                             <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '4px', textTransform: 'uppercase', fontWeight: 'bold' }}>Oldest Date</div>
                           </td>
-                          {/* 🔥 Subsequent cells sit underneath */}
-                          <td className="saas-td" style={{ fontWeight: 'bold', verticalAlign: 'top', position: 'relative', zIndex: 1 }}>
+                          {/* 🔥 Removed relative positioning so it properly stays under the sticky cell */}
+                          <td className="saas-td" style={{ fontWeight: 'bold', verticalAlign: 'top' }}>
                             {debtor.owner}
                           </td>
 
