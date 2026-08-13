@@ -32,9 +32,15 @@ export default function DeliveryPage() {
 
   const [isProcessing, setIsProcessing] = useState(false);
 
-  // --- 100k LOAD PROBLEM FIX (PAGINATION STATES) ---
+ // --- 100k LOAD PROBLEM FIX (PAGINATION STATES) ---
   const [loadLimit, setLoadLimit] = useState(100);
   const [hasMore, setHasMore] = useState(true);
+
+  // 🔥 MOBILE BOTTOM SHEET & ACCORDION STATES
+  const [selectedMobileDelivery, setSelectedMobileDelivery] = useState<any | null>(null);
+  const [mobileFilter, setMobileFilter] = useState<'All' | 'Pending' | 'Delivered'>('All'); // 🔥 MOBILE PREFILTER
+  const [creditFilter, setCreditFilter] = useState<'Pich/Both' | 'Jing' | 'Mom' | 'All'>('Pich/Both'); // 🔥 Default to Pich/Both
+  const [expandedCredit, setExpandedCredit] = useState<string | null>(null); // 🔥 Mobile Credit Expansion Memory
 
  // 🔥 TABLE DYNAMICS (DRAG, DROP, HIDE, SORT, RESIZE)
   const DEFAULT_DELIVERY_COLS = ['customer', 'date', 'items', 'total', 'status', 'method', 'pay', 'action'];
@@ -229,10 +235,17 @@ export default function DeliveryPage() {
     let totalRielEq = 0;
     let methodStrings: string[] = [];
     const paymentRecordsToInsert: any[] = [];
-    const validSpender = ['Pich', 'Jing'].includes(d.owner) ? d.owner : 'Both';
+    
+    // 🔥 FIX: Normalize owner to match Dashboard perfectly (case-insensitive)
+    let rawOwner = (d.owner || '').trim();
+    let normalizedOwner = rawOwner ? rawOwner.charAt(0).toUpperCase() + rawOwner.slice(1).toLowerCase() : 'Unassigned';
+    const validSpender = ['Pich', 'Jing'].includes(normalizedOwner) ? normalizedOwner : 'Both';
 
     for (const r of rows) {
-      const amt = Number(r.amount) || 0;
+      // 🔥 CRITICAL FIX: Strip commas before parsing so CurrencyInput values don't turn into NaN
+      const cleanAmount = String(r.amount).replace(/,/g, '');
+      const amt = Number(cleanAmount) || 0;
+      
       if (amt <= 0) continue;
       
       const isUsd = r.method.includes('$');
@@ -247,12 +260,16 @@ export default function DeliveryPage() {
         amount_paid_usd: isUsd ? amt : 0,
         payment_method: r.method,
         recorded_by: validSpender,
+        payment_date: new Date().toISOString(), // 🔥 FIX: Ensures Dashboard time-filters pick this up!
         remarks: `Inline Delivery Settlement`,
-        branch_id: activeBranchId // 🔥 STAMPED
+        branch_id: d.branch_id || activeBranchId // 🔥 FIX: Bind strictly to original branch
       });
     }
 
-    if (totalRielEq <= 0) return;
+    if (totalRielEq <= 0) {
+       showToast('error', 'Invalid Amount', 'Please enter a valid payment amount.');
+       return;
+    }
 
     setIsProcessing(true);
 
@@ -291,12 +308,13 @@ export default function DeliveryPage() {
 
       // 🔥 TELEGRAM NOTIFICATION INTEGRATION
       try {
-        let message = `📦 *Delivery Payment Update*\n\n`;
+        let message = `📦 *Delivery Payment Update*\n`;
+        message += `📅 *Date:* ${new Date().toLocaleDateString('en-GB')}\n`;
         message += `👤 *Customer name:* ${d.customer_name}\n`;
         message += `🚚 *Delivery Status:* Delivered\n`;
         message += `💵 *Paid amount:* ${formatRiel(totalRielEq)}\n`;
         if (newBalance > 0) {
-          message += `⏳ *Unpaid amount:* ${formatRiel(newBalance)}\n`;
+          message += `⏳ *Unpaid amount:* ${formatRiel(newBalance)}\n`; // 🔥 Unified emoji
         }
 
         fetch(`https://api.telegram.org/bot${TELEGRAM_CONFIG.botToken}/sendMessage`, {
@@ -378,7 +396,10 @@ export default function DeliveryPage() {
     let availableFunds: { method: string, isUsd: boolean, faceRemaining: number, eqRemaining: number }[] = [];
 
     for (const r of rows) {
-      const amt = Number(r.amount) || 0;
+      // 🔥 CRITICAL FIX: Strip commas before parsing so CurrencyInput values don't turn into NaN
+      const cleanAmount = String(r.amount).replace(/,/g, '');
+      const amt = Number(cleanAmount) || 0;
+      
       if (amt <= 0) continue;
       
       const isUsd = r.method.includes('$');
@@ -395,7 +416,10 @@ export default function DeliveryPage() {
       });
     }
 
-    if (totalRielEq <= 0) return;
+    if (totalRielEq <= 0) {
+       showToast('error', 'Invalid Amount', 'Please enter a valid payment amount.');
+       return;
+    }
 
     setIsProcessing(true);
 
@@ -425,8 +449,9 @@ export default function DeliveryPage() {
                 amount_paid_usd: fund.isUsd ? applyFace : 0,
                 payment_method: fund.method,
                 recorded_by: validSpender,
+                payment_date: new Date().toISOString(), // 🔥 FIX: Ensures Dashboard time-filters pick this up!
                 remarks: `Bulk Credit Settlement`,
-                branch_id: activeBranchId // 🔥 STAMPED
+                branch_id: inv.branch_id || activeBranchId // 🔥 FIX: Bind strictly to original branch
             });
 
             fund.eqRemaining -= applyEq;
@@ -553,7 +578,7 @@ export default function DeliveryPage() {
     return acc;
   }, {} as Record<string, any[]>);
 
-  const ownerOrder = ['Pich', 'Jing', 'Both', 'Mom', 'Unassigned'];
+  const ownerOrder = ['Pich', 'Both', 'Jing', 'Mom', 'Unassigned']; // 🔥 Rearranged Default Order
   const activeOwners = Object.keys(groupedDebtors).sort((a, b) => {
     let idxA = ownerOrder.indexOf(a);
     let idxB = ownerOrder.indexOf(b);
@@ -563,17 +588,140 @@ export default function DeliveryPage() {
   });
 
   function sidebarContent() {
+    // 🔥 HELPER: True Payment Status Visuals (Paid, Unpaid, Debt)
+    const getPaymentStatusVisual = (inv: any) => {
+      const bal = Number(inv.balance_due) || 0;
+      const tot = Number(inv.total_sales) || 0;
+      if (bal <= 0) return { label: '💳 Paid', color: '#15803d', bg: '#dcfce7' };
+      if (bal >= tot) return { label: '⏳ Unpaid', color: '#b91c1c', bg: '#fee2e2' };
+      return { label: '💸 Debt', color: '#d97706', bg: '#fef3c7' };
+    };
+
     if (activeTab === 'delivery') {
+      
+      // 🔥 INDUSTRY STANDARD MOBILE CARD LAYOUT
+      if (isMobile) {
+        const filteredMobileDeliveries = sortedDeliveries.filter((d: any) => {
+          if (mobileFilter === 'All') return true;
+          if (mobileFilter === 'Pending') return d.delivery_status === 'Pending';
+          return d.delivery_status === 'Delivered';
+        });
+
+        let lastDateKey = '';
+
+        return (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginTop: '16px', paddingBottom: '40px' }}>
+            
+            {/* MOBILE PREFILTER UI */}
+            <div style={{ display: 'flex', gap: '8px', marginBottom: '8px', overflowX: 'auto', paddingBottom: '4px' }} className="hide-scrollbar">
+              {['All', 'Pending', 'Delivered'].map(status => (
+                <button 
+                  key={status}
+                  onClick={() => setMobileFilter(status as any)}
+                  style={{
+                    padding: '8px 16px', borderRadius: '20px', fontSize: '13px', fontWeight: 'bold', border: 'none', cursor: 'pointer', whiteSpace: 'nowrap',
+                    background: mobileFilter === status ? '#3b82f6' : '#e2e8f0',
+                    color: mobileFilter === status ? '#ffffff' : '#64748b',
+                    boxShadow: mobileFilter === status ? '0 2px 6px rgba(59, 130, 246, 0.3)' : 'none',
+                    transition: 'all 0.2s'
+                  }}
+                >
+                  {status === 'All' ? 'All Deliveries' : status === 'Pending' ? '🟡 Pending' : '🟢 Delivered'}
+                </button>
+              ))}
+            </div>
+
+            {loading && filteredMobileDeliveries.length === 0 ? (
+              Array.from({ length: 5 }).map((_, i) => (
+                <div key={i} style={{ background: '#fff', borderRadius: '16px', padding: '16px', border: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', opacity: 0.7 }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', flex: 1 }}>
+                    <div style={{ background: '#e2e8f0', height: '18px', width: '60%', borderRadius: '4px' }} />
+                    <div style={{ background: '#e2e8f0', height: '14px', width: '40%', borderRadius: '4px' }} />
+                  </div>
+                  <div style={{ background: '#e2e8f0', height: '24px', width: '20%', borderRadius: '4px' }} />
+                </div>
+              ))
+            ) : filteredMobileDeliveries.length === 0 ? (
+              <EmptyState icon="🚚" title="No matching deliveries" message="No wholesale deliveries match this filter!" />
+            ) : (
+              filteredMobileDeliveries.map((d: any) => {
+                const isDoneVisual = isDeliveredVisual(d);
+                const totalSale = Number(d.total_sales) || 0;
+                const statusVis = getPaymentStatusVisual(d);
+                
+                // DATE HEADER CATEGORIZATION
+                const dateObj = new Date(d.created_at);
+                const today = new Date();
+                const yesterday = new Date();
+                yesterday.setDate(yesterday.getDate() - 1);
+                
+                let dateKey = dateObj.toLocaleDateString('en-US', { month: 'long', day: 'numeric' });
+                if (dateObj.toDateString() === today.toDateString()) dateKey = 'Today';
+                else if (dateObj.toDateString() === yesterday.toDateString()) dateKey = 'Yesterday';
+
+                const showHeader = dateKey !== lastDateKey;
+                lastDateKey = dateKey;
+
+                return (
+                  <div key={d.invoice_id} style={{ display: 'flex', flexDirection: 'column' }}>
+                    {showHeader && (
+                      <div style={{ fontSize: '15px', fontWeight: '800', color: '#64748b', marginTop: '12px', marginBottom: '4px', paddingLeft: '4px' }}>
+                        {dateKey}
+                      </div>
+                    )}
+                    <div 
+                      onClick={() => setSelectedMobileDelivery(d)}
+                      style={{ 
+                        background: '#fff', borderRadius: '16px', padding: '16px', 
+                        boxShadow: '0 2px 8px rgba(0,0,0,0.05)', border: '1px solid #e2e8f0', 
+                        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                        opacity: isDoneVisual ? 0.6 : 1, transition: 'all 0.2s', cursor: 'pointer'
+                      }}
+                    >
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', flex: 1 }}>
+                        <span style={{ fontWeight: 'bold', color: '#1e293b', fontSize: '16px' }}>{d.customer_name}</span>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                          <div style={{
+                              padding: '4px 10px', borderRadius: '12px', fontSize: '11px', fontWeight: 'bold',
+                              background: d.delivery_status === 'Pending' ? '#fef3c7' : '#dcfce7',
+                              color: d.delivery_status === 'Pending' ? '#d97706' : '#15803d',
+                          }}>
+                            {d.delivery_status === 'Pending' ? '🟡 Pending' : '🟢 Delivered'}
+                          </div>
+                          {/* 🔥 True Payment Status Badge (Paid, Unpaid, Debt) */}
+                          <div style={{ padding: '4px 10px', borderRadius: '12px', fontSize: '11px', fontWeight: 'bold', background: statusVis.bg, color: statusVis.color }}>
+                            {statusVis.label}
+                          </div>
+                        </div>
+                      </div>
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px' }}>
+                        <span style={{ fontWeight: 'bold', color: '#0f172a', fontSize: '16px' }}>{formatRiel(totalSale)}</span>
+                        <span style={{ color: '#3b82f6', fontSize: '12px', fontWeight: 'bold' }}>Pay ➔</span>
+                      </div>
+                    </div>
+                  </div>
+                )
+              })
+            )}
+            
+            {hasMore && (
+              <button onClick={() => setLoadLimit(prev => prev + 100)} className="saas-btn saas-btn-secondary" style={{ borderRadius: '20px', margin: '10px auto', display: 'block', width: '100%' }}>
+                ⬇️ Load More
+              </button>
+            )}
+          </div>
+        );
+      }
+
+      // 🔥 ORIGINAL DESKTOP TABLE VIEW
       return (
-        <div className="saas-table-wrapper" style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, marginBottom: 0, marginTop: isMobile ? '16px' : '0' }}>
-          {/* 🔥 RESTORED Vertical Scroll */}
+        <div className="saas-table-wrapper" style={{ display: 'flex', flexDirection: 'column', marginTop: isMobile ? '16px' : '0' }}>
           <div className="saas-table-responsive hide-scrollbar" style={{ flex: 1, overflow: 'auto' }}>
-            {/* 🔥 ADDED borderCollapse: 'separate' - REQUIRED for sticky columns to work! */}
             <table className="saas-table" style={{ minWidth: '100%', tableLayout: 'fixed', width: 'max-content', borderCollapse: 'separate', borderSpacing: 0 }}>
               <thead>
                 <tr>
                   {colOrder.filter(c => !hiddenCols.includes(c)).map((col, index) => {
-                    const isSticky = index === 0; // 🔥 UNCONDITIONAL FREEZE (Works on all screen sizes)
+                    const isSticky = index === 0;
                     return (
                       <th 
                         key={col} 
@@ -581,14 +729,13 @@ export default function DeliveryPage() {
                         style={{ 
                           position: 'sticky', 
                           top: 0, 
-                          left: isSticky ? 0 : undefined, // 🔥 Sticks to the left edge
-                          zIndex: isSticky ? 40 : 10, // 🔥 CRITICAL FIX: Higher z-index prevents subsequent headers from overlapping
+                          left: isSticky ? 0 : undefined,
+                          zIndex: isSticky ? 40 : 10,
                           backgroundColor: '#f8fafc',
-                          // 🔥 Restored the bottom inset shadow to make the background pop
                           boxShadow: isSticky ? '2px 0 5px -2px rgba(0,0,0,0.1), inset 0 -2px 0 0 #cbd5e1' : 'inset 0 -2px 0 0 #cbd5e1',
                           borderRight: '1px solid #cbd5e1',
                           borderLeft: index === 0 ? '1px solid #cbd5e1' : 'none',
-                          borderTop: '1px solid #cbd5e1', // 🔥 Restored Top Border
+                          borderTop: '1px solid #cbd5e1',
                           padding: 0,
                           width: colWidths[col] || DEFAULT_WIDTHS[col] || 150,
                           minWidth: colWidths[col] || DEFAULT_WIDTHS[col] || 150,
@@ -619,7 +766,6 @@ export default function DeliveryPage() {
                               {sortConfig?.key === col ? (sortConfig.direction === 'asc' ? '↑' : '↓') : '↕'}
                             </span>
                           </div>
-                          
                           <div 
                             onMouseDown={(e) => { e.stopPropagation(); handleResizeStart(e, col); }} 
                             onTouchStart={(e) => { e.stopPropagation(); handleResizeStart(e, col); }} 
@@ -655,15 +801,15 @@ export default function DeliveryPage() {
                     return (
                       <tr key={d.invoice_id} className="saas-tr" style={{ opacity: isDoneVisual ? 0.6 : 1, transition: 'all 0.3s ease' }}>
                         {colOrder.filter(c => !hiddenCols.includes(c)).map((col, index) => {
-                          const isSticky = index === 0; // 🔥 UNCONDITIONAL FREEZE
+                          const isSticky = index === 0;
                           const tdStyle: any = { 
-                            verticalAlign: 'middle',
-                            position: isSticky ? 'sticky' : undefined, // 🔥 Removed 'relative' to stop overlap bugs
+                            verticalAlign: 'middle', 
+                            position: isSticky ? 'sticky' : undefined,
                             left: isSticky ? 0 : undefined,
-                            zIndex: isSticky ? 20 : undefined, // 🔥 Removed zIndex 1 to stop overlap bugs
+                            zIndex: isSticky ? 20 : undefined,
                             backgroundColor: isSticky ? '#ffffff' : 'inherit',
                             boxShadow: isSticky ? '2px 0 5px -2px rgba(0,0,0,0.1)' : 'none',
-                            borderRight: isSticky ? '1px solid #e2e8f0' : 'none', // 🔥 Visual barrier for the freeze
+                            borderRight: isSticky ? '1px solid #e2e8f0' : 'none',
                             overflow: 'hidden',
                             wordWrap: 'break-word',
                             whiteSpace: 'normal'
@@ -702,7 +848,7 @@ export default function DeliveryPage() {
                             <td key={col} className="saas-td" style={{ ...tdStyle, textAlign: 'center' }}>
                               {balanceDue > 0 && !isDoneVisual ? (
                                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                                   {paymentState.map((row, index) => (
+                                   {paymentState.map((row, idx) => (
                                      <div key={row.id} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                                        <select 
                                           value={row.method} 
@@ -717,17 +863,10 @@ export default function DeliveryPage() {
                                           <option value="Mom QR ៛">👩 Mom QR ៛</option>
                                           <option value="Mom QR $">👩 Mom QR $</option>
                                        </select>
-                                       {/* 🔥 Renders a + button next to the dropdown */}
-                                       {index === paymentState.length - 1 ? (
-                                         <button 
-                                            onClick={() => addInlineSplit(d.invoice_id, balanceDue)} 
-                                            style={{ background: '#e0f2fe', border: 'none', borderRadius: '6px', color: '#0ea5e9', width: '32px', height: '40px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', fontWeight: 'bold', fontSize: '20px', flexShrink: 0 }} 
-                                            title="Add Split Payment"
-                                         >
-                                            +
-                                         </button>
+                                       {idx === paymentState.length - 1 ? (
+                                         <button onClick={() => addInlineSplit(d.invoice_id, balanceDue)} style={{ background: '#e0f2fe', border: 'none', borderRadius: '6px', color: '#0ea5e9', width: '32px', height: '40px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', fontWeight: 'bold', fontSize: '20px', flexShrink: 0 }}>+</button>
                                        ) : (
-                                         <div style={{ width: '32px', flexShrink: 0 }} /> // Spacer to align dropdowns nicely
+                                         <div style={{ width: '32px', flexShrink: 0 }} />
                                        )}
                                      </div>
                                    ))}
@@ -743,7 +882,17 @@ export default function DeliveryPage() {
                                 <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                                   {paymentState.map((row) => (
                                     <div key={row.id} style={{ display: 'flex', alignItems: 'center', gap: '6px', height: '40px' }}>
-                                      <CurrencyInput placeholder={formatRiel(balanceDue)} value={row.amount} onChange={(v: any) => updateInlineRow(d.invoice_id, row.id, 'amount', v, balanceDue)} onEnter={() => handleInlineProcess(d, paymentState)} className="saas-input" style={{ padding: '8px', textAlign: 'right', height: '100%' }} />
+                                      <CurrencyInput 
+                                        placeholder={formatRiel(balanceDue)} 
+                                        value={row.amount} 
+                                        onChange={(v: any) => updateInlineRow(d.invoice_id, row.id, 'amount', v, balanceDue)} 
+                                        // 🔥 AUTO CLEAR ON DESKTOP FIX
+                                        onFocus={() => { if (!row.amount || Number(String(row.amount).replace(/,/g, '')) === balanceDue) updateInlineRow(d.invoice_id, row.id, 'amount', '', balanceDue); }}
+                                        onClick={() => { if (!row.amount || Number(String(row.amount).replace(/,/g, '')) === balanceDue) updateInlineRow(d.invoice_id, row.id, 'amount', '', balanceDue); }}
+                                        onEnter={() => handleInlineProcess(d, paymentState)} 
+                                        className="saas-input" 
+                                        style={{ padding: '8px', textAlign: 'right', height: '100%' }} 
+                                      />
                                       {paymentState.length > 1 && (
                                         <button onClick={() => removeInlineSplit(d.invoice_id, row.id, balanceDue)} style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', fontSize: '16px', padding: '0 4px', fontWeight: 'bold' }}>✕</button>
                                       )}
@@ -774,7 +923,6 @@ export default function DeliveryPage() {
               </tbody>
             </table>
           </div>
-          
           {hasMore && (
             <div style={{ textAlign: 'center', padding: '20px', backgroundColor: '#f8fafc', borderTop: '1px solid #e2e8f0', flexShrink: 0 }}>
               <button onClick={() => setLoadLimit(prev => prev + 100)} className="saas-btn saas-btn-secondary" style={{ borderRadius: '20px', boxShadow: '0 2px 4px rgba(0,0,0,0.02)' }}>
@@ -786,158 +934,338 @@ export default function DeliveryPage() {
       );
     }
 
+    // ==========================================
+    // CREDIT TAB LOGIC
+    // ==========================================
+    const filteredOwners = activeOwners.filter(ownerName => {
+      if (creditFilter === 'Mom') return ownerName === 'Mom';
+      if (creditFilter === 'Jing') return ownerName === 'Jing';
+      if (creditFilter === 'Pich/Both') return ['Pich', 'Both'].includes(ownerName);
+      if (creditFilter === 'All') return true;
+      return true;
+    });
+
+    if (isMobile) {
+      // 🔥 MOBILE CREDIT TAB (Chronological View: Today, Yesterday...)
+      
+      // 1. Flatten all credit invoices into a single array, retaining debtor info
+      const flatMobileCredit = filteredOwners
+        .flatMap(ownerName => {
+          const list = groupedDebtors[ownerName] || [];
+          return list.flatMap((debtor: any) => 
+            debtor.invoices.map((inv: any) => ({
+              ...inv,
+              debtorName: debtor.name,
+              debtorTotalOwed: debtor.totalOwed,
+              ownerName
+            }))
+          );
+        })
+        // 2. Sort strictly by newest date first
+        .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+
+      let lastDateKey = '';
+
+      return (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginTop: '16px', paddingBottom: '40px' }}>
+          
+          {/* 🔥 MOBILE CREDIT PREFILTER ADDED */}
+          <div style={{ display: 'flex', gap: '8px', marginBottom: '8px', overflowX: 'auto', paddingBottom: '4px' }} className="hide-scrollbar">
+            {['Pich/Both', 'Jing', 'Mom', 'All'].map(status => (
+              <button 
+                key={status}
+                onClick={() => setCreditFilter(status as any)}
+                style={{
+                  padding: '8px 16px', borderRadius: '20px', fontSize: '13px', fontWeight: 'bold', border: 'none', cursor: 'pointer', whiteSpace: 'nowrap',
+                  background: creditFilter === status ? '#3b82f6' : '#e2e8f0',
+                  color: creditFilter === status ? '#ffffff' : '#64748b',
+                  boxShadow: creditFilter === status ? '0 2px 6px rgba(59, 130, 246, 0.3)' : 'none',
+                  transition: 'all 0.2s'
+                }}
+              >
+                {status}
+              </button>
+            ))}
+          </div>
+
+          {loading && flatMobileCredit.length === 0 ? (
+            Array.from({ length: 5 }).map((_, i) => (
+              <div key={i} style={{ background: '#fff', borderRadius: '16px', padding: '16px', border: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', opacity: 0.7 }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', flex: 1 }}>
+                  <div style={{ background: '#e2e8f0', height: '18px', width: '60%', borderRadius: '4px' }} />
+                  <div style={{ background: '#e2e8f0', height: '14px', width: '40%', borderRadius: '4px' }} />
+                </div>
+                <div style={{ background: '#e2e8f0', height: '24px', width: '20%', borderRadius: '4px' }} />
+              </div>
+            ))
+          ) : flatMobileCredit.length === 0 ? (
+            <EmptyState icon="💰" title="All caught up!" message="No credit matches this filter!" />
+          ) : (
+            flatMobileCredit.map((inv: any) => {
+              const invBalance = Number(inv.balance_due) || 0;
+              const paymentState = getInlinePaymentState(inv.invoice_id, invBalance);
+              
+              const daysOwed = Math.floor((new Date().getTime() - new Date(inv.created_at).getTime()) / (1000 * 3600 * 24));
+              const isExpanded = expandedCredit === inv.invoice_id;
+
+              // DATE HEADER CATEGORIZATION
+              const dateObj = new Date(inv.created_at);
+              const today = new Date();
+              const yesterday = new Date();
+              yesterday.setDate(yesterday.getDate() - 1);
+              
+              let dateKey = dateObj.toLocaleDateString('en-US', { month: 'long', day: 'numeric' });
+              if (dateObj.toDateString() === today.toDateString()) dateKey = 'Today';
+              else if (dateObj.toDateString() === yesterday.toDateString()) dateKey = 'Yesterday';
+
+              const showHeader = dateKey !== lastDateKey;
+              lastDateKey = dateKey;
+
+              return (
+                <div key={inv.invoice_id} style={{ display: 'flex', flexDirection: 'column' }}>
+                  {showHeader && (
+                    <div style={{ fontSize: '15px', fontWeight: '800', color: '#64748b', marginTop: '12px', marginBottom: '4px', paddingLeft: '4px' }}>
+                      {dateKey}
+                    </div>
+                  )}
+                  <div 
+                    onClick={() => setExpandedCredit(isExpanded ? null : inv.invoice_id)}
+                    style={{ 
+                      background: '#fff', borderRadius: '16px', padding: '16px', 
+                      boxShadow: '0 2px 8px rgba(0,0,0,0.05)', border: '1px solid #e2e8f0', 
+                      display: 'flex', flexDirection: 'column', gap: '16px',
+                      transition: 'all 0.2s', cursor: 'pointer', marginBottom: '4px'
+                    }}
+                  >
+                    {/* Card Header */}
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', flex: 1 }}>
+                        <span style={{ fontWeight: 'bold', color: '#1e293b', fontSize: '15px' }}>👤 {inv.debtorName}</span>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                          <span style={{ fontWeight: 'bold', color: '#3b82f6', fontSize: '13px' }}>#{inv.invoice_id.replace('INV-', '')}</span>
+                          <span style={{ fontSize: '11px', color: '#ef4444', fontWeight: 'bold', background: '#fee2e2', padding: '4px 8px', borderRadius: '12px' }}>
+                            ⏳ {daysOwed} Days
+                          </span>
+                        </div>
+                      </div>
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px' }}>
+                        <span style={{ fontWeight: 'bold', color: '#ef4444', fontSize: '16px' }}>{formatRiel(invBalance)}</span>
+                        <span style={{ color: '#3b82f6', fontSize: '12px', fontWeight: 'bold' }}>{isExpanded ? 'Close ▴' : 'Settle ▾'}</span>
+                      </div>
+                    </div>
+
+                    {/* 🔥 Accordion Expansion for Settlement */}
+                    {isExpanded && (
+                      <div onClick={(e) => e.stopPropagation()} style={{ borderTop: '1px dashed #cbd5e1', paddingTop: '16px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                        {paymentState.map((row: any, idx: number) => (
+                            <div key={row.id} style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                              <select 
+                                value={row.method} 
+                                onChange={(e) => updateInlineRow(inv.invoice_id, row.id, 'method', e.target.value, invBalance)} 
+                                className="saas-input" 
+                                style={{ flex: 1, padding: '12px', cursor: 'pointer', height: '48px', borderRadius: '12px', border: '1px solid #cbd5e1', background: '#fff' }}
+                              >
+                                <option value="Cash ៛">💵 Cash ៛</option>
+                                <option value="Cash $">💵 Cash $</option>
+                                <option value="QR ៛">📱 QR ៛</option>
+                                <option value="QR $">📱 QR $</option>
+                                <option value="Mom QR ៛">👩 Mom QR ៛</option>
+                                <option value="Mom QR $">👩 Mom QR $</option>
+                              </select>
+                              <CurrencyInput 
+                                placeholder={formatRiel(invBalance)} 
+                                value={row.amount} 
+                                onChange={(v: any) => updateInlineRow(inv.invoice_id, row.id, 'amount', v, invBalance)} 
+                                onFocus={() => { if (!row.amount || String(row.amount).replace(/,/g, '') === String(invBalance)) updateInlineRow(inv.invoice_id, row.id, 'amount', '', invBalance); }}
+                                onClick={() => { if (!row.amount || String(row.amount).replace(/,/g, '') === String(invBalance)) updateInlineRow(inv.invoice_id, row.id, 'amount', '', invBalance); }}
+                                onEnter={() => {}} 
+                                className="saas-input" 
+                                style={{ flex: 1, padding: '12px', textAlign: 'right', height: '48px', borderRadius: '12px', border: '1px solid #cbd5e1', background: '#fff' }} 
+                              />
+                              {idx === paymentState.length - 1 ? (
+                                <button onClick={() => addInlineSplit(inv.invoice_id, invBalance)} style={{ background: '#e0f2fe', border: 'none', borderRadius: '12px', color: '#0ea5e9', width: '48px', height: '48px', fontWeight: 'bold', fontSize: '24px', flexShrink: 0 }}>+</button>
+                              ) : (
+                                <button onClick={() => removeInlineSplit(inv.invoice_id, row.id, invBalance)} style={{ background: '#fee2e2', border: 'none', borderRadius: '12px', color: '#ef4444', width: '48px', height: '48px', fontWeight: 'bold', fontSize: '18px', flexShrink: 0 }}>✕</button>
+                              )}
+                            </div>
+                        ))}
+                        <button 
+                          onClick={() => { handleInlineProcess(inv, paymentState); setExpandedCredit(null); }}
+                          disabled={isProcessing}
+                          className="saas-btn saas-btn-primary"
+                          style={{ width: '100%', height: '48px', borderRadius: '12px', marginTop: '4px' }}
+                        >
+                          {isProcessing ? 'Processing...' : '✔ Confirm Payment'}
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
+      );
+    }
+
+    // 🔥 DESKTOP CREDIT TAB (BEAUTIFUL DELIVERY QUEUE CLONE)
     return (
-      <div className="saas-table-wrapper" style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, marginBottom: 0, marginTop: isMobile ? '16px' : '0' }}>
-        {/* 🔥 RESTORED Vertical Scroll */}
+      <div className="saas-table-wrapper" style={{ display: 'flex', flexDirection: 'column', marginTop: isMobile ? '16px' : '0' }}>
+        
+        {/* DESKTOP PREFILTER UI */}
+        <div style={{ display: 'flex', gap: '8px', padding: '16px 24px', borderBottom: '1px solid #e2e8f0', background: '#fff', borderTopLeftRadius: '12px', borderTopRightRadius: '12px' }}>
+          <span style={{ fontWeight: 'bold', color: '#64748b', marginRight: '8px', alignSelf: 'center' }}>Filter:</span>
+          {['Pich/Both', 'Jing', 'Mom', 'All'].map(status => (
+            <button 
+              key={status}
+              onClick={() => setCreditFilter(status as any)}
+              style={{
+                padding: '6px 14px', borderRadius: '20px', fontSize: '13px', fontWeight: 'bold', border: 'none', cursor: 'pointer',
+                background: creditFilter === status ? '#3b82f6' : '#f1f5f9',
+                color: creditFilter === status ? '#ffffff' : '#64748b',
+                transition: 'all 0.2s'
+              }}
+            >
+              {status}
+            </button>
+          ))}
+        </div>
+
         <div className="saas-table-responsive hide-scrollbar" style={{ flex: 1, overflow: 'auto' }}>
-          <table className="saas-table" style={{ minWidth: '950px', borderCollapse: 'separate', borderSpacing: 0 }}>
+          <table className="saas-table" style={{ minWidth: '100%', tableLayout: 'fixed', width: 'max-content', borderCollapse: 'separate', borderSpacing: 0 }}>
             <thead style={{ background: '#fff1f2' }}>
               <tr>
-                {/* 🔥 Added left:0 and higher zIndex to freeze the Date column */}
-                <th className="saas-th" style={{ color: '#be123c', borderBottom: '1px solid #ffe4e6', position: 'sticky', top: 0, left: 0, zIndex: 40, backgroundColor: '#fff1f2', boxShadow: 'inset 0 -2px 0 0 #fecaca, 2px 0 5px -2px rgba(0,0,0,0.1)', borderRight: '1px solid #ffe4e6' }}>Date</th>
-                <th className="saas-th" style={{ color: '#be123c', borderBottom: '1px solid #ffe4e6', position: 'sticky', top: 0, zIndex: 10, backgroundColor: '#fff1f2', boxShadow: 'inset 0 -2px 0 0 #fecaca' }}>Owner</th>
-                <th className="saas-th" style={{ color: '#be123c', borderBottom: '1px solid #ffe4e6', position: 'sticky', top: 0, zIndex: 30, backgroundColor: '#fff1f2', boxShadow: 'inset 0 -2px 0 0 #fecaca' }}>Customer & Invoices</th>
-                <th className="saas-th" style={{ color: '#be123c', borderBottom: '1px solid #ffe4e6', textAlign: 'right', position: 'sticky', top: 0, zIndex: 30, backgroundColor: '#fff1f2', boxShadow: 'inset 0 -2px 0 0 #fecaca' }}>Total Debt (៛)</th>
-                <th className="saas-th" style={{ color: '#be123c', borderBottom: '1px solid #ffe4e6', textAlign: 'center', width: '160px', position: 'sticky', top: 0, zIndex: 30, backgroundColor: '#fff1f2', boxShadow: 'inset 0 -2px 0 0 #fecaca' }}>Method</th>
-                <th className="saas-th" style={{ color: '#be123c', borderBottom: '1px solid #ffe4e6', textAlign: 'right', width: '180px', position: 'sticky', top: 0, zIndex: 30, backgroundColor: '#fff1f2', boxShadow: 'inset 0 -2px 0 0 #fecaca' }}>Pay Amount (៛)</th>
-                <th className="saas-th" style={{ color: '#be123c', borderBottom: '1px solid #ffe4e6', textAlign: 'center', width: '120px', position: 'sticky', top: 0, zIndex: 30, backgroundColor: '#fff1f2', boxShadow: 'inset 0 -2px 0 0 #fecaca' }}>Complete</th>
+                {/* MATCHED TO DELIVERY TABLE EXACTLY */}
+                <th className="saas-th" style={{ position: 'sticky', top: 0, left: 0, zIndex: 40, backgroundColor: '#fff1f2', boxShadow: '2px 0 5px -2px rgba(0,0,0,0.1), inset 0 -2px 0 0 #fecaca', borderRight: '1px solid #ffe4e6', borderBottom: '1px solid #ffe4e6', color: '#be123c', padding: '12px 16px', width: colWidths['customer'] || 200, fontWeight: 'bold', textAlign: 'left' }}>Customer</th>
+                <th className="saas-th" style={{ position: 'sticky', top: 0, zIndex: 30, backgroundColor: '#fff1f2', boxShadow: 'inset 0 -2px 0 0 #fecaca', borderRight: '1px solid #ffe4e6', borderBottom: '1px solid #ffe4e6', color: '#be123c', padding: '12px 16px', width: colWidths['date'] || 150, fontWeight: 'bold', textAlign: 'left' }}>Date & INV</th>
+                <th className="saas-th" style={{ position: 'sticky', top: 0, zIndex: 30, backgroundColor: '#fff1f2', boxShadow: 'inset 0 -2px 0 0 #fecaca', borderRight: '1px solid #ffe4e6', borderBottom: '1px solid #ffe4e6', color: '#be123c', padding: '12px 16px', width: colWidths['items'] || 300, fontWeight: 'bold', textAlign: 'left' }}>Items Ordered</th>
+                <th className="saas-th" style={{ textAlign: 'right', position: 'sticky', top: 0, zIndex: 30, backgroundColor: '#fff1f2', boxShadow: 'inset 0 -2px 0 0 #fecaca', borderRight: '1px solid #ffe4e6', borderBottom: '1px solid #ffe4e6', color: '#be123c', padding: '12px 16px', width: colWidths['total'] || 120, fontWeight: 'bold' }}>Debt (៛)</th>
+                <th className="saas-th" style={{ textAlign: 'center', position: 'sticky', top: 0, zIndex: 30, backgroundColor: '#fff1f2', boxShadow: 'inset 0 -2px 0 0 #fecaca', borderRight: '1px solid #ffe4e6', borderBottom: '1px solid #ffe4e6', width: '160px', color: '#be123c', padding: '12px 16px', fontWeight: 'bold' }}>Method</th>
+                <th className="saas-th" style={{ textAlign: 'right', position: 'sticky', top: 0, zIndex: 30, backgroundColor: '#fff1f2', boxShadow: 'inset 0 -2px 0 0 #fecaca', borderRight: '1px solid #ffe4e6', borderBottom: '1px solid #ffe4e6', width: '180px', color: '#be123c', padding: '12px 16px', fontWeight: 'bold' }}>Pay Amount (៛)</th>
+                <th className="saas-th" style={{ textAlign: 'center', position: 'sticky', top: 0, zIndex: 30, backgroundColor: '#fff1f2', boxShadow: 'inset 0 -2px 0 0 #fecaca', borderBottom: '1px solid #ffe4e6', width: '120px', color: '#be123c', padding: '12px 16px', fontWeight: 'bold' }}>Complete</th>
               </tr>
             </thead>
             
-            {loading && activeOwners.length === 0 ? (
+            {loading && filteredOwners.length === 0 ? (
               <tbody>
                  <TableSkeleton columns={7} rows={6} />
               </tbody>
-            ) : activeOwners.length === 0 ? (
+            ) : filteredOwners.length === 0 ? (
               <tbody>
                 <tr>
                   <td colSpan={7} style={{ padding: 0 }}>
-                    <EmptyState 
-                      icon="💰" 
-                      title="All caught up!" 
-                      message="All customers are fully paid up on their delivered orders!" 
-                    />
+                    <EmptyState icon="💰" title="All caught up!" message="All customers are fully paid up on their delivered orders!" />
                   </td>
                 </tr>
               </tbody>
             ) : (
-              activeOwners.map(ownerName => {
+              filteredOwners.map(ownerName => {
                 const list = groupedDebtors[ownerName];
                 const ownerTotalOwed = list.reduce((sum: number, d: any) => sum + d.totalOwed, 0);
                 return (
                   <tbody key={ownerName}>
                     <tr className="saas-tr" style={{ background: '#f1f5f9' }}>
-                      <td className="saas-td" colSpan={3} style={{ fontWeight: 'bold' }}>
+                      <td className="saas-td" colSpan={3} style={{ fontWeight: 'bold', verticalAlign: 'middle', position: 'sticky', left: 0, zIndex: 20, backgroundColor: '#f1f5f9', borderRight: '1px solid #e2e8f0', padding: '12px 16px' }}>
                         👤 Owner: {ownerName}
                       </td>
-                      <td className="saas-td" style={{ textAlign: 'right', color: '#334155', fontSize: '15px', fontWeight: 'bold' }}>
+                      <td className="saas-td" style={{ textAlign: 'right', color: '#334155', fontSize: '15px', fontWeight: 'bold', verticalAlign: 'middle', padding: '12px 16px' }}>
                         {formatRiel(ownerTotalOwed)}
                       </td>
-                      <td className="saas-td" colSpan={3}></td>
+                      <td className="saas-td" colSpan={3} style={{ padding: '12px 16px' }}></td>
                     </tr>
                     {list.map((debtor: any) => {
-                      const uniqueKey = `${debtor.owner}_${debtor.name}`;
-                      const paymentState = getCreditPaymentState(uniqueKey, debtor.totalOwed);
-                      
-                      return (
-                        <tr key={uniqueKey} className="saas-tr" style={{ transition: 'background 0.2s ease' }}>
-                          {/* 🔥 Frozen Data Cell */}
-                          <td className="saas-td" style={{ verticalAlign: 'top', position: 'sticky', left: 0, zIndex: 20, backgroundColor: '#ffffff', boxShadow: '2px 0 5px -2px rgba(0,0,0,0.1)', borderRight: '1px solid #e2e8f0' }}>
-                            <div style={{ fontWeight: 'bold', color: '#334155' }}>{new Date(debtor.oldestDate).toLocaleDateString('en-GB')}</div>
-                            <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '4px', textTransform: 'uppercase', fontWeight: 'bold' }}>Oldest Date</div>
-                          </td>
-                          {/* 🔥 Removed relative positioning so it properly stays under the sticky cell */}
-                          <td className="saas-td" style={{ fontWeight: 'bold', verticalAlign: 'top' }}>
-                            {debtor.owner}
-                          </td>
+                      return debtor.invoices.map((inv: any, i: number) => {
+                        const invBalance = Number(inv.balance_due) || 0;
+                        const paymentState = getInlinePaymentState(inv.invoice_id, invBalance);
+                        
+                        return (
+                          <tr key={inv.invoice_id} className="saas-tr" style={{ transition: 'background 0.2s ease', backgroundColor: '#ffffff' }}>
+                            
+                            {/* 🔥 Spanned Customer Box */}
+                            {i === 0 && (
+                              <td className="saas-td" rowSpan={debtor.invoices.length} style={{ verticalAlign: 'middle', position: 'sticky', left: 0, zIndex: 20, backgroundColor: '#ffffff', boxShadow: '2px 0 5px -2px rgba(0,0,0,0.05)', borderRight: '1px solid #e2e8f0', borderBottom: '1px solid #e2e8f0', padding: '12px 16px' }}>
+                                <div style={{ color: '#334155', fontSize: '15px', marginBottom: '4px', fontWeight: 'bold' }}>{debtor.name}</div>
+                                <div style={{ fontSize: '12px', color: '#ef4444', fontWeight: 'bold' }}>Total Debt: {formatRiel(debtor.totalOwed)}</div>
+                              </td>
+                            )}
 
-                          <td className="saas-td" style={{ verticalAlign: 'top' }}>
-                            <div style={{ color: '#334155', fontSize: '15px', marginBottom: '10px', fontWeight: 'bold' }}>
-                              {debtor.name}
-                            </div>
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                              {debtor.invoices.map((inv: any) => (
-                                <div key={inv.invoice_id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '12px', background: '#f8fafc', padding: '8px 12px', borderRadius: '6px', border: '1px solid #e2e8f0' }}>
-                                  <span style={{ color: '#3b82f6', fontWeight: 'bold' }}>#{inv.invoice_id.replace('INV-', '')}</span>
-                                  <div style={{ display: 'flex', gap: '16px', alignItems: 'center' }}>
-                                    <span style={{ color: '#64748b', fontSize: '11px', fontWeight: 'bold' }}>Orig: {formatRiel(inv.total_sales)}</span>
-                                    <span style={{ color: '#ef4444', fontWeight: 'bold' }}>Debt: {formatRiel(inv.balance_due)}</span>
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
-                          </td>
-
-                          <td className="saas-td" style={{ textAlign: 'right', color: '#ef4444', fontSize: '16px', verticalAlign: 'top', fontWeight: 'bold' }}>
-                            {formatRiel(debtor.totalOwed)}
-                          </td>
-                          
-                          <td className="saas-td" style={{ textAlign: 'center', verticalAlign: 'middle' }}>
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                              {paymentState.map((row, index) => (
-                                <div key={row.id} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                  <select 
-                                    value={row.method}
-                                    onChange={(e) => updateCreditRow(uniqueKey, row.id, 'method', e.target.value, debtor.totalOwed)}
-                                    className="saas-input"
-                                    style={{ flex: 1, padding: '8px 12px', cursor: 'pointer', height: '40px', width: '100%' }}
-                                  >
-                                     <option value="Cash ៛">💵 Cash ៛</option>
-                                     <option value="Cash $">💵 Cash $</option>
-                                     <option value="QR ៛">📱 QR ៛</option>
-                                     <option value="QR $">📱 QR $</option>
-                                     <option value="Mom QR ៛">👩 Mom QR ៛</option>
-                                     <option value="Mom QR $">👩 Mom QR $</option>
-                                  </select>
-                                  {/* 🔥 Renders a + button next to the dropdown */}
-                                  {index === paymentState.length - 1 ? (
-                                    <button 
-                                      onClick={() => addCreditSplit(uniqueKey, debtor.totalOwed)} 
-                                      style={{ background: '#e0f2fe', border: 'none', borderRadius: '6px', color: '#0ea5e9', width: '32px', height: '40px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', fontWeight: 'bold', fontSize: '20px', flexShrink: 0 }}
-                                      title="Add Split Payment"
+                            {/* 🔥 Separated Individual Invoices */}
+                            <td className="saas-td" style={{ verticalAlign: 'middle', padding: '12px 16px', borderBottom: '1px solid #f8fafc' }}>
+                              <div style={{ color: '#3b82f6', fontWeight: 'bold', marginBottom: '4px' }}>#{inv.invoice_id.replace('INV-', '')}</div>
+                              <div style={{ fontSize: '12px', color: '#64748b' }}>{new Date(inv.created_at).toLocaleDateString('en-GB')}</div>
+                            </td>
+                            
+                            <td className="saas-td" style={{ verticalAlign: 'middle', padding: '12px 16px', borderBottom: '1px solid #f8fafc', fontSize: '13px', lineHeight: '1.6', color: '#334155' }}>
+                              {inv.rice_types}
+                            </td>
+                            
+                            <td className="saas-td" style={{ textAlign: 'right', color: '#ef4444', fontSize: '15px', verticalAlign: 'middle', fontWeight: 'bold', padding: '12px 16px', borderBottom: '1px solid #f8fafc' }}>
+                              {formatRiel(invBalance)}
+                            </td>
+                            
+                            <td className="saas-td" style={{ textAlign: 'center', verticalAlign: 'middle', padding: '12px 16px', borderBottom: '1px solid #f8fafc' }}>
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                {paymentState.map((row: any, index: number) => (
+                                  <div key={row.id} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                    <select 
+                                      value={row.method}
+                                      onChange={(e) => updateInlineRow(inv.invoice_id, row.id, 'method', e.target.value, invBalance)}
+                                      className="saas-input"
+                                      style={{ flex: 1, padding: '8px 12px', cursor: 'pointer', height: '40px', width: '100%' }}
                                     >
-                                      +
-                                    </button>
-                                  ) : (
-                                    <div style={{ width: '32px', flexShrink: 0 }} /> // Spacer to align dropdowns nicely
-                                  )}
-                                </div>
-                              ))}
-                            </div>
-                          </td>
+                                       <option value="Cash ៛">💵 Cash ៛</option>
+                                       <option value="Cash $">💵 Cash $</option>
+                                       <option value="QR ៛">📱 QR ៛</option>
+                                       <option value="QR $">📱 QR $</option>
+                                       <option value="Mom QR ៛">👩 Mom QR ៛</option>
+                                       <option value="Mom QR $">👩 Mom QR $</option>
+                                    </select>
+                                    {index === paymentState.length - 1 ? (
+                                      <button onClick={() => addInlineSplit(inv.invoice_id, invBalance)} style={{ background: '#e0f2fe', border: 'none', borderRadius: '6px', color: '#0ea5e9', width: '32px', height: '40px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', fontWeight: 'bold', fontSize: '20px', flexShrink: 0 }}>+</button>
+                                    ) : (
+                                      <div style={{ width: '32px', flexShrink: 0 }} />
+                                    )}
+                                  </div>
+                                ))}
+                              </div>
+                            </td>
 
-                          <td className="saas-td" style={{ textAlign: 'right', verticalAlign: 'top' }}>
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                              {paymentState.map(row => (
-                                <div key={row.id} style={{ display: 'flex', alignItems: 'center', gap: '6px', height: '40px' }}>
-                                  <CurrencyInput
-                                    placeholder={formatRiel(debtor.totalOwed)}
-                                    value={row.amount}
-                                    onChange={(v: any) => updateCreditRow(uniqueKey, row.id, 'amount', v, debtor.totalOwed)}
-                                    onEnter={() => handleProcessCreditPayment(debtor, paymentState)}
-                                    className="saas-input"
-                                    style={{ padding: '8px 12px', textAlign: 'right', height: '100%' }}
-                                  />
-                                  {paymentState.length > 1 && (
-                                    <button onClick={() => removeCreditSplit(uniqueKey, row.id, debtor.totalOwed)} style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', fontSize: '16px', padding: '0 4px', fontWeight: 'bold' }}>✕</button>
-                                  )}
-                                </div>
-                              ))}
-                            </div>
-                          </td>
+                            <td className="saas-td" style={{ textAlign: 'right', verticalAlign: 'middle', padding: '12px 16px', borderBottom: '1px solid #f8fafc' }}>
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                {paymentState.map((row: any) => (
+                                  <div key={row.id} style={{ display: 'flex', alignItems: 'center', gap: '6px', height: '40px' }}>
+                                    <CurrencyInput
+                                      placeholder={formatRiel(invBalance)}
+                                      value={row.amount}
+                                      onChange={(v: any) => updateInlineRow(inv.invoice_id, row.id, 'amount', v, invBalance)}
+                                      // 🔥 AUTO CLEAR ON DESKTOP FIX
+                                      onFocus={() => { if (!row.amount || Number(String(row.amount).replace(/,/g, '')) === invBalance) updateInlineRow(inv.invoice_id, row.id, 'amount', '', invBalance); }}
+                                      onClick={() => { if (!row.amount || Number(String(row.amount).replace(/,/g, '')) === invBalance) updateInlineRow(inv.invoice_id, row.id, 'amount', '', invBalance); }}
+                                      onEnter={() => handleInlineProcess(inv, paymentState)}
+                                      className="saas-input"
+                                      style={{ padding: '8px 12px', textAlign: 'right', height: '100%' }}
+                                    />
+                                    {paymentState.length > 1 && (
+                                      <button onClick={() => removeInlineSplit(inv.invoice_id, row.id, invBalance)} style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', fontSize: '16px', padding: '0 4px', fontWeight: 'bold' }}>✕</button>
+                                    )}
+                                  </div>
+                                ))}
+                              </div>
+                            </td>
 
-                          <td className="saas-td" style={{ textAlign: 'center', verticalAlign: 'top' }}>
-                            <button 
-                              onClick={() => handleProcessCreditPayment(debtor, paymentState)}
-                              disabled={isProcessing}
-                              className="saas-btn saas-btn-primary"
-                              style={{ width: '100%', height: '40px' }}
-                            >
-                              {isProcessing ? '...' : '✔ Done'}
-                            </button>
-                          </td>
-                        </tr>
-                      )
+                            <td className="saas-td" style={{ textAlign: 'center', verticalAlign: 'middle', padding: '12px 16px', borderBottom: '1px solid #f8fafc' }}>
+                              <button 
+                                onClick={() => handleInlineProcess(inv, paymentState)}
+                                disabled={isProcessing}
+                                className="saas-btn saas-btn-primary"
+                                style={{ width: '100%', height: '40px' }}
+                              >
+                                {isProcessing ? '...' : '✔ Done'}
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      });
                     })}
                   </tbody>
                 );
@@ -960,8 +1288,8 @@ export default function DeliveryPage() {
           <h1 className="saas-page-title" style={{ margin: 0 }}>🚚 Delivery & Credit Hub</h1>
         </div>
         
-        {/* 🔥 NEW: COLUMN HIDE/SHOW MENU */}
-        {activeTab === 'delivery' && (
+        {/* 🔥 NEW: COLUMN HIDE/SHOW MENU (HIDDEN ON MOBILE) */}
+        {activeTab === 'delivery' && !isMobile && (
           <div className="header-actions" style={{ marginLeft: 'auto', position: 'relative' }}>
             <button onClick={() => setShowColMenu(!showColMenu)} className="saas-btn saas-btn-secondary" style={{ fontSize: '13px', padding: '6px 12px' }}>
               ⚙️ Columns
@@ -994,6 +1322,140 @@ export default function DeliveryPage() {
           {sidebarContent()}
         </div>
       </div>
+
+      {/* 🔥 INDUSTRY STANDARD MOBILE BOTTOM SHEET (ACTION SHEET) 🔥 */}
+      {selectedMobileDelivery && (() => {
+        // 🔥 Pro-Move: We look up the live object in the array so the sheet auto-updates instantly if status changes!
+        const d = deliveries.find(inv => inv.invoice_id === selectedMobileDelivery.invoice_id) || selectedMobileDelivery;
+        const isDoneVisual = isDeliveredVisual(d);
+        const balanceDue = Number(d.balance_due) || 0;
+        const totalSale = Number(d.total_sales) || 0;
+        const paymentState = getInlinePaymentState(d.invoice_id, balanceDue);
+
+        return (
+          <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, zIndex: 99999, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}>
+             {/* Backdrop Blur */}
+             <div 
+               onClick={() => setSelectedMobileDelivery(null)} 
+               style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(15, 23, 42, 0.4)', backdropFilter: 'blur(2px)' }} 
+             />
+             
+             {/* Slide-up Card Container */}
+             <div style={{ position: 'relative', backgroundColor: '#ffffff', borderTopLeftRadius: '24px', borderTopRightRadius: '24px', padding: '24px', paddingBottom: 'max(24px, env(safe-area-inset-bottom))', maxHeight: '90vh', overflowY: 'auto', boxShadow: '0 -10px 25px rgba(0,0,0,0.1)' }}>
+               
+               {/* Visual Drag Handle */}
+               <div style={{ width: '40px', height: '5px', backgroundColor: '#e2e8f0', borderRadius: '3px', margin: '0 auto 24px' }} />
+               
+               {/* Header Section */}
+               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '20px' }}>
+                 <div>
+                   <h2 style={{ margin: 0, color: '#0f172a', fontSize: '22px', fontWeight: '800' }}>{d.customer_name}</h2>
+                   <div style={{ color: '#64748b', fontSize: '13px', marginTop: '6px', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                     📍 {d.customer_location || 'No location provided'}
+                   </div>
+                 </div>
+                 <button 
+                   onClick={() => updateInvoiceField(d.invoice_id, 'delivery_status', d.delivery_status === 'Pending' ? 'Delivered' : 'Pending')}
+                   style={{
+                     padding: '8px 14px', borderRadius: '20px', border: 'none', fontSize: '13px', cursor: 'pointer',
+                     background: d.delivery_status === 'Pending' ? '#fef3c7' : '#dcfce7',
+                     color: d.delivery_status === 'Pending' ? '#d97706' : '#15803d',
+                     fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '6px', boxShadow: '0 2px 4px rgba(0,0,0,0.05)'
+                   }}
+                 >
+                   {d.delivery_status === 'Pending' ? '🟡 Pending' : '🟢 Delivered'}
+                 </button>
+               </div>
+
+               {/* Read-Only Details Box */}
+               <div style={{ background: '#f8fafc', borderRadius: '16px', padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px', border: '1px solid #e2e8f0', marginBottom: '24px' }}>
+                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '14px' }}>
+                   <span style={{ color: '#64748b' }}>Invoice & Date</span>
+                   <span style={{ fontWeight: 'bold', color: '#334155' }}>{d.invoice_id} • {new Date(d.created_at).toLocaleDateString('en-GB')}</span>
+                 </div>
+                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '14px' }}>
+                   <span style={{ color: '#64748b' }}>Items Ordered</span>
+                   <span style={{ fontWeight: 'bold', color: '#334155', textAlign: 'right', maxWidth: '65%' }}>{d.rice_types}</span>
+                 </div>
+                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '16px', marginTop: '4px', paddingTop: '16px', borderTop: '1px dashed #cbd5e1' }}>
+                   <span style={{ color: '#64748b', fontWeight: 'bold' }}>Total Sale</span>
+                   <span style={{ fontWeight: '800', color: '#0f172a' }}>{formatRiel(totalSale)}</span>
+                 </div>
+               </div>
+
+               {/* Payment Input Controls */}
+               <div style={{ marginBottom: '8px' }}>
+                 <h3 style={{ fontSize: '14px', color: '#64748b', marginBottom: '12px', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Payment Collection</h3>
+                 
+                 {balanceDue > 0 && !isDoneVisual ? (
+                   <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                     {paymentState.map((row, index) => (
+                       <div key={row.id} style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                         
+                         <select 
+                            value={row.method} 
+                            onChange={(e) => updateInlineRow(d.invoice_id, row.id, 'method', e.target.value, balanceDue)} 
+                            className="saas-input" 
+                            style={{ flex: 1, padding: '12px', cursor: 'pointer', height: '48px', borderRadius: '12px', border: '1px solid #cbd5e1', background: '#fff' }}
+                         >
+                            <option value="Cash ៛">💵 Cash ៛</option>
+                            <option value="Cash $">💵 Cash $</option>
+                            <option value="QR ៛">📱 QR ៛</option>
+                            <option value="QR $">📱 QR $</option>
+                            <option value="Mom QR ៛">👩 Mom QR ៛</option>
+                            <option value="Mom QR $">👩 Mom QR $</option>
+                         </select>
+                         
+                         <CurrencyInput 
+                            placeholder={formatRiel(balanceDue)} 
+                            value={row.amount} 
+                            onChange={(v: any) => updateInlineRow(d.invoice_id, row.id, 'amount', v, balanceDue)} 
+                            // 🔥 CRITICAL FIX: Strip commas from amount string before checking, so it safely auto-clears on tap!
+                            onFocus={() => { if (!row.amount || Number(String(row.amount).replace(/,/g, '')) === balanceDue) updateInlineRow(d.invoice_id, row.id, 'amount', '', balanceDue); }}
+                            onClick={() => { if (!row.amount || Number(String(row.amount).replace(/,/g, '')) === balanceDue) updateInlineRow(d.invoice_id, row.id, 'amount', '', balanceDue); }}
+                            onEnter={() => {}} 
+                            className="saas-input" 
+                            style={{ flex: 1, padding: '12px', textAlign: 'right', height: '48px', borderRadius: '12px', border: '1px solid #cbd5e1', background: '#fff' }} 
+                         />
+                         
+                         {index === paymentState.length - 1 ? (
+                           <button onClick={() => addInlineSplit(d.invoice_id, balanceDue)} style={{ background: '#e0f2fe', border: 'none', borderRadius: '12px', color: '#0ea5e9', width: '48px', height: '48px', fontWeight: 'bold', fontSize: '24px', flexShrink: 0, boxShadow: '0 2px 4px rgba(14, 165, 233, 0.1)' }}>+</button>
+                         ) : (
+                           <button onClick={() => removeInlineSplit(d.invoice_id, row.id, balanceDue)} style={{ background: '#fee2e2', border: 'none', borderRadius: '12px', color: '#ef4444', width: '48px', height: '48px', fontWeight: 'bold', fontSize: '18px', flexShrink: 0 }}>✕</button>
+                         )}
+                       </div>
+                     ))}
+                   </div>
+                 ) : (
+                   <div style={{ padding: '16px', background: '#f1f5f9', borderRadius: '12px', color: '#475569', fontSize: '15px', textAlign: 'center', border: '1px solid #e2e8f0' }}>
+                     Payment fully settled via: <strong style={{ color: '#0f172a' }}>{d.payment_method}</strong>
+                   </div>
+                 )}
+               </div>
+
+               {/* Giant Action Button */}
+               <button 
+                 onClick={async () => { 
+                   if (isDoneVisual) {
+                     await handleUndoProcess(d);
+                   } else {
+                     await handleInlineProcess(d, paymentState); 
+                     setSelectedMobileDelivery(null); // Auto-close sheet upon successful confirmation
+                   }
+                 }}
+                 disabled={isProcessing}
+                 className={`saas-btn ${isDoneVisual ? 'saas-btn-secondary' : 'saas-btn-primary'}`}
+                 style={{ 
+                   width: '100%', height: '56px', fontSize: '16px', marginTop: '24px', borderRadius: '16px',
+                   boxShadow: isDoneVisual ? 'none' : '0 4px 12px rgba(16, 185, 129, 0.2)'
+                 }}
+               >
+                 {isProcessing ? 'Processing...' : isDoneVisual ? 'Undo Payment' : '✔ Confirm & Complete'}
+               </button>
+             </div>
+          </div>
+        );
+      })()}
 
       <style jsx global>{`
         /* 🔥 BULLETPROOF SAFARI RUBBER-BANDING FIX 🔥 */
