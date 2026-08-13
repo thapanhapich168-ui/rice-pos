@@ -85,7 +85,8 @@ export default function DashboardPage() {
         buildQNarrow('accounts_payable', 'id, amount_riel, amount_usd, status').eq('status', 'Unpaid'),
         buildQNarrow('cogs_settlements', 'payment_method, paid_amount_riel, paid_amount_usd, owner_name'),
         buildQNarrow('inventory_batches', 'id, product_id, remaining_qty, cost_price, created_at').gt('remaining_qty', 0),
-        buildQNarrow('invoice_payments', 'invoice_id, payment_method, amount_paid_riel, amount_paid_usd, recorded_by, payment_date, created_at')
+        // 🔥 CRITICAL FIX: Removed 'created_at' from this string so Supabase stops rejecting the query!
+        buildQNarrow('invoice_payments', 'invoice_id, payment_method, amount_paid_riel, amount_paid_usd, recorded_by, payment_date') 
       ]);
 
       setWholesaleSales(salesData || []); 
