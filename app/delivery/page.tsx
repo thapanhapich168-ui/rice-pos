@@ -62,7 +62,10 @@ export default function DeliveryPage() {
         
         if (orderPref?.setting_value) setColOrder(orderPref.setting_value);
         if (hiddenPref?.setting_value) setHiddenCols(hiddenPref.setting_value);
-        if (widthPref?.setting_value) setColWidths(widthPref.setting_value);
+        if (widthPref?.setting_value) {
+          // 🔥 Safely merge saved widths with defaults so user preferences persist across refreshes
+          setColWidths(prev => ({ ...prev, ...widthPref.setting_value }));
+        }
       }
     }
     loadTablePrefs();
