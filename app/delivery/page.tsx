@@ -46,6 +46,15 @@ export default function DeliveryPage() {
   const [sortConfig, setSortConfig] = useState<{key: string, direction: 'asc'|'desc'} | null>(null);
   const [showColMenu, setShowColMenu] = useState(false);
   
+  // 🔥 RESPONSIVE STATE FOR MOBILE
+  const [isMobile, setIsMobile] = useState(false);
+  useEffect(() => {
+    const handleResize = () => setIsMobile(window.innerWidth < 1024);
+    handleResize();
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+  
   // Resizing State
   const [colWidths, setColWidths] = useState<Record<string, number>>(DEFAULT_WIDTHS);
   const widthsRef = useRef(colWidths);
@@ -556,37 +565,36 @@ export default function DeliveryPage() {
   function sidebarContent() {
     if (activeTab === 'delivery') {
       return (
-        <div className="saas-table-wrapper" style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, marginBottom: 0 }}>
-          <div className="saas-table-responsive hide-scrollbar" style={{ flex: 1, overflow: 'auto' }}>
-            {/* 🔥 CRITICAL FIX 1: tableLayout MUST be 'fixed' and width 'max-content' for resizable columns */}
+        <div className="saas-table-wrapper" style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, marginBottom: 0, marginTop: isMobile ? '16px' : '0' }}>
+          {/* 🔥 FIXED 'Figma Scroll': overflowY is now hidden so it only scrolls left/right! */}
+          <div className="saas-table-responsive hide-scrollbar" style={{ flex: 1, overflowX: 'auto', overflowY: 'hidden' }}>
             <table className="saas-table" style={{ minWidth: '100%', tableLayout: 'fixed', width: 'max-content' }}>
               <thead>
                 <tr>
                   {colOrder.filter(c => !hiddenCols.includes(c)).map((col, index) => {
-                    const isSticky = col === 'customer'; // 🔥 FREEZES CUSTOMER COLUMN
+                    const isSticky = index === 0; // 🔥 UNCONDITIONAL FREEZE (Works on all screen sizes)
                     return (
                       <th 
                         key={col} 
                         className="saas-th" 
                         style={{ 
-                          position: isSticky ? 'sticky' : 'static', 
+                          position: 'sticky', 
                           top: 0, 
-                          left: isSticky ? 0 : undefined,
-                          zIndex: isSticky ? 40 : 30, 
-                          backgroundColor: '#f8fafc', 
-                          boxShadow: isSticky ? '2px 0 5px -2px rgba(0,0,0,0.1), inset 0 -2px 0 0 #e2e8f0' : 'inset 0 -2px 0 0 #e2e8f0',
-                          borderRight: '1px solid #cbd5e1', // 🔥 ADDED: Right side border
-                          borderLeft: index === 0 ? '1px solid #cbd5e1' : 'none', // 🔥 ADDED: Left border ONLY for the first column
-                          padding: 0, // Remove padding from TH so inner div fills it completely
-                          // 🔥 Strict bounds to ensure table cells obey the resize widths
+                          left: isSticky ? 0 : undefined, // 🔥 Sticks to the left edge
+                          zIndex: isSticky ? 40 : 10, // 🔥 CRITICAL FIX: Higher z-index prevents subsequent headers from overlapping
+                          backgroundColor: '#f8fafc',
+                          // 🔥 Restored the bottom inset shadow to make the background pop
+                          boxShadow: isSticky ? '2px 0 5px -2px rgba(0,0,0,0.1), inset 0 -2px 0 0 #cbd5e1' : 'inset 0 -2px 0 0 #cbd5e1',
+                          borderRight: '1px solid #cbd5e1',
+                          borderLeft: index === 0 ? '1px solid #cbd5e1' : 'none',
+                          borderTop: '1px solid #cbd5e1', // 🔥 Restored Top Border
+                          padding: 0,
                           width: colWidths[col] || DEFAULT_WIDTHS[col] || 150,
                           minWidth: colWidths[col] || DEFAULT_WIDTHS[col] || 150,
                           maxWidth: colWidths[col] || DEFAULT_WIDTHS[col] || 150,
                         }}
                       >
                         <div style={{ display: 'flex', position: 'relative', width: '100%', height: '100%', alignItems: 'stretch' }}>
-                          
-                          {/* 🔥 INNER DRAG TARGET: Isolates the drag action from the resize handle so it doesn't drag a giant ghost */}
                           <div
                             draggable
                             onDragStart={(e) => handleDragStart(e, col)}
@@ -595,7 +603,7 @@ export default function DeliveryPage() {
                             onClick={() => handleSort(col)}
                             style={{ 
                               flex: 1, 
-                              padding: '12px 16px', // Standard saas-th padding moved here
+                              padding: '12px 16px', 
                               display: 'flex', 
                               alignItems: 'center', 
                               justifyContent: ['total', 'pay'].includes(col) ? 'flex-end' : ['status', 'method', 'action'].includes(col) ? 'center' : 'flex-start',
@@ -611,7 +619,6 @@ export default function DeliveryPage() {
                             </span>
                           </div>
                           
-                          {/* 🔥 ISOLATED RESIZE HANDLE: No draggable attribute here! */}
                           <div 
                             onMouseDown={(e) => { e.stopPropagation(); handleResizeStart(e, col); }} 
                             onTouchStart={(e) => { e.stopPropagation(); handleResizeStart(e, col); }} 
@@ -646,16 +653,16 @@ export default function DeliveryPage() {
                     
                     return (
                       <tr key={d.invoice_id} className="saas-tr" style={{ opacity: isDoneVisual ? 0.6 : 1, transition: 'all 0.3s ease' }}>
-                        {colOrder.filter(c => !hiddenCols.includes(c)).map(col => {
-                          const isSticky = col === 'customer';
+                        {colOrder.filter(c => !hiddenCols.includes(c)).map((col, index) => {
+                          const isSticky = index === 0; // 🔥 UNCONDITIONAL FREEZE
                           const tdStyle: any = { 
-                            verticalAlign: 'top',
-                            position: isSticky ? 'sticky' : 'static',
+                            verticalAlign: 'middle', // 🔥 CRITICAL FIX: Changed from 'top' to 'middle' to center all columns
+                            position: isSticky ? 'sticky' : 'relative', // 🔥 Force relative so zIndex works for non-sticky columns
                             left: isSticky ? 0 : undefined,
-                            zIndex: isSticky ? 20 : 'auto',
+                            zIndex: isSticky ? 20 : 1, // 🔥 Sticky column sits at zIndex 20, sliding over the others
                             backgroundColor: isSticky ? '#ffffff' : 'inherit',
-                            boxShadow: isSticky ? '2px 0 5px -2px rgba(0,0,0,0.05)' : 'none',
-                            // 🔥 CRITICAL FIX 3: Force text to wrap inside the newly strict fixed columns
+                            boxShadow: isSticky ? '2px 0 5px -2px rgba(0,0,0,0.1)' : 'none',
+                            borderRight: isSticky ? '1px solid #e2e8f0' : 'none', // 🔥 Visual barrier for the freeze
                             overflow: 'hidden',
                             wordWrap: 'break-word',
                             whiteSpace: 'normal'
@@ -694,17 +701,35 @@ export default function DeliveryPage() {
                             <td key={col} className="saas-td" style={{ ...tdStyle, textAlign: 'center' }}>
                               {balanceDue > 0 && !isDoneVisual ? (
                                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                                   {paymentState.map((row) => (
-                                     <select key={row.id} value={row.method} onChange={(e) => updateInlineRow(d.invoice_id, row.id, 'method', e.target.value, balanceDue)} className="saas-input" style={{ padding: '8px', cursor: 'pointer', height: '40px' }}>
-                                        <option value="Cash ៛">💵 Cash ៛</option>
-                                        <option value="Cash $">💵 Cash $</option>
-                                        <option value="QR ៛">📱 QR ៛</option>
-                                        <option value="QR $">📱 QR $</option>
-                                        <option value="Mom QR ៛">👩 Mom QR ៛</option>
-                                        <option value="Mom QR $">👩 Mom QR $</option>
-                                     </select>
+                                   {paymentState.map((row, index) => (
+                                     <div key={row.id} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                       <select 
+                                          value={row.method} 
+                                          onChange={(e) => updateInlineRow(d.invoice_id, row.id, 'method', e.target.value, balanceDue)} 
+                                          className="saas-input" 
+                                          style={{ flex: 1, padding: '8px', cursor: 'pointer', height: '40px', width: '100%' }}
+                                       >
+                                          <option value="Cash ៛">💵 Cash ៛</option>
+                                          <option value="Cash $">💵 Cash $</option>
+                                          <option value="QR ៛">📱 QR ៛</option>
+                                          <option value="QR $">📱 QR $</option>
+                                          <option value="Mom QR ៛">👩 Mom QR ៛</option>
+                                          <option value="Mom QR $">👩 Mom QR $</option>
+                                       </select>
+                                       {/* 🔥 Renders a + button next to the dropdown */}
+                                       {index === paymentState.length - 1 ? (
+                                         <button 
+                                            onClick={() => addInlineSplit(d.invoice_id, balanceDue)} 
+                                            style={{ background: '#e0f2fe', border: 'none', borderRadius: '6px', color: '#0ea5e9', width: '32px', height: '40px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', fontWeight: 'bold', fontSize: '20px', flexShrink: 0 }} 
+                                            title="Add Split Payment"
+                                         >
+                                            +
+                                         </button>
+                                       ) : (
+                                         <div style={{ width: '32px', flexShrink: 0 }} /> // Spacer to align dropdowns nicely
+                                       )}
+                                     </div>
                                    ))}
-                                   <button onClick={() => addInlineSplit(d.invoice_id, balanceDue)} style={{ background: 'none', border: 'none', color: '#3b82f6', fontSize: '12px', cursor: 'pointer', textAlign: 'left', fontWeight: 'bold' }}>+ Add Split</button>
                                  </div>
                               ) : (
                                 <div style={{ color: '#475569', fontSize: '13px' }}>{d.payment_method}</div>
@@ -749,7 +774,6 @@ export default function DeliveryPage() {
             </table>
           </div>
           
-          {/* LOAD MORE BUTTON */}
           {hasMore && (
             <div style={{ textAlign: 'center', padding: '20px', backgroundColor: '#f8fafc', borderTop: '1px solid #e2e8f0', flexShrink: 0 }}>
               <button onClick={() => setLoadLimit(prev => prev + 100)} className="saas-btn saas-btn-secondary" style={{ borderRadius: '20px', boxShadow: '0 2px 4px rgba(0,0,0,0.02)' }}>
@@ -762,13 +786,15 @@ export default function DeliveryPage() {
     }
 
     return (
-      <div className="saas-table-wrapper" style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, marginBottom: 0 }}>
-        <div className="saas-table-responsive" style={{ flex: 1, overflow: 'auto' }}>
-          <table className="saas-table" style={{ minWidth: '950px' }}>
+      <div className="saas-table-wrapper" style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, marginBottom: 0, marginTop: isMobile ? '16px' : '0' }}>
+        {/* 🔥 FIXED 'Figma Scroll' here as well */}
+        <div className="saas-table-responsive hide-scrollbar" style={{ flex: 1, overflowX: 'auto', overflowY: 'hidden' }}>
+          <table className="saas-table" style={{ minWidth: '950px', borderCollapse: 'separate', borderSpacing: 0 }}>
             <thead style={{ background: '#fff1f2' }}>
               <tr>
-                <th className="saas-th" style={{ color: '#be123c', borderBottom: '1px solid #ffe4e6', position: 'sticky', top: 0, zIndex: 30, backgroundColor: '#fff1f2', boxShadow: 'inset 0 -2px 0 0 #fecaca' }}>Date</th>
-                <th className="saas-th" style={{ color: '#be123c', borderBottom: '1px solid #ffe4e6', position: 'sticky', top: 0, zIndex: 30, backgroundColor: '#fff1f2', boxShadow: 'inset 0 -2px 0 0 #fecaca' }}>Owner</th>
+                {/* 🔥 Added left:0 and higher zIndex to freeze the Date column */}
+                <th className="saas-th" style={{ color: '#be123c', borderBottom: '1px solid #ffe4e6', position: 'sticky', top: 0, left: 0, zIndex: 40, backgroundColor: '#fff1f2', boxShadow: 'inset 0 -2px 0 0 #fecaca, 2px 0 5px -2px rgba(0,0,0,0.1)', borderRight: '1px solid #ffe4e6' }}>Date</th>
+                <th className="saas-th" style={{ color: '#be123c', borderBottom: '1px solid #ffe4e6', position: 'sticky', top: 0, zIndex: 10, backgroundColor: '#fff1f2', boxShadow: 'inset 0 -2px 0 0 #fecaca' }}>Owner</th>
                 <th className="saas-th" style={{ color: '#be123c', borderBottom: '1px solid #ffe4e6', position: 'sticky', top: 0, zIndex: 30, backgroundColor: '#fff1f2', boxShadow: 'inset 0 -2px 0 0 #fecaca' }}>Customer & Invoices</th>
                 <th className="saas-th" style={{ color: '#be123c', borderBottom: '1px solid #ffe4e6', textAlign: 'right', position: 'sticky', top: 0, zIndex: 30, backgroundColor: '#fff1f2', boxShadow: 'inset 0 -2px 0 0 #fecaca' }}>Total Debt (៛)</th>
                 <th className="saas-th" style={{ color: '#be123c', borderBottom: '1px solid #ffe4e6', textAlign: 'center', width: '160px', position: 'sticky', top: 0, zIndex: 30, backgroundColor: '#fff1f2', boxShadow: 'inset 0 -2px 0 0 #fecaca' }}>Method</th>
@@ -814,15 +840,16 @@ export default function DeliveryPage() {
                       
                       return (
                         <tr key={uniqueKey} className="saas-tr" style={{ transition: 'background 0.2s ease' }}>
-                          <td className="saas-td" style={{ verticalAlign: 'top' }}>
+                          {/* 🔥 Frozen Data Cell */}
+                          <td className="saas-td" style={{ verticalAlign: 'top', position: 'sticky', left: 0, zIndex: 20, backgroundColor: '#ffffff', boxShadow: '2px 0 5px -2px rgba(0,0,0,0.1)', borderRight: '1px solid #e2e8f0' }}>
                             <div style={{ fontWeight: 'bold', color: '#334155' }}>{new Date(debtor.oldestDate).toLocaleDateString('en-GB')}</div>
                             <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '4px', textTransform: 'uppercase', fontWeight: 'bold' }}>Oldest Date</div>
                           </td>
-                          <td className="saas-td" style={{ fontWeight: 'bold', verticalAlign: 'top' }}>
+                          {/* 🔥 Subsequent cells sit underneath */}
+                          <td className="saas-td" style={{ fontWeight: 'bold', verticalAlign: 'top', position: 'relative', zIndex: 1 }}>
                             {debtor.owner}
                           </td>
 
-                          {/* BEAUTIFUL NESTED INVOICE LIST */}
                           <td className="saas-td" style={{ verticalAlign: 'top' }}>
                             <div style={{ color: '#334155', fontSize: '15px', marginBottom: '10px', fontWeight: 'bold' }}>
                               {debtor.name}
@@ -844,25 +871,37 @@ export default function DeliveryPage() {
                             {formatRiel(debtor.totalOwed)}
                           </td>
                           
-                          <td className="saas-td" style={{ textAlign: 'center', verticalAlign: 'top' }}>
+                          <td className="saas-td" style={{ textAlign: 'center', verticalAlign: 'middle' }}>
                             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                              {paymentState.map(row => (
-                                <select 
-                                  key={row.id}
-                                  value={row.method}
-                                  onChange={(e) => updateCreditRow(uniqueKey, row.id, 'method', e.target.value, debtor.totalOwed)}
-                                  className="saas-input"
-                                  style={{ padding: '8px 12px', cursor: 'pointer', height: '40px' }}
-                                >
-                                   <option value="Cash ៛">💵 Cash ៛</option>
-                                   <option value="Cash $">💵 Cash $</option>
-                                   <option value="QR ៛">📱 QR ៛</option>
-                                   <option value="QR $">📱 QR $</option>
-                                   <option value="Mom QR ៛">👩 Mom QR ៛</option>
-                                   <option value="Mom QR $">👩 Mom QR $</option>
-                                </select>
+                              {paymentState.map((row, index) => (
+                                <div key={row.id} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                  <select 
+                                    value={row.method}
+                                    onChange={(e) => updateCreditRow(uniqueKey, row.id, 'method', e.target.value, debtor.totalOwed)}
+                                    className="saas-input"
+                                    style={{ flex: 1, padding: '8px 12px', cursor: 'pointer', height: '40px', width: '100%' }}
+                                  >
+                                     <option value="Cash ៛">💵 Cash ៛</option>
+                                     <option value="Cash $">💵 Cash $</option>
+                                     <option value="QR ៛">📱 QR ៛</option>
+                                     <option value="QR $">📱 QR $</option>
+                                     <option value="Mom QR ៛">👩 Mom QR ៛</option>
+                                     <option value="Mom QR $">👩 Mom QR $</option>
+                                  </select>
+                                  {/* 🔥 Renders a + button next to the dropdown */}
+                                  {index === paymentState.length - 1 ? (
+                                    <button 
+                                      onClick={() => addCreditSplit(uniqueKey, debtor.totalOwed)} 
+                                      style={{ background: '#e0f2fe', border: 'none', borderRadius: '6px', color: '#0ea5e9', width: '32px', height: '40px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', fontWeight: 'bold', fontSize: '20px', flexShrink: 0 }}
+                                      title="Add Split Payment"
+                                    >
+                                      +
+                                    </button>
+                                  ) : (
+                                    <div style={{ width: '32px', flexShrink: 0 }} /> // Spacer to align dropdowns nicely
+                                  )}
+                                </div>
                               ))}
-                              <button onClick={() => addCreditSplit(uniqueKey, debtor.totalOwed)} style={{ background: 'none', border: 'none', color: '#3b82f6', fontSize: '12px', cursor: 'pointer', textAlign: 'left', fontWeight: 'bold' }}>+ Add Split</button>
                             </div>
                           </td>
 
