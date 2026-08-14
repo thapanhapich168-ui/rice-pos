@@ -1488,7 +1488,7 @@ export default function POSPage() {
         
         <div className="main-wrapper">
           
-          {/* 🟢 STICKY HEADER WRAPPER AROUND TITLE & TABS */}
+          {/* 🟢 STICKY HEADER WRAPPER AROUND TITLE, TABS & SEARCH */}
           <div className="pos-sticky-header">
             <div className="header-container" style={{ marginBottom: '16px' }}>
               <div className="header-left">
@@ -1562,131 +1562,132 @@ export default function POSPage() {
                 </div>
               )}
             </div>
-          </div>
-          {/* 🟢 END STICKY HEADER WRAPPER */}
 
-          <div style={{ marginBottom: '24px' }}>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px', alignItems: 'flex-start', width: '100%' }}>
-              
-              {/* PRODUCT SEARCH */}
-              <div style={{ flex: 1, minWidth: '240px', position: 'relative' }}>
-                <span style={{ position: 'absolute', left: '14px', top: '50%', transform: 'translateY(-50%)', color: '#94a3b8', fontSize: '16px', zIndex: 2 }}>🔍</span>
-                <input 
-                  type="text" 
-                  placeholder={currentT.searchPlaceholder.replace('🔍 ', '').replace('🔍', '').trim()} 
-                  value={searchQuery} 
-                  onChange={(e) => setSearchQuery(e.target.value)} 
-                  className="saas-input"
-                  style={{ paddingLeft: '38px', paddingRight: searchQuery ? '38px' : '14px', width: '100%' }} 
-                />
-                {searchQuery && (
-                  <button
-                    onClick={() => setSearchQuery('')}
-                    style={{
-                      position: 'absolute',
-                      right: '10px',
-                      top: '50%',
-                      transform: 'translateY(-50%)',
-                      background: 'none',
-                      border: 'none',
-                      color: '#94a3b8',
-                      cursor: 'pointer',
-                      fontSize: '16px',
-                      zIndex: 2,
-                      padding: '4px',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center'
-                    }}
-                    title="Clear search"
-                  >
-                    ✕
-                  </button>
+            {/* 🟢 SEARCH AND CATEGORY TABS MOVED INSIDE STICKY HEADER */}
+            <div style={{ marginBottom: '8px' }}>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px', alignItems: 'flex-start', width: '100%' }}>
+                
+                {/* PRODUCT SEARCH */}
+                <div style={{ flex: 1, minWidth: '240px', position: 'relative' }}>
+                  <span style={{ position: 'absolute', left: '14px', top: '50%', transform: 'translateY(-50%)', color: '#94a3b8', fontSize: '16px', zIndex: 2 }}>🔍</span>
+                  <input 
+                    type="text" 
+                    placeholder={currentT.searchPlaceholder.replace('🔍 ', '').replace('🔍', '').trim()} 
+                    value={searchQuery} 
+                    onChange={(e) => setSearchQuery(e.target.value)} 
+                    className="saas-input"
+                    style={{ paddingLeft: '38px', paddingRight: searchQuery ? '38px' : '14px', width: '100%' }} 
+                  />
+                  {searchQuery && (
+                    <button
+                      onClick={() => setSearchQuery('')}
+                      style={{
+                        position: 'absolute',
+                        right: '10px',
+                        top: '50%',
+                        transform: 'translateY(-50%)',
+                        background: 'none',
+                        border: 'none',
+                        color: '#94a3b8',
+                        cursor: 'pointer',
+                        fontSize: '16px',
+                        zIndex: 2,
+                        padding: '4px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center'
+                      }}
+                      title="Clear search"
+                    >
+                      ✕
+                    </button>
+                  )}
+                </div>
+                
+                {/* CUSTOMER SEARCH */}
+                {activeTab === 'wholesale' && (
+                  <div style={{ flex: 1, minWidth: '300px', position: 'relative' }}>
+                    {!selectedCustomer ? (
+                      <div style={{ position: 'relative' }}>
+                        
+                        {isCustomerModalOpen && (
+                          <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, zIndex: 99 }} onMouseDown={() => setIsCustomerModalOpen(false)}></div>
+                        )}
+                        
+                        <span style={{ position: 'absolute', left: '14px', top: '50%', transform: 'translateY(-50%)', color: '#94a3b8', fontSize: '16px', zIndex: isCustomerModalOpen ? 101 : 2 }}>🔍</span>
+                        <input 
+                          type="text"
+                          placeholder={currentT.selectCustomer.replace('🔍 ', '').replace('🔍', '').trim()}
+                          value={customerSearchTerm}
+                          onChange={e => setCustomerSearchTerm(e.target.value)}
+                          onFocus={() => setIsCustomerModalOpen(true)}
+                          className="saas-input"
+                          style={{ paddingLeft: '38px', width: '100%', position: 'relative', zIndex: isCustomerModalOpen ? 100 : 1, borderColor: isCustomerModalOpen ? '#b58a3d' : undefined }}
+                        />
+
+                        {/* Inline Dropdown Menu */}
+                        {isCustomerModalOpen && (
+                          <div style={{ position: 'absolute', top: 'calc(100% + 6px)', left: 0, right: 0, backgroundColor: '#ffffff', borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: '0 10px 30px rgba(0,0,0,0.15)', zIndex: 101, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+                            <div className="hide-scrollbar" style={{ maxHeight: '350px', overflowY: 'auto', padding: '0', display: 'flex', flexDirection: 'column', backgroundColor: '#ffffff' }}>
+                              
+                              <button onMouseDown={(e) => { e.preventDefault(); setIsCreateCustomerModalOpen(true); setIsCustomerModalOpen(false); }} className="saas-btn" style={{ width: 'calc(100% - 16px)', margin: '8px', padding: '10px', backgroundColor: '#f8fafc', color: '#0f172a', border: '1px dashed #cbd5e1', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold', fontSize: '14px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', flexShrink: 0 }}>
+                                <span style={{ fontSize: '16px' }}>+</span> Add New Customer
+                              </button>
+                              
+                              {filteredCustomers.length === 0 ? (
+                                <div style={{ textAlign: 'center', padding: '20px', color: '#94a3b8', fontSize: '14px' }}>No customers found</div>
+                              ) : (
+                                filteredCustomers.map(c => (
+                                  <div 
+                                    key={c.id} 
+                                    onMouseDown={(e) => { e.preventDefault(); setSelectedCustomerId(c.id.toString()); setCustomerSearchTerm(''); setIsCustomerModalOpen(false); }} 
+                                    style={{ padding: '12px 16px', cursor: 'pointer', transition: 'background 0.2s', borderBottom: '1px solid #f1f5f9', backgroundColor: '#ffffff', display: 'flex', flexDirection: 'column', gap: '4px' }}
+                                  >
+                                    <div style={{ fontWeight: 'bold', fontSize: '14px', color: '#0f172a' }}>{c.name}</div>
+                                    <div style={{ fontSize: '12px', color: '#64748b', display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
+                                      {c.phone && <span>📞 {c.phone}</span>}
+                                      {c.location && <span>📍 {c.location}</span>}
+                                      {c.type && <span>🏷️ {c.type}</span>}
+                                    </div>
+                                  </div>
+                                ))
+                              )}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <div style={{ width: '100%', padding: '12px', backgroundColor: '#fefcf3', border: '1px solid #eadeca', borderRadius: '8px', fontSize: '14px', color: '#4a3b1b', position: 'relative', boxSizing: 'border-box' }}>
+                        <button onClick={() => { setSelectedCustomerId(''); setCustomerSearchTerm(''); }} style={{ position: 'absolute', top: '6px', right: '6px', background: 'none', border: 'none', cursor: 'pointer', fontSize: '14px' }}>❌</button>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '10px', paddingRight: '20px' }}>
+                          <div><span style={{ color: '#8a7650', fontSize: '11px', display: 'block', marginBottom: '2px', fontWeight: 'bold' }}>👤 NAME</span>{selectedCustomer.name}</div>
+                          <div><span style={{ color: '#8a7650', fontSize: '11px', display: 'block', marginBottom: '2px', fontWeight: 'bold' }}>📞 PHONE</span>{selectedCustomer.phone || '-'}</div>
+                          <div><span style={{ color: '#8a7650', fontSize: '11px', display: 'block', marginBottom: '2px', fontWeight: 'bold' }}>📍 LOCATION</span>{selectedCustomer.location || '-'}</div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 )}
               </div>
-              
-              {/* CUSTOMER SEARCH */}
-              {activeTab === 'wholesale' && (
-                <div style={{ flex: 1, minWidth: '300px', position: 'relative' }}>
-                  {!selectedCustomer ? (
-                    <div style={{ position: 'relative' }}>
-                      
-                      {isCustomerModalOpen && (
-                        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, zIndex: 99 }} onMouseDown={() => setIsCustomerModalOpen(false)}></div>
-                      )}
-                      
-                      <span style={{ position: 'absolute', left: '14px', top: '50%', transform: 'translateY(-50%)', color: '#94a3b8', fontSize: '16px', zIndex: isCustomerModalOpen ? 101 : 2 }}>🔍</span>
-                      <input 
-                        type="text"
-                        placeholder={currentT.selectCustomer.replace('🔍 ', '').replace('🔍', '').trim()}
-                        value={customerSearchTerm}
-                        onChange={e => setCustomerSearchTerm(e.target.value)}
-                        onFocus={() => setIsCustomerModalOpen(true)}
-                        className="saas-input"
-                        style={{ paddingLeft: '38px', width: '100%', position: 'relative', zIndex: isCustomerModalOpen ? 100 : 1, borderColor: isCustomerModalOpen ? '#b58a3d' : undefined }}
-                      />
 
-                      {/* Inline Dropdown Menu */}
-                      {isCustomerModalOpen && (
-                        <div style={{ position: 'absolute', top: 'calc(100% + 6px)', left: 0, right: 0, backgroundColor: '#ffffff', borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: '0 10px 30px rgba(0,0,0,0.15)', zIndex: 101, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-                          <div className="hide-scrollbar" style={{ maxHeight: '350px', overflowY: 'auto', padding: '0', display: 'flex', flexDirection: 'column', backgroundColor: '#ffffff' }}>
-                            
-                            <button onMouseDown={(e) => { e.preventDefault(); setIsCreateCustomerModalOpen(true); setIsCustomerModalOpen(false); }} className="saas-btn" style={{ width: 'calc(100% - 16px)', margin: '8px', padding: '10px', backgroundColor: '#f8fafc', color: '#0f172a', border: '1px dashed #cbd5e1', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold', fontSize: '14px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', flexShrink: 0 }}>
-                              <span style={{ fontSize: '16px' }}>+</span> Add New Customer
-                            </button>
-                            
-                            {filteredCustomers.length === 0 ? (
-                              <div style={{ textAlign: 'center', padding: '20px', color: '#94a3b8', fontSize: '14px' }}>No customers found</div>
-                            ) : (
-                              filteredCustomers.map(c => (
-                                <div 
-                                  key={c.id} 
-                                  onMouseDown={(e) => { e.preventDefault(); setSelectedCustomerId(c.id.toString()); setCustomerSearchTerm(''); setIsCustomerModalOpen(false); }} 
-                                  style={{ padding: '12px 16px', cursor: 'pointer', transition: 'background 0.2s', borderBottom: '1px solid #f1f5f9', backgroundColor: '#ffffff', display: 'flex', flexDirection: 'column', gap: '4px' }}
-                                >
-                                  <div style={{ fontWeight: 'bold', fontSize: '14px', color: '#0f172a' }}>{c.name}</div>
-                                  <div style={{ fontSize: '12px', color: '#64748b', display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
-                                    {c.phone && <span>📞 {c.phone}</span>}
-                                    {c.location && <span>📍 {c.location}</span>}
-                                    {c.type && <span>🏷️ {c.type}</span>}
-                                  </div>
-                                </div>
-                              ))
-                            )}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  ) : (
-                    <div style={{ width: '100%', padding: '12px', backgroundColor: '#fefcf3', border: '1px solid #eadeca', borderRadius: '8px', fontSize: '14px', color: '#4a3b1b', position: 'relative', boxSizing: 'border-box' }}>
-                      <button onClick={() => { setSelectedCustomerId(''); setCustomerSearchTerm(''); }} style={{ position: 'absolute', top: '6px', right: '6px', background: 'none', border: 'none', cursor: 'pointer', fontSize: '14px' }}>❌</button>
-                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '10px', paddingRight: '20px' }}>
-                        <div><span style={{ color: '#8a7650', fontSize: '11px', display: 'block', marginBottom: '2px', fontWeight: 'bold' }}>👤 NAME</span>{selectedCustomer.name}</div>
-                        <div><span style={{ color: '#8a7650', fontSize: '11px', display: 'block', marginBottom: '2px', fontWeight: 'bold' }}>📞 PHONE</span>{selectedCustomer.phone || '-'}</div>
-                        <div><span style={{ color: '#8a7650', fontSize: '11px', display: 'block', marginBottom: '2px', fontWeight: 'bold' }}>📍 LOCATION</span>{selectedCustomer.location || '-'}</div>
-                      </div>
-                    </div>
-                  )}
+              {/* SCROLLABLE CATEGORY TABS */}
+              {activeTab !== 'retail' && (
+                <div className="saas-tab-container hide-scrollbar" style={{ display: 'flex', flexWrap: 'nowrap', overflowX: 'auto', marginTop: '16px', width: '100%', border: 'none', boxShadow: 'none', padding: 0, background: 'transparent', gap: '8px' }}>
+                  {RICE_CATEGORIES.map(cat => (
+                    <button 
+                      key={cat} 
+                      onClick={() => setActiveCategory(cat)} 
+                      className={`saas-tab ${activeCategory === cat ? 'active' : ''}`}
+                      style={activeCategory === cat ? { borderRadius: '20px', minWidth: 'max-content' } : { borderRadius: '20px', minWidth: 'max-content', border: '1px solid #e2e8f0', background: '#f1f5f9', color: '#475569' }}
+                    >
+                      {cat === 'All' ? (lang === 'kh' ? 'ទាំងអស់' : 'All') : cat}
+                    </button>
+                  ))}
                 </div>
               )}
             </div>
-
-            {/* SCROLLABLE CATEGORY TABS */}
-            {activeTab !== 'retail' && (
-              <div className="saas-tab-container hide-scrollbar" style={{ display: 'flex', flexWrap: 'nowrap', overflowX: 'auto', marginTop: '16px', width: '100%', border: 'none', boxShadow: 'none', padding: 0, background: 'transparent', gap: '8px' }}>
-                {RICE_CATEGORIES.map(cat => (
-                  <button 
-                    key={cat} 
-                    onClick={() => setActiveCategory(cat)} 
-                    className={`saas-tab ${activeCategory === cat ? 'active' : ''}`}
-                    style={activeCategory === cat ? { borderRadius: '20px', minWidth: 'max-content' } : { borderRadius: '20px', minWidth: 'max-content', border: '1px solid #e2e8f0', background: '#f1f5f9', color: '#475569' }}
-                  >
-                    {cat === 'All' ? (lang === 'kh' ? 'ទាំងអស់' : 'All') : cat}
-                  </button>
-                ))}
-              </div>
-            )}
           </div>
+          {/* 🟢 END STICKY HEADER WRAPPER */}
 
           <div>
             {filteredProducts.length === 0 ? (
