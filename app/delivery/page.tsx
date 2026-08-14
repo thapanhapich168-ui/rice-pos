@@ -1135,25 +1135,80 @@ export default function DeliveryPage() {
           <table className="saas-table" style={{ minWidth: '100%', tableLayout: 'fixed', width: 'max-content', borderCollapse: 'separate', borderSpacing: 0 }}>
             <thead style={{ background: '#fff1f2' }}>
               <tr>
-                {/* MATCHED TO DELIVERY TABLE EXACTLY */}
-                <th className="saas-th" style={{ position: 'sticky', top: 0, left: 0, zIndex: 40, backgroundColor: '#fff1f2', boxShadow: '2px 0 5px -2px rgba(0,0,0,0.1), inset 0 -2px 0 0 #fecaca', borderRight: '1px solid #ffe4e6', borderBottom: '1px solid #ffe4e6', color: '#be123c', padding: '12px 16px', width: colWidths['customer'] || 200, fontWeight: 'bold', textAlign: 'left' }}>Customer</th>
-                <th className="saas-th" style={{ position: 'sticky', top: 0, zIndex: 30, backgroundColor: '#fff1f2', boxShadow: 'inset 0 -2px 0 0 #fecaca', borderRight: '1px solid #ffe4e6', borderBottom: '1px solid #ffe4e6', color: '#be123c', padding: '12px 16px', width: colWidths['date'] || 150, fontWeight: 'bold', textAlign: 'left' }}>Date & INV</th>
-                <th className="saas-th" style={{ position: 'sticky', top: 0, zIndex: 30, backgroundColor: '#fff1f2', boxShadow: 'inset 0 -2px 0 0 #fecaca', borderRight: '1px solid #ffe4e6', borderBottom: '1px solid #ffe4e6', color: '#be123c', padding: '12px 16px', width: colWidths['items'] || 300, fontWeight: 'bold', textAlign: 'left' }}>Items Ordered</th>
-                <th className="saas-th" style={{ textAlign: 'right', position: 'sticky', top: 0, zIndex: 30, backgroundColor: '#fff1f2', boxShadow: 'inset 0 -2px 0 0 #fecaca', borderRight: '1px solid #ffe4e6', borderBottom: '1px solid #ffe4e6', color: '#be123c', padding: '12px 16px', width: colWidths['total'] || 120, fontWeight: 'bold' }}>Debt (៛)</th>
-                <th className="saas-th" style={{ textAlign: 'center', position: 'sticky', top: 0, zIndex: 30, backgroundColor: '#fff1f2', boxShadow: 'inset 0 -2px 0 0 #fecaca', borderRight: '1px solid #ffe4e6', borderBottom: '1px solid #ffe4e6', width: '160px', color: '#be123c', padding: '12px 16px', fontWeight: 'bold' }}>Method</th>
-                <th className="saas-th" style={{ textAlign: 'right', position: 'sticky', top: 0, zIndex: 30, backgroundColor: '#fff1f2', boxShadow: 'inset 0 -2px 0 0 #fecaca', borderRight: '1px solid #ffe4e6', borderBottom: '1px solid #ffe4e6', width: '180px', color: '#be123c', padding: '12px 16px', fontWeight: 'bold' }}>Pay Amount (៛)</th>
-                <th className="saas-th" style={{ textAlign: 'center', position: 'sticky', top: 0, zIndex: 30, backgroundColor: '#fff1f2', boxShadow: 'inset 0 -2px 0 0 #fecaca', borderBottom: '1px solid #ffe4e6', width: '120px', color: '#be123c', padding: '12px 16px', fontWeight: 'bold' }}>Complete</th>
+                {colOrder.filter(c => !hiddenCols.includes(c) && c !== 'status').map((col, index) => {
+                  const isSticky = index === 0;
+                  return (
+                    <th 
+                      key={col} 
+                      className="saas-th" 
+                      style={{ 
+                        position: 'sticky', 
+                        top: 0, 
+                        left: isSticky ? 0 : undefined,
+                        zIndex: isSticky ? 40 : 30,
+                        backgroundColor: '#fff1f2',
+                        boxShadow: isSticky ? '2px 0 5px -2px rgba(0,0,0,0.1), inset 0 -2px 0 0 #fecaca' : 'inset 0 -2px 0 0 #fecaca',
+                        borderRight: '1px solid #ffe4e6',
+                        borderLeft: index === 0 ? '1px solid #ffe4e6' : 'none',
+                        borderTop: '1px solid #ffe4e6',
+                        borderBottom: '1px solid #ffe4e6',
+                        padding: 0,
+                        width: colWidths[col] || DEFAULT_WIDTHS[col] || 150,
+                        minWidth: colWidths[col] || DEFAULT_WIDTHS[col] || 150,
+                        maxWidth: colWidths[col] || DEFAULT_WIDTHS[col] || 150,
+                        color: '#be123c',
+                      }}
+                    >
+                      <div style={{ display: 'flex', position: 'relative', width: '100%', height: '100%', alignItems: 'stretch' }}>
+                        <div
+                          draggable
+                          onDragStart={(e) => handleDragStart(e, col)}
+                          onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }}
+                          onDrop={(e) => handleDrop(e, col)}
+                          onClick={() => handleSort(col)}
+                          style={{ 
+                            flex: 1, 
+                            padding: '12px 16px', 
+                            display: 'flex', 
+                            alignItems: 'center', 
+                            justifyContent: ['total', 'pay'].includes(col) ? 'flex-end' : ['method', 'action'].includes(col) ? 'center' : 'flex-start',
+                            cursor: 'grab',
+                            overflow: 'hidden',
+                            whiteSpace: 'nowrap',
+                            userSelect: 'none',
+                            fontWeight: 'bold'
+                          }}
+                        >
+                          <span>{col === 'total' ? 'Debt (៛)' : COL_LABELS[col]}</span>
+                          <span style={{ marginLeft: '6px', fontSize: '10px', opacity: sortConfig?.key === col ? 1 : 0.3 }}>
+                            {sortConfig?.key === col ? (sortConfig.direction === 'asc' ? '↑' : '↓') : '↕'}
+                          </span>
+                        </div>
+                        <div 
+                          onMouseDown={(e) => { e.stopPropagation(); handleResizeStart(e, col); }} 
+                          onTouchStart={(e) => { e.stopPropagation(); handleResizeStart(e, col); }} 
+                          onClick={(e) => e.stopPropagation()} 
+                          style={{ 
+                            position: 'absolute', right: 0, top: 0, bottom: 0, 
+                            width: '14px', cursor: 'col-resize', background: 'transparent', 
+                            zIndex: 50, transform: 'translateX(50%)' 
+                          }} 
+                        />
+                      </div>
+                    </th>
+                  )
+                })}
               </tr>
             </thead>
             
             {loading && filteredOwners.length === 0 ? (
               <tbody>
-                 <TableSkeleton columns={7} rows={6} />
+                 <TableSkeleton columns={colOrder.filter(c => !hiddenCols.includes(c) && c !== 'status').length} rows={6} />
               </tbody>
             ) : filteredOwners.length === 0 ? (
               <tbody>
                 <tr>
-                  <td colSpan={7} style={{ padding: 0 }}>
+                  <td colSpan={colOrder.filter(c => !hiddenCols.includes(c) && c !== 'status').length} style={{ padding: 0 }}>
                     <EmptyState icon="💰" title="All caught up!" message="All customers are fully paid up on their delivered orders!" />
                   </td>
                 </tr>
@@ -1162,107 +1217,179 @@ export default function DeliveryPage() {
               filteredOwners.map(ownerName => {
                 const list = groupedDebtors[ownerName];
                 const ownerTotalOwed = list.reduce((sum: number, d: any) => sum + d.totalOwed, 0);
+                const visibleCols = colOrder.filter(c => !hiddenCols.includes(c) && c !== 'status');
+                const totalColCount = visibleCols.length;
+                const debtColIndex = visibleCols.indexOf('total');
+                
                 return (
                   <tbody key={ownerName}>
-                    <tr className="saas-tr" style={{ background: '#f1f5f9' }}>
-                      <td className="saas-td" colSpan={3} style={{ fontWeight: 'bold', verticalAlign: 'middle', position: 'sticky', left: 0, zIndex: 20, backgroundColor: '#f1f5f9', borderRight: '1px solid #e2e8f0', padding: '12px 16px' }}>
-                        👤 Owner: {ownerName}
-                      </td>
-                      <td className="saas-td" style={{ textAlign: 'right', color: '#334155', fontSize: '15px', fontWeight: 'bold', verticalAlign: 'middle', padding: '12px 16px' }}>
-                        {formatRiel(ownerTotalOwed)}
-                      </td>
-                      <td className="saas-td" colSpan={3} style={{ padding: '12px 16px' }}></td>
-                    </tr>
+                    {creditFilter === 'All' && (
+                      <tr className="saas-tr" style={{ background: '#f1f5f9' }}>
+                        {debtColIndex > 0 && (
+                          <td className="saas-td" colSpan={debtColIndex} style={{ fontWeight: 'bold', verticalAlign: 'middle', position: 'sticky', left: 0, zIndex: 20, backgroundColor: '#f1f5f9', borderRight: '1px solid #e2e8f0', padding: '12px 16px' }}>
+                            👤 Owner: {ownerName}
+                          </td>
+                        )}
+                        {debtColIndex === 0 && (
+                          <td className="saas-td" style={{ fontWeight: 'bold', verticalAlign: 'middle', position: 'sticky', left: 0, zIndex: 20, backgroundColor: '#f1f5f9', borderRight: '1px solid #e2e8f0', padding: '12px 16px' }}>
+                            👤 Owner: {ownerName}
+                          </td>
+                        )}
+                        {debtColIndex !== -1 ? (
+                          <td className="saas-td" style={{ textAlign: 'right', color: '#334155', fontSize: '15px', fontWeight: 'bold', verticalAlign: 'middle', padding: '12px 16px' }}>
+                            {formatRiel(ownerTotalOwed)}
+                          </td>
+                        ) : (
+                          <td className="saas-td" colSpan={totalColCount > 0 ? totalColCount : 1} style={{ textAlign: 'right', color: '#334155', fontSize: '15px', fontWeight: 'bold', verticalAlign: 'middle', padding: '12px 16px' }}>
+                            👤 Owner: {ownerName} - {formatRiel(ownerTotalOwed)}
+                          </td>
+                        )}
+                        {debtColIndex !== -1 && totalColCount - debtColIndex - 1 > 0 && (
+                          <td className="saas-td" colSpan={totalColCount - debtColIndex - 1} style={{ padding: '12px 16px', background: '#f1f5f9' }}></td>
+                        )}
+                      </tr>
+                    )}
                     {list.map((debtor: any) => {
-                      return debtor.invoices.map((inv: any, i: number) => {
+                      // Apply sort specifically within debtor's invoices if a sort config is present
+                      let sortedInvoices = [...debtor.invoices];
+                      if (sortConfig) {
+                         sortedInvoices.sort((a, b) => {
+                           let valA = a[sortConfig.key] || '';
+                           let valB = b[sortConfig.key] || '';
+                           if (sortConfig.key === 'customer') { valA = a.customer_name; valB = b.customer_name; }
+                           if (sortConfig.key === 'date') { valA = new Date(a.created_at).getTime(); valB = new Date(b.created_at).getTime(); }
+                           if (sortConfig.key === 'total') { valA = Number(a.balance_due); valB = Number(b.balance_due); }
+                           if (sortConfig.key === 'items') { valA = a.rice_types; valB = b.rice_types; }
+                           if (sortConfig.key === 'method') { valA = a.payment_method; valB = b.payment_method; }
+                           if (valA < valB) return sortConfig.direction === 'asc' ? -1 : 1;
+                           if (valA > valB) return sortConfig.direction === 'asc' ? 1 : -1;
+                           return 0;
+                         });
+                      }
+
+                      return sortedInvoices.map((inv: any, i: number) => {
                         const invBalance = Number(inv.balance_due) || 0;
                         const paymentState = getInlinePaymentState(inv.invoice_id, invBalance);
                         
                         return (
                           <tr key={inv.invoice_id} className="saas-tr" style={{ transition: 'background 0.2s ease', backgroundColor: '#ffffff' }}>
-                            
-                            {/* 🔥 Spanned Customer Box */}
-                            {i === 0 && (
-                              <td className="saas-td" rowSpan={debtor.invoices.length} style={{ verticalAlign: 'middle', position: 'sticky', left: 0, zIndex: 20, backgroundColor: '#ffffff', boxShadow: '2px 0 5px -2px rgba(0,0,0,0.05)', borderRight: '1px solid #e2e8f0', borderBottom: '1px solid #e2e8f0', padding: '12px 16px' }}>
-                                <div style={{ color: '#334155', fontSize: '15px', marginBottom: '4px', fontWeight: 'bold' }}>{debtor.name}</div>
-                                <div style={{ fontSize: '12px', color: '#ef4444', fontWeight: 'bold' }}>Total Debt: {formatRiel(debtor.totalOwed)}</div>
-                              </td>
-                            )}
+                            {visibleCols.map((col, index) => {
+                              const isSticky = index === 0;
+                              const tdStyle: any = { 
+                                verticalAlign: 'middle', 
+                                position: isSticky ? 'sticky' : undefined,
+                                left: isSticky ? 0 : undefined,
+                                zIndex: isSticky ? 20 : undefined,
+                                backgroundColor: isSticky ? '#ffffff' : 'inherit',
+                                boxShadow: isSticky ? '2px 0 5px -2px rgba(0,0,0,0.05)' : 'none',
+                                borderRight: isSticky ? '1px solid #e2e8f0' : 'none',
+                                borderBottom: '1px solid #f8fafc',
+                                overflow: 'hidden',
+                                wordWrap: 'break-word',
+                                whiteSpace: 'normal',
+                                padding: '12px 16px'
+                              };
 
-                            {/* 🔥 Separated Individual Invoices */}
-                            <td className="saas-td" style={{ verticalAlign: 'middle', padding: '12px 16px', borderBottom: '1px solid #f8fafc' }}>
-                              <div style={{ color: '#3b82f6', fontWeight: 'bold', marginBottom: '4px' }}>#{inv.invoice_id.replace('INV-', '')}</div>
-                              <div style={{ fontSize: '12px', color: '#64748b' }}>{new Date(inv.created_at).toLocaleDateString('en-GB')}</div>
-                            </td>
-                            
-                            <td className="saas-td" style={{ verticalAlign: 'middle', padding: '12px 16px', borderBottom: '1px solid #f8fafc', fontSize: '13px', lineHeight: '1.6', color: '#334155' }}>
-                              {inv.rice_types}
-                            </td>
-                            
-                            <td className="saas-td" style={{ textAlign: 'right', color: '#ef4444', fontSize: '15px', verticalAlign: 'middle', fontWeight: 'bold', padding: '12px 16px', borderBottom: '1px solid #f8fafc' }}>
-                              {formatRiel(invBalance)}
-                            </td>
-                            
-                            <td className="saas-td" style={{ textAlign: 'center', verticalAlign: 'middle', padding: '12px 16px', borderBottom: '1px solid #f8fafc' }}>
-                              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                                {paymentState.map((row: any, index: number) => (
-                                  <div key={row.id} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                    <select 
-                                      value={row.method}
-                                      onChange={(e) => updateInlineRow(inv.invoice_id, row.id, 'method', e.target.value, invBalance)}
-                                      className="saas-input"
-                                      style={{ flex: 1, padding: '8px 12px', cursor: 'pointer', height: '40px', width: '100%' }}
-                                    >
-                                       <option value="Cash ៛">💵 Cash ៛</option>
-                                       <option value="Cash $">💵 Cash $</option>
-                                       <option value="QR ៛">📱 QR ៛</option>
-                                       <option value="QR $">📱 QR $</option>
-                                       <option value="Mom QR ៛">👩 Mom QR ៛</option>
-                                       <option value="Mom QR $">👩 Mom QR $</option>
-                                    </select>
-                                    {index === paymentState.length - 1 ? (
-                                      <button onClick={() => addInlineSplit(inv.invoice_id, invBalance)} style={{ background: '#e0f2fe', border: 'none', borderRadius: '6px', color: '#0ea5e9', width: '32px', height: '40px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', fontWeight: 'bold', fontSize: '20px', flexShrink: 0 }}>+</button>
-                                    ) : (
-                                      <div style={{ width: '32px', flexShrink: 0 }} />
-                                    )}
+                              if (col === 'customer') {
+                                if (i === 0) {
+                                  return (
+                                    <td key={col} className="saas-td" rowSpan={debtor.invoices.length} style={{ ...tdStyle, borderBottom: '1px solid #e2e8f0' }}>
+                                      <div style={{ color: '#334155', fontSize: '15px', marginBottom: '4px', fontWeight: 'bold' }}>{debtor.name}</div>
+                                      <div style={{ fontSize: '12px', color: '#ef4444', fontWeight: 'bold' }}>Total Debt: {formatRiel(debtor.totalOwed)}</div>
+                                    </td>
+                                  );
+                                }
+                                return null;
+                              }
+
+                              if (col === 'date') return (
+                                <td key={col} className="saas-td" style={tdStyle}>
+                                  <div style={{ color: '#3b82f6', fontWeight: 'bold', marginBottom: '4px' }}>#{inv.invoice_id.replace('INV-', '')}</div>
+                                  <div style={{ fontSize: '12px', color: '#64748b' }}>{new Date(inv.created_at).toLocaleDateString('en-GB')}</div>
+                                </td>
+                              );
+
+                              if (col === 'items') return (
+                                <td key={col} className="saas-td" style={{ ...tdStyle, fontSize: '13px', lineHeight: '1.6', color: '#334155' }}>
+                                  {inv.rice_types}
+                                </td>
+                              );
+
+                              if (col === 'total') return (
+                                <td key={col} className="saas-td" style={{ ...tdStyle, textAlign: 'right', color: '#ef4444', fontSize: '15px', fontWeight: 'bold' }}>
+                                  {formatRiel(invBalance)}
+                                </td>
+                              );
+
+                              if (col === 'method') return (
+                                <td key={col} className="saas-td" style={{ ...tdStyle, textAlign: 'center' }}>
+                                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                    {paymentState.map((row: any, idx: number) => (
+                                      <div key={row.id} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                        <select 
+                                          value={row.method}
+                                          onChange={(e) => updateInlineRow(inv.invoice_id, row.id, 'method', e.target.value, invBalance)}
+                                          className="saas-input"
+                                          style={{ flex: 1, padding: '8px 12px', cursor: 'pointer', height: '40px', width: '100%' }}
+                                        >
+                                           <option value="Cash ៛">💵 Cash ៛</option>
+                                           <option value="Cash $">💵 Cash $</option>
+                                           <option value="QR ៛">📱 QR ៛</option>
+                                           <option value="QR $">📱 QR $</option>
+                                           <option value="Mom QR ៛">👩 Mom QR ៛</option>
+                                           <option value="Mom QR $">👩 Mom QR $</option>
+                                        </select>
+                                        {idx === paymentState.length - 1 ? (
+                                          <button onClick={() => addInlineSplit(inv.invoice_id, invBalance)} style={{ background: '#e0f2fe', border: 'none', borderRadius: '6px', color: '#0ea5e9', width: '32px', height: '40px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', fontWeight: 'bold', fontSize: '20px', flexShrink: 0 }}>+</button>
+                                        ) : (
+                                          <div style={{ width: '32px', flexShrink: 0 }} />
+                                        )}
+                                      </div>
+                                    ))}
                                   </div>
-                                ))}
-                              </div>
-                            </td>
+                                </td>
+                              );
 
-                            <td className="saas-td" style={{ textAlign: 'right', verticalAlign: 'middle', padding: '12px 16px', borderBottom: '1px solid #f8fafc' }}>
-                              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                                {paymentState.map((row: any) => (
-                                  <div key={row.id} style={{ display: 'flex', alignItems: 'center', gap: '6px', height: '40px' }}>
-                                    <CurrencyInput
-                                      placeholder={formatRiel(invBalance)}
-                                      value={row.amount}
-                                      onChange={(v: any) => updateInlineRow(inv.invoice_id, row.id, 'amount', v, invBalance)}
-                                      // 🔥 AUTO CLEAR ON DESKTOP FIX
-                                      onFocus={() => { if (!row.amount || Number(String(row.amount).replace(/,/g, '')) === invBalance) updateInlineRow(inv.invoice_id, row.id, 'amount', '', invBalance); }}
-                                      onClick={() => { if (!row.amount || Number(String(row.amount).replace(/,/g, '')) === invBalance) updateInlineRow(inv.invoice_id, row.id, 'amount', '', invBalance); }}
-                                      onEnter={() => handleInlineProcess(inv, paymentState)}
-                                      className="saas-input"
-                                      style={{ padding: '8px 12px', textAlign: 'right', height: '100%' }}
-                                    />
-                                    {paymentState.length > 1 && (
-                                      <button onClick={() => removeInlineSplit(inv.invoice_id, row.id, invBalance)} style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', fontSize: '16px', padding: '0 4px', fontWeight: 'bold' }}>✕</button>
-                                    )}
+                              if (col === 'pay') return (
+                                <td key={col} className="saas-td" style={{ ...tdStyle, textAlign: 'right' }}>
+                                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                    {paymentState.map((row: any) => (
+                                      <div key={row.id} style={{ display: 'flex', alignItems: 'center', gap: '6px', height: '40px' }}>
+                                        <CurrencyInput
+                                          placeholder={formatRiel(invBalance)}
+                                          value={row.amount}
+                                          onChange={(v: any) => updateInlineRow(inv.invoice_id, row.id, 'amount', v, invBalance)}
+                                          // 🔥 AUTO CLEAR ON DESKTOP FIX
+                                          onFocus={() => { if (!row.amount || Number(String(row.amount).replace(/,/g, '')) === invBalance) updateInlineRow(inv.invoice_id, row.id, 'amount', '', invBalance); }}
+                                          onClick={() => { if (!row.amount || Number(String(row.amount).replace(/,/g, '')) === invBalance) updateInlineRow(inv.invoice_id, row.id, 'amount', '', invBalance); }}
+                                          onEnter={() => handleInlineProcess(inv, paymentState)}
+                                          className="saas-input"
+                                          style={{ padding: '8px 12px', textAlign: 'right', height: '100%' }}
+                                        />
+                                        {paymentState.length > 1 && (
+                                          <button onClick={() => removeInlineSplit(inv.invoice_id, row.id, invBalance)} style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', fontSize: '16px', padding: '0 4px', fontWeight: 'bold' }}>✕</button>
+                                        )}
+                                      </div>
+                                    ))}
                                   </div>
-                                ))}
-                              </div>
-                            </td>
+                                </td>
+                              );
 
-                            <td className="saas-td" style={{ textAlign: 'center', verticalAlign: 'middle', padding: '12px 16px', borderBottom: '1px solid #f8fafc' }}>
-                              <button 
-                                onClick={() => handleInlineProcess(inv, paymentState)}
-                                disabled={isProcessing}
-                                className="saas-btn saas-btn-primary"
-                                style={{ width: '100%', height: '40px' }}
-                              >
-                                {isProcessing ? '...' : '✔ Done'}
-                              </button>
-                            </td>
+                              if (col === 'action') return (
+                                <td key={col} className="saas-td" style={{ ...tdStyle, textAlign: 'center' }}>
+                                  <button 
+                                    onClick={() => handleInlineProcess(inv, paymentState)}
+                                    disabled={isProcessing}
+                                    className="saas-btn saas-btn-primary"
+                                    style={{ width: '100%', height: '40px' }}
+                                  >
+                                    {isProcessing ? '...' : '✔'}
+                                  </button>
+                                </td>
+                              );
+
+                              return null;
+                            })}
                           </tr>
                         );
                       });
@@ -1289,17 +1416,17 @@ export default function DeliveryPage() {
         </div>
         
         {/* 🔥 NEW: COLUMN HIDE/SHOW MENU (HIDDEN ON MOBILE) */}
-        {activeTab === 'delivery' && !isMobile && (
+        {!isMobile && (
           <div className="header-actions" style={{ marginLeft: 'auto', position: 'relative' }}>
             <button onClick={() => setShowColMenu(!showColMenu)} className="saas-btn saas-btn-secondary" style={{ fontSize: '13px', padding: '6px 12px' }}>
               ⚙️ Columns
             </button>
             {showColMenu && (
               <div style={{ position: 'absolute', right: 0, top: 'calc(100% + 4px)', background: '#fff', border: '1px solid #e2e8f0', padding: '8px', zIndex: 999, borderRadius: '8px', width: '200px', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)' }}>
-                 {DEFAULT_DELIVERY_COLS.map(col => (
+                 {DEFAULT_DELIVERY_COLS.filter(col => activeTab === 'delivery' || col !== 'status').map(col => (
                    <label key={col} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '6px', cursor: 'pointer', fontSize: '13px', color: '#334155', borderBottom: '1px solid #f8fafc' }}>
                      <input type="checkbox" checked={!hiddenCols.includes(col)} onChange={() => toggleCol(col)} style={{ accentColor: '#3b82f6', width: '14px', height: '14px' }} />
-                     {COL_LABELS[col]}
+                     {col === 'total' && activeTab === 'credit' ? 'Debt (៛)' : COL_LABELS[col]}
                    </label>
                  ))}
               </div>

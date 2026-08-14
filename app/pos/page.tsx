@@ -126,7 +126,28 @@ export default function POSPage() {
   const [searchQuery, setSearchQuery] = useState('')
   const [activeTab, setActiveTab] = useState<'retail' | 'wholesale'>('retail')
   const [activeCategory, setActiveCategory] = useState<string>('All')
+  const [riceCategories, setRiceCategories] = useState<string[]>(RICE_CATEGORIES)
   
+  const handleCategoryDragStart = (e: React.DragEvent, cat: string) => {
+    e.dataTransfer.setData('text/plain', cat);
+    e.dataTransfer.effectAllowed = 'move';
+  }
+
+  const handleCategoryDrop = (e: React.DragEvent, targetCat: string) => {
+    e.preventDefault();
+    const sourceCat = e.dataTransfer.getData('text/plain');
+    if (!sourceCat || sourceCat === targetCat) return;
+
+    const currentCats = [...riceCategories];
+    const sIdx = currentCats.indexOf(sourceCat);
+    const tIdx = currentCats.indexOf(targetCat);
+    if (sIdx > -1 && tIdx > -1) {
+      currentCats.splice(sIdx, 1);
+      currentCats.splice(tIdx, 0, sourceCat);
+      setRiceCategories(currentCats);
+    }
+  }
+
   const [isMobileCartOpen, setIsMobileCartOpen] = useState(false)
   const [isProcessing, setIsProcessing] = useState(false)
   const [isDeviceMobile, setIsDeviceMobile] = useState(false)
