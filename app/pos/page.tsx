@@ -1678,7 +1678,10 @@ export default function POSPage() {
                       key={cat} 
                       onClick={() => setActiveCategory(cat)} 
                       className={`saas-tab ${activeCategory === cat ? 'active' : ''}`}
-                      style={activeCategory === cat ? { borderRadius: '20px', minWidth: 'max-content' } : { borderRadius: '20px', minWidth: 'max-content', border: '1px solid #e2e8f0', background: '#f1f5f9', color: '#475569' }}
+                      style={activeCategory === cat 
+                        ? { borderRadius: '20px', minWidth: 'max-content' } 
+                        : { borderRadius: '20px', minWidth: 'max-content', border: '1px solid #94a3b8', background: '#ffffff', color: '#334155' }
+                      }
                     >
                       {cat === 'All' ? (lang === 'kh' ? 'ទាំងអស់' : 'All') : cat}
                     </button>
