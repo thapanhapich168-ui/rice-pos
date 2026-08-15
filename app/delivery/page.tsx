@@ -1616,7 +1616,8 @@ export default function DeliveryPage() {
           display: flex;
           justify-content: flex-start;
           align-items: center; 
-          margin-bottom: 24px; 
+          /* 🔥 FIX: Changed from 24px to 16px to perfectly match the 16px bottom gap to the tables! */
+          margin-bottom: 16px; 
           margin-top: 0;
           margin-left: 60px; /* Clears the burger menu icon */
           gap: 12px;
@@ -1644,7 +1645,9 @@ export default function DeliveryPage() {
           .desktop-text { display: none !important; } /* Removes text like 'Pending' on mobile */
 
           .content-container {
-            padding: 0 16px !important;
+            /* 🔥 FIX: Removed the 16px double-padding. Now the pre-filter tabs and cards 
+               will shift left and align perfectly with the vertical line of the burger icon! */
+            padding: 0 !important;
           }
 
           .header-container { 
