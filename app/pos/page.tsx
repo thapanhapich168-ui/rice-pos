@@ -28,6 +28,27 @@ interface CartItem extends Product {
   db_row_id?: number
 }
 
+interface MixHistory {
+  id: string
+  time: string
+  rice1Name: string
+  rice1Ratio: number
+  rice2Name: string
+  rice2Ratio: number
+  rice3Name?: string
+  rice3Ratio?: number
+  mixedCogs: number
+  yieldStr: string
+  bagUsed?: string       
+  bagQty?: number        
+  branch_id?: number 
+  targetProductId?: number;
+  targetBatchId?: number;
+  yieldKg?: number;
+  ingredients?: { id: number; qty: number; batchId?: number | null }[];
+  bagId?: number;
+}
+
 const LOGO_LEFT_SRC = "/logo-left.png";
 const LOGO_RIGHT_SRC = "/logo-right.png";
 const WATERMARK_SRC = "/watermark.png";
@@ -151,6 +172,50 @@ export default function POSPage() {
   const [isMobileCartOpen, setIsMobileCartOpen] = useState(false)
   const [isProcessing, setIsProcessing] = useState(false)
   const [isDeviceMobile, setIsDeviceMobile] = useState(false)
+
+  // 🟢 NEW: FULL SCREEN TAKEOVER & SEARCH STATE
+  const [activeFullScreen, setActiveFullScreen] = useState<'none' | 'import' | 'mix'>('none');
+
+  // 🟢 NEW: IMPORT STOCK STATES
+  const [suppliers, setSuppliers] = useState<any[]>([]);
+  const [importForm, setImportForm] = useState({ supplier_id: '', product_id: '', qty: '', unit_cost: '', paid_amount: '', payment_method: 'Cash ៛' });
+  const [isSupplierDropdownOpen, setIsSupplierDropdownOpen] = useState(false);
+  const [supplierSearch, setSupplierSearch] = useState('');
+  const [isProductDropdownOpen, setIsProductDropdownOpen] = useState(false);
+  const [productSearch, setProductSearch] = useState('');
+  const [isAddSupplierOpen, setIsAddSupplierOpen] = useState(false);
+  const [newSupplier, setNewSupplier] = useState({ name: '', phone: '', location: '' });
+  
+  // 🟢 ADDED: CREATE NEW PRODUCT STATE
+  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [newItem, setNewItem] = useState({ name: '', price: 0 as any, cost_price: 0 as any, weight: 50 as any, stock: 0 as any, min_stock_level: 10 as any });
+
+  // 🟢 NEW: MIX RICE STATES
+  const [rice1Id, setRice1Id] = useState<string>('');
+  const [rice1Qty, setRice1Qty] = useState<number | ''>('');
+  const [rice1BatchId, setRice1BatchId] = useState<number | null>(null);
+  const [rice2Id, setRice2Id] = useState<string>('');
+  const [rice2Qty, setRice2Qty] = useState<number | ''>('');
+  const [rice2BatchId, setRice2BatchId] = useState<number | null>(null);
+  const [showThirdRice, setShowThirdRice] = useState(false);
+  const [rice3Id, setRice3Id] = useState<string>('');
+  const [rice3Qty, setRice3Qty] = useState<number | ''>('');
+  const [rice3BatchId, setRice3BatchId] = useState<number | null>(null);
+  const [activeDropdown, setActiveDropdown] = useState<'rice1' | 'rice2' | 'rice3' | 'target' | 'bag' | null>(null);
+  const [mixDropdownSearch, setMixDropdownSearch] = useState('');
+  const [dropdownTab, setDropdownTab] = useState<'wholesale' | 'retail'>('wholesale');
+  const [calcResult, setCalcResult] = useState<{ blendedCogsPerKg: number, totalYieldKg: number, totalCost: number } | null>(null);
+  const [syncMode, setSyncMode] = useState<'none' | 'existing' | 'new'>('none');
+  const [targetProductId, setTargetProductId] = useState<string>('');
+  const [bagId, setBagId] = useState<string>('');
+  const [bagQty, setBagQty] = useState<number | ''>('');
+  const [newMixName, setNewMixName] = useState('');
+  const [newMixPrice, setNewMixPrice] = useState<number | ''>(0);
+  const [newMixType, setNewMixType] = useState<'wholesale' | 'half' | 'retail'>('wholesale');
+  const [globalHistory, setGlobalHistory] = useState<MixHistory[]>([]);
+  const [mixHistory, setMixHistory] = useState<MixHistory[]>([]);
+  const [editingHistoryId, setEditingHistoryId] = useState<string | null>(null);
+  const [historyEdits, setHistoryEdits] = useState<Record<string, { yieldKg: number, mixedCogs: number }>>({});
 
   const [selectedCustomerId, setSelectedCustomerId] = useState('')
   const [customerSearchTerm, setCustomerSearchTerm] = useState('')
@@ -316,6 +381,8 @@ export default function POSPage() {
         await loadCustomers()
         await loadBatches()
         await loadMtdSales()
+        await loadSuppliers()
+        await loadMixHistory()
 
         const urlParams = new URLSearchParams(window.location.search);
         const editId = urlParams.get('edit');
@@ -513,9 +580,273 @@ export default function POSPage() {
       setMtdSalesStats(stats);
     }
   }
+  async function loadSuppliers() {
+    const { data } = await supabase.from('suppliers').select('*').eq('is_archived', false).eq('branch_id', activeBranchId).order('name', { ascending: true })
+    if (data) setSuppliers(data)
+  }
+
+  async function loadMixHistory() {
+    const { data } = await supabase.from('app_settings').select('setting_value').eq('setting_key', 'calculator_history').single()
+    if (data && data.setting_value) {
+      setGlobalHistory(data.setting_value);
+      setMixHistory(data.setting_value.filter((h: any) => h.branch_id === activeBranchId || !h.branch_id));
+    }
+  }
 
   const formatRielSymbol = (amountInRiel: number) => `${new Intl.NumberFormat('en-US').format(Math.round(amountInRiel))} ៛`;
   const formatRielFromNative = (rielAmount: number) => `${new Intl.NumberFormat('en-US').format(Math.round(rielAmount))} ៛`;
+
+  // --- 🟢 NEW CORE LOGIC FOR IMPORT AND MIX ---
+
+  const importTotalCalc = (Number(importForm.qty) || 0) * (Number(importForm.unit_cost) || 0);
+
+  const handleOpenAddProduct = () => {
+    setNewItem({ name: '', price: 0, cost_price: 0, weight: 50, stock: 0, min_stock_level: 10 });
+    setIsAddModalOpen(true);
+  };
+
+  const addProduct = async () => {
+    if (!newItem.name) return showToast('error', 'Missing Data', 'Name is required');
+    setIsProcessing(true);
+    try {
+      const payload = {
+        name: newItem.name,
+        price: Number(newItem.price) || 0,
+        cost_price: Number(newItem.cost_price) || 0,
+        weight: Number(newItem.weight) || 50,
+        stock: Number(newItem.stock) || 0,
+        min_stock_level: Number(newItem.min_stock_level) || 10,
+        mtd_kg_used: 0,
+        mtd_bags_used: 0,
+        branch_id: activeBranchId 
+      }
+      const { data, error } = await supabase.from('products').insert([payload]).select();
+      
+      if (!error && data && data.length > 0) {
+        setIsAddModalOpen(false);
+        setNewItem({ name: '', price: 0, cost_price: 0, weight: 50, stock: 0, min_stock_level: 10 });
+        setProducts(prev => [...prev, data[0]]);
+        setImportForm(prev => ({ ...prev, product_id: String(data[0].id) }));
+        showToast('success', 'Product Created', 'Ready to receive stock.');
+      } else if (error) {
+        throw error;
+      }
+    } catch (err: any) {
+      showToast('error', 'Creation Failed', err.message);
+    } finally {
+      setIsProcessing(false);
+    }
+  }
+
+  async function handleAddSupplier() {
+    if (!newSupplier.name) return showToast('error', 'Validation Error', 'Supplier name is required');
+    setIsProcessing(true);
+    try {
+      const { data, error } = await supabase.from('suppliers').insert([{ 
+        name: newSupplier.name, phone: newSupplier.phone, location: newSupplier.location, branch_id: activeBranchId 
+      }]).select();
+      if (error) throw error;
+      setIsAddSupplierOpen(false);
+      setNewSupplier({ name: '', phone: '', location: '' });
+      if (data && data.length > 0) {
+        setSuppliers(prev => [...prev, data[0]]);
+        setImportForm(prev => ({ ...prev, supplier_id: String(data[0].id) }));
+        showToast('success', 'Supplier Added', `${data[0].name} has been added successfully.`);
+      }
+    } catch (err: any) { showToast('error', 'Error', err.message); } finally { setIsProcessing(false); }
+  }
+
+  async function handleProcessImport(isPayLater: boolean) {
+    if (!importForm.supplier_id || !importForm.product_id || !importForm.qty || !importForm.unit_cost) {
+      return showToast('error', 'Missing Data', 'Please fill in Supplier, Product, Qty, and Cost.');
+    }
+    setIsProcessing(true);
+    const qty = Number(importForm.qty);
+    const unitCost = Number(importForm.unit_cost);
+    const totalCost = qty * unitCost;
+    const paidAmount = isPayLater ? (Number(importForm.paid_amount) || 0) : totalCost;
+    
+    if (paidAmount > totalCost) {
+      setIsProcessing(false);
+      return showToast('error', 'Invalid Amount', 'Cannot pay more than the total cost.');
+    }
+
+    try {
+      const supplierName = suppliers.find(s => String(s.id) === String(importForm.supplier_id))?.name || 'Unknown Supplier';
+      const product = products.find(p => String(p.id) === String(importForm.product_id));
+      if (!product) throw new Error("Product ID mismatch");
+
+      const { error: importErr } = await supabase.from('imports').insert([{
+        supplier_id: Number(importForm.supplier_id), product_id: Number(importForm.product_id), product_name: product.name,
+        qty: qty, unit_cost: unitCost, total_cost: totalCost, paid_amount: paidAmount, status: paidAmount >= totalCost ? 'Paid' : 'Pending', branch_id: activeBranchId
+      }]);
+      if (importErr) throw importErr;
+
+      if (totalCost - paidAmount > 0) {
+        const supplier = suppliers.find(s => String(s.id) === String(importForm.supplier_id));
+        await supabase.from('suppliers').update({ total_owed_riel: Number(supplier?.total_owed_riel || 0) + (totalCost - paidAmount) }).eq('id', supplier?.id);
+        await supabase.from('accounts_payable').insert([{ supplier_name: supplierName, amount_riel: totalCost - paidAmount, amount_usd: 0, notes: `Stock Import: ${qty} bags`, status: 'Unpaid', branch_id: activeBranchId }]);
+      }
+      
+      await supabase.from('products').update({ stock: Number(product.stock || 0) + qty, cost_price: unitCost }).eq('id', product.id);
+      await supabase.from('inventory_batches').insert([{ product_id: Number(importForm.product_id), product_name: product.name, cost_price: unitCost, remaining_qty: qty, branch_id: activeBranchId }]);
+
+      if (paidAmount > 0) {
+        let amtUsd = 0, amtRiel = paidAmount;
+        if (importForm.payment_method.includes('$')) { amtUsd = paidAmount; amtRiel = paidAmount * EXCHANGE_RATE; }
+        await supabase.from('expenses').insert([{ expense_date: new Date().toISOString().split('T')[0], spender: 'Both', payment_method: importForm.payment_method, remarks: `Stock Import: ${supplierName}`, amount_usd: Math.abs(amtUsd), amount_riel: Math.abs(amtRiel), description: 'BUSINESS', branch_id: activeBranchId }]);
+      }
+
+      setImportForm({ supplier_id: '', product_id: '', qty: '', unit_cost: '', paid_amount: '', payment_method: 'Cash ៛' });
+      showToast('success', 'Stock Received', `${qty} bags added to inventory.`);
+      setActiveFullScreen('none');
+      loadProductsAndSettings();
+      loadBatches();
+      loadSuppliers();
+    } catch (err: any) { showToast('error', 'Error', err.message); } finally { setIsProcessing(false); }
+  }
+
+  // Math Engine
+  const getCogs = (prod: Product, batchId: number | null) => {
+    if (batchId) { const batch = activeBatches[prod.id]?.find(b => b.id === batchId); if (batch) return batch.cost_price; }
+    return prod.cost_price;
+  }
+  const rice1 = products.find(p => p.id.toString() === rice1Id);
+  const rice2 = products.find(p => p.id.toString() === rice2Id);
+  const rice3 = products.find(p => p.id.toString() === rice3Id);
+  const targetProd = products.find(p => p.id.toString() === targetProductId);
+  const bagProd = products.find(p => p.id.toString() === bagId);
+
+  useEffect(() => {
+    const q1 = Number(rice1Qty) || 0, q2 = Number(rice2Qty) || 0, q3 = showThirdRice ? (Number(rice3Qty) || 0) : 0, qBag = Number(bagQty) || 0;
+    if (rice1 && rice2 && (showThirdRice ? rice3 : true) && (q1 + q2 + q3) > 0) {
+      const kg1 = q1 * (Number(rice1.weight) >= 50 ? 50 : 1);
+      const kg2 = q2 * (Number(rice2.weight) >= 50 ? 50 : 1);
+      const kg3 = q3 * (rice3 ? (Number(rice3.weight) >= 50 ? 50 : 1) : 1);
+      const totalYieldKg = kg1 + kg2 + kg3;
+      const totalCost = (q1 * getCogs(rice1, rice1BatchId)) + (q2 * getCogs(rice2, rice2BatchId)) + (rice3 ? (q3 * getCogs(rice3, rice3BatchId)) : 0) + (bagProd ? (qBag * bagProd.cost_price) : 0);
+      setCalcResult({ blendedCogsPerKg: totalYieldKg > 0 ? (totalCost / totalYieldKg) : 0, totalYieldKg, totalCost });
+    } else { setCalcResult(null); setSyncMode('none'); }
+  }, [rice1Id, rice2Id, rice3Id, rice1Qty, rice2Qty, rice3Qty, rice1BatchId, rice2BatchId, rice3BatchId, showThirdRice, bagQty, products, rice1, rice2, rice3, bagProd, activeBatches])
+
+  let outputUnit = 'Kg', outputMultiplier = 1, finalYield = 0, finalCogs = 0;
+  if (calcResult) {
+    if (syncMode === 'new') { outputMultiplier = newMixType === 'wholesale' ? 50 : newMixType === 'half' ? 25 : 1; outputUnit = newMixType === 'wholesale' ? 'Bags' : newMixType === 'half' ? '25kg Bags' : 'Kg'; } 
+    else if (syncMode === 'existing' && targetProd) { outputMultiplier = Number(targetProd.weight) >= 50 ? 50 : 1; outputUnit = Number(targetProd.weight) >= 50 ? 'Bags' : 'Kg'; } 
+    else { outputMultiplier = 50; outputUnit = 'Bags'; }
+    finalYield = calcResult.totalYieldKg / outputMultiplier; finalCogs = calcResult.blendedCogsPerKg * outputMultiplier;
+  }
+
+  useEffect(() => { if (bagId && finalYield > 0 && bagQty === '') setBagQty(Math.ceil(finalYield)); }, [finalYield, bagId]);
+
+  const handleResetMix = () => {
+    setRice1Id(''); setRice1Qty(''); setRice1BatchId(null); setRice2Id(''); setRice2Qty(''); setRice2BatchId(null);
+    setRice3Id(''); setRice3Qty(''); setRice3BatchId(null); setShowThirdRice(false); setCalcResult(null); setSyncMode('none');
+    setNewMixName(''); setNewMixPrice(0); setTargetProductId(''); setBagId(''); setBagQty(''); setActiveDropdown(null);
+  }
+
+  async function handleExecuteInventorySync() {
+    if (!calcResult || !rice1 || !rice2) return;
+    const qtyToDeduct1 = Number(rice1Qty) || 0, qtyToDeduct2 = Number(rice2Qty) || 0, qtyToDeduct3 = showThirdRice ? (Number(rice3Qty) || 0) : 0, qtyToDeductBag = Number(bagQty) || 0;
+    if (!bagId || qtyToDeductBag <= 0) return showToast('error', 'Missing Bag', 'Please select a packaging bag and enter the quantity.');
+    setIsProcessing(true);
+    try {
+      const processDeduction = async (prodId: number, qty: number, specificBatchId: number | null) => {
+        if (qty <= 0) return;
+        await supabase.rpc('adjust_product_stock', { p_product_id: prodId, p_quantity: -qty });
+        if (specificBatchId) await supabase.rpc('adjust_batch_stock', { p_batch_id: specificBatchId, p_quantity: -qty });
+        else {
+          const { data: batches } = await supabase.from('inventory_batches').select('*').eq('product_id', prodId).eq('branch_id', activeBranchId).gt('remaining_qty', 0).order('id', { ascending: true }); 
+          let leftToDeduct = qty;
+          if (batches) { for (const b of batches) { if (leftToDeduct <= 0) break; const take = Math.min(b.remaining_qty, leftToDeduct); await supabase.rpc('adjust_batch_stock', { p_batch_id: b.id, p_quantity: -take }); leftToDeduct -= take; } }
+        }
+      };
+
+      if (rice1 && qtyToDeduct1 > 0) await processDeduction(rice1.id, qtyToDeduct1, rice1BatchId);
+      if (rice2 && qtyToDeduct2 > 0) await processDeduction(rice2.id, qtyToDeduct2, rice2BatchId);
+      if (showThirdRice && rice3 && qtyToDeduct3 > 0) await processDeduction(rice3.id, qtyToDeduct3, rice3BatchId);
+      if (bagProd && qtyToDeductBag > 0) await processDeduction(bagProd.id, qtyToDeductBag, null);
+
+      let finalTargetId = targetProductId, finalTargetName = targetProd?.name || ''; 
+      if (syncMode === 'new') {
+        const payload = { name: newMixName, price: Number(newMixPrice) || 0, cost_price: Math.round(finalCogs), weight: newMixType === 'wholesale' ? 50 : newMixType === 'half' ? 25 : 1, stock: finalYield, branch_id: activeBranchId }
+        const { data: newProd, error } = await supabase.from('products').insert([payload]).select().single();
+        if (error) throw error; finalTargetId = newProd.id.toString(); finalTargetName = newMixName; 
+      } else if (targetProd) {
+        await supabase.rpc('adjust_product_stock', { p_product_id: targetProd.id, p_quantity: finalYield });
+        await supabase.from('products').update({ cost_price: Math.round(finalCogs) }).eq('id', targetProd.id);
+        finalTargetId = targetProd.id.toString(); finalTargetName = targetProd.name; 
+      }
+
+      const recipeString = `Recipe: ${qtyToDeduct1}x ${rice1.name} + ${qtyToDeduct2}x ${rice2.name}${showThirdRice && rice3 ? ` + ${qtyToDeduct3}x ${rice3.name}` : ''}`;
+      const { data: generatedBatch, error: batchErr } = await supabase.from('inventory_batches').insert([{ product_id: Number(finalTargetId), product_name: finalTargetName, cost_price: Math.round(finalCogs), remaining_qty: finalYield, branch_id: activeBranchId, notes: recipeString }]).select().single();
+      if (batchErr) throw batchErr;
+
+      const usedIngredients: any[] = [];
+      if (rice1 && qtyToDeduct1 > 0) usedIngredients.push({ id: rice1.id, qty: qtyToDeduct1, batchId: rice1BatchId });
+      if (rice2 && qtyToDeduct2 > 0) usedIngredients.push({ id: rice2.id, qty: qtyToDeduct2, batchId: rice2BatchId });
+      if (showThirdRice && rice3 && qtyToDeduct3 > 0) usedIngredients.push({ id: rice3.id, qty: qtyToDeduct3, batchId: rice3BatchId });
+
+      const newRecord: MixHistory = {
+        id: Date.now().toString(), time: new Date().toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }),
+        rice1Name: rice1.name, rice1Ratio: qtyToDeduct1, rice2Name: rice2.name, rice2Ratio: qtyToDeduct2, rice3Name: showThirdRice && rice3 ? rice3.name : undefined, rice3Ratio: showThirdRice ? qtyToDeduct3 : undefined,
+        mixedCogs: finalCogs, yieldStr: `${finalYield.toLocaleString('en-US', { maximumFractionDigits: 2 })} ${outputUnit}`, bagUsed: bagProd ? bagProd.name : undefined, bagQty: bagProd ? qtyToDeductBag : undefined, branch_id: activeBranchId,
+        targetProductId: Number(finalTargetId), targetBatchId: generatedBatch.id, yieldKg: finalYield, ingredients: usedIngredients, bagId: bagProd ? bagProd.id : undefined,
+      }
+      const updatedGlobalHistory = [newRecord, ...globalHistory].slice(0, 100); 
+      setGlobalHistory(updatedGlobalHistory); setMixHistory(updatedGlobalHistory.filter(h => h.branch_id === activeBranchId || !h.branch_id));
+      await supabase.from('app_settings').upsert({ setting_key: 'calculator_history', setting_value: updatedGlobalHistory }, { onConflict: 'setting_key' })
+
+      showToast('success', 'Sync Successful', 'Inventory synced and stored in batch!');
+      handleResetMix(); setActiveFullScreen('none'); loadProductsAndSettings(); loadBatches();
+    } catch (err: any) { showToast('error', 'Error', err.message); } finally { setIsProcessing(false); }
+  }
+
+  const mixDropdownFilteredProducts = products.filter(p => {
+    if (mixDropdownSearch && !p.name.toLowerCase().includes(mixDropdownSearch.toLowerCase())) return false;
+    if (activeDropdown === 'bag') return p.name.includes('បាវ');
+    if (activeDropdown === 'rice1' || activeDropdown === 'rice2' || activeDropdown === 'rice3') { if (p.stock <= 0) return false; if (p.weight < 50) return false; return true; }
+    if (activeDropdown === 'target') { const isWholesale = Number(p.weight) >= 50; if (dropdownTab === 'wholesale' && !isWholesale) return false; if (dropdownTab === 'retail' && isWholesale) return false; return true; }
+    return true;
+  });
+
+  const handleSelectMixProduct = (p: Product, target: string) => {
+    if (target === 'rice1') { setRice1Id(p.id.toString()); setRice1BatchId(null); }
+    if (target === 'rice2') { setRice2Id(p.id.toString()); setRice2BatchId(null); }
+    if (target === 'rice3') { setRice3Id(p.id.toString()); setRice3BatchId(null); }
+    if (target === 'target') setTargetProductId(p.id.toString());
+    if (target === 'bag') setBagId(p.id.toString());
+    setActiveDropdown(null);
+  }
+
+  const renderMixDropdownMenu = (target: string) => {
+    if (activeDropdown !== target) return null;
+    return (
+      <div style={{ position: 'absolute', top: 'calc(100% + 4px)', left: 0, right: 0, backgroundColor: '#fff', border: '1px solid #cbd5e1', borderRadius: '12px', boxShadow: '0 10px 25px rgba(0,0,0,0.15)', zIndex: 101, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+        {target === 'target' && (
+          <div className="saas-tab-container" style={{ margin: '8px', marginBottom: 0, padding: '4px', border: 'none', boxShadow: 'none', background: '#f1f5f9' }}>
+            <button onClick={(e) => { e.stopPropagation(); setDropdownTab('wholesale'); }} className={`saas-tab ${dropdownTab === 'wholesale' ? 'active' : ''}`} style={{ flex: 1, textAlign: 'center', padding: '8px' }}>🌾 Wholesale</button>
+            <button onClick={(e) => { e.stopPropagation(); setDropdownTab('retail'); }} className={`saas-tab ${dropdownTab === 'retail' ? 'active' : ''}`} style={{ flex: 1, textAlign: 'center', padding: '8px' }}>🛍️ Retail</button>
+          </div>
+        )}
+        <div className="hide-scrollbar" style={{ maxHeight: '220px', overflowY: 'auto', padding: '8px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+          {mixDropdownFilteredProducts.length === 0 ? (
+            <div style={{ padding: '16px', textAlign: 'center', color: '#94a3b8', fontSize: '13px' }}>No products found</div>
+          ) : (
+            mixDropdownFilteredProducts.map(p => (
+              <div key={p.id} onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); handleSelectMixProduct(p, target); }} style={{ padding: '12px', borderBottom: '1px solid #f1f5f9', cursor: 'pointer', borderRadius: '8px', background: '#ffffff' }} onMouseEnter={e => e.currentTarget.style.backgroundColor = '#f8fafc'} onMouseLeave={e => e.currentTarget.style.backgroundColor = '#ffffff'}>
+                <div style={{ fontWeight: 'bold', fontSize: '14px', color: '#1e293b', marginBottom: '4px' }}>{p.name}</div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: '#64748b' }}>
+                  <span>Cost: <b style={{ color: '#b58a3d' }}>{formatRiel(p.cost_price)}</b></span>
+                  <span>Stock: <b style={{ color: p.stock > 0 ? '#10b981' : '#ef4444' }}>{p.stock}</b></span>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+    )
+  }
 
   const toggleProductActiveStatus = async (productId: number, targetStatus: 'active' | 'inactive') => {
     let newHidden: number[];
@@ -1564,7 +1895,7 @@ export default function POSPage() {
             </div>
 
             {/* 🟢 SEARCH AND CATEGORY TABS MOVED INSIDE STICKY HEADER */}
-            <div style={{ marginBottom: '8px' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', width: '100%' }}>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px', alignItems: 'flex-start', width: '100%' }}>
                 
                 {/* PRODUCT SEARCH */}
@@ -1581,26 +1912,9 @@ export default function POSPage() {
                   {searchQuery && (
                     <button
                       onClick={() => setSearchQuery('')}
-                      style={{
-                        position: 'absolute',
-                        right: '10px',
-                        top: '50%',
-                        transform: 'translateY(-50%)',
-                        background: 'none',
-                        border: 'none',
-                        color: '#94a3b8',
-                        cursor: 'pointer',
-                        fontSize: '16px',
-                        zIndex: 2,
-                        padding: '4px',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center'
-                      }}
+                      style={{ position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer', fontSize: '16px', zIndex: 2, padding: '4px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
                       title="Clear search"
-                    >
-                      ✕
-                    </button>
+                    >✕</button>
                   )}
                 </div>
                 
@@ -1670,9 +1984,9 @@ export default function POSPage() {
                 )}
               </div>
 
-              {/* SCROLLABLE CATEGORY TABS */}
+              {/* SCROLLABLE CATEGORY TABS WITH MIX & IMPORT BUTTONS APPENDED */}
               {activeTab !== 'retail' && (
-                <div className="saas-tab-container hide-scrollbar" style={{ display: 'flex', flexWrap: 'nowrap', overflowX: 'auto', marginTop: '16px', width: '100%', border: 'none', boxShadow: 'none', padding: 0, background: 'transparent', gap: '8px' }}>
+                <div className="saas-tab-container hide-scrollbar" style={{ display: 'flex', flexWrap: 'nowrap', overflowX: 'auto', width: '100%', border: 'none', boxShadow: 'none', padding: 0, background: 'transparent', gap: '8px', margin: 0 }}>
                   {RICE_CATEGORIES.map(cat => (
                     <button 
                       key={cat} 
@@ -1686,6 +2000,22 @@ export default function POSPage() {
                       {cat === 'All' ? (lang === 'kh' ? 'ទាំងអស់' : 'All') : cat}
                     </button>
                   ))}
+                  
+                  {/* 🟢 NEW APPENDED INLINE TOOLS */}
+                  <button 
+                    onClick={() => setActiveFullScreen('import')}
+                    className="saas-tab"
+                    style={{ borderRadius: '20px', minWidth: 'max-content', border: '1px dashed #3b82f6', background: '#eff6ff', color: '#1d4ed8', fontWeight: 'bold' }}
+                  >
+                    📦 Import Stock
+                  </button>
+                  <button 
+                    onClick={() => setActiveFullScreen('mix')}
+                    className="saas-tab"
+                    style={{ borderRadius: '20px', minWidth: 'max-content', border: '1px dashed #8b5cf6', background: '#f5f3ff', color: '#6d28d9', fontWeight: 'bold' }}
+                  >
+                    🥣 Mix Rice
+                  </button>
                 </div>
               )}
             </div>
@@ -2965,7 +3295,374 @@ export default function POSPage() {
         </div>
       </Modal>
 
+
+
       {/* --- GLOBAL CSS --- */}
+
+{/* 🟢 FULL SCREEN TAKEOVER: IMPORT STOCK */}
+      {activeFullScreen === 'import' && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: '#f8fafc', zIndex: 99999, overflowY: 'auto' }}>
+          <div style={{ padding: isDeviceMobile ? '16px' : '32px', width: '100%', maxWidth: '800px', margin: '0 auto', minHeight: '100dvh', display: 'flex', flexDirection: 'column' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px', flexShrink: 0 }}>
+              <h1 className="saas-page-title" style={{ margin: 0 }}>📦 Import Stock</h1>
+              {isDeviceMobile ? (
+                <button onClick={() => setActiveFullScreen('none')} style={{ background: 'none', border: 'none', color: '#ef4444', fontSize: '24px', padding: '4px', cursor: 'pointer' }}>
+                  ❌
+                </button>
+              ) : (
+                <button onClick={() => setActiveFullScreen('none')} className="saas-btn saas-btn-danger" style={{ padding: '8px 16px', fontWeight: 'bold', color: '#ffffff' }}>
+                  ❌ Discard & Return
+                </button>
+              )}
+            </div>
+            
+            <div className="saas-card fade-in" style={{ width: '100%' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', marginTop: '10px' }}>
+                {/* SUPPLIER */}
+                <div style={{ position: 'relative', zIndex: isSupplierDropdownOpen ? 100 : 2 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: '6px' }}>
+                    <label className="saas-card-title" style={{ fontSize: '11px', margin: 0 }}>Select Supplier</label>
+                    <button onClick={() => setIsAddSupplierOpen(true)} className="saas-btn" style={{ background: 'none', border: 'none', color: '#3b82f6', fontSize: '12px', padding: 0 }}>+ Add New Supplier</button>
+                  </div>
+                  {isSupplierDropdownOpen ? (
+                    <div style={{ position: 'relative' }}>
+                      <input autoFocus className="saas-input" placeholder="Search..." value={supplierSearch} onChange={e => setSupplierSearch(e.target.value)} onBlur={() => setTimeout(() => setIsSupplierDropdownOpen(false), 200)} />
+                      <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, background: '#fff', border: '1px solid #cbd5e1', borderRadius: '8px', boxShadow: '0 10px 15px rgba(0,0,0,0.1)', maxHeight: '220px', overflowY: 'auto', zIndex: 10 }}>
+                        {suppliers.filter(s => s.name.toLowerCase().includes(supplierSearch.toLowerCase())).map(s => (
+                          <div key={s.id} onMouseDown={(e) => { e.stopPropagation(); setImportForm({...importForm, supplier_id: String(s.id)}); setIsSupplierDropdownOpen(false); }} style={{ padding: '12px 16px', cursor: 'pointer', borderBottom: '1px solid #f1f5f9', fontSize: '14px', color: '#0f172a' }}>{s.name}</div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : (
+                    <div onClick={() => { setIsSupplierDropdownOpen(true); setSupplierSearch(''); }} style={{ width: '100%', padding: '12px', fontSize: '15px', border: '1px solid #cbd5e1', borderRadius: '6px', cursor: 'pointer', background: '#f8fafc' }}>
+                      {importForm.supplier_id ? suppliers.find(s => String(s.id) === String(importForm.supplier_id))?.name || 'Unknown' : '-- Choose a Supplier --'}
+                    </div>
+                  )}
+                </div>
+
+                {/* PRODUCT */}
+                <div style={{ position: 'relative', zIndex: isProductDropdownOpen ? 90 : 1 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: '6px' }}>
+                    <label className="saas-card-title" style={{ fontSize: '11px', margin: 0 }}>Select Product (Rice)</label>
+                    <button onClick={handleOpenAddProduct} className="saas-btn" style={{ background: 'none', border: 'none', color: '#3b82f6', fontSize: '12px', padding: 0 }}>+ Create New Product</button>
+                  </div>
+                  {isProductDropdownOpen ? (
+                    <div style={{ position: 'relative' }}>
+                      <input autoFocus className="saas-input" placeholder="Search..." value={productSearch} onChange={e => setProductSearch(e.target.value)} onBlur={() => setTimeout(() => setIsProductDropdownOpen(false), 200)} />
+                      <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, background: '#fff', border: '1px solid #cbd5e1', borderRadius: '8px', boxShadow: '0 10px 15px rgba(0,0,0,0.1)', maxHeight: '220px', overflowY: 'auto', zIndex: 10 }}>
+                        {products.filter(p => p.weight >= 50 && p.name.toLowerCase().includes(productSearch.toLowerCase())).map(p => (
+                          <div key={p.id} onMouseDown={(e) => { e.stopPropagation(); setImportForm({...importForm, product_id: String(p.id)}); setIsProductDropdownOpen(false); }} style={{ padding: '12px 16px', cursor: 'pointer', borderBottom: '1px solid #f1f5f9' }} onMouseEnter={e => e.currentTarget.style.backgroundColor = '#f8fafc'} onMouseLeave={e => e.currentTarget.style.backgroundColor = '#ffffff'}>
+                            <div style={{ fontWeight: 'bold', fontSize: '14px', color: '#1e293b', marginBottom: '4px' }}>{p.name} <span style={{ color: '#64748b', fontSize: '11px', fontWeight: 'normal' }}>({p.weight}kg)</span></div>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: '#64748b' }}>
+                              <span>Cost: <b style={{ color: '#b58a3d' }}>{formatRiel(p.cost_price)}</b></span>
+                              <span>Stock: <b style={{ color: p.stock > 0 ? '#10b981' : '#ef4444' }}>{p.stock}</b></span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : (
+                    <div onClick={() => { setIsProductDropdownOpen(true); setProductSearch(''); }} style={{ width: '100%', padding: '12px', fontSize: '15px', border: '1px solid #cbd5e1', borderRadius: '6px', cursor: 'pointer', background: '#f8fafc' }}>
+                      {importForm.product_id ? products.find(p => String(p.id) === String(importForm.product_id))?.name || 'Unknown' : '-- Choose Rice Type --'}
+                    </div>
+                  )}
+                </div>
+
+                <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap' }}>
+                  <div style={{ flex: 1, minWidth: '150px' }}>
+                    <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '6px' }}>Quantity Imported</label>
+                    <input type="number" className="saas-input" value={importForm.qty} onChange={e => setImportForm({...importForm, qty: e.target.value})} />
+                  </div>
+                  <div style={{ flex: 1, minWidth: '150px' }}>
+                    <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '6px' }}>Unit Cost (៛)</label>
+                    <CurrencyInput value={importForm.unit_cost} onChange={(v:any) => setImportForm({...importForm, unit_cost: v})} className="saas-input" />
+                  </div>
+                </div>
+
+                <div style={{ background: '#fefcf3', padding: '16px', borderRadius: '8px', border: '1px solid #fde047', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontWeight: 'bold', color: '#854d0e' }}>Total Bill Cost:</span>
+                  <span style={{ fontSize: '20px', fontWeight: 'bold', color: '#b58a3d' }}>{formatRiel(importTotalCalc)}</span>
+                </div>
+
+                <div style={{ background: '#f8fafc', padding: '20px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                  <h4 style={{ margin: '0 0 16px 0', fontSize: '14px', color: '#1e293b' }}>Payment Details</h4>
+                  <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap' }}>
+                    <div style={{ flex: 2, minWidth: '150px' }}>
+                      <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '6px' }}>Amount Paying Now (៛)</label>
+                      <CurrencyInput value={importForm.paid_amount} onChange={(v:any) => setImportForm({...importForm, paid_amount: v})} className="saas-input" />
+                    </div>
+                    <div style={{ flex: 1, minWidth: '120px' }}>
+                      <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '6px' }}>Payment Method</label>
+                      <select value={importForm.payment_method} onChange={e => setImportForm({...importForm, payment_method: e.target.value})} className="saas-input" style={{ cursor: 'pointer' }}>
+                        <option value="Cash ៛">💵 Cash ៛</option>
+                        <option value="Cash $">💵 Cash $</option>
+                        <option value="QR ៛">📱 QR ៛</option>
+                      </select>
+                    </div>
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', gap: '12px', marginTop: '10px' }}>
+                  <button onClick={() => handleProcessImport(true)} disabled={isProcessing} className="saas-btn" style={{ flex: 1, padding: '14px', background: '#f59e0b', color: '#fff', fontSize: '15px' }}>⏳ Save as Pending/Partial</button>
+                  <button onClick={() => handleProcessImport(false)} disabled={isProcessing} className="saas-btn saas-btn-primary" style={{ flex: 1, padding: '14px', fontSize: '15px' }}>✅ Paid Full & Import</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 🟢 FULL SCREEN TAKEOVER: MIX RICE */}
+      {activeFullScreen === 'mix' && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: '#f8fafc', zIndex: 99999, overflowY: 'auto', paddingBottom: '100px' }}>
+          <div style={{ padding: isDeviceMobile ? '16px' : '32px', width: '100%', maxWidth: '1400px', margin: '0 auto', minHeight: '100dvh', display: 'flex', flexDirection: 'column' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px', flexShrink: 0 }}>
+              <h1 className="saas-page-title" style={{ margin: 0 }}>🥣 Mix Rice Calculator</h1>
+              {isDeviceMobile ? (
+                <button onClick={() => setActiveFullScreen('none')} style={{ background: 'none', border: 'none', color: '#ef4444', fontSize: '24px', padding: '4px', cursor: 'pointer' }}>
+                  ❌
+                </button>
+              ) : (
+                <button onClick={() => setActiveFullScreen('none')} className="saas-btn saas-btn-danger" style={{ padding: '8px 16px', fontWeight: 'bold', color: '#ffffff' }}>
+                  ❌ Discard & Return
+                </button>
+              )}
+            </div>
+
+            <div className="calculator-grid">
+              {/* Rice 1 */}
+              <div className="saas-card fade-in" style={{ flex: 1, minWidth: '220px' }}>
+                <h2 className="saas-card-title">Base Rice A</h2>
+                <div style={{ position: 'relative' }}>
+                  <label className="saas-card-title" style={{ fontSize: '11px', marginBottom: '6px', display: 'block' }}>Select Rice Ingredient</label>
+                  {activeDropdown === 'rice1' && <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, zIndex: 99 }} onClick={() => setActiveDropdown(null)}></div>}
+                  <div style={{ position: 'relative', zIndex: activeDropdown === 'rice1' ? 100 : 1 }}>
+                    <input type="text" placeholder="🔍 Search rice..." value={activeDropdown === 'rice1' ? mixDropdownSearch : (rice1 ? rice1.name : '')} onClick={() => { if (activeDropdown !== 'rice1') { setActiveDropdown('rice1'); setMixDropdownSearch(''); } }} onChange={(e) => { setActiveDropdown('rice1'); setMixDropdownSearch(e.target.value); }} className="saas-input" style={{ paddingRight: '30px' }} />
+                  </div>
+                  {renderMixDropdownMenu('rice1')}
+                </div>
+                {rice1 && (
+                  <div style={{ marginTop: '16px', padding: '12px', background: '#fefcf3', border: '1px solid #eadeca', borderRadius: '8px' }}>
+                    <label className="saas-card-title" style={{ fontSize: '11px', marginBottom: '6px', display: 'block' }}>Select Batch (Optional)</label>
+                    <select value={rice1BatchId || 'AUTO'} onChange={(e) => setRice1BatchId(e.target.value === 'AUTO' ? null : Number(e.target.value))} className="saas-input" style={{ width: '100%', padding: '6px', fontSize: '13px', marginBottom: '12px', cursor: 'pointer' }}>
+                      <option value="AUTO">▼ Auto FIFO</option>
+                      {activeBatches[rice1.id]?.map((b: any) => (<option key={b.id} value={b.id}>{formatRiel(b.cost_price)} ({b.remaining_qty} left)</option>))}
+                    </select>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <div><span style={{ display: 'block', fontSize: '11px', color: '#8a7650', fontWeight: 'bold' }}>Active COGS</span><span style={{ fontSize: '16px', color: '#b58a3d', fontWeight: 'bold' }}>{formatRiel(rice1BatchId ? activeBatches[rice1.id]?.find(b=>b.id===rice1BatchId)?.cost_price || rice1.cost_price : rice1.cost_price)}</span></div>
+                      <div style={{ fontSize: '11px', color: '#64748b', textAlign: 'right' }}>Total Stock:<br/><b style={{ color: rice1.stock > 0 ? '#10b981' : '#ef4444', fontSize: '14px' }}>{rice1.stock}</b></div>
+                    </div>
+                  </div>
+                )}
+                <div style={{ marginTop: '16px' }}><label className="saas-card-title" style={{ fontSize: '11px', marginBottom: '6px', display: 'block' }}>Portion / Quantity</label><CurrencyInput placeholder="0" value={rice1Qty} onChange={(v: any) => setRice1Qty(v)} className="saas-input" /></div>
+              </div>
+
+              <div className="math-symbol">+</div>
+
+              {/* Rice 2 */}
+              <div className="saas-card fade-in" style={{ flex: 1, minWidth: '220px' }}>
+                <h2 className="saas-card-title">Base Rice B</h2>
+                <div style={{ position: 'relative' }}>
+                  <label className="saas-card-title" style={{ fontSize: '11px', marginBottom: '6px', display: 'block' }}>Select Rice Ingredient</label>
+                  {activeDropdown === 'rice2' && <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, zIndex: 99 }} onClick={() => setActiveDropdown(null)}></div>}
+                  <div style={{ position: 'relative', zIndex: activeDropdown === 'rice2' ? 100 : 1 }}>
+                    <input type="text" placeholder="🔍 Search rice..." value={activeDropdown === 'rice2' ? mixDropdownSearch : (rice2 ? rice2.name : '')} onClick={() => { if (activeDropdown !== 'rice2') { setActiveDropdown('rice2'); setMixDropdownSearch(''); } }} onChange={(e) => { setActiveDropdown('rice2'); setMixDropdownSearch(e.target.value); }} className="saas-input" style={{ paddingRight: '30px' }} />
+                  </div>
+                  {renderMixDropdownMenu('rice2')}
+                </div>
+                {rice2 && (
+                  <div style={{ marginTop: '16px', padding: '12px', background: '#fefcf3', border: '1px solid #eadeca', borderRadius: '8px' }}>
+                    <label className="saas-card-title" style={{ fontSize: '11px', marginBottom: '6px', display: 'block' }}>Select Batch (Optional)</label>
+                    <select value={rice2BatchId || 'AUTO'} onChange={(e) => setRice2BatchId(e.target.value === 'AUTO' ? null : Number(e.target.value))} className="saas-input" style={{ width: '100%', padding: '6px', fontSize: '13px', marginBottom: '12px', cursor: 'pointer' }}>
+                      <option value="AUTO">▼ Auto FIFO</option>
+                      {activeBatches[rice2.id]?.map((b: any) => (<option key={b.id} value={b.id}>{formatRiel(b.cost_price)} ({b.remaining_qty} left)</option>))}
+                    </select>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <div><span style={{ display: 'block', fontSize: '11px', color: '#8a7650', fontWeight: 'bold' }}>Active COGS</span><span style={{ fontSize: '16px', color: '#b58a3d', fontWeight: 'bold' }}>{formatRiel(rice2BatchId ? activeBatches[rice2.id]?.find(b=>b.id===rice2BatchId)?.cost_price || rice2.cost_price : rice2.cost_price)}</span></div>
+                      <div style={{ fontSize: '11px', color: '#64748b', textAlign: 'right' }}>Total Stock:<br/><b style={{ color: rice2.stock > 0 ? '#10b981' : '#ef4444', fontSize: '14px' }}>{rice2.stock}</b></div>
+                    </div>
+                  </div>
+                )}
+                <div style={{ marginTop: '16px' }}><label className="saas-card-title" style={{ fontSize: '11px', marginBottom: '6px', display: 'block' }}>Portion / Quantity</label><CurrencyInput placeholder="0" value={rice2Qty} onChange={(v: any) => setRice2Qty(v)} className="saas-input" /></div>
+              </div>
+
+              {/* Rice 3 */}
+              {showThirdRice && (
+                <>
+                  <div className="math-symbol">+</div>
+                  <div className="saas-card fade-in" style={{ flex: 1, minWidth: '220px' }}>
+                    <h2 className="saas-card-title">Base Rice C</h2>
+                    <div style={{ position: 'relative' }}>
+                      <label className="saas-card-title" style={{ fontSize: '11px', marginBottom: '6px', display: 'block' }}>Select Rice Ingredient</label>
+                      {activeDropdown === 'rice3' && <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, zIndex: 99 }} onClick={() => setActiveDropdown(null)}></div>}
+                      <div style={{ position: 'relative', zIndex: activeDropdown === 'rice3' ? 100 : 1 }}>
+                        <input type="text" placeholder="🔍 Search rice..." value={activeDropdown === 'rice3' ? mixDropdownSearch : (rice3 ? rice3.name : '')} onClick={() => { if (activeDropdown !== 'rice3') { setActiveDropdown('rice3'); setMixDropdownSearch(''); } }} onChange={(e) => { setActiveDropdown('rice3'); setMixDropdownSearch(e.target.value); }} className="saas-input" style={{ paddingRight: '30px' }} />
+                      </div>
+                      {renderMixDropdownMenu('rice3')}
+                    </div>
+                    {rice3 && (
+                      <div style={{ marginTop: '16px', padding: '12px', background: '#fefcf3', border: '1px solid #eadeca', borderRadius: '8px' }}>
+                        <label className="saas-card-title" style={{ fontSize: '11px', marginBottom: '6px', display: 'block' }}>Select Batch (Optional)</label>
+                        <select value={rice3BatchId || 'AUTO'} onChange={(e) => setRice3BatchId(e.target.value === 'AUTO' ? null : Number(e.target.value))} className="saas-input" style={{ width: '100%', padding: '6px', fontSize: '13px', marginBottom: '12px', cursor: 'pointer' }}>
+                          <option value="AUTO">▼ Auto FIFO</option>
+                          {activeBatches[rice3.id]?.map((b: any) => (<option key={b.id} value={b.id}>{formatRiel(b.cost_price)} ({b.remaining_qty} left)</option>))}
+                        </select>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <div><span style={{ display: 'block', fontSize: '11px', color: '#8a7650', fontWeight: 'bold' }}>Active COGS</span><span style={{ fontSize: '16px', color: '#b58a3d', fontWeight: 'bold' }}>{formatRiel(rice3BatchId ? activeBatches[rice3.id]?.find(b=>b.id===rice3BatchId)?.cost_price || rice3.cost_price : rice3.cost_price)}</span></div>
+                          <div style={{ fontSize: '11px', color: '#64748b', textAlign: 'right' }}>Total Stock:<br/><b style={{ color: rice3.stock > 0 ? '#10b981' : '#ef4444', fontSize: '14px' }}>{rice3.stock}</b></div>
+                        </div>
+                      </div>
+                    )}
+                    <div style={{ marginTop: '16px' }}><label className="saas-card-title" style={{ fontSize: '11px', marginBottom: '6px', display: 'block' }}>Portion / Quantity</label><CurrencyInput placeholder="0" value={rice3Qty} onChange={(v: any) => setRice3Qty(v)} className="saas-input" /></div>
+                  </div>
+                </>
+              )}
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'center', marginTop: '24px' }}>
+              {!showThirdRice ? (
+                <button onClick={() => setShowThirdRice(true)} className="saas-btn saas-btn-secondary" style={{ border: '1px dashed #cbd5e1' }}>➕ Add 3rd Rice to Mix</button>
+              ) : (
+                <button onClick={() => { setShowThirdRice(false); setRice3Id(''); setRice3Qty(''); setRice3BatchId(null); }} className="saas-btn saas-btn-danger" style={{ background: '#fef2f2', color: '#ef4444', border: '1px dashed #fca5a5' }}>➖ Remove 3rd Rice</button>
+              )}
+            </div>
+
+            {calcResult && (
+              <div className="saas-card fade-in" style={{ marginTop: '30px', border: '2px solid #bbf7d0', background: '#f0fdf4' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px', flexWrap: 'wrap', gap: '12px' }}>
+                  <h2 className="saas-card-title" style={{ margin: 0, color: '#047857', fontSize: '16px' }}>Auto-Calculated Yield</h2>
+                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                    <button onClick={() => setSyncMode('existing')} className={`saas-btn ${syncMode === 'existing' ? 'saas-btn-primary' : 'saas-btn-secondary'}`} style={syncMode === 'existing' ? { background: '#3b82f6' } : {}}>📦 Add to Existing</button>
+                    <button onClick={() => setSyncMode('new')} className={`saas-btn ${syncMode === 'new' ? 'saas-btn-primary' : 'saas-btn-secondary'}`}>✨ Create New</button>
+                  </div>
+                </div>
+                
+                <div style={{ display: 'flex', gap: '20px', flexWrap: 'wrap', marginBottom: syncMode !== 'none' ? '24px' : '0' }}>
+                  <div style={{ flex: 1.5, padding: '16px 24px', background: '#ffffff', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                    <span className="saas-card-title" style={{ display: 'block', marginBottom: '8px' }}>Total Raw Mix Weight</span>
+                    <span style={{ fontSize: '24px', fontWeight: 'bold', color: '#3b82f6' }}>{calcResult.totalYieldKg.toLocaleString('en-US', { maximumFractionDigits: 2 })} <span style={{ fontSize: '16px', fontWeight: 'normal' }}>Kg</span></span>
+                  </div>
+                  
+                  <div style={{ flex: 2, padding: '16px 24px', background: '#fefcf3', borderRadius: '8px', border: '1px solid #fde047' }}>
+                    <span className="saas-card-title" style={{ display: 'block', color: '#8a7650', marginBottom: '8px' }}>Will Generate Output of:</span>
+                    <span style={{ fontSize: '24px', fontWeight: 'bold', color: '#b58a3d', display: 'flex', alignItems: 'baseline', gap: '8px' }}>{finalYield.toLocaleString('en-US', { maximumFractionDigits: 2 })} <span style={{ fontSize: '16px', fontWeight: 'bold' }}>{outputUnit}</span></span>
+                    <div style={{ fontSize: '12px', color: '#64748b', marginTop: '6px', fontWeight: 'bold' }}>At new COGS: <span style={{ color: '#0f172a' }}>{formatRiel(finalCogs)} per {outputUnit.replace(/s$/, '')}</span></div>
+                  </div>
+                </div>
+
+                {syncMode !== 'none' && (
+                  <div className="saas-card fade-in" style={{ background: '#ffffff', padding: '20px', border: '1px solid #e2e8f0', boxShadow: 'none' }}>
+                    <div style={{ fontSize: '14px', fontWeight: 'bold', color: '#1e293b', marginBottom: '16px' }}>{syncMode === 'new' ? 'Create & Sync New Product' : 'Select Target to Sync & Overwrite'}</div>
+
+                    {syncMode === 'new' ? (
+                      <div style={{ display: 'flex', gap: '16px', marginBottom: '20px', flexWrap: 'wrap' }}>
+                        <div style={{ flex: 1, minWidth: '200px' }}><label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '6px' }}>New Product Name</label><input type="text" value={newMixName} onChange={e => setNewMixName(e.target.value)} className="saas-input" /></div>
+                        <div style={{ flex: 1, minWidth: '150px' }}><label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '6px' }}>Size Type</label><select value={newMixType} onChange={(e: any) => setNewMixType(e.target.value)} className="saas-input" style={{ cursor: 'pointer' }}><option value="wholesale">Wholesale (50kg Bag)</option><option value="half">Half Size (25kg Bag)</option><option value="retail">Retail (1kg)</option></select></div>
+                        <div style={{ flex: 1, minWidth: '150px' }}><label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '6px' }}>Selling Price (៛)</label><CurrencyInput value={newMixPrice} onChange={(v: any) => setNewMixPrice(v)} className="saas-input" /></div>
+                      </div>
+                    ) : (
+                      <div style={{ marginBottom: '20px', position: 'relative' }}>
+                        {activeDropdown === 'target' && <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, zIndex: 99 }} onClick={() => setActiveDropdown(null)}></div>}
+                        <div style={{ position: 'relative', zIndex: activeDropdown === 'target' ? 100 : 1 }}>
+                          <input type="text" placeholder="🔍 Search target product..." value={activeDropdown === 'target' ? mixDropdownSearch : (targetProd ? `${targetProd.name}` : '')} onClick={() => { if (activeDropdown !== 'target') { setActiveDropdown('target'); setMixDropdownSearch(''); setDropdownTab('wholesale'); } }} onChange={(e) => { setActiveDropdown('target'); setMixDropdownSearch(e.target.value); }} className="saas-input" style={{ paddingRight: '30px' }} />
+                        </div>
+                        {renderMixDropdownMenu('target')}
+                      </div>
+                    )}
+
+                    <div style={{ borderTop: '1px dashed #cbd5e1', paddingTop: '16px', marginBottom: '16px' }}>
+                      <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '6px', color: '#b45309' }}>Packaging Bag Used (Cost will be absorbed into the new Mix COGS)</label>
+                      <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap' }}>
+                        <div style={{ flex: 2, minWidth: '200px', position: 'relative' }}>
+                          {activeDropdown === 'bag' && <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, zIndex: 99 }} onClick={() => setActiveDropdown(null)}></div>}
+                          <div style={{ position: 'relative', zIndex: activeDropdown === 'bag' ? 100 : 1 }}>
+                            <input type="text" placeholder="🔍 Search empty bag..." value={activeDropdown === 'bag' ? mixDropdownSearch : (bagProd ? `${bagProd.name}` : '')} onClick={() => { if (activeDropdown !== 'bag') { setActiveDropdown('bag'); setMixDropdownSearch(''); } }} onChange={(e) => { setActiveDropdown('bag'); setMixDropdownSearch(e.target.value); }} className="saas-input" />
+                          </div>
+                          {renderMixDropdownMenu('bag')}
+                        </div>
+                        <div style={{ flex: 1, minWidth: '100px' }}>
+                          <CurrencyInput placeholder="Qty" value={bagQty} onChange={(v: any) => setBagQty(v)} className="saas-input" disabled={!bagId} style={{ backgroundColor: !bagId ? '#f1f5f9' : '#fff' }} />
+                        </div>
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '24px' }}>
+                      <button onClick={handleExecuteInventorySync} disabled={isProcessing} className="saas-btn saas-btn-primary" style={{ padding: '14px 24px', fontSize: '15px' }}>{isProcessing ? 'Processing...' : `✅ Sync and Inject ${finalYield.toLocaleString('en-US', { maximumFractionDigits: 2 })} ${outputUnit}`}</button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* 🟢 PORTAL: ADD SUPPLIER MODAL (FORCED TOP Z-INDEX) */}
+      {isAddSupplierOpen && typeof document !== 'undefined' && createPortal(
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(15, 23, 42, 0.6)', zIndex: 1000000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px' }}>
+          <div style={{ background: '#ffffff', borderRadius: '12px', width: '100%', maxWidth: '400px', padding: '24px', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1)', animation: 'posPopupSlideDown 0.2s ease-out' }}>
+            <h2 style={{ margin: '0 0 16px 0', fontSize: '18px', color: '#0f172a' }}>🏢 Add New Supplier</h2>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              <div><label className="saas-card-title" style={{ display: 'block', fontSize: '11px', margin: '0 0 6px 0' }}>Supplier Name</label><input autoFocus value={newSupplier.name} onChange={e => setNewSupplier({...newSupplier, name: e.target.value})} className="saas-input" style={{width:'100%'}}/></div>
+              <div><label className="saas-card-title" style={{ display: 'block', fontSize: '11px', margin: '0 0 6px 0' }}>Phone Number (Optional)</label><input value={newSupplier.phone} onChange={e => setNewSupplier({...newSupplier, phone: e.target.value})} className="saas-input" style={{width:'100%'}}/></div>
+              <div><label className="saas-card-title" style={{ display: 'block', fontSize: '11px', margin: '0 0 6px 0' }}>Location / Address (Optional)</label><input value={newSupplier.location} onChange={e => setNewSupplier({...newSupplier, location: e.target.value})} className="saas-input" style={{width:'100%'}}/></div>
+            </div>
+            <div style={{ marginTop: '24px', display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
+              <button onClick={() => setIsAddSupplierOpen(false)} className="saas-btn saas-btn-secondary">Cancel</button>
+              <button onClick={handleAddSupplier} disabled={isProcessing} className="saas-btn saas-btn-primary">Save Supplier</button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {/* 🟢 PORTAL: CREATE NEW PRODUCT MODAL (FORCED TOP Z-INDEX) */}
+      {isAddModalOpen && typeof document !== 'undefined' && createPortal(
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(15, 23, 42, 0.6)', zIndex: 1000000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px' }}>
+          <div style={{ background: '#ffffff', borderRadius: '12px', width: '100%', maxWidth: '500px', padding: '24px', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1)', animation: 'posPopupSlideDown 0.2s ease-out' }}>
+            <h2 style={{ margin: '0 0 16px 0', fontSize: '18px', color: '#0f172a' }}>📦 Add New Product</h2>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              <div>
+                <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', margin: '0 0 6px 0' }}>Product Name</label>
+                <input autoFocus placeholder="" value={newItem.name} onChange={e => setNewItem({...newItem, name: e.target.value})} className="saas-input" style={{width:'100%'}}/>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+                <div>
+                  <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', margin: '0 0 6px 0' }}>Selling Price (៛)</label>
+                  <CurrencyInput value={newItem.price} onChange={(v:any) => setNewItem({...newItem, price: v})} className="saas-input" style={{width:'100%'}}/>
+                </div>
+                <div>
+                  <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', margin: '0 0 6px 0' }}>Cost Price (៛)</label>
+                  <CurrencyInput value={newItem.cost_price} onChange={(v:any) => setNewItem({...newItem, cost_price: v})} className="saas-input" style={{width:'100%'}}/>
+                </div>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '8px' }}>
+                <div>
+                  <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', margin: '0 0 6px 0' }}>Weight (kg)</label>
+                  <input type="number" className="saas-input no-spinners" value={newItem.weight} onChange={e => setNewItem({...newItem, weight: e.target.value})} style={{width:'100%'}}/>
+                </div>
+                <div>
+                  <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', margin: '0 0 6px 0' }}>Initial Stock</label>
+                  <input type="number" className="saas-input no-spinners" value={newItem.stock} onChange={e => setNewItem({...newItem, stock: e.target.value})} style={{width:'100%'}}/>
+                </div>
+              </div>
+              
+              <div style={{ background: '#fef2f2', padding: '16px', borderRadius: '8px', border: '1px solid #fecaca' }}>
+                <label style={{ display: 'block', fontSize: '11px', color: '#991b1b', fontWeight: 'bold', marginBottom: '6px', textTransform: 'uppercase' }}>🚨 Min Stock Alert Level</label>
+                <input type="number" className="saas-input no-spinners" value={newItem.min_stock_level} onChange={e => setNewItem({...newItem, min_stock_level: e.target.value})} style={{ borderColor: '#fca5a5', width: '100%' }} />
+                <p style={{ fontSize: '11px', color: '#ef4444', marginTop: '6px', marginBottom: 0 }}>Triggers a Restock Alert if current stock falls below this amount.</p>
+              </div>
+            </div>
+
+            <div style={{ marginTop: '24px', display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
+              <button onClick={() => setIsAddModalOpen(false)} className="saas-btn saas-btn-secondary">Cancel</button>
+              <button onClick={addProduct} disabled={isProcessing} className="saas-btn saas-btn-primary">Save Product</button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+
       <style jsx global>{`
         input, select, button, textarea {
           font-family: inherit;
@@ -3033,12 +3730,39 @@ export default function POSPage() {
           z-index: 40;
           background-color: #f8fafc;
           padding-top: max(20px, env(safe-area-inset-top, 20px));
-          padding-bottom: 8px;
-          margin-bottom: 8px;
+          padding-bottom: 16px;
+          margin-bottom: 0px;
           box-shadow: 0 4px 10px -2px rgba(248, 250, 252, 1);
         }
 
         /* 🔥 BULLETPROOF GLOBAL OVERRIDE FOR MOBILE TABS 🔥 */
+        /* 🟢 CALCULATOR GRID FOR MIX RICE RESPONSIVENESS */
+        .calculator-grid {
+          display: flex;
+          align-items: flex-start;
+          gap: 20px;
+          flex-wrap: wrap;
+          width: 100%;
+        }
+        .math-symbol {
+          font-size: 32px;
+          font-weight: bold;
+          color: #cbd5e1;
+          margin-top: 40px;
+          flex-shrink: 0;
+        }
+
+        @media (max-width: 1023px) {
+          .calculator-grid {
+            flex-direction: column;
+            align-items: stretch;
+            gap: 16px;
+            flex-wrap: nowrap;
+          }
+          .math-symbol {
+            display: none;
+          }
+        }
         .saas-tab-container {
           flex-wrap: nowrap !important;
           overflow-x: auto !important;
