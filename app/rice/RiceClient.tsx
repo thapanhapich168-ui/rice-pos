@@ -1,0 +1,2475 @@
+'use client'
+
+import React, { useState, useEffect, useRef } from 'react'
+import { supabase } from '@/lib/supabaseClient'
+import { useFocusRefresh } from '@/lib/useFocusRefresh'
+import { formatRiel, formatUSD, formatNumber, EXCHANGE_RATE } from '@/utils/formatters'
+import { CurrencyInput } from '@/components/Inputs'
+import { Product, InventoryBatch, PaymentRow } from '@/types'
+import { useToast } from '@/components/ToastProvider'
+import { useDebounce } from '@/lib/useDebounce'
+import TableSkeleton from '@/components/TableSkeleton'
+import EmptyState from '@/components/EmptyState'
+import Modal from '@/components/Modal'
+import { useBranch } from '@/components/BranchContext' // 🔥 GLOBAL MEMORY IMPORTED
+import { TELEGRAM_CONFIG } from '@/lib/telegramConfig'
+
+// --- CATEGORIES ---
+const RICE_CATEGORIES = ['All', 'មិញ', 'ខុន', 'ខ្ញី', 'ម្លិះ', 'រំដួល', 'បីកំណាត់', 'ដំណើប', 'សម្រូប', 'ផ្សេងៗ', '❌ Out of Stock'];
+const MAIN_KEYWORDS = ['មិញ', 'ខុន', 'ខ្ញី', 'ម្លិះ', 'រំដួល', 'បីកំណាត់', 'ដំណើប', 'សម្រូប'];
+
+type SortConfig = {
+  key: keyof Product;
+  direction: 'asc' | 'desc';
+} | null;
+
+type FilterOperator = 'contains' | 'equals' | 'gt' | 'lt'
+interface FilterRule {
+  id: number
+  column: string // 🔥 FIX: Changed from keyof Product to string to stop TS errors
+  operator: FilterOperator
+  value: string | number
+}
+
+// 🔥 FIX: Relaxed ColumnKey to string to absolutely annihilate the 9+ TypeScript errors
+type ColumnKey = string;
+
+const DEFAULT_WIDTHS: Record<string, number> = {
+  expand: 40, id: 60, name: 320, price: 120, cost_price: 120, stock: 100, min_stock_level: 100, weight: 90, linked_wholesale: 220, mtd_kg_used: 120, mtd_bags_used: 120, actions: 160
+}
+const DEFAULT_ORDER: string[] = ['expand', 'id', 'name', 'price', 'cost_price', 'stock', 'min_stock_level', 'weight', 'linked_wholesale', 'mtd_kg_used', 'mtd_bags_used', 'actions']
+
+const DEFAULT_PENDING_WIDTHS: Record<string, number> = { date: 120, supplier: 180, product: 200, total_cost: 140, paid_so_far: 140, remaining_debt: 150, actions: 200 };
+const DEFAULT_PENDING_ORDER: string[] = ['date', 'supplier', 'product', 'total_cost', 'paid_so_far', 'remaining_debt', 'actions'];
+
+const DEFAULT_SUPPLIER_WIDTHS: Record<string, number> = { select: 50, name: 240, phone: 160, location: 200, total_owed: 180 };
+const DEFAULT_SUPPLIER_ORDER: string[] = ['select', 'name', 'phone', 'location', 'total_owed'];
+
+export default function RiceControl() {
+  const { showToast } = useToast();
+  const { activeBranchId } = useBranch(); // 🔥 TUNED INTO GLOBAL MEMORY
+
+  // --- CORE STATE ---
+  const [products, setProducts] = useState<Product[]>([])
+  const [suppliers, setSuppliers] = useState<any[]>([])
+  const [imports, setImports] = useState<any[]>([])
+  const [isLoading, setIsLoading] = useState(true)
+
+  const [searchQuery, setSearchQuery] = useState('')
+  const debouncedSearch = useDebounce(searchQuery, 300)
+
+  const [edits, setEdits] = useState<Record<number, Partial<Product>>>({})
+  const [selectedToDelete, setSelectedToDelete] = useState<Set<number>>(new Set())
+  const [selectedSuppliersToDelete, setSelectedSuppliersToDelete] = useState<Set<number>>(new Set())
+  const [hoveredId, setHoveredId] = useState<number | null>(null)
+  
+  const [isProcessing, setIsProcessing] = useState(false) 
+  const isImportingRef = useRef(false);
+
+  // --- CELL EDITING STATE ---
+  const [editingCell, setEditingCell] = useState<{id: number, col: string} | null>(null)
+  const [activeDropdownId, setActiveDropdownId] = useState<number | null>(null)
+  const [dropdownSearch, setDropdownSearch] = useState('')
+
+  // --- IMPORT DROPDOWN STATE ---
+  const [isSupplierDropdownOpen, setIsSupplierDropdownOpen] = useState(false)
+  const [isProductDropdownOpen, setIsProductDropdownOpen] = useState(false)
+  const [supplierSearch, setSupplierSearch] = useState('')
+  const [productSearch, setProductSearch] = useState('')
+
+  // --- VIEWS & TABS STATE ---
+  const [activeView, setActiveView] = useState<'retail' | 'wholesale' | 'import' | 'pending' | 'suppliers'>('retail')
+  const [activeCategory, setActiveCategory] = useState<string>('All')
+  const [categoryOrder, setCategoryOrder] = useState<string[]>(RICE_CATEGORIES)
+
+  // --- BATCH ENGINE STATES ---
+  const [activeBatchesMap, setActiveBatchesMap] = useState<Record<number, InventoryBatch[]>>({})
+  const [expandedProductId, setExpandedProductId] = useState<number | null>(null)
+
+  // --- IMPORT FORM STATE ---
+  const [importForm, setImportForm] = useState({ supplier_id: '', product_id: '', qty: '', unit_cost: '', paid_amount: '', payment_method: 'Cash ៛' })
+  
+  // --- MODALS ---
+  const [isAddSupplierOpen, setIsAddSupplierOpen] = useState(false)
+  const [newSupplier, setNewSupplier] = useState({ name: '', phone: '', location: '' })
+  
+  const [payPendingModal, setPayPendingModal] = useState<{isOpen: boolean, record: any, totalDue: number}>({ isOpen: false, record: null, totalDue: 0 })
+  const [pendingPaymentRows, setPendingPaymentRows] = useState<PaymentRow[]>([{ id: Date.now(), method: 'Cash ៛', amount: '' }]);
+
+  const [repackModal, setRepackModal] = useState<{ isOpen: boolean, product: Product | null }>({ isOpen: false, product: null });
+
+  // --- MAIN PRODUCTS TABLE STATE ---
+  const [columnWidths, setColumnWidths] = useState<Record<string, number>>(DEFAULT_WIDTHS)
+  const [columnOrder, setColumnOrder] = useState<ColumnKey[]>(DEFAULT_ORDER)
+  const widthsRef = useRef(columnWidths)
+  widthsRef.current = columnWidths
+  const [sortConfig, setSortConfig] = useState<SortConfig>(null)
+
+  // --- PENDING IMPORTS TABLE STATE ---
+  const [pendingColWidths, setPendingColWidths] = useState<Record<string, number>>(DEFAULT_PENDING_WIDTHS)
+  const [pendingColOrder, setPendingColOrder] = useState<string[]>(DEFAULT_PENDING_ORDER)
+  const pendingWidthsRef = useRef(pendingColWidths)
+  pendingWidthsRef.current = pendingColWidths
+  const [pendingSort, setPendingSort] = useState<{key: string, direction: 'asc'|'desc'} | null>(null)
+
+  // --- SUPPLIERS TABLE STATE ---
+  const [supplierColWidths, setSupplierColWidths] = useState<Record<string, number>>(DEFAULT_SUPPLIER_WIDTHS)
+  const [supplierColOrder, setSupplierColOrder] = useState<string[]>(DEFAULT_SUPPLIER_ORDER)
+  const supplierWidthsRef = useRef(supplierColWidths)
+  supplierWidthsRef.current = supplierColWidths
+  const [supplierSort, setSupplierSort] = useState<{key: string, direction: 'asc'|'desc'} | null>(null)
+
+  const [isFilterOpen, setIsFilterOpen] = useState(false)
+  const [filterRules, setFilterRules] = useState<FilterRule[]>([])
+
+  const [isAddModalOpen, setIsAddModalOpen] = useState(false)
+  const [newItem, setNewItem] = useState({ name: '', price: 0 as any, cost_price: 0 as any, weight: 50 as any, stock: 0 as any, min_stock_level: 10 as any })
+
+  const [historyModal, setHistoryModal] = useState<{ isOpen: boolean; product: Product | null; data: any[]; activeBatches: InventoryBatch[] }>({
+    isOpen: false, product: null, data: [], activeBatches: []
+  })
+  
+  const [editingHistoryId, setEditingHistoryId] = useState<number | null>(null)
+  const [historyEdits, setHistoryEdits] = useState<Record<number, Partial<InventoryBatch>>>({})
+
+  // --- DRAG HANDLERS FOR CATEGORIES ---
+  const handleCategoryDragStart = (e: React.DragEvent, cat: string) => {
+    e.dataTransfer.setData('text/category', cat)
+    e.dataTransfer.effectAllowed = 'move'
+  }
+
+  const handleCategoryDrop = async (e: React.DragEvent, targetCat: string) => {
+    e.preventDefault()
+    const sourceCat = e.dataTransfer.getData('text/category');
+    if (!sourceCat || sourceCat === targetCat) return
+
+    setCategoryOrder(prev => {
+      const newOrder = prev.filter(c => c !== sourceCat);
+      const targetIdx = newOrder.indexOf(targetCat);
+      newOrder.splice(targetIdx, 0, sourceCat);
+      
+      supabase.from('app_settings').upsert({
+        setting_key: 'category_order',
+        setting_value: newOrder
+      }, { onConflict: 'setting_key' }).then()
+      
+      return newOrder;
+    })
+  }
+
+  // --- TELEGRAM STOCK ALERTS & REPORTING ---
+  // 🔥 FIX: Added strict fallback values to prevent TS "undefined" errors
+  const triggerStockAlert = async (productName: string = 'Unknown Product', currentStock: number = 0, minStockLevel: number = 0) => {
+    // Only alert if stock drops to or below the minimum threshold
+    if (currentStock > minStockLevel && currentStock > 0) return;
+    
+    const isOOS = currentStock <= 0;
+    const alertType = isOOS ? '🚨 *OUT OF STOCK*' : '⚠️ *LOW STOCK ALERT*';
+    const dateStr = new Date().toLocaleString('en-GB');
+    const message = `${alertType}\n📅 Date: ${dateStr}\n🌾 Product: *${productName}*\n📦 Current Stock: *${currentStock}*\n📉 Min Threshold: ${minStockLevel}`;
+
+    const botToken = TELEGRAM_CONFIG.botToken || process.env.NEXT_PUBLIC_TELEGRAM_BOT_TOKEN;
+    // Uses your requested newGroupChatId mapping
+    const chatId = (TELEGRAM_CONFIG as any).newGroupChatId || (TELEGRAM_CONFIG as any).stockChatId || TELEGRAM_CONFIG.chatId;
+
+    if (botToken && chatId) {
+      fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chat_id: chatId, text: message, parse_mode: 'Markdown' })
+      }).catch(console.error);
+    }
+  };
+
+  const handleSendInventoryReport = async () => {
+    setIsProcessing(true);
+    try {
+      // Filter out archived products, out-of-stock products, and split by weight type
+      const retailItems = products.filter(p => !p.is_archived && Number(p.stock) > 0 && Number(p.weight) < 25);
+      const wholesaleItems = products.filter(p => !p.is_archived && Number(p.stock) > 0 && Number(p.weight) >= 25);
+
+      let msg = `📊 *CURRENT INVENTORY REPORT*\n📅 Date: ${new Date().toLocaleString('en-GB')}\n\n`;
+
+      msg += `🛍️ *RETAIL STOCK (< 25kg)*\n`;
+      if(retailItems.length === 0) msg += `- None\n`;
+      retailItems.forEach(p => {
+        msg += `• ${p.name}: *${p.stock} kg*\n`;
+      });
+
+      msg += `\n🌾 *WHOLESALE STOCK (≥ 25kg)*\n`;
+      if(wholesaleItems.length === 0) msg += `- None\n`;
+      wholesaleItems.forEach(p => {
+        msg += `• ${p.name}: *${p.stock} Bags*\n`;
+        const batches = activeBatchesMap[p.id] || [];
+        if (batches.length > 0) {
+          [...batches].sort((a,b) => a.id - b.id).forEach((b, idx) => {
+            msg += `  ↳ Batch ${idx + 1}: ${b.remaining_qty} left (${formatRiel(b.cost_price)}/bag)\n`;
+          });
+        }
+      });
+
+      const botToken = TELEGRAM_CONFIG.botToken || process.env.NEXT_PUBLIC_TELEGRAM_BOT_TOKEN;
+      const chatId = (TELEGRAM_CONFIG as any).newGroupChatId || (TELEGRAM_CONFIG as any).stockChatId || TELEGRAM_CONFIG.chatId;
+
+      if (!botToken || !chatId) throw new Error('Telegram chat ID or bot token missing');
+
+      const res = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chat_id: chatId, text: msg, parse_mode: 'Markdown' })
+      });
+      
+      if(!res.ok) throw new Error('Telegram API error');
+      showToast('success', 'Report Sent', 'Inventory report dispatched to Telegram.');
+    } catch (err: any) {
+      showToast('error', 'Report Failed', err.message);
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handleOpenAddProduct = () => {
+    setNewItem({
+      name: '',
+      price: '' as any, // 🔥 Default to empty string for cleaner UI
+      cost_price: '' as any, // 🔥 Default to empty string for cleaner UI
+      weight: activeView === 'retail' ? 1 : 50,
+      stock: '' as any, // 🔥 Default to empty string
+      min_stock_level: 10 as any
+    });
+    setIsAddModalOpen(true);
+  };
+
+  useEffect(() => { 
+    async function init() {
+      setIsLoading(true);
+      await Promise.all([
+        fetchProducts(),
+        fetchSettings(),
+        fetchSuppliers(),
+        fetchImports(),
+        fetchBatches()
+      ]);
+      setIsLoading(false);
+    }
+    init();
+
+    // Re-fetch data seamlessly if a branch event is fired
+    const handleBranchChange = () => init();
+    window.addEventListener('branch_changed', handleBranchChange);
+
+    return () => {
+      window.removeEventListener('branch_changed', handleBranchChange);
+    }
+  }, [activeBranchId]) // 🔥 CRITICAL: RE-RUNS ON BRANCH SWITCH
+
+  const handleManualPull = async (retailId: number, wholesaleId: number) => {
+    const wholesaleProduct = products.find(p => p.id === wholesaleId);
+    if (!wholesaleProduct || Number(wholesaleProduct.stock) < 1) {
+      showToast('error', 'Action Blocked', 'Cannot pull: Wholesale bag is out of stock!');
+      return;
+    }
+
+    setIsProcessing(true);
+    try {
+      const { error } = await supabase.rpc('pull_wholesale_bags', {
+         p_retail_id: retailId,
+         p_wholesale_id: wholesaleId,
+         p_bags_needed: 1
+      });
+
+     if (error) throw new Error(error.message);
+      showToast('success', 'Bags Pulled', 'Wholesale stock converted to retail successfully.');
+
+      // Check if pulling this bag dropped the wholesale stock to alert levels
+      const newWholesaleStock = Number(wholesaleProduct.stock) - 1;
+      triggerStockAlert(wholesaleProduct.name || 'Unknown', newWholesaleStock, Number(wholesaleProduct.min_stock_level) || 0);
+
+      fetchProducts();
+      fetchBatches();
+
+    } catch (err: any) {
+      showToast('error', 'Error', err.message);
+    } finally {
+      setIsProcessing(false);
+    }
+  }
+
+  const handleConfirmRepack = async () => {
+    if (!repackModal.product || !repackModal.product.linked_wholesale_id) return;
+    setIsProcessing(true);
+    
+    try {
+        const retailId = repackModal.product.id;
+        const wholesaleId = repackModal.product.linked_wholesale_id;
+        
+        const { data: freshWholesale, error: fetchErr } = await supabase
+           .from('products')
+           .select('cost_price')
+           .eq('id', wholesaleId)
+           .single();
+           
+        if (fetchErr || !freshWholesale) throw new Error("Linked wholesale product not found.");
+
+        const { error } = await supabase.rpc('execute_repack', {
+           p_retail_id: retailId,
+           p_wholesale_id: wholesaleId,
+           p_cogs: Number(freshWholesale.cost_price) || 0
+        });
+
+        if (error) throw new Error(error.message);
+
+        setEdits(prev => {
+            const next = { ...prev };
+            delete next[retailId];
+            delete next[wholesaleId];
+            return next;
+        });
+
+        showToast('success', 'Repack Successful', 'Converted 50kg loose rice into 1 sealed bag.');
+        setRepackModal({ isOpen: false, product: null });
+        
+        // Check if repacking dropped the loose retail stock to alert levels
+        const wProd = products.find(p => p.id === wholesaleId);
+        const wWeight = wProd ? Number(wProd.weight) || 50 : 50;
+        const newRetailStock = Number(repackModal.product!.stock) - wWeight;
+        triggerStockAlert(repackModal.product?.name || 'Unknown', newRetailStock, Number(repackModal.product?.min_stock_level) || 0);
+
+        fetchProducts();
+        fetchBatches();
+
+    } catch (err: any) {
+        showToast('error', 'Repack Error', err.message);
+    } finally {
+        setIsProcessing(false);
+    }
+  }
+
+  async function fetchSettings() {
+    const { data } = await supabase.from('app_settings').select('*').in('setting_key', [
+      'column_widths', 'column_order', 'category_order', 
+      'pending_col_widths', 'pending_col_order',
+      'supplier_col_widths', 'supplier_col_order',
+      'product_sort', 'pending_sort', 'supplier_sort' // 🔥 Added sort keys to fetch
+    ])
+    if (data) {
+      const widths = data.find((d: any) => d.setting_key === 'column_widths')
+      const order = data.find((d: any) => d.setting_key === 'column_order')
+      const catOrder = data.find((d: any) => d.setting_key === 'category_order')
+      const pendWidths = data.find((d: any) => d.setting_key === 'pending_col_widths')
+      const pendOrder = data.find((d: any) => d.setting_key === 'pending_col_order')
+      const supWidths = data.find((d: any) => d.setting_key === 'supplier_col_widths')
+      const supOrder = data.find((d: any) => d.setting_key === 'supplier_col_order')
+      
+      const prodSort = data.find((d: any) => d.setting_key === 'product_sort')
+      const pendSort = data.find((d: any) => d.setting_key === 'pending_sort')
+      const supSort = data.find((d: any) => d.setting_key === 'supplier_sort')
+
+      if (widths?.setting_value) setColumnWidths(widths.setting_value)
+      if (order?.setting_value) {
+        const cleanOrder = order.setting_value.filter((o: string) => o !== 'actions' && o !== 'expand');
+        cleanOrder.unshift('expand');
+        setColumnOrder([...cleanOrder, 'actions'] as any);
+      }
+      if (catOrder?.setting_value) {
+        const saved = catOrder.setting_value;
+        const missing = RICE_CATEGORIES.filter(c => !saved.includes(c));
+        setCategoryOrder([...saved, ...missing]);
+      }
+      if (pendWidths?.setting_value) setPendingColWidths(pendWidths.setting_value)
+      if (pendOrder?.setting_value) {
+        const cleanOrder = pendOrder.setting_value.filter((o: string) => o !== 'actions');
+        setPendingColOrder([...cleanOrder, 'actions']);
+      }
+      if (supWidths?.setting_value) setSupplierColWidths(supWidths.setting_value)
+      if (supOrder?.setting_value) {
+        const cleanOrder = supOrder.setting_value.filter((o: string) => o !== 'select');
+        cleanOrder.unshift('select');
+        setSupplierColOrder(cleanOrder);
+      }
+
+      // 🔥 Load Sort Preferences
+      if (prodSort?.setting_value) setSortConfig(prodSort.setting_value);
+      if (pendSort?.setting_value) setPendingSort(pendSort.setting_value);
+      if (supSort?.setting_value) setSupplierSort(supSort.setting_value);
+    }
+  }
+
+  async function fetchProducts() {
+    // 🔥 FILTERED BY BRANCH
+    const { data } = await supabase.from('products').select('*').eq('is_archived', false).eq('branch_id', activeBranchId).order('id', { ascending: true })
+    if (data) setProducts(data)
+  }
+
+  async function fetchSuppliers() {
+    // 🔥 FILTERED BY BRANCH
+    const { data } = await supabase.from('suppliers').select('*').eq('is_archived', false).eq('branch_id', activeBranchId).order('name', { ascending: true })
+    if (data) setSuppliers(data)
+  }
+
+  async function fetchImports() {
+    // 🔥 FILTERED BY BRANCH
+    const { data } = await supabase.from('imports').select(`*, suppliers (name), products (name)`).eq('branch_id', activeBranchId).order('created_at', { ascending: false })
+    if (data) setImports(data)
+  }
+
+  async function fetchBatches() {
+    // 🔥 FILTERED BY BRANCH
+    const { data } = await supabase.from('inventory_batches')
+      .select('*')
+      .eq('branch_id', activeBranchId)
+      .gt('remaining_qty', 0) 
+      .order('id', { ascending: true }); 
+
+    if (data) {
+      const bMap: Record<number, InventoryBatch[]> = {}
+      data.forEach(b => {
+        if (!bMap[b.product_id]) bMap[b.product_id] = []
+        bMap[b.product_id].push(b)
+      })
+      setActiveBatchesMap(bMap)
+    }
+  }
+
+  const fetchHistory = async (product: Product) => {
+    // 🔥 FILTERED BY BRANCH
+    const { data: importLog } = await supabase.from('imports')
+      .select(`*, suppliers(name)`)
+      .eq('product_id', product.id)
+      .eq('branch_id', activeBranchId)
+      .order('created_at', { ascending: false });
+
+    const { data: activeBatches } = await supabase.from('inventory_batches')
+      .select('*')
+      .eq('product_id', product.id)
+      .eq('branch_id', activeBranchId)
+      .gt('remaining_qty', 0)
+      .order('id', { ascending: true });
+
+    setHistoryModal({ isOpen: true, product, data: importLog || [], activeBatches: activeBatches || [] })
+    setEditingHistoryId(null);
+    setHistoryEdits({});
+  }
+
+  const handleSaveHistory = async (batchId: number) => {
+    const edits = historyEdits[batchId];
+    if (!edits) return setEditingHistoryId(null);
+
+    const originalBatch = historyModal.activeBatches.find(b => b.id === batchId);
+    if (!originalBatch) return setEditingHistoryId(null);
+    
+    const targetProduct = products.find(p => p.id === originalBatch.product_id);
+    if (!targetProduct) return setEditingHistoryId(null);
+
+    const originalQty = Number(originalBatch.remaining_qty) || 0;
+    const newQty = edits.remaining_qty !== undefined ? Number(edits.remaining_qty) : originalQty;
+    const qtyDifference = newQty - originalQty;
+
+    const payload: any = {};
+    if (edits.remaining_qty !== undefined) payload.remaining_qty = newQty;
+    if (edits.cost_price !== undefined) payload.cost_price = Number(edits.cost_price) || 0;
+
+    const { error } = await supabase.from('inventory_batches').update(payload).eq('id', batchId);
+    
+    if (!error) {
+      if (qtyDifference !== 0) {
+        const newStock = Number(targetProduct.stock) + qtyDifference;
+        await supabase.from('products').update({ stock: newStock }).eq('id', targetProduct.id);
+        triggerStockAlert(targetProduct.name || 'Unknown', newStock, Number(targetProduct.min_stock_level) || 0);
+        
+        if (historyModal.product) {
+            setHistoryModal(prev => ({...prev, product: {...prev.product!, stock: newStock}}));
+        }
+      }
+      
+      const { data: updatedBatches } = await supabase.from('inventory_batches')
+        .select('*').eq('product_id', targetProduct.id).eq('branch_id', activeBranchId).gt('remaining_qty', 0).order('id', { ascending: true });
+      
+      setHistoryModal(prev => ({...prev, activeBatches: updatedBatches || []}));
+      setEditingHistoryId(null);
+      showToast('success', 'Batch Updated', 'Inventory limits adjusted successfully.');
+      fetchProducts();
+    } else {
+      showToast('error', 'Update Failed', error.message);
+    }
+  }
+
+  const handleDeleteHistory = async (batchId: number) => {
+    const originalBatch = historyModal.activeBatches.find(b => b.id === batchId);
+    if (!originalBatch) return;
+    
+    const targetProduct = products.find(p => p.id === originalBatch.product_id);
+    if (!targetProduct) return;
+
+    if (!confirm("Are you sure you want to delete this active batch? The remaining quantity will be deducted from your master stock.")) return;
+    
+    const qtyToReverse = Number(originalBatch.remaining_qty) || 0;
+
+    const { error } = await supabase.from('inventory_batches').delete().eq('id', batchId);
+    
+    if (!error) {
+      if (qtyToReverse > 0) {
+        const newStock = Number(targetProduct.stock) - qtyToReverse;
+        await supabase.from('products').update({ stock: newStock }).eq('id', targetProduct.id);
+        triggerStockAlert(targetProduct.name || 'Unknown', newStock, Number(targetProduct.min_stock_level) || 0);
+        
+        if (historyModal.product) {
+            setHistoryModal(prev => ({...prev, product: {...prev.product!, stock: newStock}}));
+        }
+      }
+      
+      const { data: updatedBatches } = await supabase.from('inventory_batches')
+        .select('*').eq('product_id', targetProduct.id).eq('branch_id', activeBranchId).gt('remaining_qty', 0).order('id', { ascending: true });
+      
+      setHistoryModal(prev => ({...prev, activeBatches: updatedBatches || []}));
+      showToast('success', 'Batch Deleted', 'Remaining stock deducted safely.');
+      fetchProducts();
+      
+    } else {
+      showToast('error', 'Delete Failed', error.message);
+    }
+  }
+
+  const handleVoidImport = async (importId: number) => {
+    if (!confirm(`🚨 Are you sure you want to VOID this import?\n\nThis will instantly:\n1. Remove the bags from stock\n2. Delete the linked batch\n3. Reverse supplier debt & expenses\n4. Permanently erase this import record`)) return;
+
+    setIsProcessing(true);
+    try {
+      const { data: impData } = await supabase.from('imports').select('*').eq('id', importId).single();
+      if (!impData) throw new Error("Import not found");
+
+      const targetProduct = products.find(p => p.id === impData.product_id);
+      if (targetProduct) {
+        const newStock = Math.max(0, Number(targetProduct.stock) - Number(impData.qty));
+        await supabase.from('products').update({ stock: newStock }).eq('id', targetProduct.id);
+      }
+
+      const { data: batches } = await supabase.from('inventory_batches')
+        .select('*')
+        .eq('product_id', impData.product_id)
+        .eq('cost_price', impData.unit_cost)
+        .eq('remaining_qty', impData.qty)
+        .order('created_at', { ascending: false })
+        .limit(1);
+      
+      if (batches && batches.length > 0) {
+        await supabase.from('inventory_batches').delete().eq('id', batches[0].id);
+      }
+
+      const { data: supData } = await supabase.from('suppliers').select('name, total_owed_riel').eq('id', impData.supplier_id).single();
+      const supplierName = supData?.name || 'Unknown Supplier';
+
+      const debtAdded = Number(impData.total_cost) - Number(impData.paid_amount);
+      if (debtAdded > 0) {
+        if (supData) {
+          await supabase.from('suppliers').update({ total_owed_riel: Math.max(0, Number(supData.total_owed_riel) - debtAdded) }).eq('id', impData.supplier_id);
+        }
+        await supabase.from('accounts_payable')
+          .delete()
+          .eq('supplier_name', supplierName)
+          .eq('notes', `Stock Import: ${impData.qty} bags`)
+          .eq('status', 'Unpaid');
+      }
+
+      if (Number(impData.paid_amount) > 0) {
+        await supabase.from('expenses')
+          .delete()
+          .eq('remarks', `Stock Import: ${supplierName}`);
+      }
+
+      await supabase.from('imports').delete().eq('id', importId);
+
+      showToast('success', 'Import Voided', 'Record and associated funds safely reversed.');
+      setHistoryModal({ isOpen: false, product: null, data: [], activeBatches: [] });
+      fetchProducts();
+      fetchSuppliers();
+      fetchBatches();
+      fetchImports();
+
+    } catch (err: any) {
+      showToast('error', 'Error Voiding Import', err.message);
+    } finally {
+      setIsProcessing(false);
+    }
+  }
+
+  async function handleAddSupplier() {
+    if (!newSupplier.name) return showToast('error', 'Validation Error', 'Supplier name is required');
+    setIsProcessing(true);
+    try {
+      // 🔥 STAMP BRANCH ID
+      const { data, error } = await supabase.from('suppliers').insert([{ 
+        name: newSupplier.name, 
+        phone: newSupplier.phone, 
+        location: newSupplier.location,
+        branch_id: activeBranchId 
+      }]).select();
+      
+      if (error) throw error;
+      
+      setIsAddSupplierOpen(false);
+      setNewSupplier({ name: '', phone: '', location: '' });
+
+      if (data && data.length > 0) {
+        setSuppliers(prev => [...prev, data[0]]);
+        setImportForm(prev => ({ ...prev, supplier_id: String(data[0].id) }));
+        setActiveView('import');
+        showToast('success', 'Supplier Added', `${data[0].name} has been added successfully.`);
+      }
+
+    } catch (err: any) {
+      showToast('error', 'Database Error', err.message);
+    } finally {
+      setIsProcessing(false);
+    }
+  }
+
+  async function handleProcessImport(isPayLater: boolean) {
+    if (isImportingRef.current) return;
+
+    if (!importForm.supplier_id || !importForm.product_id || !importForm.qty || !importForm.unit_cost) {
+      return showToast('error', 'Missing Data', 'Please fill in Supplier, Product, Qty, and Cost.');
+    }
+
+    isImportingRef.current = true;
+    setIsProcessing(true);
+
+    const qty = Number(importForm.qty);
+    const unitCost = Number(importForm.unit_cost);
+    const totalCost = qty * unitCost;
+    const paidAmount = isPayLater ? (Number(importForm.paid_amount) || 0) : totalCost;
+    
+    if (paidAmount > totalCost) {
+      isImportingRef.current = false;
+      setIsProcessing(false);
+      return showToast('error', 'Invalid Amount', 'Cannot pay more than the total cost.');
+    }
+
+    const status = paidAmount >= totalCost ? 'Paid' : 'Pending';
+    const remainingDebt = totalCost - paidAmount;
+
+    try {
+      const supplierName = suppliers.find(s => String(s.id) === String(importForm.supplier_id))?.name || 'Unknown Supplier';
+      const product = products.find(p => String(p.id) === String(importForm.product_id));
+      if (!product) throw new Error("Product ID mismatch");
+
+      // 🔥 ALL INSERTS ARE STAMPED WITH BRANCH ID
+      const { error: importErr } = await supabase.from('imports').insert([{
+        supplier_id: Number(importForm.supplier_id),
+        product_id: Number(importForm.product_id),
+        product_name: product.name,
+        qty: qty,
+        unit_cost: unitCost,
+        total_cost: totalCost,
+        paid_amount: paidAmount,
+        status: status,
+        branch_id: activeBranchId
+      }]);
+      if (importErr) throw importErr;
+
+      if (remainingDebt > 0) {
+        const supplier = suppliers.find(s => String(s.id) === String(importForm.supplier_id));
+        const newTotalOwed = Number(supplier?.total_owed_riel || 0) + remainingDebt;
+        await supabase.from('suppliers').update({ total_owed_riel: newTotalOwed }).eq('id', supplier?.id);
+
+        await supabase.from('accounts_payable').insert([{
+          supplier_name: supplierName,
+          amount_riel: remainingDebt,
+          amount_usd: 0,
+          notes: `Stock Import: ${qty} bags`,
+          status: 'Unpaid',
+          branch_id: activeBranchId
+        }]);
+      }
+      
+      const newStock = Number(product.stock || 0) + qty;
+      const { error: stockErr } = await supabase.from('products').update({ stock: newStock, cost_price: unitCost }).eq('id', product.id);
+      if (stockErr) throw stockErr;
+
+      await supabase.from('inventory_batches').insert([{
+        product_id: Number(importForm.product_id),
+        product_name: product.name, 
+        cost_price: unitCost,
+        remaining_qty: qty,
+        branch_id: activeBranchId
+      }]);
+
+      if (paidAmount > 0) {
+        let amtUsd = 0;
+        let amtRiel = paidAmount;
+        if (importForm.payment_method.includes('$')) {
+          amtUsd = paidAmount;
+          amtRiel = paidAmount * EXCHANGE_RATE;
+        }
+
+        await supabase.from('expenses').insert([{
+          expense_date: new Date().toISOString().split('T')[0],
+          spender: 'Both',
+          payment_method: importForm.payment_method,
+          remarks: `Stock Import: ${supplierName}`,
+          amount_usd: Math.abs(amtUsd),
+          amount_riel: Math.abs(amtRiel),
+          description: 'BUSINESS',
+          branch_id: activeBranchId
+        }]);
+      }
+
+      setImportForm({ supplier_id: '', product_id: '', qty: '', unit_cost: '', paid_amount: '', payment_method: 'Cash ៛' });
+      showToast('success', 'Stock Received', `${qty} bags added to inventory. Batch logged.`);
+      
+      if (isPayLater) setActiveView('pending');
+      else setActiveView('wholesale');
+
+      fetchProducts();
+      fetchBatches();
+      fetchSuppliers();
+      fetchImports();
+
+    } catch (err: any) {
+      showToast('error', 'Import Error', err.message);
+    } finally {
+      isImportingRef.current = false;
+      setIsProcessing(false);
+    }
+  }
+
+  async function handlePayPendingSubmit() {
+    const record = payPendingModal.record;
+    
+    let totalRielEq = 0;
+    let totalUsdFace = 0;
+    let totalRielFace = 0;
+    let methodStrings: string[] = [];
+
+    for (const r of pendingPaymentRows) {
+      const amt = Number(r.amount) || 0;
+      if (amt <= 0) continue;
+      
+      if (r.method.includes('$')) {
+        totalRielEq += (amt * EXCHANGE_RATE);
+        totalUsdFace += amt;
+      } else {
+        totalRielEq += amt;
+        totalRielFace += amt;
+      }
+      methodStrings.push(`${r.method}: ${amt}`);
+    }
+
+    if (totalRielEq <= 0) return showToast('error', 'Invalid Amount', 'Enter a valid payment amount.');
+    const remainingBefore = Number(record.total_cost) - Number(record.paid_amount);
+    if (totalRielEq > remainingBefore + 0.1) return showToast('error', 'Overpayment', 'Cannot pay more than what is owed.');
+
+    setIsProcessing(true); 
+
+    try {
+      const newPaidAmount = Number(record.paid_amount) + totalRielEq;
+      const newStatus = newPaidAmount >= Number(record.total_cost) ? 'Paid' : 'Pending';
+
+      await supabase.from('imports').update({ paid_amount: newPaidAmount, status: newStatus }).eq('id', record.id);
+
+      const supplier = suppliers.find(s => String(s.id) === String(record.supplier_id));
+      const newTotalOwed = Math.max(0, Number(supplier?.total_owed_riel || 0) - totalRielEq);
+      await supabase.from('suppliers').update({ total_owed_riel: newTotalOwed }).eq('id', supplier?.id);
+
+      const { data: apRows } = await supabase.from('accounts_payable')
+        .select('*')
+        .eq('supplier_name', supplier?.name)
+        .eq('status', 'Unpaid')
+        .order('created_at', { ascending: true });
+      
+      if (apRows && apRows.length > 0) {
+          let debtRemainingToOffset = totalRielEq;
+          for (let apRow of apRows) {
+              if (debtRemainingToOffset <= 0) break;
+              let apRowAmount = Number(apRow.amount_riel);
+              let apply = Math.min(apRowAmount, debtRemainingToOffset);
+              let newRowBalance = apRowAmount - apply;
+              
+              await supabase.from('accounts_payable').update({
+                  amount_riel: newRowBalance,
+                  status: newRowBalance <= 0 ? 'Paid' : 'Unpaid'
+              }).eq('id', apRow.id);
+              
+              debtRemainingToOffset -= apply;
+          }
+      }
+
+      await supabase.from('expenses').insert([{
+        expense_date: new Date().toISOString().split('T')[0],
+        spender: 'Both',
+        payment_method: methodStrings.join(', '),
+        remarks: `Paid Debt: ${supplier?.name || 'Supplier'}`,
+        amount_usd: Math.abs(totalUsdFace),
+        amount_riel: Math.abs(totalRielFace),
+        description: 'BUSINESS',
+        branch_id: activeBranchId // 🔥 STAMPED
+      }]);
+
+      setPayPendingModal({ isOpen: false, record: null, totalDue: 0 });
+      setPendingPaymentRows([{ id: Date.now(), method: 'Cash ៛', amount: '' }]);
+      
+      if (newStatus === 'Paid') {
+        showToast('success', 'Bill Cleared', 'The supplier debt has been fully settled.');
+      } else {
+        showToast('info', 'Partial Payment', `Payment logged. ${formatRiel(remainingBefore - totalRielEq)} remaining.`);
+      }
+
+      fetchImports();
+      fetchSuppliers();
+      
+    } catch (err: any) {
+      showToast('error', 'Payment Error', err.message);
+    } finally {
+      setIsProcessing(false);
+    }
+  }
+
+  const handleSaveRecord = async (id: number) => {
+    if (!edits[id]) return;
+    const payload = { ...edits[id] } as any;
+    
+    const mainProd = products.find(p => p.id === id);
+    if (!mainProd) return;
+
+    if (activeView === 'wholesale') {
+      const pBatches = activeBatchesMap[id] || [];
+      pBatches.sort((a,b) => a.id - b.id);
+      const currentBatch = pBatches.length > 0 ? pBatches[0] : null;
+
+      if (currentBatch) {
+        const batchPayload: any = {};
+        let updateBatch = false;
+
+        if (payload.cost_price !== undefined) { 
+           batchPayload.cost_price = Number(payload.cost_price); 
+           updateBatch = true; 
+        }
+
+        if (payload.stock !== undefined) {
+           const newMasterStock = Number(payload.stock);
+           const oldMasterStock = Number(mainProd.stock);
+           const diff = newMasterStock - oldMasterStock;
+           
+           batchPayload.remaining_qty = Math.max(0, Number(currentBatch.remaining_qty) + diff);
+           updateBatch = true;
+           
+           payload.stock = newMasterStock;
+        }
+
+        if (updateBatch) {
+           await supabase.from('inventory_batches').update(batchPayload).eq('id', currentBatch.id);
+        }
+      }
+    }
+
+    ['price', 'cost_price', 'weight', 'stock', 'mtd_kg_used', 'mtd_bags_used', 'min_stock_level'].forEach(key => {
+      if (payload[key] === '') payload[key] = 0;
+      else if (payload[key] !== undefined) payload[key] = Number(payload[key]);
+    });
+
+    if (Object.keys(payload).length > 0) {
+       const { error } = await supabase.from('products').update(payload).eq('id', id);
+       if (error) {
+         showToast('error', 'Save Failed', error.message);
+       } else {
+         fetchProducts();
+         if (payload.stock !== undefined) {
+           triggerStockAlert(mainProd.name || 'Unknown', Number(payload.stock), Number(mainProd.min_stock_level) || 0);
+         }
+       }
+    }
+
+    setEdits(prev => { const n = { ...prev }; delete n[id]; return n });
+    setEditingCell(null);
+  }
+
+  const handleDelete = async () => {
+    if (!confirm(`Are you sure you want to delete ${selectedToDelete.size} item(s)?`)) return
+    const { error } = await supabase.from('products').update({ is_archived: true }).in('id', Array.from(selectedToDelete))
+    if (!error) { 
+      setSelectedToDelete(new Set()); 
+      fetchProducts(); 
+      showToast('success', 'Products Deleted', 'Items removed safely.');
+    }
+  }
+
+  const handleDeleteSuppliers = async () => {
+    if (!confirm(`Are you sure you want to delete ${selectedSuppliersToDelete.size} supplier(s)?`)) return
+    const { error } = await supabase.from('suppliers').update({ is_archived: true }).in('id', Array.from(selectedSuppliersToDelete))
+    if (!error) { 
+      setSelectedSuppliersToDelete(new Set()); 
+      fetchSuppliers(); 
+      showToast('success', 'Suppliers Deleted', 'Suppliers archived safely.');
+    }
+  }
+
+  const addProduct = async () => {
+    if (!newItem.name) return showToast('error', 'Missing Data', 'Name is required');
+    const payload = {
+      name: newItem.name,
+      price: Number(newItem.price) || 0,
+      cost_price: Number(newItem.cost_price) || 0,
+      weight: Number(newItem.weight) || 50,
+      stock: Number(newItem.stock) || 0,
+      min_stock_level: Number(newItem.min_stock_level) || 10,
+      mtd_kg_used: 0,
+      mtd_bags_used: 0,
+      branch_id: activeBranchId // 🔥 STAMPED
+    }
+    const { data, error } = await supabase.from('products').insert([payload]).select()
+    
+    if (!error && data && data.length > 0) {
+      setIsAddModalOpen(false)
+      setNewItem({ name: '', price: '0' as any, cost_price: '0' as any, weight: 50 as any, stock: '0' as any, min_stock_level: 10 as any })
+      
+      setProducts(prev => [...prev, data[0]]);
+      setImportForm(prev => ({ ...prev, product_id: String(data[0].id) }));
+      setActiveView('import');
+      showToast('success', 'Product Created', 'Ready to receive stock.');
+
+    } else if (error) {
+      showToast('error', 'Creation Failed', error.message);
+    }
+  }
+
+  const openImportModal = (product: Product) => {
+    setImportForm(prev => ({ ...prev, product_id: String(product.id) }));
+    setActiveView('import');
+  }
+
+  const handleLinkWholesaleBag = async (retailId: number, wholesaleProduct: Product | null) => {
+    const { error } = await supabase.from('products').update({ 
+      linked_wholesale_id: wholesaleProduct ? wholesaleProduct.id : null,
+    }).eq('id', retailId);
+    
+    if (!error) {
+      setActiveDropdownId(null);
+      setDropdownSearch('');
+      fetchProducts();
+    } else {
+      showToast('error', 'Link Failed', error.message);
+    }
+  }
+
+  // --- UNIVERSAL DRAG & DROP FOR ALL TABLES ---
+  const onDragStartCol = (e: React.DragEvent, col: string, unmovables: string[]) => {
+    if (unmovables.includes(col)) return;
+    e.dataTransfer.setData('text/plain', col);
+    e.dataTransfer.effectAllowed = 'move';
+  }
+
+  const onDragOverCol = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+  }
+
+  const handleProductDrop = async (e: React.DragEvent, targetCol: string) => {
+    e.preventDefault()
+    if (targetCol === 'actions' || targetCol === 'expand') return;
+    const sourceCol = e.dataTransfer.getData('text/plain') as ColumnKey;
+    if (!sourceCol || sourceCol === targetCol || sourceCol === 'actions' || sourceCol === 'expand') return
+
+    setColumnOrder(prev => {
+      const staticCols = ['expand', 'actions'];
+      const movableOrder = prev.filter(c => !staticCols.includes(c as string));
+      const newOrder = movableOrder.filter(c => c !== sourceCol);
+      const targetIdx = newOrder.indexOf(targetCol as any);
+      
+      newOrder.splice(targetIdx, 0, sourceCol);
+      const finalOrder = ['expand', ...newOrder, 'actions'] as ColumnKey[];
+      
+      supabase.from('app_settings').upsert({ setting_key: 'column_order', setting_value: finalOrder }, { onConflict: 'setting_key' }).then();
+      return finalOrder;
+    })
+  }
+
+  const handlePendingDrop = async (e: React.DragEvent, targetCol: string) => {
+    e.preventDefault()
+    if (targetCol === 'actions') return;
+    const sourceCol = e.dataTransfer.getData('text/plain');
+    if (!sourceCol || sourceCol === targetCol || sourceCol === 'actions') return;
+
+    setPendingColOrder(prev => {
+      const movableOrder = prev.filter(c => c !== 'actions');
+      const newOrder = movableOrder.filter(c => c !== sourceCol);
+      const targetIdx = newOrder.indexOf(targetCol);
+      
+      newOrder.splice(targetIdx, 0, sourceCol);
+      const finalOrder = [...newOrder, 'actions'];
+      
+      supabase.from('app_settings').upsert({ setting_key: 'pending_col_order', setting_value: finalOrder }, { onConflict: 'setting_key' }).then();
+      return finalOrder;
+    })
+  }
+
+  const handleSupplierDrop = async (e: React.DragEvent, targetCol: string) => {
+    e.preventDefault()
+    if (targetCol === 'select') return;
+    const sourceCol = e.dataTransfer.getData('text/plain');
+    if (!sourceCol || sourceCol === targetCol || sourceCol === 'select') return;
+
+    setSupplierColOrder(prev => {
+      const movableOrder = prev.filter(c => c !== 'select');
+      const newOrder = movableOrder.filter(c => c !== sourceCol);
+      const targetIdx = newOrder.indexOf(targetCol);
+      
+      newOrder.splice(targetIdx, 0, sourceCol);
+      const finalOrder = ['select', ...newOrder];
+      
+      supabase.from('app_settings').upsert({ setting_key: 'supplier_col_order', setting_value: finalOrder }, { onConflict: 'setting_key' }).then();
+      return finalOrder;
+    })
+  }
+
+  const handleResizeStartProduct = (e: React.MouseEvent | React.TouchEvent, columnKey: string) => {
+    if (columnKey === 'expand') return;
+    e.preventDefault(); e.stopPropagation();
+    const startX = 'touches' in e ? e.touches[0].pageX : e.pageX;
+    const startWidth = widthsRef.current[columnKey] || 150;
+    const handleMove = (moveEvent: MouseEvent | TouchEvent) => {
+      const currentX = 'touches' in moveEvent ? moveEvent.touches[0].pageX : moveEvent.pageX;
+      const newWidth = Math.max(40, startWidth + (currentX - startX));
+      setColumnWidths(prev => ({ ...prev, [columnKey]: newWidth }));
+    }
+    const handleUp = async () => {
+      document.removeEventListener('mousemove', handleMove); document.removeEventListener('mouseup', handleUp);
+      document.removeEventListener('touchmove', handleMove); document.removeEventListener('touchend', handleUp);
+      await supabase.from('app_settings').upsert({ setting_key: 'column_widths', setting_value: widthsRef.current }, { onConflict: 'setting_key' });
+    }
+    document.addEventListener('mousemove', handleMove); document.addEventListener('mouseup', handleUp);
+    document.addEventListener('touchmove', handleMove, { passive: false }); document.addEventListener('touchend', handleUp);
+  }
+
+  const handleResizeStartPending = (e: React.MouseEvent | React.TouchEvent, columnKey: string) => {
+    if (columnKey === 'actions') return;
+    e.preventDefault(); e.stopPropagation();
+    const startX = 'touches' in e ? e.touches[0].pageX : e.pageX;
+    const startWidth = pendingWidthsRef.current[columnKey] || 150;
+    const handleMove = (moveEvent: MouseEvent | TouchEvent) => {
+      const currentX = 'touches' in moveEvent ? moveEvent.touches[0].pageX : moveEvent.pageX;
+      const newWidth = Math.max(40, startWidth + (currentX - startX));
+      setPendingColWidths(prev => ({ ...prev, [columnKey]: newWidth }));
+    }
+    const handleUp = async () => {
+      document.removeEventListener('mousemove', handleMove); document.removeEventListener('mouseup', handleUp);
+      document.removeEventListener('touchmove', handleMove); document.removeEventListener('touchend', handleUp);
+      await supabase.from('app_settings').upsert({ setting_key: 'pending_col_widths', setting_value: pendingWidthsRef.current }, { onConflict: 'setting_key' });
+    }
+    document.addEventListener('mousemove', handleMove); document.addEventListener('mouseup', handleUp);
+    document.addEventListener('touchmove', handleMove, { passive: false }); document.addEventListener('touchend', handleUp);
+  }
+
+  const handleResizeStartSupplier = (e: React.MouseEvent | React.TouchEvent, columnKey: string) => {
+    if (columnKey === 'select') return;
+    e.preventDefault(); e.stopPropagation();
+    const startX = 'touches' in e ? e.touches[0].pageX : e.pageX;
+    const startWidth = supplierWidthsRef.current[columnKey] || 150;
+    const handleMove = (moveEvent: MouseEvent | TouchEvent) => {
+      const currentX = 'touches' in moveEvent ? moveEvent.touches[0].pageX : moveEvent.pageX;
+      const newWidth = Math.max(40, startWidth + (currentX - startX));
+      setSupplierColWidths(prev => ({ ...prev, [columnKey]: newWidth }));
+    }
+    const handleUp = async () => {
+      document.removeEventListener('mousemove', handleMove); document.removeEventListener('mouseup', handleUp);
+      document.removeEventListener('touchmove', handleMove); document.removeEventListener('touchend', handleUp);
+      await supabase.from('app_settings').upsert({ setting_key: 'supplier_col_widths', setting_value: supplierWidthsRef.current }, { onConflict: 'setting_key' });
+    }
+    document.addEventListener('mousemove', handleMove); document.addEventListener('mouseup', handleUp);
+    document.addEventListener('touchmove', handleMove, { passive: false }); document.addEventListener('touchend', handleUp);
+  }
+
+  const handleProductSort = (key: any) => {
+    if (key === 'linked_wholesale' || key === 'actions' || key === 'expand') return;
+    let direction: 'asc' | 'desc' = 'asc';
+    if (sortConfig && sortConfig.key === key && sortConfig.direction === 'asc') direction = 'desc';
+    const newSort = { key, direction };
+    setSortConfig(newSort);
+    // 🔥 Save preference to DB
+    supabase.from('app_settings').upsert({ setting_key: 'product_sort', setting_value: newSort }, { onConflict: 'setting_key' }).then();
+  }
+
+  const handlePendingSort = (key: string) => {
+    if (key === 'actions') return;
+    let direction: 'asc' | 'desc' = 'asc';
+    if (pendingSort && pendingSort.key === key && pendingSort.direction === 'asc') direction = 'desc';
+    const newSort = { key, direction };
+    setPendingSort(newSort);
+    // 🔥 Save preference to DB
+    supabase.from('app_settings').upsert({ setting_key: 'pending_sort', setting_value: newSort }, { onConflict: 'setting_key' }).then();
+  }
+
+  const handleSupplierSort = (key: string) => {
+    if (key === 'select') return;
+    let direction: 'asc' | 'desc' = 'asc';
+    if (supplierSort && supplierSort.key === key && supplierSort.direction === 'asc') direction = 'desc';
+    const newSort = { key, direction };
+    setSupplierSort(newSort);
+    // 🔥 Save preference to DB
+    supabase.from('app_settings').upsert({ setting_key: 'supplier_sort', setting_value: newSort }, { onConflict: 'setting_key' }).then();
+  }
+
+  const processedProducts = products
+    .map(p => ({ ...p, ...edits[p.id] }))
+    .filter(p => {
+      const isEditingThisRow = editingCell?.id === p.id;
+      if (debouncedSearch && !p.name?.toLowerCase().includes(debouncedSearch.toLowerCase())) return false;
+      // 🔥 FIX: Cast weight to Number to prevent TS comparison errors
+      if (activeView === 'retail' && Number(p.weight) >= 25) return false; 
+      if (activeView === 'wholesale' && Number(p.weight) < 25) return false;
+      if (activeView === 'wholesale') {
+        if (activeCategory === '❌ Out of Stock') {
+            if (!isEditingThisRow && Number(p.stock) > 0) return false;
+        } else {
+            if (!isEditingThisRow && Number(p.stock) <= 0) return false;
+        }
+      }
+      if (activeView === 'wholesale' && activeCategory !== 'All' && activeCategory !== '❌ Out of Stock') {
+        const name = p.name || '';
+        if (activeCategory === 'ផ្សេងៗ') {
+          if (MAIN_KEYWORDS.some(kw => name.includes(kw))) return false;
+        } else {
+          if (!name.includes(activeCategory)) return false;
+        }
+      }
+      for (const rule of filterRules) {
+        if (!rule.value && rule.value !== 0) continue;
+        const val = p[rule.column as keyof Product];
+        const checkVal = String(rule.value).toLowerCase();
+        if (rule.operator === 'contains' && !String(val).toLowerCase().includes(checkVal)) return false;
+        if (rule.operator === 'equals' && String(val).toLowerCase() !== checkVal) return false;
+        if (rule.operator === 'gt' && Number(val) <= Number(rule.value)) return false;
+        if (rule.operator === 'lt' && Number(val) >= Number(rule.value)) return false;
+      }
+      return true;
+    })
+    .sort((a, b) => {
+      if (!sortConfig) return 0;
+      const { key, direction } = sortConfig;
+      if ((a as any)[key] < (b as any)[key]) return direction === 'asc' ? -1 : 1;
+      if ((a as any)[key] > (b as any)[key]) return direction === 'asc' ? 1 : -1;
+      return 0;
+    });
+
+  const processedPending = imports.filter(i => i.status === 'Pending').sort((a, b) => {
+    if (!pendingSort) return 0;
+    const { key, direction } = pendingSort;
+    let valA, valB;
+    if (key === 'date') { valA = new Date((a as any).created_at).getTime(); valB = new Date((b as any).created_at).getTime(); }
+    else if (key === 'supplier') { valA = a.suppliers?.name || ''; valB = b.suppliers?.name || ''; }
+    else if (key === 'product') { valA = a.products?.name || ''; valB = b.products?.name || ''; }
+    else if (key === 'total_cost') { valA = Number(a.total_cost); valB = Number(b.total_cost); }
+    else if (key === 'paid_so_far') { valA = Number(a.paid_amount); valB = Number(b.paid_amount); }
+    else if (key === 'remaining_debt') { valA = Number(a.total_cost) - Number(a.paid_amount); valB = Number(b.total_cost) - Number(b.paid_amount); }
+    
+    if (valA < valB) return direction === 'asc' ? -1 : 1;
+    if (valA > valB) return direction === 'asc' ? 1 : -1;
+    return 0;
+  });
+
+  const processedSuppliers = [...suppliers].sort((a, b) => {
+    if (!supplierSort) return 0;
+    const { key, direction } = supplierSort;
+    let valA = a[key] || '';
+    let valB = b[key] || '';
+    if (key === 'total_owed') { valA = Number(a.total_owed_riel); valB = Number(b.total_owed_riel); }
+    if (valA < valB) return direction === 'asc' ? -1 : 1;
+    if (valA > valB) return direction === 'asc' ? 1 : -1;
+    return 0;
+  });
+
+  const formatDisplayValue = (col: string, val: any) => {
+    if (val === null || val === undefined) return '';
+    if (['price', 'cost_price'].includes(col)) return `${new Intl.NumberFormat('en-US').format(val)} ៛`;
+    if (['stock', 'weight', 'id', 'min_stock_level'].includes(col)) return new Intl.NumberFormat('en-US').format(val);
+    if (['mtd_kg_used'].includes(col)) return `${new Intl.NumberFormat('en-US').format(val)} kg`;
+    if (['mtd_bags_used'].includes(col)) return `${new Intl.NumberFormat('en-US').format(val)} bags`;
+    return String(val);
+  };
+
+  const importTotalCalc = (Number(importForm.qty) || 0) * (Number(importForm.unit_cost) || 0);
+  const liveTotalPendingReceived = pendingPaymentRows.reduce((sum, row) => {
+    const amt = Number(row.amount) || 0;
+    if (row.method.includes('$')) return sum + (amt * EXCHANGE_RATE);
+    return sum + amt;
+  }, 0);
+  const livePendingRemaining = payPendingModal.totalDue - liveTotalPendingReceived;
+
+  return (
+    <div className="main-wrapper" style={{ display: 'flex', flexDirection: 'column', height: '100dvh', overflow: 'hidden' }}>
+      
+      {/* HEADER (Frozen) */}
+      <div className="header-container" style={{ flexShrink: 0 }}>
+        <div className="header-left">
+          <h1 className="saas-page-title">🌾 Rice Inventory & Suppliers</h1>
+        </div>
+        <div className="header-actions">
+          <button className="saas-btn saas-btn-secondary" onClick={handleSendInventoryReport} disabled={isProcessing}>
+            📱 <span className="hide-on-mobile">Report</span>
+          </button>
+          {selectedToDelete.size > 0 && (activeView === 'retail' || activeView === 'wholesale') && (
+            <button className="saas-btn saas-btn-danger" onClick={handleDelete}>
+              Delete ({selectedToDelete.size})
+            </button>
+          )}
+          {selectedSuppliersToDelete.size > 0 && activeView === 'suppliers' && (
+            <button className="saas-btn saas-btn-danger" onClick={handleDeleteSuppliers}>
+              Delete ({selectedSuppliersToDelete.size})
+            </button>
+          )}
+          {(activeView === 'retail' || activeView === 'wholesale') && (
+            <button className="saas-btn saas-btn-primary desktop-only-btn" onClick={handleOpenAddProduct}>
+              + Add Product
+            </button>
+          )}
+          {activeView === 'suppliers' && (
+            <button className="saas-btn saas-btn-primary desktop-only-btn" onClick={() => setIsAddSupplierOpen(true)}>
+              + Add Supplier
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* TOOLBAR & TABS (Frozen) */}
+      <div className="saas-card" style={{ marginBottom: '24px', padding: '16px 20px', display: 'flex', gap: '16px', flexWrap: 'wrap', alignItems: 'center', flexShrink: 0 }}>
+        <div className="saas-tab-container hide-scrollbar" style={{ margin: 0, padding: 0, border: 'none', boxShadow: 'none', background: 'transparent' }}>
+          <button className={`saas-tab ${activeView === 'retail' ? 'active' : ''}`} onClick={() => { setActiveView('retail'); setActiveCategory('All'); }}>🛍️ Retail</button>
+          <button className={`saas-tab ${activeView === 'wholesale' ? 'active' : ''}`} onClick={() => setActiveView('wholesale')}>🌾 Wholesale</button>
+          <button className={`saas-tab ${activeView === 'import' ? 'active' : ''}`} onClick={() => setActiveView('import')}>🚚 Receive Stock</button>
+          <button className={`saas-tab ${activeView === 'pending' ? 'active' : ''}`} onClick={() => setActiveView('pending')}>⏳ Pending Payments {processedPending.length > 0 && `(${processedPending.length})`}</button>
+          <button className={`saas-tab ${activeView === 'suppliers' ? 'active' : ''}`} onClick={() => setActiveView('suppliers')}>🏢 Suppliers</button>
+        </div>
+        
+        {(activeView === 'retail' || activeView === 'wholesale') && (
+          <div className="mobile-action-row" style={{ flex: 1 }}>
+            <input 
+              className="saas-input" 
+              placeholder="🔍 Quick search..." 
+              value={searchQuery} 
+              onChange={(e) => setSearchQuery(e.target.value)} 
+              onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
+              style={{ minWidth: '200px' }}
+            />
+            
+            <div className="toolbar-filters" style={{ display: 'flex', gap: '10px' }}>
+              <button className="saas-btn saas-btn-primary mobile-only-btn" onClick={handleOpenAddProduct}>
+                Add
+              </button>
+              
+              <button 
+                className="saas-btn saas-btn-secondary" 
+                onClick={() => setIsFilterOpen(true)} 
+                style={{ 
+                  color: filterRules.length > 0 ? '#3b82f6' : '#0f172a', 
+                  display: 'flex', 
+                  alignItems: 'center', 
+                  justifyContent: 'center', 
+                  padding: '10px' 
+                }}
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon>
+                </svg>
+                {filterRules.length > 0 && (
+                  <span style={{ marginLeft: '6px', fontSize: '13px', fontWeight: 'bold' }}>
+                    {filterRules.length}
+                  </span>
+                )}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {activeView === 'suppliers' && (
+          <div className="mobile-action-row mobile-only-flex" style={{ justifyContent: 'flex-end', flex: 1 }}>
+             <button className="saas-btn saas-btn-primary" onClick={() => setIsAddSupplierOpen(true)}>
+               + Add Supplier
+             </button>
+          </div>
+        )}
+      </div>
+
+      {/* RICE CATEGORIES (Frozen) */}
+      {activeView === 'wholesale' && (
+        <div 
+          className="saas-tab-container hide-scrollbar" 
+          style={{ paddingBottom: '16px', marginBottom: '8px', WebkitOverflowScrolling: 'touch', userSelect: 'none', background: 'transparent', border: 'none', boxShadow: 'none', flexShrink: 0 }}
+        >
+          {categoryOrder.map(cat => (
+            <button 
+              key={cat} 
+              draggable={true}
+              onDragStart={(e) => handleCategoryDragStart(e, cat)}
+              onDragOver={onDragOverCol}
+              onDrop={(e) => handleCategoryDrop(e, cat)}
+              onClick={() => setActiveCategory(cat)} 
+              className={`saas-tab ${activeCategory === cat ? 'active' : ''}`}
+              style={{ flexShrink: 0, borderRadius: '20px', cursor: 'grab' }}
+            >
+              {cat}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* 🔥 SPREADSHEET VIEWS: RETAIL & WHOLESALE */}
+      {(activeView === 'retail' || activeView === 'wholesale') && (
+        <div className="saas-table-wrapper fade-in" style={{ flex: 1, minHeight: 0, marginBottom: 0, display: 'flex', flexDirection: 'column' }}>
+          <div className="saas-table-responsive" style={{ flex: 1, overflow: 'auto' }}>
+            <table className="saas-table" style={{ minWidth: '100%', tableLayout: 'fixed', width: 'max-content' }}>
+              <thead>
+                <tr>
+                  {columnOrder.map(key => {
+                    if (key === 'expand' && activeView !== 'wholesale') return null;
+                    if ((key === 'linked_wholesale' || key === 'mtd_kg_used' || key === 'mtd_bags_used') && activeView !== 'retail') return null;
+                    if (key === 'actions' && activeView !== 'wholesale') return null; 
+                    
+                    const isDraggable = key !== 'actions' && key !== 'linked_wholesale' && key !== 'expand';
+
+                    if (key === 'expand') {
+                      return <th key={key} className="saas-th" style={{ width: '40px', minWidth: '40px', maxWidth: '40px', padding: '16px 8px', borderRight: '1px solid #f1f5f9', position: 'sticky', top: 0, zIndex: 30, backgroundColor: '#f8fafc', boxShadow: 'inset 0 -2px 0 0 #e2e8f0' }}></th>;
+                    }
+
+                    return (
+                      <th 
+                        key={key} 
+                        className="saas-th"
+                        draggable={isDraggable}
+                        onDragStart={(e) => onDragStartCol(e, key as string, ['actions', 'linked_wholesale', 'expand'])}
+                        onDragOver={onDragOverCol}
+                        onDrop={(e) => handleProductDrop(e, key as string)}
+                        onClick={() => handleProductSort(key)}
+                        style={{ 
+                          width: columnWidths[key as string] || 150, 
+                          position: 'sticky', top: 0, zIndex: 30, backgroundColor: '#f8fafc', boxShadow: 'inset 0 -2px 0 0 #e2e8f0',
+                          textAlign: key === 'actions' ? 'center' : 'left', 
+                          borderRight: '1px solid #f1f5f9', 
+                          cursor: isDraggable ? 'pointer' : 'default', 
+                          whiteSpace: 'nowrap', userSelect: 'none' 
+                        }}
+                      >
+                        {key === 'linked_wholesale' ? 'Linked Wholesale Bag' : key === 'mtd_kg_used' ? 'MTD Used (Kg)' : key === 'mtd_bags_used' ? 'MTD Used (Bags)' : key === 'min_stock_level' ? 'Min Stock' : (key as string).replace('_', ' ')}
+                        {isDraggable && (<span style={{ marginLeft: '6px', fontSize: '12px', opacity: sortConfig?.key === key ? 1 : 0.3 }}>{sortConfig?.key === key ? (sortConfig.direction === 'asc' ? '↑' : '↓') : '↕'}</span>)}
+                        {isDraggable && <div onMouseDown={(e) => handleResizeStartProduct(e, key as string)} onTouchStart={(e) => handleResizeStartProduct(e, key as string)} style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: '14px', cursor: 'col-resize', background: 'transparent', zIndex: 10, transform: 'translateX(50%)' }} />}
+                      </th>
+                    )
+                  })}
+                </tr>
+              </thead>
+              <tbody>
+                {isLoading ? (
+                  <TableSkeleton columns={columnOrder.length} rows={8} />
+                ) : processedProducts.length === 0 ? (
+                  <tr>
+                    <td colSpan={columnOrder.length} style={{ padding: 0 }}>
+                      <EmptyState icon="📦" title="No products found." message="Try adjusting your filters or search query." />
+                    </td>
+                  </tr>
+                ) : (
+                  processedProducts.map(p => {
+                    const pBatches = activeBatchesMap[p.id] || [];
+                    pBatches.sort((a,b) => a.id - b.id); 
+                    const currentBatch = pBatches.length > 0 ? pBatches[0] : null;
+                    const isExpanded = expandedProductId === p.id;
+                    const totalActiveBatchStock = pBatches.reduce((sum, b) => sum + Number(b.remaining_qty), 0);
+                    const linkedRetail = products.find(r => r.linked_wholesale_id === p.id);
+
+                    return (
+                      <React.Fragment key={p.id}>
+                        <tr className="saas-tr" onMouseEnter={() => setHoveredId(p.id)} onMouseLeave={() => setHoveredId(null)} style={{ background: edits[p.id] ? '#fefcf3' : 'transparent' }}>
+                          {columnOrder.map(col => {
+                            if (col === 'expand' && activeView !== 'wholesale') return null;
+                            if ((col === 'linked_wholesale' || col === 'mtd_kg_used' || col === 'mtd_bags_used') && activeView !== 'retail') return null;
+                            
+                            if (col === 'expand') {
+                               return (
+                                 <td className="saas-td" key={col} style={{ width: '40px', minWidth: '40px', maxWidth: '40px', borderRight: '1px solid #f1f5f9', padding: '8px 4px', textAlign: 'center', verticalAlign: 'middle' }}>
+                                   {pBatches.length > 1 && (
+                                     <button 
+                                       onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); setExpandedProductId(isExpanded ? null : p.id); }} 
+                                       style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '12px', color: '#64748b', display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%', height: '100%' }}
+                                     >
+                                       {isExpanded ? '▼' : '▶'}
+                                     </button>
+                                   )}
+                                 </td>
+                               )
+                            }
+
+                            if (col === 'actions') {
+                              if (activeView === 'retail') {
+                                 return (
+                                   <td className="saas-td" key={col} style={{ borderRight: '1px solid #f1f5f9', padding: '8px', overflow: 'hidden', textAlign: 'center' }}>
+                                     {p.linked_wholesale_id ? (() => {
+                                       const wholesaleProd = products.find(wp => wp.id === p.linked_wholesale_id);
+                                       const isOutOfStock = wholesaleProd ? Number(wholesaleProd.stock) < 1 : true;
+                                       return (
+                                         <button 
+                                           onClick={() => handleManualPull(p.id, p.linked_wholesale_id!)}
+                                           disabled={isProcessing || isOutOfStock}
+                                           className="saas-btn"
+                                           style={{ background: isOutOfStock ? '#cbd5e1' : '#10b981', color: '#fff', border: 'none', padding: '6px 12px', fontSize: '12px', cursor: (isProcessing || isOutOfStock) ? 'not-allowed' : 'pointer' }}
+                                         >
+                                           {isOutOfStock ? '❌ No Stock' : '♻️ Pull 1 Bag'}
+                                         </button>
+                                       )
+                                     })() : (
+                                        <span style={{ fontSize: '12px', color: '#94a3b8' }}>No Link</span>
+                                     )}
+                                   </td>
+                                 )
+                              }
+                              
+                              return (
+                                <td className="saas-td" key={col} style={{ borderRight: '1px solid #f1f5f9', padding: '8px', overflow: 'hidden' }}>
+                                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center', justifyContent: 'center' }}>
+                                    {edits[p.id] ? (
+                                      <>
+                                        <button onMouseDown={(e) => { e.stopPropagation(); handleSaveRecord(p.id); }} className="saas-btn saas-btn-primary" style={{ padding: '6px 12px', fontSize: '12px' }}>Save</button>
+                                        <button onMouseDown={(e) => { e.stopPropagation(); setEdits(prev => { const n = { ...prev }; delete n[p.id]; return n }) }} className="saas-btn" style={{ background: '#fee2e2', color: '#ef4444', padding: '6px 12px', fontSize: '12px' }}>Undo</button>
+                                      </>
+                                    ) : (
+                                      <>
+                                        <button onClick={(e) => { e.stopPropagation(); openImportModal(p); }} className="saas-btn" style={{ background: '#3b82f6', color: '#fff', padding: '6px 12px', fontSize: '12px' }}>📦 Import</button>
+                                        <button onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); fetchHistory(p); }} title="View Import Log" style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '20px', padding: 0 }}>🕒</button>
+                                      </>
+                                    )}
+                                  </div>
+                                </td>
+                              )
+                            }
+
+                            const isIdCol = col === 'id';
+                            const isEditing = editingCell?.id === p.id && editingCell?.col === col;
+                            
+                            let val = edits[p.id]?.[col as keyof Product] ?? p[col as keyof Product] ?? '';
+                            if (activeView === 'wholesale' && currentBatch) {
+                               if (col === 'cost_price') val = edits[p.id]?.cost_price ?? currentBatch.cost_price;
+                               // 🔥 Displays the individual FIFO current batch remaining quantity instead of Master Stock
+                               if (col === 'stock') val = edits[p.id]?.stock ?? currentBatch.remaining_qty;
+                            }
+
+                            if (!isEditing && !edits[p.id] && activeView === 'retail' && col === 'cost_price' && p.linked_wholesale_id) {
+                              const parentWholesale = products.find(wp => wp.id === p.linked_wholesale_id);
+                              if (parentWholesale) {
+                                const parentBatches = (activeBatchesMap[parentWholesale.id] || []);
+                                parentBatches.sort((a,b) => a.id - b.id);
+                                const liveParentCogs = parentBatches.length > 0 ? parentBatches[0].cost_price : (parentWholesale.cost_price || 0);
+                                const parentWeight = parentWholesale.weight || 50;
+                                val = Math.round(liveParentCogs / parentWeight);
+                              }
+                            }
+
+                            if (col === 'linked_wholesale') {
+                              if (activeView === 'retail') {
+                                const linkedProduct = products.find(wp => wp.id === p.linked_wholesale_id);
+                                const isDropdownOpen = activeDropdownId === p.id;
+                                return (
+                                  <td className="saas-td" key={col} style={{ borderRight: '1px solid #f1f5f9', position: 'relative', padding: '6px 12px', overflow: 'visible' }}>
+                                    {isDropdownOpen ? (
+                                      <div style={{ position: 'relative', zIndex: 100 }}>
+                                        <input autoFocus className="saas-input" placeholder="Search Wholesale bag..." value={dropdownSearch} onChange={e => setDropdownSearch(e.target.value)} onBlur={() => setTimeout(() => setActiveDropdownId(null), 200)} onKeyDown={e => e.key === 'Escape' && setActiveDropdownId(null)} />
+<div className="dropdown-results-tray">
+  <div className="dropdown-row clear-option" onMouseDown={(e) => { e.stopPropagation(); handleLinkWholesaleBag(p.id, null); }}>❌ Clear Linked Bag</div>
+  {products.filter(wp => wp.weight >= 25 && wp.name.toLowerCase().includes(dropdownSearch.toLowerCase())).map(wp => (
+                                            <div key={wp.id} className="dropdown-row" onMouseDown={(e) => { e.stopPropagation(); handleLinkWholesaleBag(p.id, wp); }}>
+                                              <span style={{ fontWeight: 'normal', color: '#334155' }}>{wp.name}</span>
+                                              <span style={{ fontSize: '11px', color: '#64748b' }}> ({formatRiel(wp.cost_price)})</span>
+                                            </div>
+                                          ))}
+                                        </div>
+                                      </div>
+                                    ) : (
+                                      <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                                        <div className="interactive-select-trigger" onClick={(e) => { e.stopPropagation(); setActiveDropdownId(p.id); setDropdownSearch(''); }} style={{ flex: 1 }}>
+                                          {linkedProduct ? `🌾 ${linkedProduct.name}` : '🔍 Click to link Wholesale Bag...'}
+                                        </div>
+                                      </div>
+                                    )}
+                                  </td>
+                                )
+                              }
+                              return null;
+                            }
+
+                            return (
+                              <td key={col} className={`saas-td ${isEditing ? 'cell-editing' : ''}`} style={{ borderRight: '1px solid #f1f5f9', overflow: 'hidden', position: 'relative', padding: 0 }}>
+                                {isIdCol && (hoveredId === p.id || selectedToDelete.has(p.id)) && (
+                                  <div style={{ position: 'absolute', left: '8px', top: '50%', transform: 'translateY(-50%)', zIndex: 25, background: edits[p.id] ? '#fefcf3' : '#fff', paddingRight: '4px' }}>
+                                    <input type="checkbox" checked={selectedToDelete.has(p.id)} onChange={() => { const next = new Set(selectedToDelete); next.has(p.id) ? next.delete(p.id) : next.add(p.id); setSelectedToDelete(next); }} style={{ cursor: 'pointer', width: '18px', height: '18px', margin: 0, accentColor: '#b58a3d' }} />
+                                  </div>
+                                )}
+                                
+                                {isEditing ? (
+                                  <input 
+                                    autoFocus 
+                                    enterKeyHint="done"
+                                    type={['name'].includes(col as string) ? 'text' : 'number'} 
+                                    className="cell-input no-spinners" 
+                                    style={{ paddingLeft: isIdCol ? '36px' : '12px' }} 
+                                    value={val as any} 
+                                    onChange={(e) => { const newVal = e.target.type === 'number' ? (e.target.value === '' ? '' : Number(e.target.value)) : e.target.value; setEdits(prev => ({ ...prev, [p.id]: { ...(prev[p.id] || {}), [col]: newVal } })) }} 
+                                    onBlur={() => {
+                                      const originalVal = p[col as keyof Product];
+                                      const editVal = edits[p.id]?.[col as keyof Product];
+                                      if (editVal === undefined || editVal === originalVal || editVal === '') {
+                                        setEdits(prev => { const n = { ...prev }; delete n[p.id]; return n });
+                                        setEditingCell(null);
+                                      } else {
+                                        setEditingCell(null);
+                                      }
+                                    }} 
+                                    onKeyDown={(e) => { 
+                                      if (e.key === 'Enter' || e.keyCode === 13) { 
+                                        e.preventDefault();
+                                        handleSaveRecord(p.id);
+                                      } 
+                                      if (e.key === 'Escape') { 
+                                        setEdits(prev => { const n = { ...prev }; delete n[p.id]; return n }); 
+                                        setEditingCell(null); 
+                                      } 
+                                    }} 
+                                  />
+                                ) : (
+                                  <div className="cell-display" style={{ paddingLeft: isIdCol ? '36px' : '12px', fontWeight: 'normal', color: ['mtd_kg_used', 'mtd_bags_used'].includes(col as string) ? '#b58a3d' : '#334155', cursor: 'text' }} onClick={() => { setEditingCell({ id: p.id, col: col as string }) }}>
+                                    
+                                    {col === 'name' ? (
+                                      <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                        {activeView === 'wholesale' && (
+                                          <span style={{ fontSize: '11px', background: '#fef3c7', color: '#b45309', padding: '2px 6px', borderRadius: '4px', display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                                            <span style={{ fontWeight: 'bold' }}>📦 {totalActiveBatchStock} Total</span>
+                                            {linkedRetail && (
+                                              <>
+                                                <span style={{ width: '1px', height: '10px', background: '#d97706', opacity: 0.5 }}></span>
+                                                <span style={{ fontWeight: 'normal' }}>⚖️ {linkedRetail.stock} kg Loose</span>
+                                              </>
+                                            )}
+                                          </span>
+                                        )}
+                                        {formatDisplayValue(col as string, val)}
+                                        
+                                        {activeView === 'retail' && p.linked_wholesale_id && (() => {
+                                          const wProd = products.find(wp => wp.id === p.linked_wholesale_id);
+                                          const wWeight = wProd ? Number(wProd.weight) : 50;
+                                          if (p.stock >= wWeight) {
+                                            return (
+                                              <button 
+                                                onClick={(e) => { 
+                                                  e.preventDefault(); 
+                                                  e.stopPropagation(); 
+                                                  setRepackModal({ isOpen: true, product: p }); 
+                                                }}
+                                                onMouseDown={(e) => e.stopPropagation()} 
+                                                className="saas-btn"
+                                                style={{ marginLeft: '12px', padding: '4px 8px', background: '#f0fdf4', color: '#166534', border: '1px solid #bbf7d0', fontSize: '11px' }}
+                                              >
+                                                📦 Repack {wWeight}kg
+                                              </button>
+                                            );
+                                          }
+                                          return null;
+                                        })()}
+                                      </span>
+                                    ) : (
+                                      formatDisplayValue(col as string, val)
+                                    )}
+
+                                  </div>
+                                )}
+                              </td>
+                            )
+                          })}
+                        </tr>
+
+                        {/* Expandable Child Row Batch List (View Only) */}
+                        {isExpanded && activeView === 'wholesale' && pBatches.length > 1 && pBatches.slice(1).map((batch, index) => {
+                           let batchLabel = index === 0 ? '2nd Batch' : index === 1 ? '3rd Batch' : `${index + 2}th Batch`;
+                           
+                           return (
+                             <tr className="saas-tr" key={`batch-${batch.id}`} style={{ background: '#f8fafc' }}>
+                                {columnOrder.map(col => {
+                                  if (col === 'expand') return <td className="saas-td" key={col} style={{ borderRight: '1px solid #f1f5f9' }}></td>;
+                                  if (col === 'linked_wholesale' || col === 'mtd_kg_used' || col === 'mtd_bags_used') return null;
+                                  if (col === 'id') return <td className="saas-td" key={col} style={{ borderRight: '1px solid #f1f5f9' }}></td>;
+                                  
+                                  if (col === 'name') return (
+                                    <td className="saas-td" key={col} style={{ padding: '12px 12px 12px 48px', borderRight: '1px solid #f1f5f9', color: '#475569', fontSize: '14px' }}>
+                                      ↳ {batchLabel}
+                                    </td>
+                                  );
+                                  
+                                  if (col === 'price') return <td className="saas-td" key={col} style={{ padding: '12px', borderRight: '1px solid #f1f5f9', color: '#475569', fontSize: '14px' }}>-</td>;
+                                  
+                                  if (col === 'cost_price') return <td className="saas-td" key={col} style={{ padding: '12px', borderRight: '1px solid #f1f5f9', color: '#475569', fontSize: '14px' }}>{formatRiel(batch.cost_price)}</td>;
+                                  
+                                  if (col === 'stock') return <td className="saas-td" key={col} style={{ padding: '12px', borderRight: '1px solid #f1f5f9', color: '#b58a3d', fontWeight: 'normal', fontSize: '14px' }}>{batch.remaining_qty}</td>;
+                                  
+                                  if (col === 'actions') {
+                                    return <td className="saas-td" key={col} style={{ borderRight: '1px solid #f1f5f9' }}></td>;
+                                  }
+                                  
+                                  return <td className="saas-td" key={col} style={{ padding: '12px', borderRight: '1px solid #f1f5f9', color: '#94a3b8', fontSize: '14px', textAlign: 'center' }}>-</td>;
+                                })}
+                             </tr>
+                           )
+                        })}
+                      </React.Fragment>
+                    )
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* IMPORT FORM TAB */}
+      {activeView === 'import' && (
+        <div className="fade-in" style={{ display: 'flex', justifyContent: 'center', flex: 1, overflowY: 'auto' }}>
+          <div className="saas-card" style={{ width: '100%', maxWidth: '600px', height: 'fit-content' }}>
+            <h2 className="saas-card-title" style={{ fontSize: '18px', borderBottom: '1px solid #f1f5f9', paddingBottom: '12px' }}>🚚 Receive New Stock</h2>
+            
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', marginTop: '20px' }}>
+              
+              {/* SUPPLIER SEARCHABLE DROPDOWN */}
+              <div style={{ position: 'relative', zIndex: isSupplierDropdownOpen ? 100 : 2 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: '6px' }}>
+                  <label className="saas-card-title" style={{ fontSize: '11px', margin: 0 }}>Select Supplier</label>
+                  <button onClick={() => setIsAddSupplierOpen(true)} className="saas-btn" style={{ background: 'none', border: 'none', color: '#3b82f6', fontSize: '12px', padding: 0 }}>+ Add New Supplier</button>
+                </div>
+                {isSupplierDropdownOpen ? (
+                  <div style={{ position: 'relative' }}>
+                    <input 
+                      autoFocus 
+                      className="saas-input" 
+                      placeholder="Search..." 
+                      value={supplierSearch} 
+                      onChange={e => setSupplierSearch(e.target.value)} 
+                      onBlur={() => setTimeout(() => setIsSupplierDropdownOpen(false), 200)} 
+                      onKeyDown={e => e.key === 'Escape' && setIsSupplierDropdownOpen(false)} 
+                    />
+                    <div className="dropdown-results-tray">
+                      {suppliers.filter(s => s.name.toLowerCase().includes(supplierSearch.toLowerCase())).map(s => (
+                        <div key={s.id} className="dropdown-row" onMouseDown={(e) => { e.stopPropagation(); setImportForm({...importForm, supplier_id: String(s.id)}); setIsSupplierDropdownOpen(false); }}>
+                          <span style={{ fontWeight: 'normal', color: '#334155' }}>{s.name}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="interactive-select-trigger" onClick={() => { setIsSupplierDropdownOpen(true); setSupplierSearch(''); }} style={{ width: '100%', padding: '12px', fontSize: '15px' }}>
+                    {importForm.supplier_id ? suppliers.find(s => String(s.id) === String(importForm.supplier_id))?.name || 'Unknown' : '-- Choose a Supplier --'}
+                  </div>
+                )}
+              </div>
+
+              {/* PRODUCT SEARCHABLE DROPDOWN */}
+              <div style={{ position: 'relative', zIndex: isProductDropdownOpen ? 90 : 1 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: '6px' }}>
+                  <label className="saas-card-title" style={{ fontSize: '11px', margin: 0 }}>Select Product (Rice)</label>
+                  <button onClick={handleOpenAddProduct} className="saas-btn" style={{ background: 'none', border: 'none', color: '#3b82f6', fontSize: '12px', padding: 0 }}>+ Create New Product</button>
+                </div>
+                {isProductDropdownOpen ? (
+                  <div style={{ position: 'relative' }}>
+                    <input 
+                      autoFocus 
+                      className="saas-input" 
+                      placeholder="Search..." 
+                      value={productSearch} 
+                      onChange={e => setProductSearch(e.target.value)} 
+                      onBlur={() => setTimeout(() => setIsProductDropdownOpen(false), 200)} 
+                      onKeyDown={e => e.key === 'Escape' && setIsProductDropdownOpen(false)} 
+                    />
+                    <div className="dropdown-results-tray">
+                      {products.filter(p => p.weight >= 50 && p.name.toLowerCase().includes(productSearch.toLowerCase())).map(p => (
+                        <div key={p.id} className="dropdown-row" onMouseDown={(e) => { e.stopPropagation(); setImportForm({...importForm, product_id: String(p.id)}); setIsProductDropdownOpen(false); }}>
+                          <span style={{ fontWeight: 'normal', color: '#334155' }}>{p.name}</span>
+                          <span style={{ fontSize: '11px', color: '#64748b', marginLeft: '8px' }}>({p.weight}kg)</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="interactive-select-trigger" onClick={() => { setIsProductDropdownOpen(true); setProductSearch(''); }} style={{ width: '100%', padding: '12px', fontSize: '15px' }}>
+                    {importForm.product_id ? products.find(p => String(p.id) === String(importForm.product_id))?.name || 'Unknown' : '-- Choose Rice Type --'}
+                  </div>
+                )}
+              </div>
+
+              <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap' }}>
+                <div style={{ flex: 1, minWidth: '150px' }}>
+                  <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '6px' }}>Quantity Imported</label>
+                  <input type="number" className="saas-input no-spinners" value={importForm.qty} onChange={e => setImportForm({...importForm, qty: e.target.value})} />
+                </div>
+                <div style={{ flex: 1, minWidth: '150px' }}>
+                  <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '6px' }}>Unit Cost (៛)</label>
+                  <input type="number" className="saas-input no-spinners" value={importForm.unit_cost} onChange={e => setImportForm({...importForm, unit_cost: e.target.value})} />
+                </div>
+              </div>
+
+              <div style={{ background: '#fefcf3', padding: '16px', borderRadius: '8px', border: '1px solid #fde047', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontWeight: 'bold', color: '#854d0e' }}>Total Bill Cost:</span>
+                <span style={{ fontSize: '20px', fontWeight: 'bold', color: '#b58a3d' }}>{formatRiel(importTotalCalc)}</span>
+              </div>
+
+              <div style={{ background: '#f8fafc', padding: '20px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                <h4 style={{ margin: '0 0 16px 0', fontSize: '14px', color: '#1e293b' }}>Payment Details</h4>
+                <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap' }}>
+                  <div style={{ flex: 2, minWidth: '150px' }}>
+                    <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '6px' }}>Amount Paying Now (៛)</label>
+                    <input type="number" className="saas-input no-spinners" value={importForm.paid_amount} onChange={e => setImportForm({...importForm, paid_amount: e.target.value})} />
+                  </div>
+                  <div style={{ flex: 1, minWidth: '120px' }}>
+                    <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '6px' }}>Payment Method</label>
+                    <select value={importForm.payment_method} onChange={e => setImportForm({...importForm, payment_method: e.target.value})} className="saas-input" style={{ cursor: 'pointer' }}>
+                      <option value="Cash ៛">💵 Cash ៛</option>
+                      <option value="Cash $">💵 Cash $</option>
+                      <option value="QR ៛">📱 QR ៛</option>
+                      <option value="QR $">📱 QR $</option>
+                      <option value="Mom QR ៛">👩 Mom QR ៛</option>
+                      <option value="Mom QR $">👩 Mom QR $</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', gap: '12px', marginTop: '10px' }}>
+                <button 
+                  onClick={() => handleProcessImport(true)} 
+                  disabled={isProcessing}
+                  className="saas-btn"
+                  style={{ flex: 1, padding: '14px', background: '#f59e0b', color: '#fff', fontSize: '15px' }}
+                >
+                  ⏳ Save as Pending/Partial
+                </button>
+                <button 
+                  onClick={() => handleProcessImport(false)} 
+                  disabled={isProcessing}
+                  className="saas-btn saas-btn-primary"
+                  style={{ flex: 1, padding: '14px', fontSize: '15px' }}
+                >
+                  ✅ Paid Full & Import
+                </button>
+              </div>
+
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 🔥 PENDING PAYMENTS TAB */}
+      {activeView === 'pending' && (
+        <div className="saas-table-wrapper fade-in" style={{ flex: 1, minHeight: 0, marginBottom: 0, display: 'flex', flexDirection: 'column' }}>
+          <div className="saas-table-responsive" style={{ flex: 1, overflow: 'auto' }}>
+            <table className="saas-table" style={{ minWidth: '100%', tableLayout: 'fixed', width: 'max-content' }}>
+              <thead>
+                <tr>
+                  {pendingColOrder.map(col => {
+                    const isDraggable = col !== 'actions';
+                    let label = col;
+                    if (col === 'date') label = 'Date';
+                    if (col === 'supplier') label = 'Supplier';
+                    if (col === 'product') label = 'Product';
+                    if (col === 'total_cost') label = 'Total Cost (៛)';
+                    if (col === 'paid_so_far') label = 'Paid So Far';
+                    if (col === 'remaining_debt') label = 'Remaining Debt';
+                    if (col === 'actions') label = 'Action';
+
+                    return (
+                      <th 
+                        key={col}
+                        className="saas-th"
+                        draggable={isDraggable}
+                        onDragStart={(e) => onDragStartCol(e, col, ['actions'])}
+                        onDragOver={onDragOverCol}
+                        onDrop={(e) => handlePendingDrop(e, col)}
+                        onClick={() => handlePendingSort(col)}
+                        style={{ 
+                          width: pendingColWidths[col] || 150, 
+                          position: 'sticky', top: 0, zIndex: 30, backgroundColor: '#fff1f2', boxShadow: 'inset 0 -2px 0 0 #ffe4e6',
+                          textAlign: col === 'actions' ? 'center' : (['total_cost', 'paid_so_far', 'remaining_debt'].includes(col) ? 'right' : 'left'), 
+                          color: '#991b1b', 
+                          borderRight: '1px solid #ffe4e6', 
+                          cursor: isDraggable ? 'pointer' : 'default', 
+                          whiteSpace: 'nowrap', 
+                          userSelect: 'none' 
+                        }}
+                      >
+                        {label}
+                        {isDraggable && (<span style={{ marginLeft: '6px', fontSize: '12px', opacity: pendingSort?.key === col ? 1 : 0.3 }}>{pendingSort?.key === col ? (pendingSort.direction === 'asc' ? '↑' : '↓') : '↕'}</span>)}
+                        {isDraggable && <div onMouseDown={(e) => handleResizeStartPending(e, col)} onTouchStart={(e) => handleResizeStartPending(e, col)} style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: '14px', cursor: 'col-resize', background: 'transparent', zIndex: 10, transform: 'translateX(50%)' }} />}
+                      </th>
+                    );
+                  })}
+                </tr>
+              </thead>
+              <tbody>
+                {isLoading ? (
+                  <TableSkeleton columns={pendingColOrder.length} rows={5} />
+                ) : processedPending.length === 0 ? (
+                  <tr>
+                    <td colSpan={pendingColOrder.length} style={{ padding: 0 }}>
+                      <EmptyState icon="🎉" title="No pending payments!" message="All your supplier debts are fully settled." />
+                    </td>
+                  </tr>
+                ) : (
+                  processedPending.map((imp: any) => {
+                    const remaining = Number(imp.total_cost) - Number(imp.paid_amount);
+                    return (
+                      <tr key={imp.id} className="saas-tr">
+                        {pendingColOrder.map(col => {
+                          if (col === 'date') return <td className="saas-td" key={col}>{new Date(imp.created_at).toLocaleDateString()}</td>;
+                          if (col === 'supplier') return <td className="saas-td" key={col} style={{ fontWeight: 'bold' }}>{imp.suppliers?.name}</td>;
+                          if (col === 'product') return <td className="saas-td" key={col}>{imp.products?.name} <span style={{color:'#94a3b8'}}>(x{imp.qty})</span></td>;
+                          if (col === 'total_cost') return <td className="saas-td" key={col} style={{ textAlign: 'right' }}>{formatRiel(imp.total_cost)}</td>;
+                          if (col === 'paid_so_far') return <td className="saas-td" key={col} style={{ textAlign: 'right', color: '#10b981', fontWeight: 'bold' }}>{formatRiel(imp.paid_amount)}</td>;
+                          if (col === 'remaining_debt') return <td className="saas-td" key={col} style={{ textAlign: 'right', color: '#ef4444', fontWeight: 'bold' }}>{formatRiel(remaining)}</td>;
+                          if (col === 'actions') return (
+                            <td className="saas-td" key={col} style={{ textAlign: 'center' }}>
+                              <div style={{ display: 'flex', gap: '8px', justifyContent: 'center' }}>
+                                <button 
+                                  onClick={() => {
+                                    setPayPendingModal({ isOpen: true, record: imp, totalDue: remaining });
+                                    setPendingPaymentRows([{ id: Date.now(), method: 'Cash ៛', amount: '' }]);
+                                  }}
+                                  className="saas-btn saas-btn-primary"
+                                  style={{ padding: '6px 12px', fontSize: '12px' }}
+                                >
+                                  💸 Pay Now
+                                </button>
+                                <button 
+                                  onClick={() => handleVoidImport(imp.id)}
+                                  disabled={isProcessing}
+                                  className="saas-btn saas-btn-danger"
+                                  style={{ padding: '6px 12px', fontSize: '12px' }}
+                                >
+                                  ❌ Void
+                                </button>
+                              </div>
+                            </td>
+                          );
+                          return null;
+                        })}
+                      </tr>
+                    )
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* 🔥 SUPPLIERS DATABASE TAB */}
+      {activeView === 'suppliers' && (
+        <div className="saas-table-wrapper fade-in" style={{ flex: 1, minHeight: 0, marginBottom: 0, display: 'flex', flexDirection: 'column' }}>
+          <div className="saas-table-responsive" style={{ flex: 1, overflow: 'auto' }}>
+            <table className="saas-table" style={{ minWidth: '100%', tableLayout: 'fixed', width: 'max-content' }}>
+              <thead>
+                <tr>
+                  {supplierColOrder.map(col => {
+                    const isDraggable = col !== 'select';
+                    let label = col;
+                    if (col === 'name') label = 'Supplier Name';
+                    if (col === 'phone') label = 'Phone';
+                    if (col === 'location') label = 'Location';
+                    if (col === 'total_owed') label = 'Total Current Debt (៛)';
+
+                    if (col === 'select') {
+                      return (
+                        <th key={col} className="saas-th" style={{ width: '50px', minWidth: '50px', maxWidth: '50px', padding: '16px 8px', textAlign: 'center', position: 'sticky', top: 0, zIndex: 30, backgroundColor: '#f8fafc', boxShadow: 'inset 0 -2px 0 0 #e2e8f0', borderRight: '1px solid #f1f5f9' }}>
+                          <input 
+                            type="checkbox" 
+                            checked={selectedSuppliersToDelete.size === suppliers.length && suppliers.length > 0}
+                            onChange={(e) => {
+                              if (e.target.checked) setSelectedSuppliersToDelete(new Set(suppliers.map(s => s.id)));
+                              else setSelectedSuppliersToDelete(new Set());
+                            }}
+                            style={{ cursor: 'pointer', accentColor: '#b58a3d', width: '16px', height: '16px' }}
+                          />
+                        </th>
+                      );
+                    }
+
+                    return (
+                      <th 
+                        key={col}
+                        className="saas-th"
+                        draggable={isDraggable}
+                        onDragStart={(e) => onDragStartCol(e, col, ['select'])}
+                        onDragOver={onDragOverCol}
+                        onDrop={(e) => handleSupplierDrop(e, col)}
+                        onClick={() => handleSupplierSort(col)}
+                        style={{ 
+                          width: supplierColWidths[col] || 150, 
+                          position: 'sticky', top: 0, zIndex: 30, backgroundColor: '#f8fafc', boxShadow: 'inset 0 -2px 0 0 #e2e8f0',
+                          textAlign: col === 'total_owed' ? 'right' : 'left', 
+                          borderRight: '1px solid #f1f5f9',
+                          cursor: isDraggable ? 'pointer' : 'default', 
+                          whiteSpace: 'nowrap', 
+                          userSelect: 'none' 
+                        }}
+                      >
+                        {label}
+                        {isDraggable && (<span style={{ marginLeft: '6px', fontSize: '12px', opacity: supplierSort?.key === col ? 1 : 0.3 }}>{supplierSort?.key === col ? (supplierSort.direction === 'asc' ? '↑' : '↓') : '↕'}</span>)}
+                        {isDraggable && <div onMouseDown={(e) => handleResizeStartSupplier(e, col)} onTouchStart={(e) => handleResizeStartSupplier(e, col)} style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: '14px', cursor: 'col-resize', background: 'transparent', zIndex: 10, transform: 'translateX(50%)' }} />}
+                      </th>
+                    );
+                  })}
+                </tr>
+              </thead>
+              <tbody>
+                {isLoading ? (
+                  <TableSkeleton columns={supplierColOrder.length} rows={5} />
+                ) : processedSuppliers.length === 0 ? (
+                  <tr>
+                    <td colSpan={supplierColOrder.length} style={{ padding: 0 }}>
+                      <EmptyState icon="🏢" title="No suppliers recorded" message="Add a supplier to get started." />
+                    </td>
+                  </tr>
+                ) : (
+                  processedSuppliers.map((s: any) => (
+                    <tr key={s.id} className="saas-tr">
+                      {supplierColOrder.map(col => {
+                        if (col === 'select') return (
+                          <td className="saas-td" key={col} style={{ textAlign: 'center', borderRight: '1px solid #f1f5f9' }}>
+                            <input 
+                              type="checkbox" 
+                              checked={selectedSuppliersToDelete.has(s.id)}
+                              onChange={() => {
+                                const next = new Set(selectedSuppliersToDelete)
+                                next.has(s.id) ? next.delete(s.id) : next.add(s.id)
+                                setSelectedSuppliersToDelete(next)
+                              }} 
+                              style={{ cursor: 'pointer', accentColor: '#b58a3d', width: '16px', height: '16px' }} 
+                            />
+                          </td>
+                        );
+                        if (col === 'name') return <td className="saas-td" key={col} style={{ fontWeight: 'bold', borderRight: '1px solid #f1f5f9' }}>{s.name}</td>;
+                        if (col === 'phone') return <td className="saas-td" key={col} style={{ borderRight: '1px solid #f1f5f9' }}>{s.phone || '-'}</td>;
+                        if (col === 'location') return <td className="saas-td" key={col} style={{ borderRight: '1px solid #f1f5f9' }}>{s.location || '-'}</td>;
+                        if (col === 'total_owed') return (
+                          <td className="saas-td" key={col} style={{ textAlign: 'right', fontWeight: 'bold', borderRight: '1px solid #f1f5f9', color: Number(s.total_owed_riel) > 0 ? '#ef4444' : '#10b981' }}>
+                            {formatRiel(s.total_owed_riel || 0)}
+                            {Number(s.total_owed_usd) > 0 && <div style={{ fontSize: '12px', marginTop: '4px' }}>{formatUSD(s.total_owed_usd)}</div>}
+                          </td>
+                        );
+                        return null;
+                      })}
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* === GLOBAL MODALS === */}
+
+      {/* SETTLE SUPPLIER BILL MODAL */}
+      <Modal isOpen={payPendingModal.isOpen && !!payPendingModal.record} onClose={() => setPayPendingModal({ isOpen: false, record: null, totalDue: 0 })} title="💸 Settle Supplier Bill" maxWidth="450px">
+        <p style={{ margin: '0 0 16px 0', color: '#475569', fontSize: '14px' }}>Paying: <b>{payPendingModal.record?.suppliers?.name}</b></p>
+        
+        <div style={{ background: '#fef2f2', padding: '16px', borderRadius: '8px', border: '1px solid #fecaca', marginBottom: '20px', textAlign: 'center' }}>
+          <div style={{ fontSize: '12px', color: '#991b1b', fontWeight: 'bold', textTransform: 'uppercase' }}>Remaining Debt</div>
+          <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#dc2626' }}>
+            {formatRiel(payPendingModal.totalDue)}
+          </div>
+        </div>
+
+        <div style={{ marginBottom: '24px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+            <label className="saas-card-title" style={{ margin: 0 }}>Payment Method(s)</label>
+            <button onClick={() => setPendingPaymentRows([...pendingPaymentRows, { id: Date.now(), method: 'Cash ៛', amount: '' }])} className="saas-btn" style={{ background: '#e0f2fe', color: '#0284c7', padding: '6px 10px', fontSize: '12px' }}>+ Split</button>
+          </div>
+
+          {pendingPaymentRows.map((row, index) => (
+            <div key={row.id} style={{ display: 'flex', gap: '8px', marginBottom: '12px', alignItems: 'center' }}>
+              <select 
+                value={row.method} 
+                onChange={e => {
+                  const newRows = [...pendingPaymentRows];
+                  newRows[index].method = e.target.value;
+                  setPendingPaymentRows(newRows);
+                }}
+                className="saas-input"
+                style={{ width: '45%', cursor: 'pointer' }}
+              >
+                <option value="Cash ៛">💵 Cash ៛</option>
+                <option value="Cash $">💵 Cash $</option>
+                <option value="QR ៛">📱 QR ៛</option>
+                <option value="QR $">📱 QR $</option>
+                <option value="Mom QR ៛">👩 Mom QR ៛</option>
+                <option value="Mom QR $">👩 Mom QR $</option>
+              </select>
+              
+              <div style={{ flex: 1 }}>
+                <CurrencyInput 
+                  placeholder="" 
+                  value={row.amount} 
+                  onChange={(val: any) => {
+                    const newRows = [...pendingPaymentRows];
+                    newRows[index].amount = val;
+                    setPendingPaymentRows(newRows);
+                  }}
+                  onEnter={handlePayPendingSubmit}
+                  className="saas-input"
+                  style={{ textAlign: 'right' }}
+                />
+              </div>
+              
+              {pendingPaymentRows.length > 1 && (
+                <button onClick={() => setPendingPaymentRows(pendingPaymentRows.filter(r => r.id !== row.id))} style={{ background: 'none', border: 'none', color: '#ef4444', fontSize: '18px', cursor: 'pointer', padding: '0 4px', fontWeight: 'bold' }}>✕</button>
+              )}
+            </div>
+          ))}
+        </div>
+
+        {pendingPaymentRows.some(r => Number(r.amount) > 0) && (
+          <div style={{ marginBottom: '24px', paddingTop: '16px', borderTop: '1px dashed #cbd5e1', fontSize: '14px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
+              <span style={{ color: '#64748b' }}>Total Processed:</span>
+              <span style={{ color: '#334155', fontWeight: 'bold' }}>{formatRiel(liveTotalPendingReceived)}</span>
+            </div>
+            {livePendingRemaining < 0 ? (
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ color: '#ef4444' }}>Overpaid By:</span>
+                <span style={{ color: '#dc2626', fontWeight: 'bold' }}>{formatRiel(Math.abs(livePendingRemaining))}</span>
+              </div>
+            ) : livePendingRemaining > 0 ? (
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ color: '#d97706' }}>Still Owes:</span>
+                <span style={{ color: '#b45309', fontWeight: 'bold' }}>{formatRiel(livePendingRemaining)}</span>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ color: '#166534' }}>Balance:</span>
+                <span style={{ color: '#15803d', fontWeight: 'bold' }}>Perfectly Cleared ✅</span>
+              </div>
+            )}
+          </div>
+        )}
+
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
+          <button onClick={() => setPayPendingModal({ isOpen: false, record: null, totalDue: 0 })} className="saas-btn saas-btn-secondary">Cancel</button>
+          <button onClick={handlePayPendingSubmit} disabled={isProcessing} className="saas-btn saas-btn-primary">
+            {isProcessing ? 'Processing...' : 'Confirm Payment'}
+          </button>
+        </div>
+      </Modal>
+
+      {/* DUAL-VIEW HISTORY MODAL WITH AUTOMATED VOID FEATURE */}
+      <Modal isOpen={historyModal.isOpen && !!historyModal.product} onClose={() => setHistoryModal({ isOpen: false, product: null, data: [], activeBatches: [] })} title="📦 Batch & Import History" maxWidth="600px">
+        <p style={{ margin: '0 0 16px 0', color: '#64748b', fontSize: '14px' }}>Tracking: <b style={{ color: '#0f172a' }}>{historyModal.product?.name}</b></p>
+        
+        <div style={{ overflowY: 'auto', flex: 1, paddingRight: '8px', maxHeight: '50vh' }}>
+          
+          {/* SECTION 1: Active Shelved Batches (These decrease) */}
+          <h3 className="saas-card-title" style={{ marginBottom: '12px' }}>🟢 Active Batches on Shelf</h3>
+          {historyModal.activeBatches.length === 0 ? (
+            <p style={{ color: '#ef4444', fontSize: '14px', marginBottom: '24px' }}>No active batches remaining. Stock is empty.</p>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '24px' }}>
+              {historyModal.activeBatches.map((b, index) => {
+                const isEditing = editingHistoryId === b.id;
+                const editData = historyEdits[b.id] || { remaining_qty: b.remaining_qty, cost_price: b.cost_price };
+                let batchLabel = index === 0 ? '1st Batch (Current)' : index === 1 ? '2nd Batch' : `${index + 1}th Batch`;
+
+                return (
+                  <div key={b.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '12px', background: index === 0 ? '#f0fdf4' : '#f8fafc', border: isEditing ? '1px solid #b58a3d' : (index === 0 ? '1px solid #bbf7d0' : '1px solid #e2e8f0'), borderRadius: '8px', transition: 'all 0.2s' }}>
+                    {isEditing ? (
+                      <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', flex: 1 }}>
+                        <div style={{ flex: '1 1 80px' }}>
+                          <label className="saas-card-title" style={{ fontSize: '11px', margin: '0 0 4px 0' }}>Remaining Qty</label>
+                          <input autoFocus type="number" className="saas-input no-spinners" value={editData.remaining_qty} onChange={e => setHistoryEdits({...historyEdits, [b.id]: {...editData, remaining_qty: Number(e.target.value)}})} onKeyDown={e => e.key === 'Enter' && handleSaveHistory(b.id)} style={{ padding: '6px' }} />
+                        </div>
+                        <div style={{ flex: '1 1 100px' }}>
+                          <label className="saas-card-title" style={{ fontSize: '11px', margin: '0 0 4px 0' }}>Cost (៛)</label>
+                          <input type="number" className="saas-input no-spinners" value={editData.cost_price} onChange={e => setHistoryEdits({...historyEdits, [b.id]: {...editData, cost_price: Number(e.target.value)}})} onKeyDown={e => e.key === 'Enter' && handleSaveHistory(b.id)} style={{ padding: '6px' }} />
+                        </div>
+                      </div>
+                    ) : (
+                      <div>
+                        <div style={{ fontWeight: 'bold', color: index === 0 ? '#15803d' : '#0f172a' }}>{batchLabel}</div>
+                        <div style={{ fontSize: '12px', color: '#64748b', marginTop: '4px' }}>Arrived: {new Date((b as any).created_at).toLocaleDateString()}</div>
+                      </div>
+                    )}
+
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', justifyContent: 'space-between' }}>
+                      {!isEditing && (
+                        <div style={{ textAlign: 'right' }}>
+                          <div style={{ fontWeight: 'bold', color: '#b58a3d', fontSize: '16px' }}>{b.remaining_qty} Bags Left</div>
+                          <div style={{ fontSize: '12px', color: '#64748b', marginTop: '2px' }}>Cost: {formatRiel(b.cost_price)}</div>
+                        </div>
+                      )}
+                      <div style={{ display: 'flex', gap: '8px', marginTop: isEditing ? '20px' : '8px' }}>
+                        {isEditing ? (
+                          <>
+                            <button onClick={() => handleSaveHistory(b.id)} className="saas-btn saas-btn-primary" style={{ padding: '6px 12px', fontSize: '12px' }}>Save</button>
+                            <button onClick={() => setEditingHistoryId(null)} className="saas-btn saas-btn-secondary" style={{ padding: '6px 12px', fontSize: '12px' }}>Cancel</button>
+                          </>
+                        ) : (
+                          <>
+                            <button onClick={() => { setEditingHistoryId(b.id); setHistoryEdits({ [b.id]: { remaining_qty: b.remaining_qty, cost_price: b.cost_price } }); }} className="saas-btn" style={{ padding: '4px 8px', background: '#e0f2fe', color: '#0284c7', fontSize: '12px' }}>✏️ Edit</button>
+                            <button onClick={() => handleDeleteHistory(b.id)} className="saas-btn" style={{ padding: '4px 8px', background: '#fee2e2', color: '#dc2626', fontSize: '12px' }}>🗑️ Del</button>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* SECTION 2: Permanent Import Log (These never decrease) */}
+          <h3 className="saas-card-title" style={{ marginBottom: '12px', paddingTop: '16px', borderTop: '2px dashed #e2e8f0' }}>📦 Permanent Invoice Log</h3>
+          {historyModal.data.length === 0 ? (
+            <p style={{ color: '#64748b', fontSize: '14px' }}>No import records found.</p>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              {historyModal.data.map((h) => (
+                <div key={h.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px', border: '1px solid #e2e8f0', borderRadius: '8px', background: '#fff' }}>
+                   <div>
+                     <div style={{ fontWeight: 'bold', color: '#0f172a', marginBottom: '4px', fontSize: '13px' }}>{new Date(h.created_at).toLocaleDateString()} at {new Date(h.created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</div>
+                     <div style={{ color: '#64748b', fontSize: '12px' }}>Supplier: <span style={{ color: '#334155', fontWeight: 'bold' }}>{h.suppliers?.name || 'Unknown'}</span></div>
+                   </div>
+                   <div style={{ textAlign: 'right', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '6px' }}>
+                     <div>
+                       <div style={{ fontWeight: 'bold', color: '#10b981', fontSize: '14px' }}>+{h.qty} Bags Imported</div>
+                       <div style={{ color: '#64748b', fontSize: '12px', marginTop: '2px' }}>Paid: {formatRiel(h.unit_cost)} / bag</div>
+                     </div>
+                     <button 
+                       onClick={() => handleVoidImport(h.id)}
+                       disabled={isProcessing}
+                       className="saas-btn saas-btn-danger"
+                       style={{ padding: '4px 8px', fontSize: '11px' }}
+                     >
+                       ❌ Void
+                     </button>
+                   </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+        </div>
+      </Modal>
+
+      {/* CONFIRM REPACK MODAL */}
+      <Modal isOpen={repackModal.isOpen && !!repackModal.product} onClose={() => setRepackModal({ isOpen: false, product: null })} title="📦 Confirm Repack" maxWidth="400px">
+        {repackModal.product && (() => {
+            const wholesaleProd = products.find(wp => wp.id === repackModal.product?.linked_wholesale_id);
+            const wWeight = wholesaleProd ? Number(wholesaleProd.weight) : 50;
+            return (
+              <>
+                <p style={{ color: '#475569', fontSize: '14px', lineHeight: '1.5' }}>
+                  Are you sure you want to convert <b>{wWeight}kg</b> of loose <span style={{ color: '#b58a3d', fontWeight: 'bold' }}>{repackModal.product.name}</span> into 1 sealed wholesale bag of <span style={{ color: '#10b981', fontWeight: 'bold' }}>{wholesaleProd?.name}</span>?
+                </p>
+                <div style={{ background: '#f8fafc', padding: '12px', borderRadius: '8px', border: '1px solid #e2e8f0', marginTop: '16px', fontSize: '13px', color: '#64748b' }}>
+                  This action will:
+                  <ul style={{ paddingLeft: '20px', marginTop: '8px', marginBottom: 0 }}>
+                    <li>Deduct {wWeight}kg from Retail Stock</li>
+                    <li>Add 1 Bag to Wholesale Stock</li>
+                    <li>Log to Repack History</li>
+                  </ul>
+                </div>
+                <div style={{ marginTop: '24px', display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
+                  <button onClick={() => setRepackModal({ isOpen: false, product: null })} className="saas-btn saas-btn-secondary">Cancel</button>
+                  <button onClick={handleConfirmRepack} disabled={isProcessing} className="saas-btn saas-btn-primary">{isProcessing ? 'Packing...' : 'Confirm Repack'}</button>
+                </div>
+              </>
+            );
+        })()}
+      </Modal>
+
+      {/* ADD SUPPLIER MODAL */}
+      <Modal isOpen={isAddSupplierOpen} onClose={() => setIsAddSupplierOpen(false)} title="🏢 Add New Supplier" maxWidth="400px">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          <div>
+            <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', margin: '0 0 6px 0' }}>Supplier Name</label>
+            <input autoFocus placeholder="" value={newSupplier.name} onChange={e => setNewSupplier({...newSupplier, name: e.target.value})} className="saas-input" />
+          </div>
+          <div>
+            <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', margin: '0 0 6px 0' }}>Phone Number (Optional)</label>
+            <input value={newSupplier.phone} onChange={e => setNewSupplier({...newSupplier, phone: e.target.value})} className="saas-input" />
+          </div>
+          <div>
+            <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', margin: '0 0 6px 0' }}>Location / Address (Optional)</label>
+            <input value={newSupplier.location} onChange={e => setNewSupplier({...newSupplier, location: e.target.value})} className="saas-input" />
+          </div>
+        </div>
+        <div style={{ marginTop: '24px', display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
+          <button onClick={() => setIsAddSupplierOpen(false)} className="saas-btn saas-btn-secondary">Cancel</button>
+          <button onClick={handleAddSupplier} disabled={isProcessing} className="saas-btn saas-btn-primary">Save Supplier</button>
+        </div>
+      </Modal>
+
+      {/* FILTER MODAL */}
+      <Modal isOpen={isFilterOpen} onClose={() => setIsFilterOpen(false)} title="Filter Records" icon="🔍" maxWidth="500px">
+        {filterRules.map((rule, index) => (
+          <div key={rule.id} style={{ display: 'flex', gap: '8px', marginBottom: '12px', alignItems: 'center', flexWrap: 'wrap', background: '#f8fafc', padding: '12px', borderRadius: '8px' }}>
+            <span style={{ fontSize: '13px', color: '#475569', width: '40px', fontWeight: 'bold' }}>{index === 0 ? 'Where' : 'And'}</span>
+            <select value={rule.column} onChange={e => setFilterRules(prev => prev.map(r => r.id === rule.id ? { ...r, column: e.target.value as keyof Product } : r))} className="saas-input" style={{ flex: '1 1 100px', cursor: 'pointer', padding: '8px' }}>
+              {DEFAULT_ORDER.filter(o => o !== 'linked_wholesale' && o !== 'actions' && o !== 'expand').map(c => <option key={c as string} value={c as string}>{String(c).toUpperCase()}</option>)}
+            </select>
+            <select value={rule.operator} onChange={e => setFilterRules(prev => prev.map(r => r.id === rule.id ? { ...r, operator: e.target.value as FilterOperator } : r))} className="saas-input" style={{ flex: '1 1 100px', cursor: 'pointer', padding: '8px' }}>
+              <option value="contains">Contains</option>
+              <option value="equals">Equals (=)</option>
+              <option value="gt">Greater Than (&gt;)</option>
+              <option value="lt">Less Than (&lt;)</option>
+            </select>
+            <input placeholder="" value={rule.value} onChange={e => setFilterRules(prev => prev.map(r => r.id === rule.id ? { ...r, value: e.target.value } : r))} className="saas-input no-spinners" style={{ flex: '1 1 120px', padding: '8px 12px' }} type={['price', 'cost_price', 'stock', 'weight'].includes(rule.column as string) ? 'number' : 'text'} />
+            <button onClick={() => setFilterRules(prev => prev.filter(r => r.id !== rule.id))} style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', fontSize: '18px', fontWeight: 'bold' }}>✕</button>
+          </div>
+        ))}
+        
+        <button onClick={() => setFilterRules(prev => [...prev, { id: Date.now(), column: 'name', operator: 'contains', value: '' }])} className="saas-btn" style={{ background: 'none', border: 'none', color: '#3b82f6', marginTop: '10px' }}>+ Add condition</button>
+
+        <div style={{ marginTop: '24px', display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
+          <button onClick={() => setFilterRules([])} className="saas-btn saas-btn-secondary">Clear All</button>
+          <button onClick={() => setIsFilterOpen(false)} className="saas-btn saas-btn-primary">Apply Filters</button>
+        </div>
+      </Modal>
+
+      {/* NEW PRODUCT CREATION MODAL */}
+      <Modal isOpen={isAddModalOpen} onClose={() => setIsAddModalOpen(false)} title="📦 Add New Product" maxWidth="500px">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          <div>
+            <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', margin: '0 0 6px 0' }}>Product Name</label>
+            <input autoFocus placeholder="" value={newItem.name} onChange={e => setNewItem({...newItem, name: e.target.value})} className="saas-input" />
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+            <div>
+              <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', margin: '0 0 6px 0' }}>Selling Price (៛)</label>
+              <CurrencyInput placeholder="0" value={newItem.price} onChange={(v:any) => setNewItem({...newItem, price: v})} className="saas-input" />
+            </div>
+            <div>
+              <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', margin: '0 0 6px 0' }}>Cost Price (៛)</label>
+              <CurrencyInput placeholder="0" value={newItem.cost_price} onChange={(v:any) => setNewItem({...newItem, cost_price: v})} className="saas-input" />
+            </div>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '8px' }}>
+            <div>
+              <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', margin: '0 0 6px 0' }}>Weight (kg)</label>
+              <input type="number" placeholder="50" className="saas-input no-spinners" value={newItem.weight} onChange={e => setNewItem({...newItem, weight: e.target.value})} />
+            </div>
+            <div>
+              <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', margin: '0 0 6px 0' }}>Initial Stock</label>
+              <input type="number" placeholder="0" className="saas-input no-spinners" value={newItem.stock} onChange={e => setNewItem({...newItem, stock: e.target.value})} />
+            </div>
+          </div>
+          
+          <div style={{ background: '#fef2f2', padding: '16px', borderRadius: '8px', border: '1px solid #fecaca' }}>
+            <label style={{ display: 'block', fontSize: '11px', color: '#991b1b', fontWeight: 'bold', marginBottom: '6px', textTransform: 'uppercase' }}>🚨 Min Stock Alert Level</label>
+            <input type="number" className="saas-input no-spinners" value={newItem.min_stock_level} onChange={e => setNewItem({...newItem, min_stock_level: e.target.value})} style={{ borderColor: '#fca5a5' }} />
+            <p style={{ fontSize: '11px', color: '#ef4444', marginTop: '6px', marginBottom: 0 }}>Triggers a Restock Alert if current stock falls below this amount.</p>
+          </div>
+        </div>
+
+        <div style={{ marginTop: '24px', display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
+          <button onClick={() => setIsAddModalOpen(false)} className="saas-btn saas-btn-secondary">Cancel</button>
+          <button onClick={addProduct} className="saas-btn saas-btn-primary">Save Product</button>
+        </div>
+      </Modal>
+
+      {/* --- PAGE-SPECIFIC STYLES --- */}
+      <style jsx global>{`
+        input[type="number"].no-spinners::-webkit-inner-spin-button,
+        input[type="number"].no-spinners::-webkit-outer-spin-button {
+          -webkit-appearance: none;
+          margin: 0;
+        }
+        input[type="number"].no-spinners {
+          -moz-appearance: textfield;
+        }
+
+        .fade-in {
+          animation: fadeIn 0.3s ease-in-out;
+        }
+        @keyframes fadeIn {
+          from { opacity: 0; transform: translateY(5px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* 📱 RESPONSIVE CLASSES */
+        .desktop-only-btn { display: block; }
+        .mobile-only-btn { display: none !important; }
+        .mobile-only-flex { display: none !important; }
+        .hide-on-mobile { display: inline; }
+
+        .mobile-action-row {
+          display: flex;
+          flex: 1;
+          gap: 12px;
+          align-items: center;
+          min-width: 300px;
+        }
+
+        .header-container { 
+          display: flex;
+          justify-content: space-between; /* 🔥 Pushes title left and buttons right */
+          align-items: center; 
+          margin-bottom: 24px; 
+          margin-top: 0;
+          margin-left: 60px; /* Clears sidebar */
+          gap: 12px;
+          min-height: 48px; 
+          width: calc(100% - 60px); /* Prevents horizontal scroll/overflow */
+          max-width: 1600px;
+          padding-right: 24px; /* Breathing room on the far right */
+        }
+        
+        .header-left {
+          display: flex;
+          align-items: center; 
+          gap: 12px;
+        }
+
+        .header-actions {
+          display: flex;
+          gap: 10px;
+          margin-left: auto; /* 🔥 Hard-locks the buttons to the right */
+        }
+
+        .hide-scrollbar::-webkit-scrollbar { display: none; }
+        .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+        .cell-display {
+          padding: 16px 12px;
+          font-size: 14px;
+          min-height: 48px;
+          cursor: text;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          display: flex;
+          align-items: center;
+        }
+        .cell-input {
+          width: 100%;
+          height: 100%;
+          padding: 0 12px; /* 🔥 Fixed massive box by removing excessive vertical padding */
+          font-size: 14px; /* 🔥 Matched the normal surrounding text size */
+          border: none;
+          outline: 2px solid #b58a3d;
+          box-shadow: 0 0 5px rgba(181, 138, 61, 0.3);
+          background: #fff;
+          position: absolute;
+          top: 0;
+          left: 0;
+          z-index: 20;
+          box-sizing: border-box;
+          color: #0f172a;
+        }
+        .cell-editing {
+          z-index: 20;
+          position: relative;
+        }
+
+        .interactive-select-trigger {
+          padding: 8px 12px;
+          border: 1px solid #cbd5e1;
+          border-radius: 6px;
+          background: #f8fafc;
+          font-size: 14px;
+          color: #334155;
+          cursor: pointer;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          transition: background 0.15s;
+        }
+        .interactive-select-trigger:hover {
+          background: #edf2f7;
+          border-color: #94a3b8;
+        }
+        .dropdown-search-input {
+          width: 100%;
+          padding: 10px 12px;
+          border: 2px solid #b58a3d;
+          border-radius: 6px;
+          font-size: 16px;
+          outline: none;
+          box-sizing: border-box;
+          color: #0f172a;
+          background-color: #ffffff;
+        }
+        .dropdown-results-tray {
+          position: absolute;
+          top: 100%;
+          left: 0px;
+          right: 0px;
+          background: #ffffff;
+          border: 1px solid #cbd5e1;
+          border-radius: 8px;
+          box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1);
+          max-height: 180px;
+          overflow-y: auto;
+          margin-top: 4px;
+        }
+        .dropdown-row {
+          padding: 10px 16px;
+          font-size: 14px;
+          cursor: pointer;
+          color: #0f172a;
+          border-bottom: 1px solid #f1f5f9;
+        }
+        .dropdown-row:hover {
+          background: #f1f5f9;
+        }
+        .clear-option {
+          color: #ef4444;
+          font-weight: bold;
+          background: #fff5f5;
+        }
+        .clear-option:hover {
+          background: #fee2e2;
+        }
+
+        /* 🔥 MOBILE OVERRIDES */
+        @media (max-width: 1023px) { 
+          .desktop-only-btn { display: none !important; }
+          .mobile-only-btn { display: flex !important; }
+          .mobile-only-flex { display: flex !important; }
+          .hide-on-mobile { display: none !important; }
+
+          .mobile-action-row {
+            display: flex;
+            flex: 1;
+            gap: 12px;
+            align-items: center;
+            min-width: 300px;
+          }
+
+          .header-container { 
+            margin-left: 54px !important; 
+            margin-right: 0 !important;
+            margin-bottom: 24px !important; 
+            margin-top: 0 !important;
+            display: flex !important;
+            flex-direction: row !important;
+            justify-content: flex-start !important;
+            align-items: center !important; 
+            min-height: 44px !important;
+            width: calc(100% - 54px) !important;
+          }
+
+          .header-left {
+            display: flex !important;
+            flex-direction: row !important;
+            align-items: center !important;
+            gap: 12px !important;
+          }
+          
+          .mobile-action-row {
+            width: 100%;
+            gap: 8px !important;
+            min-width: 0 !important;
+            justify-content: space-between;
+          }
+        }
+      `}</style>
+    </div>
+  );
+}
