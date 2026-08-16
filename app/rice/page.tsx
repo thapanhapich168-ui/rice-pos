@@ -236,10 +236,10 @@ export default function RiceControl() {
   const handleOpenAddProduct = () => {
     setNewItem({
       name: '',
-      price: '0' as any, // 🔥 FIX: String '0' forces CurrencyInput to display it
-      cost_price: '0' as any, // 🔥 FIX: String '0' forces CurrencyInput to display it
+      price: '' as any, // 🔥 Default to empty string for cleaner UI
+      cost_price: '' as any, // 🔥 Default to empty string for cleaner UI
       weight: activeView === 'retail' ? 1 : 50,
-      stock: '0' as any,
+      stock: '' as any, // 🔥 Default to empty string
       min_stock_level: 10 as any
     });
     setIsAddModalOpen(true);
