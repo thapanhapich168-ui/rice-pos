@@ -11,6 +11,10 @@ import { useToast } from '@/components/ToastProvider'
 import Modal from '@/components/Modal'
 import EmptyState from '@/components/EmptyState'
 import { useBranch } from '@/components/BranchContext' 
+// 🔥 NEW DND-KIT IMPORTS
+import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
+import { arrayMove, SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 
 // --- LOCAL TYPES ---
 interface CartItem extends Product {
@@ -120,16 +124,44 @@ const t: Record<'en' | 'kh', any> = {
     cancel: "បោះបង់",
     add: "បញ្ចូលទៅកន្ត្រក"
   }
-};
+}; // <-- 🔥 FIX: This properly closes the 't' object!
 
+// 🔥 NEW: PROFESSIONAL SORTABLE ITEM COMPONENT
+function SortableCategoryItem({ id, cat, lang }: { id: string, cat: string, lang: 'en' | 'kh' }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
+  
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    zIndex: isDragging ? 100 : 'auto',
+    opacity: isDragging ? 0.9 : 1,
+    boxShadow: isDragging ? '0 10px 25px rgba(0,0,0,0.15)' : 'none',
+    display: 'flex', 
+    alignItems: 'center', 
+    padding: '12px', 
+    background: '#f8fafc', 
+    border: isDragging ? '1px solid #3b82f6' : '1px solid #e2e8f0', 
+    borderRadius: '8px'
+  };
+
+  return (
+    <div ref={setNodeRef} style={style}>
+      {/* 🔥 THE HANDLE: Only the hamburger icon gets the drag listeners! */}
+      <div {...attributes} {...listeners} style={{ marginRight: '16px', color: '#94a3b8', fontSize: '18px', display: 'flex', alignItems: 'center', cursor: 'grab', touchAction: 'none' }}>
+        ☰
+      </div>
+      <span style={{ fontWeight: 'bold', color: '#334155', fontSize: '14px', userSelect: 'none' }}>
+        {cat === 'All' ? (lang === 'kh' ? 'ទាំងអស់' : 'All') : cat}
+      </span>
+    </div>
+  );
+}
+
+// 🔥 FIX: THIS LINE WAS ACCIDENTALLY DELETED! IT STARTS YOUR ENTIRE PAGE COMPONENT!
 export default function POSPage() {
   const { showToast } = useToast();
   const { activeBranchId } = useBranch(); 
   const [isPosMounted, setIsPosMounted] = useState(false);
-
-  useEffect(() => {
-    document.title = 'Point of Sales';
-  }, []);
 
   const [products, setProducts] = useState<Product[]>([])
   const [customers, setCustomers] = useState<Customer[]>([])
@@ -148,26 +180,33 @@ export default function POSPage() {
   const [activeTab, setActiveTab] = useState<'retail' | 'wholesale'>('retail')
   const [activeCategory, setActiveCategory] = useState<string>('All')
   const [riceCategories, setRiceCategories] = useState<string[]>(RICE_CATEGORIES)
-  
-  const handleCategoryDragStart = (e: React.DragEvent, cat: string) => {
-    e.dataTransfer.setData('text/plain', cat);
-    e.dataTransfer.effectAllowed = 'move';
-  }
+  const [isCategorySettingsOpen, setIsCategorySettingsOpen] = useState(false);
 
-  const handleCategoryDrop = (e: React.DragEvent, targetCat: string) => {
-    e.preventDefault();
-    const sourceCat = e.dataTransfer.getData('text/plain');
-    if (!sourceCat || sourceCat === targetCat) return;
+  // 🔥 NEW: PROFESSIONAL DND-KIT SENSORS & HANDLERS
+  const sensors = useSensors(
+    // 5px distance prevents accidental drags when a user is just tapping on mobile
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }), 
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
+  );
 
-    const currentCats = [...riceCategories];
-    const sIdx = currentCats.indexOf(sourceCat);
-    const tIdx = currentCats.indexOf(targetCat);
-    if (sIdx > -1 && tIdx > -1) {
-      currentCats.splice(sIdx, 1);
-      currentCats.splice(tIdx, 0, sourceCat);
-      setRiceCategories(currentCats);
+  const handleDragEnd = (event: any) => {
+    const { active, over } = event;
+    if (over && active.id !== over.id) {
+      setRiceCategories((items) => {
+        const oldIndex = items.indexOf(active.id);
+        const newIndex = items.indexOf(over.id);
+        const newOrder = arrayMove(items, oldIndex, newIndex);
+        
+        // Save to database instantly in the background
+        supabase.from('app_settings').upsert(
+          { setting_key: 'category_order', setting_value: newOrder },
+          { onConflict: 'setting_key' }
+        ).then();
+        
+        return newOrder;
+      });
     }
-  }
+  };
 
   const [isMobileCartOpen, setIsMobileCartOpen] = useState(false)
   const [isProcessing, setIsProcessing] = useState(false)
@@ -546,6 +585,14 @@ export default function POSPage() {
 
     const { data: hiddenSet } = await supabase.from('app_settings').select('*').eq('setting_key', 'hidden_retail_ids').maybeSingle()
     if (hiddenSet && hiddenSet.setting_value) setHiddenRetailIds(hiddenSet.setting_value)
+
+    // 🔥 LOAD CUSTOM CATEGORY ORDER
+    const { data: catOrderSet } = await supabase.from('app_settings').select('*').eq('setting_key', 'category_order').maybeSingle();
+    if (catOrderSet && catOrderSet.setting_value) {
+      const savedCats = catOrderSet.setting_value;
+      const missingCats = RICE_CATEGORIES.filter(c => !savedCats.includes(c)); // In case new standard categories were added
+      setRiceCategories([...savedCats, ...missingCats]);
+    }
   }
 
   async function loadCustomers() {
@@ -1686,7 +1733,8 @@ export default function POSPage() {
   )
   const selectedCustomer = customers.find(c => c.id.toString() === selectedCustomerId.toString())
 
-  const isSimpleCustomer = !selectedCustomer || ['walk-in', 'walk in', 'mom'].includes((selectedCustomer.name || '').toLowerCase());
+  // 🔥 FIX: Added safe optional chaining (?.) to prevent 'possibly undefined' errors
+  const isSimpleCustomer = !selectedCustomer || ['walk-in', 'walk in', 'mom'].includes((selectedCustomer?.name || '').toLowerCase());
   const showPaymentSelector = activeTab === 'retail' || isSimpleCustomer;
 
   const liveTotalReceivedInRiel = paymentRows.reduce((sum, row) => {
@@ -1987,7 +2035,7 @@ export default function POSPage() {
               {/* SCROLLABLE CATEGORY TABS WITH MIX & IMPORT BUTTONS APPENDED */}
               {activeTab !== 'retail' && (
                 <div className="saas-tab-container hide-scrollbar" style={{ display: 'flex', flexWrap: 'nowrap', overflowX: 'auto', width: '100%', border: 'none', boxShadow: 'none', padding: 0, background: 'transparent', gap: '8px', margin: 0 }}>
-                  {RICE_CATEGORIES.map(cat => (
+                  {riceCategories.map(cat => (
                     <button 
                       key={cat} 
                       onClick={() => setActiveCategory(cat)} 
@@ -2000,6 +2048,16 @@ export default function POSPage() {
                       {cat === 'All' ? (lang === 'kh' ? 'ទាំងអស់' : 'All') : cat}
                     </button>
                   ))}
+
+                  {/* ⚙️ NEW: SETTINGS BUTTON FOR CATEGORY ORDER */}
+                  <button 
+                    onClick={() => setIsCategorySettingsOpen(true)} 
+                    className="saas-tab" 
+                    style={{ padding: '8px 12px', minWidth: 'max-content', borderRadius: '20px', border: '1px solid #cbd5e1', background: '#ffffff', color: '#64748b', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                    title="Manage Categories"
+                  >
+                    ⚙️
+                  </button>
                   
                   {/* 🟢 NEW APPENDED INLINE TOOLS */}
                   <button 
@@ -3596,6 +3654,26 @@ export default function POSPage() {
           </div>
         </div>
       )}
+
+      {/* ⚙️ CATEGORY REORDER MODAL */}
+      <Modal isOpen={isCategorySettingsOpen} onClose={() => setIsCategorySettingsOpen(false)} title="Manage Categories" icon="⚙️" maxWidth="400px">
+        <p style={{ fontSize: '13px', color: '#64748b', marginBottom: '16px', marginTop: 0 }}>Drag the ☰ icon up and down to reorder your menu. Preferences save automatically.</p>
+        
+        <div className="hide-scrollbar" style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '50vh', overflowY: 'auto', paddingRight: '4px', paddingBottom: '10px' }}>
+          {/* 🔥 DND-KIT ENGINE */}
+          <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+            <SortableContext items={riceCategories} strategy={verticalListSortingStrategy}>
+              {riceCategories.map(cat => (
+                <SortableCategoryItem key={cat} id={cat} cat={cat} lang={lang} />
+              ))}
+            </SortableContext>
+          </DndContext>
+        </div>
+
+        <div style={{ marginTop: '24px', display: 'flex', justifyContent: 'flex-end' }}>
+          <button onClick={() => setIsCategorySettingsOpen(false)} className="saas-btn saas-btn-primary">Done</button>
+        </div>
+      </Modal>
 
       {/* 🟢 PORTAL: ADD SUPPLIER MODAL (FORCED TOP Z-INDEX) */}
       {isAddSupplierOpen && typeof document !== 'undefined' && createPortal(

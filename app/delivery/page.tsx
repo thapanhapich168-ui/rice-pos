@@ -17,11 +17,6 @@ export default function DeliveryPage() {
   const { showToast } = useToast();
   const { activeBranchId } = useBranch(); // 🔥 TUNED INTO RADIO TOWER
 
-  // 🔥 BROWSER TAB TITLE FIX
-  useEffect(() => {
-    document.title = 'Delivery and Payment Status';
-  }, []);
-
   const [deliveries, setDeliveries] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [activeTab, setActiveTab] = useState<'delivery' | 'credit'>('delivery')

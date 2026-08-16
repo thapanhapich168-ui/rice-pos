@@ -179,12 +179,16 @@ export default function ExpenseDashboard() {
   const { showToast } = useToast();
   const { activeBranchId } = useBranch(); // 🔥 CONNECTED TO GLOBAL MEMORY
   const [isMounted, setIsMounted] = useState(false);
+  const [isDeviceMobile, setIsDeviceMobile] = useState(false); // 🔥 FIX: Added missing state
 
-  // 🔥 GUARANTEED BROWSER TAB TITLE FIX
+  // 🔥 FIX: Added listener to securely track mobile screen sizes without crashing
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      document.title = 'Expenses and Staffs';
-    }
+    const checkDeviceType = () => {
+      setIsDeviceMobile(window.innerWidth < 1024);
+    };
+    checkDeviceType();
+    window.addEventListener('resize', checkDeviceType);
+    return () => window.removeEventListener('resize', checkDeviceType);
   }, []);
 
   // --- Active Tab State ---
@@ -742,13 +746,16 @@ export default function ExpenseDashboard() {
       {/* HEADER (Frozen, Uses Explicit Height to Align with Sidebar Menu) */}
       <div className="header-container" style={{ flexShrink: 0 }}>
         <div className="header-left">
-          <h1 className="saas-page-title" style={{ margin: 0, padding: 0, display: 'flex', alignItems: 'center' }}>💸 Daily Expense & Payroll</h1>
+          {/* 🔥 FIX: Forced line-height crushes the invisible text padding for visual symmetry */}
+          <h1 className="saas-page-title" style={{ margin: 0, padding: 0, display: 'flex', alignItems: 'center', lineHeight: '1.2' }}>💸 Daily Expense & Payroll</h1>
         </div>
       </div>
 
       {/* TABS (Frozen) */}
-      <div className="content-container" style={{ flexShrink: 0, paddingBottom: '16px' }}>
-        <div className="hide-scrollbar" style={{ display: 'flex', flexWrap: 'nowrap', overflowX: 'auto', WebkitOverflowScrolling: 'touch', gap: '8px', background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '12px', padding: '6px' }}>
+      {/* 🔥 FIX: Erased padding and locked margin-bottom to exactly 20px to match header */}
+      <div className="content-container" style={{ flexShrink: 0, marginBottom: '20px' }}>
+        {/* 🔥 FIX: Forced margin: 0 to override any hidden global margins from saas-tab-container */}
+        <div className="saas-tab-container hide-scrollbar" style={{ margin: 0, display: 'flex', flexWrap: 'nowrap', overflowX: 'auto', WebkitOverflowScrolling: 'touch', gap: '8px', background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '12px', padding: '6px', scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
           <button type="button" onClick={() => setActiveTab('personal')} className={`saas-tab ${activeTab === 'personal' ? 'active' : ''}`} style={{ flexShrink: 0, padding: '10px 24px' }}>
             🏡 Personal
           </button>
@@ -770,10 +777,10 @@ export default function ExpenseDashboard() {
 
           {/* --- DYNAMIC EXPENSE LEDGER (Personal & Business) --- */}
           {(activeTab === 'personal' || activeTab === 'business') && (
-            <form onSubmit={handleSubmit} className="saas-card" style={{ padding: '30px', margin: 0, width: '100%' }}>
+            <form onSubmit={handleSubmit} className="saas-card" style={{ padding: isDeviceMobile ? '16px' : '30px', margin: 0, width: '100%' }}>
               
               {/* Top Action Row (Date, Add, Submit) */}
-              <div className="top-action-row" style={{ marginBottom: '32px' }}>
+              <div className="top-action-row" style={{ marginBottom: isDeviceMobile ? '20px' : '32px' }}>
                 <div className="date-wrapper">
                   <label style={{ display: 'block', fontSize: '11px', color: '#64748b', fontWeight: 'bold', marginBottom: '8px', textTransform: 'uppercase' }}>Date</label>
                   <CustomDatePicker value={expenseDate} onChange={setExpenseDate} />
@@ -802,9 +809,9 @@ export default function ExpenseDashboard() {
               </div>
 
               {/* List of Pending Expenses */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: isDeviceMobile ? '16px' : '24px' }}>
                 {getActiveList().map((exp, index) => (
-                  <div key={exp.id} className="expense-entry-card" style={{ padding: '24px', background: '#ffffff', borderRadius: '12px', border: '1px solid #cbd5e1', position: 'relative', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.02)' }}>
+                  <div key={exp.id} className="expense-entry-card" style={{ padding: isDeviceMobile ? '16px' : '24px', background: '#ffffff', borderRadius: '12px', border: '1px solid #cbd5e1', position: 'relative', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.02)' }}>
                     
                     {/* 3-COLUMN GRID SETUP */}
                     <div className="expense-grid">
@@ -1587,6 +1594,14 @@ export default function ExpenseDashboard() {
         .desktop-only-flex { display: flex; }
         .mobile-only-flex { display: none; }
 
+        /* 🔥 FIX: BULLETPROOF SCROLLBAR HIDING FOR WEBKIT BROWSERS (iOS/Safari/Chrome) */
+        .hide-scrollbar::-webkit-scrollbar { display: none !important; }
+        .hide-scrollbar { -ms-overflow-style: none !important; scrollbar-width: none !important; }
+
+        /* 🔥 FIX: BULLETPROOF SCROLLBAR HIDING FOR WEBKIT BROWSERS (iOS/Safari/Chrome) */
+        .hide-scrollbar::-webkit-scrollbar { display: none !important; }
+        .hide-scrollbar { -ms-overflow-style: none !important; scrollbar-width: none !important; }
+
         .content-container {
           width: 100%;
           max-width: 1600px;
@@ -1600,7 +1615,7 @@ export default function ExpenseDashboard() {
           display: flex;
           justify-content: flex-start;
           align-items: center; 
-          margin-bottom: 16px; 
+          margin-bottom: 20px !important; /* 🔥 FIX: Locked to 20px for perfect symmetry with tabs */
           margin-top: 0; 
           margin-left: 60px; 
           gap: 12px;
@@ -1695,7 +1710,7 @@ export default function ExpenseDashboard() {
           .header-container { 
             margin-left: 54px !important; 
             margin-right: 0 !important;
-            margin-bottom: 24px !important; 
+            margin-bottom: 20px !important; /* 🔥 FIX: Locked to 20px for perfect symmetry with tabs */
             margin-top: 0 !important; 
             display: flex !important;
             flex-direction: row !important;

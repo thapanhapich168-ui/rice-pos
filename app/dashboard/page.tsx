@@ -16,11 +16,6 @@ export default function DashboardPage() {
   const { showToast } = useToast();
   const { branches, activeBranchId } = useBranch(); 
 
-  // 🔥 BROWSER TAB TITLE FIX
-  useEffect(() => {
-    document.title = 'Business Dashboard';
-  }, []);
-
   const [isLoading, setIsLoading] = useState(true)
   const [wholesaleSales, setWholesaleSales] = useState<any[]>([])
   const [retailSales, setRetailSales] = useState<any[]>([])

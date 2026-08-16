@@ -53,11 +53,6 @@ function CurrencyInput({ value, onChange, onBlur, placeholder, style, className 
 
 export default function SettingsPage() {
   const router = useRouter()
-
-  // 🔥 BROWSER TAB TITLE FIX
-  useEffect(() => {
-    document.title = 'Settings';
-  }, []);
   
   // 🚀 AUTH & ROLE STATE
   const { role, loadingRole } = useUserRole()

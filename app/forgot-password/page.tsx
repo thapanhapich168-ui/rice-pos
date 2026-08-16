@@ -16,11 +16,6 @@ export default function ForgotPassword() {
   const [message, setMessage] = useState('')
   const [errorMsg, setErrorMsg] = useState('')
 
-  // 🔥 BROWSER TAB TITLE FIX
-  useEffect(() => {
-    document.title = 'Forgot Password';
-  }, []);
-
   const handleReset = async (e: React.FormEvent) => {
     e.preventDefault()
     setLoading(true)

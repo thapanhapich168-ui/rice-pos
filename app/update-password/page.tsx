@@ -17,11 +17,6 @@ export default function UpdatePassword() {
   const [errorMsg, setErrorMsg] = useState('')
   const [showPassword, setShowPassword] = useState(false)
 
-  // 🔥 BROWSER TAB TITLE FIX
-  useEffect(() => {
-    document.title = 'Update Password';
-  }, []);
-
   const handleUpdatePassword = async (e: React.FormEvent) => {
     e.preventDefault()
     setLoading(true)
