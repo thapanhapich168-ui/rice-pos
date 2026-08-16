@@ -163,10 +163,6 @@ export default function POSPage() {
   const { activeBranchId } = useBranch(); 
   const [isPosMounted, setIsPosMounted] = useState(false);
 
-  useEffect(() => {
-    document.title = 'Point of Sales';
-  }, []);
-
   const [products, setProducts] = useState<Product[]>([])
   const [customers, setCustomers] = useState<Customer[]>([])
   const [cart, setCart] = useState<CartItem[]>([])

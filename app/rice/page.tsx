@@ -49,11 +49,6 @@ export default function RiceControl() {
   const { showToast } = useToast();
   const { activeBranchId } = useBranch(); // 🔥 TUNED INTO GLOBAL MEMORY
 
-  // 🔥 BROWSER TAB TITLE FIX
-  useEffect(() => {
-    document.title = 'Rice Inventory';
-  }, []);
-
   // --- CORE STATE ---
   const [products, setProducts] = useState<Product[]>([])
   const [suppliers, setSuppliers] = useState<any[]>([])

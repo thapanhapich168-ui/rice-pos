@@ -36,10 +36,6 @@ export default function RiceMixCalculator() {
 const { showToast } = useToast();
 const { activeBranchId } = useBranch();
 
-useEffect(() => {
-document.title = 'Mix Calculator';
-}, []);
-
 const [products, setProducts] = useState<Product[]>([])
 const [activeBatches, setActiveBatches] = useState<Record<number, InventoryBatch[]>>({})
 // 🔥 NEW STATES FOR HISTORY EDITING

@@ -181,13 +181,6 @@ export default function ExpenseDashboard() {
   const [isMounted, setIsMounted] = useState(false);
   const [isDeviceMobile, setIsDeviceMobile] = useState(false); // 🔥 FIX: Added missing state
 
-  // 🔥 GUARANTEED BROWSER TAB TITLE FIX
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      document.title = 'Expenses and Staffs';
-    }
-  }, []);
-
   // 🔥 FIX: Added listener to securely track mobile screen sizes without crashing
   useEffect(() => {
     const checkDeviceType = () => {

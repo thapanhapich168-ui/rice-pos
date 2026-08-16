@@ -31,11 +31,6 @@ export default function InvoiceGallery() {
   const { showToast } = useToast();
   const { activeBranchId } = useBranch(); // 🔥 TUNED INTO RADIO TOWER
 
-  // 🔥 SETS THE SAFARI BROWSER TAB TITLE
-  useEffect(() => {
-    document.title = 'Invoice Gallery';
-  }, []);
-
   const [invoices, setInvoices] = useState<Invoice[]>([])
   const [isLoading, setIsLoading] = useState<boolean>(true)
   const [isProcessing, setIsProcessing] = useState<boolean>(false)
