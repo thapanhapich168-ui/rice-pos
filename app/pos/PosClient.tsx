@@ -296,7 +296,8 @@ export default function POSPage() {
 
   const [showAdjustmentMenu, setShowAdjustmentMenu] = useState(false);
   
-  const [autoOpenModal, setAutoOpenModal] = useState<{ isOpen: boolean, items: (Product & { bags_needed: number })[] }>({ isOpen: false, items: [] });
+  // 🔥 FIX: Added preCheckoutStock to remember the exact old stock & COGS before the new bag is opened
+  const [autoOpenModal, setAutoOpenModal] = useState<{ isOpen: boolean, items: (Product & { bags_needed: number })[], preCheckoutStock?: Record<number, { stock: number, cost_price: number }> }>({ isOpen: false, items: [] });
   
   const [repackSubstitutes, setRepackSubstitutes] = useState<Record<number, number>>({});
   const [repackSearch, setRepackSearch] = useState<Record<number, string>>({});
@@ -1263,12 +1264,31 @@ export default function POSPage() {
         }
     }
 
+    // 🔥 STRICT FIFO: Capture the exact stock and old COGS currently in the bin BEFORE the new bag is opened
+    const preCheckoutStock: Record<number, { stock: number, cost_price: number }> = {};
+    for (const item of cart) {
+        const p = products.find(x => x.id === item.product_id);
+        if (p) {
+            let currentCogs = Number(p.cost_price || 0);
+            if (p.linked_wholesale_id) {
+                const wp = products.find(w => w.id === p.linked_wholesale_id);
+                if (wp) {
+                    const wBatches = activeBatches[wp.id] || [];
+                    const cb = wBatches.length > 0 ? [...wBatches].sort((a,b) => a.id - b.id)[0] : null;
+                    const wCogs = cb ? Number(cb.cost_price) : Number(wp.cost_price || 0);
+                    currentCogs = wCogs / (Number(wp.weight) || 50);
+                }
+            }
+            preCheckoutStock[p.id] = { stock: Number(p.stock || 0), cost_price: currentCogs };
+        }
+    }
+
     if (itemsNeedingBags.length > 0) {
-        setAutoOpenModal({ isOpen: true, items: itemsNeedingBags });
+        setAutoOpenModal({ isOpen: true, items: itemsNeedingBags, preCheckoutStock });
         return;
     }
 
-    executeCheckout(products);
+    executeCheckout(products, preCheckoutStock);
   }
 
   async function handleConfirmAutoOpen() {
@@ -1288,25 +1308,36 @@ export default function POSPage() {
                 p_bags_needed: p.bags_needed
             });
             if (error) throw error;
+
+            // 🔥 FIX: If you manually chose a NEW bag from the dropdown, permanently update the link in the database!
+            if (targetWholesaleId !== p.linked_wholesale_id) {
+                await supabase.from('products')
+                  .update({ linked_wholesale_id: targetWholesaleId })
+                  .eq('id', p.id);
+            }
         }
         
         setAutoOpenModal({ isOpen: false, items: [] });
         setRepackSubstitutes({});
+        setRepackSearch({});
+        setRepackMenuOpen({});
         
+        // This refresh will now pull the newly linked bag data, syncing POS and Rice Inventory automatically
         const { data: prodData } = await supabase.from('products').select('*').eq('is_archived', false).eq('branch_id', activeBranchId).order('id', { ascending: true });
         if (prodData) {
             setProducts(prodData);
             await loadBatches(); 
-            await executeCheckout(prodData);
+            // 🔥 STRICT FIFO: Inject the captured memory snapshot into the execution engine
+            await executeCheckout(prodData, autoOpenModal.preCheckoutStock);
         }
     } catch (err: any) {
         showToast('error', 'Auto-Open Failed', err.message);
         setIsProcessing(false);
     }
   }
-
+  
   // MAIN CHECKOUT ENGINE
-  async function executeCheckout(latestProducts: Product[]) {
+  async function executeCheckout(latestProducts: Product[], preCheckoutStock?: Record<number, { stock: number, cost_price: number }>) {
     setIsProcessing(true);
 
     try {
@@ -1389,21 +1420,66 @@ export default function POSPage() {
            if (isDiscount) finalCogs = 0; 
            if (isDeposit) finalCogs = Number(item.custom_price_riel || 0); 
 
-           retailRows.push({
-             transaction_id: activeTxId,
-             branch_id: activeBranchId, 
-             product_id: item.product_id, 
-             rice_type: item.name,
-             custom_rice_type: item.custom_name !== item.name ? item.custom_name : null,
-             qty: finalQty,
-             price_per_bag: Number(item.custom_price_riel || 0),
-             cogs_price: finalCogs,
-             payment_method: primaryMethodStr,
-             owner: 'Both'
-           });
-           
-           if (!item.bypass_stock) {
-             stockUpdates[item.product_id] = (stockUpdates[item.product_id] || 0) - finalQty;
+           // 🔥 STRICT RETAIL FIFO SPLIT LOGIC
+           const oldData = preCheckoutStock?.[item.product_id];
+           const oldStock = oldData ? oldData.stock : 0;
+           const oldCogs = oldData ? oldData.cost_price : finalCogs;
+
+           const needsSplit = !isNegativeItem && !item.bypass_stock && !editingInvoiceId && oldStock > 0 && oldStock < finalQty;
+
+           if (needsSplit) {
+               const qty1 = oldStock; // The old rice remaining in the bin
+               const qty2 = finalQty - oldStock; // The new rice poured from the new bag
+
+               // Split 1: Sell the old stock exactly at the old COGS
+               retailRows.push({
+                   transaction_id: activeTxId,
+                   branch_id: activeBranchId,
+                   product_id: item.product_id,
+                   rice_type: item.name,
+                   custom_rice_type: item.custom_name !== item.name ? item.custom_name : null,
+                   qty: qty1,
+                   price_per_bag: Number(item.custom_price_riel || 0),
+                   cogs_price: oldCogs,
+                   payment_method: primaryMethodStr,
+                   owner: 'Both'
+               });
+
+               // Split 2: Sell the remaining quantity exactly at the new COGS
+               retailRows.push({
+                   transaction_id: activeTxId,
+                   branch_id: activeBranchId,
+                   product_id: item.product_id,
+                   rice_type: item.name,
+                   custom_rice_type: item.custom_name !== item.name ? item.custom_name : null,
+                   qty: qty2,
+                   price_per_bag: Number(item.custom_price_riel || 0),
+                   cogs_price: finalCogs,
+                   payment_method: primaryMethodStr,
+                   owner: 'Both'
+               });
+               
+               if (!item.bypass_stock) {
+                   stockUpdates[item.product_id] = (stockUpdates[item.product_id] || 0) - finalQty;
+               }
+           } else {
+               // Standard single-row logic (no split needed)
+               retailRows.push({
+                 transaction_id: activeTxId,
+                 branch_id: activeBranchId, 
+                 product_id: item.product_id, 
+                 rice_type: item.name,
+                 custom_rice_type: item.custom_name !== item.name ? item.custom_name : null,
+                 qty: finalQty,
+                 price_per_bag: Number(item.custom_price_riel || 0),
+                 cogs_price: finalCogs,
+                 payment_method: primaryMethodStr,
+                 owner: 'Both'
+               });
+               
+               if (!item.bypass_stock) {
+                 stockUpdates[item.product_id] = (stockUpdates[item.product_id] || 0) - finalQty;
+               }
            }
         }
 
@@ -2532,20 +2608,22 @@ export default function POSPage() {
         </div>
       )}
 
-      {/* AUTO OPEN BAG MODAL (🔥 FIXED: Now supports searchable manual bag selection) */}
+      {/* AUTO OPEN BAG MODAL */}
       <Modal isOpen={autoOpenModal.isOpen} onClose={() => { setAutoOpenModal({ isOpen: false, items: [] }); setRepackSubstitutes({}); setRepackSearch({}); setRepackMenuOpen({}); }} title="Auto-Open Bag Required" icon="⚠️" maxWidth="400px">
+        
         <p style={{ color: '#475569', fontSize: '14px', lineHeight: '1.5', margin: '0 0 16px 0' }}>
-          You do not have enough loose retail rice for this sale. Proceeding will automatically open a wholesale bag to restock the loose bin.
+          Not enough loose retail rice. Select a wholesale bag to open.
         </p>
+        
         <div style={{ background: '#f8fafc', padding: '12px', borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '13px', color: '#64748b' }}>
           Items needing restocking:
-          <ul style={{ paddingLeft: '20px', marginTop: '8px', marginBottom: 0 }}>
+          <ul style={{ paddingLeft: '0', marginTop: '12px', marginBottom: 0 }}>
             {autoOpenModal.items.map((p) => {
-              const defaultW = products.find(w => w.id === p.linked_wholesale_id);
+              const defaultW = p.linked_wholesale_id ? products.find(w => w.id === p.linked_wholesale_id) : null;
               const isOutOfStock = !defaultW || defaultW.stock < p.bags_needed;
               
               const currentSelectedId = repackSubstitutes[p.id] || p.linked_wholesale_id;
-              const currentSelectedName = products.find(prod => prod.id === currentSelectedId)?.name || '-- Select Alternative Bag --';
+              const currentSelectedName = products.find(prod => prod.id === currentSelectedId)?.name || '-- Click to Select a Bag --';
               const searchTerm = repackSearch[p.id] || '';
               
               const availableBags = products.filter(prod => 
@@ -2555,64 +2633,66 @@ export default function POSPage() {
               );
 
               return (
-                <li key={p.id} style={{ marginBottom: '12px' }}>
-                  <span style={{ fontWeight: 'bold', color: '#0f172a' }}>{p.name}</span> (Needs {p.bags_needed} bag)
+                <li key={p.id} style={{ marginBottom: '16px', listStyle: 'none', background: isOutOfStock ? '#fef2f2' : '#ffffff', padding: '12px', borderRadius: '8px', border: `1px solid ${isOutOfStock ? '#fca5a5' : '#cbd5e1'}` }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                     <span style={{ fontWeight: 'bold', color: '#0f172a', fontSize: '14px' }}>{p.name}</span>
+                     <span style={{ fontSize: '12px', color: '#ef4444', fontWeight: 'bold', background: '#fee2e2', padding: '2px 8px', borderRadius: '12px' }}>Needs {p.bags_needed} bag</span>
+                  </div>
                   
-                  <div style={{ marginTop: '8px', padding: '8px', background: isOutOfStock ? '#fee2e2' : '#ffffff', borderRadius: '6px', border: `1px solid ${isOutOfStock ? '#fca5a5' : '#cbd5e1'}` }}>
-                    {isOutOfStock && <div style={{ color: '#dc2626', marginBottom: '6px', fontWeight: 'bold' }}>⚠️ Default bag out of stock! Select alternative:</div>}
-                    {!isOutOfStock && <div style={{ color: '#475569', marginBottom: '6px', fontSize: '12px' }}>Select bag to open (Default: {defaultW?.name}):</div>}
-                    
-                    <div style={{ position: 'relative' }}>
-                      {/* Dropdown Overlay / Backdrop */}
-                      {repackMenuOpen[p.id] && (
-                        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, zIndex: 99 }} onMouseDown={() => setRepackMenuOpen({...repackMenuOpen, [p.id]: false})}></div>
-                      )}
+                  <div style={{ color: isOutOfStock ? '#dc2626' : '#334155', marginBottom: '8px', fontSize: '12px', fontWeight: 'bold' }}>
+                    {isOutOfStock ? '⚠️ Default bag empty! Select a bag:' : 'Select wholesale bag:'}
+                  </div>
+                  
+                  <div style={{ position: 'relative' }}>
+                    {/* Dropdown Overlay / Backdrop */}
+                    {repackMenuOpen[p.id] && (
+                      <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, zIndex: 99 }} onMouseDown={() => setRepackMenuOpen({...repackMenuOpen, [p.id]: false})}></div>
+                    )}
 
-                      {/* Dropdown Trigger */}
-                      <div 
-                        onClick={() => setRepackMenuOpen({...repackMenuOpen, [p.id]: !repackMenuOpen[p.id]})}
-                        className="saas-input"
-                        style={{ width: '100%', padding: '8px 12px', fontSize: '13px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', backgroundColor: '#fff', position: 'relative', zIndex: repackMenuOpen[p.id] ? 100 : 1, margin: 0 }}
-                      >
-                        <span style={{ color: currentSelectedName === '-- Select Alternative Bag --' ? '#94a3b8' : '#0f172a', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                          {currentSelectedName}
-                        </span>
-                        <span style={{ color: '#94a3b8', fontSize: '10px', marginLeft: '8px' }}>{repackMenuOpen[p.id] ? '▲' : '▼'}</span>
-                      </div>
-
-                      {/* Dropdown Menu */}
-                      {repackMenuOpen[p.id] && (
-                        <div style={{ position: 'absolute', top: 'calc(100% + 4px)', left: 0, right: 0, zIndex: 101, backgroundColor: '#fff', border: '1px solid #cbd5e1', borderRadius: '8px', boxShadow: '0 10px 25px rgba(0,0,0,0.1)', overflow: 'hidden' }}>
-                          <input 
-                            type="text"
-                            placeholder="🔍 Search bag..."
-                            value={searchTerm}
-                            onChange={(e) => setRepackSearch({...repackSearch, [p.id]: e.target.value})}
-                            autoFocus
-                            className="saas-input"
-                            style={{ width: '100%', padding: '8px 12px', border: 'none', borderBottom: '1px solid #e2e8f0', outline: 'none', fontSize: '13px', borderRadius: '0', margin: 0 }}
-                          />
-                          <div className="hide-scrollbar" style={{ maxHeight: '180px', overflowY: 'auto' }}>
-                            {availableBags.map(sub => (
-                              <div 
-                                key={sub.id}
-                                onClick={() => {
-                                  setRepackSubstitutes({...repackSubstitutes, [p.id]: sub.id});
-                                  setRepackMenuOpen({...repackMenuOpen, [p.id]: false});
-                                  setRepackSearch({...repackSearch, [p.id]: ''}); 
-                                }}
-                                style={{ padding: '10px 12px', fontSize: '13px', cursor: 'pointer', borderBottom: '1px solid #f8fafc', backgroundColor: currentSelectedId === sub.id ? '#f1f5f9' : '#fff', color: '#334155' }}
-                              >
-                                {sub.name} <span style={{ color: '#10b981', fontWeight: 'bold' }}>(Stock: {sub.stock})</span>
-                              </div>
-                            ))}
-                            {availableBags.length === 0 && (
-                              <div style={{ padding: '12px', fontSize: '13px', color: '#94a3b8', textAlign: 'center' }}>No bags found</div>
-                            )}
-                          </div>
-                        </div>
-                      )}
+                    {/* 🔥 NEUTRAL, PROFESSIONAL DROPDOWN TRIGGER */}
+                    <div 
+                      onClick={() => setRepackMenuOpen({...repackMenuOpen, [p.id]: !repackMenuOpen[p.id]})}
+                      className="saas-input"
+                      style={{ width: '100%', padding: '10px 14px', fontSize: '14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', backgroundColor: '#ffffff', border: '1px solid #cbd5e1', borderRadius: '8px', color: '#0f172a', fontWeight: 'bold', position: 'relative', zIndex: repackMenuOpen[p.id] ? 100 : 1, margin: 0, boxShadow: '0 1px 2px rgba(0, 0, 0, 0.05)' }}
+                    >
+                      <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {currentSelectedName}
+                      </span>
+                      <span style={{ fontSize: '12px', marginLeft: '8px', flexShrink: 0, color: '#64748b' }}>{repackMenuOpen[p.id] ? '▲' : '▼ Change'}</span>
                     </div>
+
+                    {/* Dropdown Menu */}
+                    {repackMenuOpen[p.id] && (
+                      <div style={{ position: 'absolute', top: 'calc(100% + 4px)', left: 0, right: 0, zIndex: 101, backgroundColor: '#fff', border: '1px solid #cbd5e1', borderRadius: '8px', boxShadow: '0 10px 25px rgba(0,0,0,0.1)', overflow: 'hidden' }}>
+                        <input 
+                          type="text"
+                          placeholder="🔍 Search bag..."
+                          value={searchTerm}
+                          onChange={(e) => setRepackSearch({...repackSearch, [p.id]: e.target.value})}
+                          autoFocus
+                          className="saas-input"
+                          style={{ width: '100%', padding: '10px 14px', border: 'none', borderBottom: '1px solid #e2e8f0', outline: 'none', fontSize: '14px', borderRadius: '0', margin: 0, boxSizing: 'border-box' }}
+                        />
+                        <div className="hide-scrollbar" style={{ maxHeight: '180px', overflowY: 'auto' }}>
+                          {availableBags.map(sub => (
+                            <div 
+                              key={sub.id}
+                              onClick={() => {
+                                setRepackSubstitutes({...repackSubstitutes, [p.id]: sub.id});
+                                setRepackMenuOpen({...repackMenuOpen, [p.id]: false});
+                                setRepackSearch({...repackSearch, [p.id]: ''}); 
+                              }}
+                              style={{ padding: '10px 14px', fontSize: '14px', cursor: 'pointer', borderBottom: '1px solid #f8fafc', backgroundColor: currentSelectedId === sub.id ? '#f1f5f9' : '#fff', color: '#0f172a', fontWeight: currentSelectedId === sub.id ? 'bold' : 'normal' }}
+                            >
+                              {sub.name} <span style={{ color: '#64748b', fontWeight: 'normal', fontSize: '13px' }}>(Stock: {sub.stock})</span>
+                            </div>
+                          ))}
+                          {availableBags.length === 0 && (
+                            <div style={{ padding: '12px', fontSize: '14px', color: '#94a3b8', textAlign: 'center' }}>No bags found</div>
+                          )}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </li>
               );
