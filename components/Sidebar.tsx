@@ -6,6 +6,10 @@ import { usePathname, useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabaseClient'
 import { useUserRole } from '@/lib/useUserRole'
 import { useBranch } from '@/components/BranchContext' 
+// 🔥 NEW DND-KIT IMPORTS
+import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
+import { arrayMove, SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 
 interface MenuItem {
   label: string;
@@ -17,7 +21,7 @@ const defaultMenuItems: MenuItem[] = [
   { label: '📊 Dashboard', href: '/dashboard', adminOnly: false },
   { label: '🛒 POS System', href: '/pos', adminOnly: false },
   { label: '🚚 Delivery & Credit', href: '/delivery', adminOnly: false },
-  { label: '💵 Expense & Payroll', href: '/expense', adminOnly: false },
+  { label: '💸 Expense & Payroll', href: '/expense', adminOnly: false },
   { label: '🌾 Rice Control', href: '/rice', adminOnly: false },
   { label: '🧮 Mix Calculator', href: '/calculator', adminOnly: false },
   { label: '🖼️ Invoice Gallery', href: '/invoices', adminOnly: false },
@@ -29,6 +33,47 @@ const defaultMenuItems: MenuItem[] = [
   { label: '⚙️ Settings', href: '/settings', adminOnly: true }
 ]
 
+// 🔥 NEW: PROFESSIONAL SORTABLE ITEM COMPONENT (Whole Item Draggable)
+function SortableSidebarItem({ item, isActive, setIsOpen }: { item: MenuItem, isActive: boolean, setIsOpen: (val: boolean) => void }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: item.label });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    zIndex: isDragging ? 100 : 'auto',
+    opacity: isDragging ? 0.8 : 1,
+    boxShadow: isDragging ? '0 10px 25px rgba(0,0,0,0.3)' : 'none',
+    borderRadius: '6px',
+    touchAction: 'none' // 🔥 Crucial for smooth mobile dragging
+  };
+
+  return (
+    <div ref={setNodeRef} style={style} {...attributes} {...listeners}>
+      <Link 
+        href={item.href}
+        onClick={() => setIsOpen(false)} 
+        draggable={false} // Disable native ghost image
+        style={{
+          color: 'white',
+          textDecoration: 'none',
+          fontSize: '14px',
+          padding: '10px 12px',
+          borderRadius: '6px',
+          display: 'block',
+          whiteSpace: 'nowrap',
+          background: isActive ? '#1f2937' : 'transparent',
+          borderLeft: isActive ? '4px solid #38bdf8' : '4px solid transparent',
+          fontWeight: isActive ? 'bold' : 'normal',
+          transition: 'background 0.2s',
+          cursor: 'grab' // Indicate it's draggable
+        }}
+      >
+        {item.label}
+      </Link>
+    </div>
+  );
+}
+
 export default function Sidebar() {
   const [isOpen, setIsOpen] = useState(false)
   const [menuItems, setMenuItems] = useState<MenuItem[]>(defaultMenuItems)
@@ -38,8 +83,15 @@ export default function Sidebar() {
   const { role, loadingRole } = useUserRole();
   const { branches, activeBranchId, setActiveBranchId } = useBranch();
 
+  const [isMounted, setIsMounted] = useState(false); // 🔥 FIX: State to prevent SSR mismatch
+
   const sidebarRef = useRef<HTMLDivElement>(null)
   const buttonRef = useRef<HTMLButtonElement>(null)
+
+  // 🔥 FIX: Set mounted to true once the browser takes over
+  useEffect(() => {
+    setIsMounted(true);
+  }, []);
 
   // 🔥 NEW: THE SMART GATEKEEPER
   // If the user leaves the Dashboard while in HQ Mode, force them back to Branch 1
@@ -101,28 +153,27 @@ export default function Sidebar() {
     router.push('/')
   }
 
-  const handleDragStart = (e: React.DragEvent, index: number) => {
-    e.dataTransfer.setData('text/plain', index.toString())
-    e.dataTransfer.effectAllowed = 'move'
-  }
+  // 🔥 NEW DND-KIT SENSORS AND HANDLERS
+  const sensors = useSensors(
+    // 🔥 distance: 5 means normal clicks work instantly, but dragging 5px initiates the drag!
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }), 
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
+  );
 
-  const handleDragOver = (e: React.DragEvent) => {
-    e.preventDefault()
-    e.dataTransfer.dropEffect = 'move'
-  }
-
-  const handleDrop = (e: React.DragEvent, targetIndex: number) => {
-    e.preventDefault()
-    const sourceIndex = parseInt(e.dataTransfer.getData('text/plain'), 10)
-    if (isNaN(sourceIndex) || sourceIndex === targetIndex) return
-
-    const newItems = [...menuItems]
-    const [draggedItem] = newItems.splice(sourceIndex, 1)
-    newItems.splice(targetIndex, 0, draggedItem)
-
-    setMenuItems(newItems)
-    localStorage.setItem('sidebar_menu_order', JSON.stringify(newItems.map(i => i.label)))
-  }
+  const handleDragEnd = (event: any) => {
+    const { active, over } = event;
+    if (over && active.id !== over.id) {
+      setMenuItems((items) => {
+        const oldIndex = items.findIndex(i => i.label === active.id);
+        const newIndex = items.findIndex(i => i.label === over.id);
+        const newOrder = arrayMove(items, oldIndex, newIndex);
+        
+        // Save to localStorage immediately
+        localStorage.setItem('sidebar_menu_order', JSON.stringify(newOrder.map(i => i.label)));
+        return newOrder;
+      });
+    }
+  };
 
   if (pathname === '/') return null;
 
@@ -182,45 +233,49 @@ export default function Sidebar() {
           </div>
           
           <nav style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            {menuItems.map((item, index) => {
-              const isAllowed = !item.adminOnly || (!loadingRole && role === 'admin');
-              if (!isAllowed) return null;
-
-              const isActive = pathname === item.href
-              
-              return (
-                <div
-                  key={item.href}
-                  draggable
-                  onDragStart={(e) => handleDragStart(e, index)}
-                  onDragOver={handleDragOver}
-                  onDrop={(e) => handleDrop(e, index)}
-                  style={{ cursor: 'grab', userSelect: 'none' }}
-                  title="Drag up or down to reorder"
-                >
-                  <Link 
-                    href={item.href}
-                    onClick={() => setIsOpen(false)} 
-                    draggable={false}
-                    style={{
-                      color: 'white',
-                      textDecoration: 'none',
-                      fontSize: '14px',
-                      padding: '10px 12px',
-                      borderRadius: '6px',
-                      display: 'block',
-                      whiteSpace: 'nowrap',
-                      background: isActive ? '#1f2937' : 'transparent',
-                      borderLeft: isActive ? '4px solid #38bdf8' : '4px solid transparent',
-                      fontWeight: isActive ? 'bold' : 'normal',
-                      transition: 'background 0.2s'
-                    }}
-                  >
-                    {item.label}
-                  </Link>
-                </div>
-              )
-            })}
+            {/* 🔥 FIX: Only render DND engine after client hydration to prevent ID mismatch */}
+            {isMounted ? (
+              <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+                <SortableContext items={menuItems.map(i => i.label)} strategy={verticalListSortingStrategy}>
+                  {menuItems.map((item) => {
+                    const isAllowed = !item.adminOnly || (!loadingRole && role === 'admin');
+                    if (!isAllowed) return null;
+                    const isActive = pathname === item.href;
+                    return (
+                      <SortableSidebarItem 
+                        key={item.label} 
+                        item={item} 
+                        isActive={isActive} 
+                        setIsOpen={setIsOpen} 
+                      />
+                    );
+                  })}
+                </SortableContext>
+              </DndContext>
+            ) : (
+              /* 🔥 SSR FALLBACK: Renders static links to prevent flashing before hydration */
+              menuItems.map((item) => {
+                const isAllowed = !item.adminOnly || (!loadingRole && role === 'admin');
+                if (!isAllowed) return null;
+                const isActive = pathname === item.href;
+                return (
+                  <div key={item.label}>
+                    <Link 
+                      href={item.href}
+                      style={{
+                        color: 'white', textDecoration: 'none', fontSize: '14px', padding: '10px 12px',
+                        borderRadius: '6px', display: 'block', whiteSpace: 'nowrap',
+                        background: isActive ? '#1f2937' : 'transparent',
+                        borderLeft: isActive ? '4px solid #38bdf8' : '4px solid transparent',
+                        fontWeight: isActive ? 'bold' : 'normal'
+                      }}
+                    >
+                      {item.label}
+                    </Link>
+                  </div>
+                )
+              })
+            )}
           </nav>
         </div>
 
