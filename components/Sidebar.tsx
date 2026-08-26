@@ -51,7 +51,14 @@ function SortableSidebarItem({ item, isActive, setIsOpen }: { item: MenuItem, is
     <div ref={setNodeRef} style={style} {...attributes} {...listeners}>
       <Link 
         href={item.href}
-        onClick={() => setIsOpen(false)} 
+        onClick={(e) => {
+          // 🔥 PREVENTS CLICK NAVIGATION IF USER IS DRAGGING
+          if (isDragging) {
+            e.preventDefault();
+            return;
+          }
+          setIsOpen(false);
+        }} 
         draggable={false} // Disable native ghost image
         style={{
           color: 'white',
@@ -65,7 +72,8 @@ function SortableSidebarItem({ item, isActive, setIsOpen }: { item: MenuItem, is
           borderLeft: isActive ? '4px solid #38bdf8' : '4px solid transparent',
           fontWeight: isActive ? 'bold' : 'normal',
           transition: 'background 0.2s',
-          cursor: 'grab' // Indicate it's draggable
+          cursor: isDragging ? 'grabbing' : 'pointer', // 🔥 SHOW GRABBING HAND WHEN DRAGGING, NORMAL POINTER OTHERWISE
+          pointerEvents: isDragging ? 'none' : 'auto' // 🔥 DISABLES INNER CLICKS WHILE DRAGGING
         }}
       >
         {item.label}

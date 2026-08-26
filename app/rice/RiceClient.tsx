@@ -14,6 +14,76 @@ import Modal from '@/components/Modal'
 import { useBranch } from '@/components/BranchContext' // 🔥 GLOBAL MEMORY IMPORTED
 import { TELEGRAM_CONFIG } from '@/lib/telegramConfig'
 
+// --- DND-KIT IMPORTS ---
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  MouseSensor,
+  TouchSensor,
+  useSensor,
+  useSensors,
+  DragEndEvent
+} from '@dnd-kit/core';
+import {
+  arrayMove,
+  SortableContext,
+  sortableKeyboardCoordinates,
+  horizontalListSortingStrategy,
+  useSortable
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
+
+// --- SORTABLE CATEGORY COMPONENT ---
+function SortableCategoryItem({ id, isActive, onClick }: { id: string, isActive: boolean, onClick: () => void }) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.9 : 1,
+    flexShrink: 0,
+    borderRadius: '20px',
+    cursor: isDragging ? 'grabbing' : 'pointer',
+    zIndex: isDragging ? 50 : 1,
+    
+    // 🔥 MATCHES THE ACTIVE WHOLESALE TAB COLOR 🔥
+    backgroundColor: isActive ? '#b58a3d' : '#ffffff', 
+    color: isActive ? '#ffffff' : '#334155',
+    border: isActive ? '1px solid #b58a3d' : '1px solid #cbd5e1',
+    
+    boxShadow: isDragging 
+      ? '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1)' // Big shadow when picked up
+      : '0 1px 2px 0 rgba(0, 0, 0, 0.05)', // Subtle resting shadow
+    
+    padding: '8px 16px',
+    marginRight: '8px',
+    fontSize: '14px',
+    fontWeight: '500',
+    position: isDragging ? 'relative' as any : 'static' as any,
+    touchAction: 'manipulation', // 🔥 Essential for smooth mobile touch handling
+  };
+
+  return (
+    <button
+      ref={setNodeRef}
+      style={style}
+      {...attributes}
+      {...listeners}
+      onClick={onClick}
+    >
+      {id}
+    </button>
+  );
+}
+
 // --- CATEGORIES ---
 const RICE_CATEGORIES = ['All', 'មិញ', 'ខុន', 'ខ្ញី', 'ម្លិះ', 'រំដួល', 'បីកំណាត់', 'ដំណើប', 'សម្រូប', 'ផ្សេងៗ', '❌ Out of Stock'];
 const MAIN_KEYWORDS = ['មិញ', 'ខុន', 'ខ្ញី', 'ម្លិះ', 'រំដួល', 'បីកំណាត់', 'ដំណើប', 'សម្រូប'];
@@ -132,41 +202,60 @@ export default function RiceControl() {
   const [editingHistoryId, setEditingHistoryId] = useState<number | null>(null)
   const [historyEdits, setHistoryEdits] = useState<Record<number, Partial<InventoryBatch>>>({})
 
-  // --- DRAG HANDLERS FOR CATEGORIES ---
-  const handleCategoryDragStart = (e: React.DragEvent, cat: string) => {
-    e.dataTransfer.setData('text/category', cat)
-    e.dataTransfer.effectAllowed = 'move'
-  }
-
-  const handleCategoryDrop = async (e: React.DragEvent, targetCat: string) => {
-    e.preventDefault()
-    const sourceCat = e.dataTransfer.getData('text/category');
-    if (!sourceCat || sourceCat === targetCat) return
-
-    setCategoryOrder(prev => {
-      const newOrder = prev.filter(c => c !== sourceCat);
-      const targetIdx = newOrder.indexOf(targetCat);
-      newOrder.splice(targetIdx, 0, sourceCat);
-      
-      supabase.from('app_settings').upsert({
-        setting_key: 'category_order',
-        setting_value: newOrder
-      }, { onConflict: 'setting_key' }).then()
-      
-      return newOrder;
+  // --- DRAG HANDLERS FOR CATEGORIES (DND-KIT) ---
+  const sensors = useSensors(
+    useSensor(MouseSensor, {
+      activationConstraint: {
+        distance: 5, // Desktop: requires 5px of movement before drag starts
+      },
+    }),
+    useSensor(TouchSensor, {
+      activationConstraint: {
+        delay: 250, // 🔥 MOBILE FIX: Requires a 250ms Long-Press to pick up the item!
+        tolerance: 5, // Allows 5px of finger wiggle without canceling the long-press
+      },
+    }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
     })
-  }
+  );
+
+  const handleCategoryDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+
+    if (over && active.id !== over.id) {
+      setCategoryOrder((items) => {
+        const oldIndex = items.indexOf(active.id as string);
+        const newIndex = items.indexOf(over.id as string);
+
+        const newOrder = arrayMove(items, oldIndex, newIndex);
+        
+        // 🛡️ INTEGRATION FIX: Map category orders to the active branch exactly like POSPage
+        const branchKey = activeBranchId === 0 ? 'category_order' : `category_order_${activeBranchId}`;
+        supabase.from('app_settings').upsert({
+          setting_key: branchKey,
+          setting_value: newOrder
+        }, { onConflict: 'setting_key' }).then();
+        
+        return newOrder;
+      });
+    }
+  };
 
   // --- TELEGRAM STOCK ALERTS & REPORTING ---
   // 🔥 FIX: Added strict fallback values to prevent TS "undefined" errors
   const triggerStockAlert = async (productName: string = 'Unknown Product', currentStock: number = 0, minStockLevel: number = 0) => {
-    // Only alert if stock drops to or below the minimum threshold
-    if (currentStock > minStockLevel && currentStock > 0) return;
+    const stockNum = Number(currentStock) || 0;
+    const minNum = Number(minStockLevel) || 0;
+
+    // 🔥 RELIABILITY FIX: Safely cast to Numbers to prevent string-comparison bypasses
+    if (stockNum > minNum) return;
     
-    const isOOS = currentStock <= 0;
+    const isOOS = stockNum <= 0;
     const alertType = isOOS ? '🚨 *OUT OF STOCK*' : '⚠️ *LOW STOCK ALERT*';
     const dateStr = new Date().toLocaleString('en-GB');
-    const message = `${alertType}\n📅 Date: ${dateStr}\n🌾 Product: *${productName}*\n📦 Current Stock: *${currentStock}*\n📉 Min Threshold: ${minStockLevel}`;
+    // 🔥 SECURITY FIX: Include the active Branch ID so you know which tenant needs the restock
+    const message = `${alertType}\n🏬 Branch ID: *${activeBranchId}*\n📅 Date: ${dateStr}\n🌾 Product: *${productName}*\n📦 Current Stock: *${stockNum}*\n📉 Min Threshold: ${minNum}`;
 
     const botToken = TELEGRAM_CONFIG.botToken || process.env.NEXT_PUBLIC_TELEGRAM_BOT_TOKEN;
     // Uses your requested newGroupChatId mapping
@@ -258,8 +347,19 @@ export default function RiceControl() {
     const handleBranchChange = () => init();
     window.addEventListener('branch_changed', handleBranchChange);
 
+    // 🛡️ INTEGRATION FIX: Listen to POS sales in real-time so the Inventory screen is never stale
+    const invProductsChannel = supabase.channel('inv-products-update')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'products' }, () => fetchProducts())
+      .subscribe();
+
+    const invBatchesChannel = supabase.channel('inv-batches-update')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'inventory_batches' }, () => fetchBatches())
+      .subscribe();
+
     return () => {
       window.removeEventListener('branch_changed', handleBranchChange);
+      supabase.removeChannel(invProductsChannel);
+      supabase.removeChannel(invBatchesChannel);
     }
   }, [activeBranchId]) // 🔥 CRITICAL: RE-RUNS ON BRANCH SWITCH
 
@@ -346,24 +446,38 @@ export default function RiceControl() {
   }
 
   async function fetchSettings() {
-    const { data } = await supabase.from('app_settings').select('*').in('setting_key', [
+    // 🛡️ INTEGRATION FIX: Fetch branched keys so RiceControl reads the exact layouts saved by POSPage
+    const branchSuffix = activeBranchId === 0 ? '' : `_${activeBranchId}`;
+    const keysToFetch = [
+      `column_widths${branchSuffix}`, `column_order${branchSuffix}`, `category_order${branchSuffix}`, 
+      `pending_col_widths${branchSuffix}`, `pending_col_order${branchSuffix}`,
+      `supplier_col_widths${branchSuffix}`, `supplier_col_order${branchSuffix}`,
+      `product_sort${branchSuffix}`, `pending_sort${branchSuffix}`, `supplier_sort${branchSuffix}`
+    ];
+    
+    // Fallback to global keys if branched keys don't exist yet
+    const fallbackKeys = [
       'column_widths', 'column_order', 'category_order', 
-      'pending_col_widths', 'pending_col_order',
-      'supplier_col_widths', 'supplier_col_order',
-      'product_sort', 'pending_sort', 'supplier_sort' // 🔥 Added sort keys to fetch
-    ])
+      'pending_col_widths', 'pending_col_order', 'supplier_col_widths', 
+      'supplier_col_order', 'product_sort', 'pending_sort', 'supplier_sort'
+    ];
+
+    const { data } = await supabase.from('app_settings').select('*').in('setting_key', [...keysToFetch, ...fallbackKeys]);
+    
     if (data) {
-      const widths = data.find((d: any) => d.setting_key === 'column_widths')
-      const order = data.find((d: any) => d.setting_key === 'column_order')
-      const catOrder = data.find((d: any) => d.setting_key === 'category_order')
-      const pendWidths = data.find((d: any) => d.setting_key === 'pending_col_widths')
-      const pendOrder = data.find((d: any) => d.setting_key === 'pending_col_order')
-      const supWidths = data.find((d: any) => d.setting_key === 'supplier_col_widths')
-      const supOrder = data.find((d: any) => d.setting_key === 'supplier_col_order')
+      const getSetting = (key: string) => data.find((d: any) => d.setting_key === `${key}${branchSuffix}`) || data.find((d: any) => d.setting_key === key);
+
+      const widths = getSetting('column_widths');
+      const order = getSetting('column_order');
+      const catOrder = getSetting('category_order');
+      const pendWidths = getSetting('pending_col_widths');
+      const pendOrder = getSetting('pending_col_order');
+      const supWidths = getSetting('supplier_col_widths');
+      const supOrder = getSetting('supplier_col_order');
       
-      const prodSort = data.find((d: any) => d.setting_key === 'product_sort')
-      const pendSort = data.find((d: any) => d.setting_key === 'pending_sort')
-      const supSort = data.find((d: any) => d.setting_key === 'supplier_sort')
+      const prodSort = getSetting('product_sort');
+      const pendSort = getSetting('pending_sort');
+      const supSort = getSetting('supplier_sort');
 
       if (widths?.setting_value) setColumnWidths(widths.setting_value)
       if (order?.setting_value) {
@@ -473,8 +587,13 @@ export default function RiceControl() {
     
     if (!error) {
       if (qtyDifference !== 0) {
+        // ✅ FIX: Use atomic RPC when editing historical batch quantities
+        await supabase.rpc('adjust_product_stock', { 
+          p_product_id: targetProduct.id, 
+          p_quantity: qtyDifference 
+        });
+        
         const newStock = Number(targetProduct.stock) + qtyDifference;
-        await supabase.from('products').update({ stock: newStock }).eq('id', targetProduct.id);
         triggerStockAlert(targetProduct.name || 'Unknown', newStock, Number(targetProduct.min_stock_level) || 0);
         
         if (historyModal.product) {
@@ -509,8 +628,13 @@ export default function RiceControl() {
     
     if (!error) {
       if (qtyToReverse > 0) {
+        // ✅ FIX: Use atomic RPC when deleting a batch to deduct from master stock safely
+        await supabase.rpc('adjust_product_stock', { 
+          p_product_id: targetProduct.id, 
+          p_quantity: -Math.abs(qtyToReverse) 
+        });
+        
         const newStock = Number(targetProduct.stock) - qtyToReverse;
-        await supabase.from('products').update({ stock: newStock }).eq('id', targetProduct.id);
         triggerStockAlert(targetProduct.name || 'Unknown', newStock, Number(targetProduct.min_stock_level) || 0);
         
         if (historyModal.product) {
@@ -540,8 +664,11 @@ export default function RiceControl() {
 
       const targetProduct = products.find(p => p.id === impData.product_id);
       if (targetProduct) {
-        const newStock = Math.max(0, Number(targetProduct.stock) - Number(impData.qty));
-        await supabase.from('products').update({ stock: newStock }).eq('id', targetProduct.id);
+        // ✅ FIX: Use atomic RPC instead of client-side math for voiding
+        await supabase.rpc('adjust_product_stock', { 
+          p_product_id: targetProduct.id, 
+          p_quantity: -Math.abs(Number(impData.qty)) 
+        });
       }
 
       const { data: batches } = await supabase.from('inventory_batches')
@@ -572,12 +699,19 @@ export default function RiceControl() {
       }
 
       if (Number(impData.paid_amount) > 0) {
-        await supabase.from('expenses')
-          .delete()
-          .eq('remarks', `Stock Import: ${supplierName}`);
+        // 🛡️ DASHBOARD FIX: Find and delete ONLY ONE matching expense to prevent erasing the entire supplier's payment history
+        const { data: exps } = await supabase.from('expenses')
+          .select('id')
+          .eq('remarks', `Stock Import: ${supplierName}`)
+          .eq('branch_id', activeBranchId)
+          .limit(1);
+          
+        if (exps && exps.length > 0) {
+          await supabase.from('expenses').delete().eq('id', exps[0].id);
+        }
       }
-
-      await supabase.from('imports').delete().eq('id', importId);
+      // 🔥 SECURITY FIX: Isolate import deletion
+      await supabase.from('imports').delete().eq('id', importId).eq('branch_id', activeBranchId);
 
       showToast('success', 'Import Voided', 'Record and associated funds safely reversed.');
       setHistoryModal({ isOpen: false, product: null, data: [], activeBatches: [] });
@@ -681,9 +815,11 @@ export default function RiceControl() {
           branch_id: activeBranchId
         }]);
       }
+
+      // ✅ FIX: Use atomic RPC to safely ADD stock, preventing cashiers' sales from being overwritten!
+      await supabase.rpc('adjust_product_stock', { p_product_id: product.id, p_quantity: qty });
       
-      const newStock = Number(product.stock || 0) + qty;
-      const { error: stockErr } = await supabase.from('products').update({ stock: newStock, cost_price: unitCost }).eq('id', product.id);
+      const { error: stockErr } = await supabase.from('products').update({ cost_price: unitCost }).eq('id', product.id);
       if (stockErr) throw stockErr;
 
       await supabase.from('inventory_batches').insert([{
@@ -699,7 +835,7 @@ export default function RiceControl() {
         let amtRiel = paidAmount;
         if (importForm.payment_method.includes('$')) {
           amtUsd = paidAmount;
-          amtRiel = paidAmount * EXCHANGE_RATE;
+          amtRiel = 0; // 🛡️ DASHBOARD FIX: Set to 0 so the Dashboard doesn't double-count the expense
         }
 
         await supabase.from('expenses').insert([{
@@ -709,7 +845,7 @@ export default function RiceControl() {
           remarks: `Stock Import: ${supplierName}`,
           amount_usd: Math.abs(amtUsd),
           amount_riel: Math.abs(amtRiel),
-          description: 'BUSINESS',
+          description: 'RICE',
           branch_id: activeBranchId
         }]);
       }
@@ -765,16 +901,19 @@ export default function RiceControl() {
       const newPaidAmount = Number(record.paid_amount) + totalRielEq;
       const newStatus = newPaidAmount >= Number(record.total_cost) ? 'Paid' : 'Pending';
 
-      await supabase.from('imports').update({ paid_amount: newPaidAmount, status: newStatus }).eq('id', record.id);
+      // 🔥 SECURITY FIX: Apply branch isolation to import payment updates
+      await supabase.from('imports').update({ paid_amount: newPaidAmount, status: newStatus }).eq('id', record.id).eq('branch_id', activeBranchId);
 
       const supplier = suppliers.find(s => String(s.id) === String(record.supplier_id));
       const newTotalOwed = Math.max(0, Number(supplier?.total_owed_riel || 0) - totalRielEq);
-      await supabase.from('suppliers').update({ total_owed_riel: newTotalOwed }).eq('id', supplier?.id);
+      // 🔥 SECURITY FIX: Apply branch isolation to supplier debt updates
+      await supabase.from('suppliers').update({ total_owed_riel: newTotalOwed }).eq('id', supplier?.id).eq('branch_id', activeBranchId);
 
       const { data: apRows } = await supabase.from('accounts_payable')
         .select('*')
         .eq('supplier_name', supplier?.name)
         .eq('status', 'Unpaid')
+        .eq('branch_id', activeBranchId) // 🛡️ DASHBOARD FIX: Prevent wiping out other branches' AP data
         .order('created_at', { ascending: true });
       
       if (apRows && apRows.length > 0) {
@@ -794,14 +933,14 @@ export default function RiceControl() {
           }
       }
 
-      await supabase.from('expenses').insert([{
+     await supabase.from('expenses').insert([{
         expense_date: new Date().toISOString().split('T')[0],
         spender: 'Both',
         payment_method: methodStrings.join(', '),
         remarks: `Paid Debt: ${supplier?.name || 'Supplier'}`,
         amount_usd: Math.abs(totalUsdFace),
         amount_riel: Math.abs(totalRielFace),
-        description: 'BUSINESS',
+        description: 'RICE', // ✅ Changed from 'BUSINESS' to 'RICE'
         branch_id: activeBranchId // 🔥 STAMPED
       }]);
 
@@ -868,7 +1007,8 @@ export default function RiceControl() {
     });
 
     if (Object.keys(payload).length > 0) {
-       const { error } = await supabase.from('products').update(payload).eq('id', id);
+       // 🔥 SECURITY FIX: Lock product modifications to the active branch
+       const { error } = await supabase.from('products').update(payload).eq('id', id).eq('branch_id', activeBranchId);
        if (error) {
          showToast('error', 'Save Failed', error.message);
        } else {
@@ -885,7 +1025,8 @@ export default function RiceControl() {
 
   const handleDelete = async () => {
     if (!confirm(`Are you sure you want to delete ${selectedToDelete.size} item(s)?`)) return
-    const { error } = await supabase.from('products').update({ is_archived: true }).in('id', Array.from(selectedToDelete))
+    // 🔥 SECURITY FIX: Lock product mass-archiving to the active branch
+    const { error } = await supabase.from('products').update({ is_archived: true }).in('id', Array.from(selectedToDelete)).eq('branch_id', activeBranchId)
     if (!error) { 
       setSelectedToDelete(new Set()); 
       fetchProducts(); 
@@ -895,16 +1036,25 @@ export default function RiceControl() {
 
   const handleDeleteSuppliers = async () => {
     if (!confirm(`Are you sure you want to delete ${selectedSuppliersToDelete.size} supplier(s)?`)) return
-    const { error } = await supabase.from('suppliers').update({ is_archived: true }).in('id', Array.from(selectedSuppliersToDelete))
-    if (!error) { 
+    // 🔥 SECURITY FIX: Lock supplier mass-archiving to the active branch
+    const { error } = await supabase.from('suppliers').update({ is_archived: true }).in('id', Array.from(selectedSuppliersToDelete)).eq('branch_id', activeBranchId)
+    if (!error) {
       setSelectedSuppliersToDelete(new Set()); 
       fetchSuppliers(); 
       showToast('success', 'Suppliers Deleted', 'Suppliers archived safely.');
     }
   }
 
-  const addProduct = async () => {
+const addProduct = async () => {
     if (!newItem.name) return showToast('error', 'Missing Data', 'Name is required');
+
+    // ✅ FIX: Prevent Duplicate Product Names
+    const isDuplicate = products.some(p => p.name.toLowerCase().trim() === newItem.name.toLowerCase().trim());
+    if (isDuplicate) {
+      return showToast('error', 'Duplicate Name', 'A product with this exact name already exists!');
+    }
+
+    setIsProcessing(true);
     const payload = {
       name: newItem.name,
       price: Number(newItem.price) || 0,
@@ -978,7 +1128,9 @@ export default function RiceControl() {
       newOrder.splice(targetIdx, 0, sourceCol);
       const finalOrder = ['expand', ...newOrder, 'actions'] as ColumnKey[];
       
-      supabase.from('app_settings').upsert({ setting_key: 'column_order', setting_value: finalOrder }, { onConflict: 'setting_key' }).then();
+      // 🔥 SECURITY FIX: Isolates UI layout updates to the active branch to prevent cross-tenant overrides
+      const branchKey = activeBranchId === 0 ? 'column_order' : `column_order_${activeBranchId}`;
+      supabase.from('app_settings').upsert({ setting_key: branchKey, setting_value: finalOrder }, { onConflict: 'setting_key' }).then();
       return finalOrder;
     })
   }
@@ -1288,27 +1440,32 @@ export default function RiceControl() {
         )}
       </div>
 
-      {/* RICE CATEGORIES (Frozen) */}
+      {/* RICE CATEGORIES (dnd-kit) */}
       {activeView === 'wholesale' && (
-        <div 
-          className="saas-tab-container hide-scrollbar" 
-          style={{ paddingBottom: '16px', marginBottom: '8px', WebkitOverflowScrolling: 'touch', userSelect: 'none', background: 'transparent', border: 'none', boxShadow: 'none', flexShrink: 0 }}
+        <DndContext
+          sensors={sensors}
+          collisionDetection={closestCenter}
+          onDragEnd={handleCategoryDragEnd}
         >
-          {categoryOrder.map(cat => (
-            <button 
-              key={cat} 
-              draggable={true}
-              onDragStart={(e) => handleCategoryDragStart(e, cat)}
-              onDragOver={onDragOverCol}
-              onDrop={(e) => handleCategoryDrop(e, cat)}
-              onClick={() => setActiveCategory(cat)} 
-              className={`saas-tab ${activeCategory === cat ? 'active' : ''}`}
-              style={{ flexShrink: 0, borderRadius: '20px', cursor: 'grab' }}
+          <div 
+            className="saas-tab-container hide-scrollbar" 
+            style={{ paddingBottom: '16px', marginBottom: '8px', WebkitOverflowScrolling: 'touch', userSelect: 'none', background: 'transparent', border: 'none', boxShadow: 'none', flexShrink: 0, display: 'flex' }}
+          >
+            <SortableContext
+              items={categoryOrder}
+              strategy={horizontalListSortingStrategy}
             >
-              {cat}
-            </button>
-          ))}
-        </div>
+              {categoryOrder.map(cat => (
+                <SortableCategoryItem
+                  key={cat}
+                  id={cat}
+                  isActive={activeCategory === cat}
+                  onClick={() => setActiveCategory(cat)}
+                />
+              ))}
+            </SortableContext>
+          </div>
+        </DndContext>
       )}
 
       {/* 🔥 SPREADSHEET VIEWS: RETAIL & WHOLESALE */}

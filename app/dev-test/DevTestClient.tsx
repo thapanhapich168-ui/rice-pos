@@ -3,15 +3,17 @@
 import { useState } from 'react'
 import { supabase } from '@/lib/supabaseClient'
 import EmptyState from '@/components/EmptyState'
+import { useBranch } from '@/components/BranchContext' // 🛡️ FIX: Added missing import
 
 type TestResult = { name: string; status: 'PENDING' | 'RUNNING' | 'PASS' | 'FAIL'; log: { type: 'info' | 'assert' | 'ui', msg: string }[] };
 
 export default function MasterTestEngine() {
+  const { activeBranchId } = useBranch(); // 🛡️ FIX: Pulled from context to clear the 8 "activeBranchId is not defined" errors
   const [results, setResults] = useState<TestResult[]>([])
   const [isRunning, setIsRunning] = useState(false)
 
-  // 🔥 NO BRACKETS: Postgres ILIKE treats '[' and ']' as wildcards.
-  const TEST_ID = `DEV_TEST_${Date.now()}`;
+  // 🛡️ STABILITY FIX: Lock the TEST_ID in state so it does not mutate during log re-renders
+  const [TEST_ID] = useState(() => `DEV_TEST_${Date.now()}`);
   const EXCHANGE_RATE = 4000;
 
   // --- 🚨 PRODUCTION SECURITY LOCK ---
@@ -66,7 +68,8 @@ export default function MasterTestEngine() {
     try {
       // 🛡️ Bulletproof wrapper: Ignores foreign key blocks and keeps wiping what it can.
       const wipe = async (table: string, column: string) => {
-         const { error } = await supabase.from(table).delete().ilike(column, '%DEV_TEST_%');
+         // 🛡️ SECURITY FIX: Isolate the destructive wipe strictly to the active branch
+         const { error } = await supabase.from(table).delete().ilike(column, '%DEV_TEST_%').eq('branch_id', activeBranchId);
          if (error) {
            console.warn(`Backend restriction prevented deleting from ${table}:`, error.message);
          }
@@ -83,7 +86,8 @@ export default function MasterTestEngine() {
 
       const { data: stf } = await supabase.from('staff').select('id').ilike('name', '%DEV_TEST_%');
       if (stf && stf.length > 0) {
-        await supabase.from('staff_debt_history').delete().in('staff_id', stf.map(s => s.id));
+        // 🛡️ SECURITY FIX: Isolate the nested cleanup deletion to the active branch
+        await supabase.from('staff_debt_history').delete().in('staff_id', stf.map(s => s.id)).eq('branch_id', activeBranchId);
       }
 
       // 2. DELETE INTERMEDIATE DATA
@@ -94,14 +98,16 @@ export default function MasterTestEngine() {
       const { data: prods } = await supabase.from('products').select('id').ilike('name', '%DEV_TEST_%');
       if (prods && prods.length > 0) {
         const pIds = prods.map(p => p.id);
-        await supabase.from('imports').delete().in('product_id', pIds);
-        await supabase.from('price_history').delete().in('product_id', pIds);
-        await supabase.from('inventory_batches').delete().in('product_id', pIds);
+        // 🛡️ CASCADE FIX: Wipe price_history BEFORE deleting the product to bypass Foreign Key constraint blocks
+        await supabase.from('price_history').delete().in('product_id', pIds).eq('branch_id', activeBranchId);
+        await supabase.from('imports').delete().in('product_id', pIds).eq('branch_id', activeBranchId);
+        await supabase.from('inventory_batches').delete().in('product_id', pIds).eq('branch_id', activeBranchId);
       }
       
       const { data: sups } = await supabase.from('suppliers').select('id').ilike('name', '%DEV_TEST_%');
       if (sups && sups.length > 0) {
-        await supabase.from('imports').delete().in('supplier_id', sups.map(s => s.id));
+        // 🛡️ SECURITY FIX: Isolate the nested supplier cleanup to the active branch
+        await supabase.from('imports').delete().in('supplier_id', sups.map(s => s.id)).eq('branch_id', activeBranchId);
       }
 
       // 3. DELETE INVENTORY & PRODUCT DATA
@@ -131,7 +137,8 @@ export default function MasterTestEngine() {
     try {
       await cleanupTestData('Pre-Test Cleanup');
 
-      let supData, custData, wProd, rProd;
+      // 🛡️ FIX: Added explicit 'any' types to prevent strict TypeScript compilation errors
+      let supData: any, custData: any, wProd: any, rProd: any;
 
       // =========================================================================
       // MODULE 1: SETUP & CUSTOMER DB
@@ -139,22 +146,23 @@ export default function MasterTestEngine() {
       let testName = 'Test 9: Customer & Product Database';
       logInfo(testName, 'Creating Supplier, Customer, and Products...');
       try {
-        const { data: sData } = await supabase.from('suppliers').insert({ name: `${TEST_ID}_SUPPLIER` }).select().single();
+        // 🛡️ DATA FIX: Attach activeBranchId to all test insertions to pass RLS and prevent data leaking
+        const { data: sData } = await supabase.from('suppliers').insert({ name: `${TEST_ID}_SUPPLIER`, branch_id: activeBranchId }).select().single();
         supData = sData;
         assertEq(true, !!supData, testName, '[Table: suppliers] Supplier created successfully');
 
-        const { data: cData } = await supabase.from('customers').insert({ name: `${TEST_ID}_CUSTOMER`, type: 'ហូប', owner: 'Both' }).select().single();
+        const { data: cData } = await supabase.from('customers').insert({ name: `${TEST_ID}_CUSTOMER`, type: 'ហូប', owner: 'Both', branch_id: activeBranchId }).select().single();
         custData = cData;
         assertEq(true, !!custData, testName, '[Table: customers] Customer created successfully');
 
-        const { data: wpData } = await supabase.from('products').insert({ name: `${TEST_ID}_WHOLESALE_RICE`, price: 0, cost_price: 100000, weight: 50, stock: 10 }).select().single();
+        const { data: wpData } = await supabase.from('products').insert({ name: `${TEST_ID}_WHOLESALE_RICE`, price: 0, cost_price: 100000, weight: 50, stock: 10, branch_id: activeBranchId }).select().single();
         wProd = wpData;
         assertEq(10, wProd.stock, testName, '[Table: products] Wholesale 50kg bag created with 10 stock');
 
-        await supabase.from('inventory_batches').insert({ product_id: wProd.id, cost_price: 100000, remaining_qty: 10 });
-        await supabase.from('price_history').insert({ product_id: wProd.id, price: 0, cost_price: 100000, imported_qty: 10, remaining_qty: 10 });
+        await supabase.from('inventory_batches').insert({ product_id: wProd.id, cost_price: 100000, remaining_qty: 10, branch_id: activeBranchId });
+        await supabase.from('price_history').insert({ product_id: wProd.id, price: 0, cost_price: 100000, imported_qty: 10, remaining_qty: 10, branch_id: activeBranchId });
 
-        const { data: rpData } = await supabase.from('products').insert({ name: `${TEST_ID}_RETAIL_RICE`, price: 3000, cost_price: 0, weight: 1, stock: 10, linked_wholesale_id: wProd.id }).select().single();
+        const { data: rpData } = await supabase.from('products').insert({ name: `${TEST_ID}_RETAIL_RICE`, price: 3000, cost_price: 0, weight: 1, stock: 10, linked_wholesale_id: wProd.id, branch_id: activeBranchId }).select().single();
         rProd = rpData;
         assertEq(wProd.id, rProd.linked_wholesale_id, testName, '[Table: products] Retail bag strictly linked to Wholesale ID');
 

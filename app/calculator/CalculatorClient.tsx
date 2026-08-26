@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { supabase } from '@/lib/supabaseClient'
 import { Product, InventoryBatch } from '@/types'
 import { formatRiel } from '@/utils/formatters'
@@ -40,18 +40,18 @@ const [products, setProducts] = useState<Product[]>([])
 const [activeBatches, setActiveBatches] = useState<Record<number, InventoryBatch[]>>({})
 // 🔥 NEW STATES FOR HISTORY EDITING
 const [editingHistoryId, setEditingHistoryId] = useState<string | null>(null);
-const [historyEdits, setHistoryEdits] = useState<Record<string, { yieldKg: number, mixedCogs: number }>>({});
+const [historyEdits, setHistoryEdits] = useState<Record<string, { yieldKg: number | string, mixedCogs: number | string }>>({});
 // Selection States
 const [rice1Id, setRice1Id] = useState<string>('')
-const [rice1Qty, setRice1Qty] = useState<number | ''>('')
+const [rice1Qty, setRice1Qty] = useState<number | string>('')
 const [rice1BatchId, setRice1BatchId] = useState<number | null>(null)
 const [rice2Id, setRice2Id] = useState<string>('')
-const [rice2Qty, setRice2Qty] = useState<number | ''>('')
+const [rice2Qty, setRice2Qty] = useState<number | string>('')
 const [rice2BatchId, setRice2BatchId] = useState<number | null>(null)
 
 const [showThirdRice, setShowThirdRice] = useState(false)
 const [rice3Id, setRice3Id] = useState<string>('')
-const [rice3Qty, setRice3Qty] = useState<number | ''>('')
+const [rice3Qty, setRice3Qty] = useState<number | string>('')
 const [rice3BatchId, setRice3BatchId] = useState<number | null>(null)
 
 // 🟢 INLINE DROPDOWN STATES
@@ -69,10 +69,10 @@ const [syncMode, setSyncMode] = useState<'none' | 'existing' | 'new'>('none')
 const [targetProductId, setTargetProductId] = useState<string>('')
 // 🔥 BAG DEDUCTION STATES
 const [bagId, setBagId] = useState<string>('')
-const [bagQty, setBagQty] = useState<number | ''>('')
+const [bagQty, setBagQty] = useState<number | string>('')
 
 const [newMixName, setNewMixName] = useState('')
-const [newMixPrice, setNewMixPrice] = useState<number | ''>(0)
+const [newMixPrice, setNewMixPrice] = useState<number | string>(0)
 const [newMixType, setNewMixType] = useState<'wholesale' | 'half' | 'retail'>('wholesale')
 
 useEffect(() => {
@@ -97,10 +97,11 @@ return prod.cost_price;
 
 // 🧠 SMART MATH ENGINE
 useEffect(() => {
-const q1 = Number(rice1Qty) || 0;
-const q2 = Number(rice2Qty) || 0;
-const q3 = showThirdRice ? (Number(rice3Qty) || 0) : 0;
-const qBag = Number(bagQty) || 0;
+// 🔥 RELIABILITY FIX: Strip commas from CurrencyInput strings to prevent live math NaN crashes
+const q1 = Number(String(rice1Qty).replace(/,/g, '')) || 0;
+const q2 = Number(String(rice2Qty).replace(/,/g, '')) || 0;
+const q3 = showThirdRice ? (Number(String(rice3Qty).replace(/,/g, '')) || 0) : 0;
+const qBag = Number(String(bagQty).replace(/,/g, '')) || 0;
 
 const hasValidThird = showThirdRice ? rice3 : true;
 
@@ -180,7 +181,9 @@ setting_value: keptHistory
 }, { onConflict: 'setting_key' })
 }
 
-const dropdownFilteredProducts = products.filter(p => {
+// 🔥 PERFORMANCE FIX: Memoize complex array filtering to prevent UI freezing on input keystrokes
+const dropdownFilteredProducts = useMemo(() => {
+return products.filter(p => {
 if (dropdownSearch && !p.name.toLowerCase().includes(dropdownSearch.toLowerCase())) return false;
 if (activeDropdown === 'bag') {
 return p.name.includes('បាវ');
@@ -199,6 +202,7 @@ return true;
 }
 return true;
 });
+}, [products, dropdownSearch, activeDropdown, dropdownTab]);
 
 const handleSelectProduct = (p: Product, target: string) => {
 if (target === 'rice1') { setRice1Id(p.id.toString()); setRice1BatchId(null); }
@@ -241,10 +245,11 @@ if (showThirdRice && !rice3) {
 showToast('error', 'Missing Information', 'Please select the 3rd rice or remove it.');
 return;
 }
-const qtyToDeduct1 = Number(rice1Qty) || 0;
-const qtyToDeduct2 = Number(rice2Qty) || 0;
-const qtyToDeduct3 = showThirdRice ? (Number(rice3Qty) || 0) : 0;
-const qtyToDeductBag = Number(bagQty) || 0;
+// 🔥 RELIABILITY FIX: Strip commas to prevent NaN crashes which bypass strict stock validation
+const qtyToDeduct1 = Number(String(rice1Qty).replace(/,/g, '')) || 0;
+const qtyToDeduct2 = Number(String(rice2Qty).replace(/,/g, '')) || 0;
+const qtyToDeduct3 = showThirdRice ? (Number(String(rice3Qty).replace(/,/g, '')) || 0) : 0;
+const qtyToDeductBag = Number(String(bagQty).replace(/,/g, '')) || 0;
 
 if (syncMode === 'new' && (!newMixName || newMixPrice === '')) {
 showToast('error', 'Missing Information', 'Please enter a name for the new mix.');
@@ -370,7 +375,8 @@ let finalTargetName = targetProd?.name || '';
 if (syncMode === 'new') {
   const payload = {
     name: newMixName,
-    price: Number(newMixPrice) || 0,
+    // 🔥 RELIABILITY FIX: Strip commas to prevent NaN database corruption
+    price: Number(String(newMixPrice).replace(/,/g, '')) || 0,
     cost_price: Math.round(finalCogs),
     weight: newMixType === 'wholesale' ? 50 : newMixType === 'half' ? 25 : 1, 
     stock: finalYield,
@@ -383,7 +389,8 @@ if (syncMode === 'new') {
 
 } else if (targetProd) {
   await supabase.rpc('adjust_product_stock', { p_product_id: targetProd.id, p_quantity: finalYield });
-  const { error } = await supabase.from('products').update({ cost_price: Math.round(finalCogs) }).eq('id', targetProd.id);
+  // 🔥 SECURITY FIX: Cryptographically lock the product update strictly to the active branch
+  const { error } = await supabase.from('products').update({ cost_price: Math.round(finalCogs) }).eq('id', targetProd.id).eq('branch_id', activeBranchId);
   if (error) throw error;
   finalTargetId = targetProd.id.toString();
   finalTargetName = targetProd.name; 
@@ -464,7 +471,8 @@ setIsProcessing(false);
     try {
       // 1. Reverse Target Product & Batch
       await supabase.rpc('adjust_product_stock', { p_product_id: record.targetProductId, p_quantity: -(record.yieldKg || 0) });
-      await supabase.from('inventory_batches').delete().eq('id', record.targetBatchId);
+      // 🔥 SECURITY FIX: Enforce strict branch isolation on batch deletion
+      await supabase.from('inventory_batches').delete().eq('id', record.targetBatchId).eq('branch_id', activeBranchId);
 
       // 2. Restore Ingredients
       if (record.ingredients) {
@@ -485,11 +493,8 @@ setIsProcessing(false);
           await supabase.rpc('adjust_product_stock', { p_product_id: ing.id, p_quantity: ing.qty });
           
           if (ing.batchId) {
-            // Restore to the explicitly selected Manual Batch using forceful UPDATE
-            const { data: specificBatch } = await supabase.from('inventory_batches').select('remaining_qty').eq('id', ing.batchId).single();
-            if (specificBatch) {
-               await supabase.from('inventory_batches').update({ remaining_qty: Number(specificBatch.remaining_qty) + ing.qty }).eq('id', ing.batchId);
-            }
+            // ✅ FIX: Use atomic RPC to prevent race conditions during mix voids
+            await supabase.rpc('adjust_batch_stock', { p_batch_id: ing.batchId, p_quantity: ing.qty });
           } else {
              // 🔥 FIX: Auto-FIFO Restoration Logic
              let targetBatchId = null;
@@ -524,9 +529,8 @@ setIsProcessing(false);
 
              // Apply the restoration
              if (targetBatchId) {
-                 await supabase.from('inventory_batches').update({ 
-                     remaining_qty: Number(currentQty) + ing.qty 
-                 }).eq('id', targetBatchId);
+                 // ✅ FIX: Use atomic RPC
+                 await supabase.rpc('adjust_batch_stock', { p_batch_id: targetBatchId, p_quantity: ing.qty });
              } else {
                  // Step C: Absolute Fallback (Create new)
                  const prodData = products.find(p => p.id === ing.id);
@@ -576,29 +580,30 @@ return;
 }
 setIsProcessing(true);
 try {
-const yieldDiff = edits.yieldKg - (record.yieldKg || 0);
+// 🔥 RELIABILITY FIX: Strip commas from CurrencyInput values to safely execute math operations and prevent NaN crashes
+const cleanYieldKg = Number(String(edits.yieldKg).replace(/,/g, '')) || 0;
+const cleanMixedCogs = Number(String(edits.mixedCogs).replace(/,/g, '')) || 0;
+const yieldDiff = cleanYieldKg - (Number(record.yieldKg) || 0);
+
 // Update Target Product Stock Master
 if (yieldDiff !== 0) {
 await supabase.rpc('adjust_product_stock', { p_product_id: record.targetProductId, p_quantity: yieldDiff });
+
+// 🔥 RELIABILITY FIX: Use atomic RPC to prevent read-modify-write race conditions on batch inventory
+await supabase.rpc('adjust_batch_stock', { p_batch_id: record.targetBatchId, p_quantity: yieldDiff });
 }
 
-// Update Batch Record
-const batchPayload: any = {};
-if (yieldDiff !== 0) {
-const { data: currentBatch } = await supabase.from('inventory_batches').select('remaining_qty').eq('id', record.targetBatchId).single();
-if (currentBatch) {
-batchPayload.remaining_qty = Math.max(0, Number(currentBatch.remaining_qty) + yieldDiff);
-}
-}
-batchPayload.cost_price = edits.mixedCogs;
+// Update Batch Record Cost Price Only
+const batchPayload = { cost_price: cleanMixedCogs };
 
-await supabase.from('inventory_batches').update(batchPayload).eq('id', record.targetBatchId);
+// 🔥 SECURITY FIX: Enforce branch isolation on batch updates
+await supabase.from('inventory_batches').update(batchPayload).eq('id', record.targetBatchId).eq('branch_id', activeBranchId);
 
 // Update local history JSON
 const updatedHistory = globalHistory.map(h => {
 if (h.id === historyId) {
 const newUnit = h.yieldStr.replace(/[0-9.,]+/, '').trim();
-return { ...h, mixedCogs: edits.mixedCogs, yieldKg: edits.yieldKg, yieldStr: `${edits.yieldKg.toLocaleString('en-US', { maximumFractionDigits: 2 })} ${newUnit}` };
+return { ...h, mixedCogs: cleanMixedCogs, yieldKg: cleanYieldKg, yieldStr: `${cleanYieldKg.toLocaleString('en-US', { maximumFractionDigits: 2 })} ${newUnit}` };
 }
 return h;
 });
@@ -1042,7 +1047,8 @@ return (
 </td>
 <td className="saas-td" style={{ color: '#10b981', fontWeight: 'bold', fontSize: '13px' }}>
 {isEditing ? (
-<CurrencyInput value={editData.yieldKg} onChange={(v:any) => setHistoryEdits({...historyEdits, [h.id]: {...editData, yieldKg: v}})} className="saas-input no-spinners" style={{ width: '80px', padding: '4px 8px', fontSize: '13px' }} />
+// 🔥 STATE FIX: Use functional updates to prevent dropped keystrokes and stale closures
+<CurrencyInput value={editData.yieldKg} onChange={(v:any) => setHistoryEdits(prev => ({...prev, [h.id]: {...(prev[h.id] || editData), yieldKg: v}}))} className="saas-input no-spinners" style={{ width: '80px', padding: '4px 8px', fontSize: '13px' }} />
 ) : (
 h.yieldStr || '-'
 )}
@@ -1052,7 +1058,8 @@ h.yieldStr || '-'
 </td>
 <td className="saas-td" style={{ color: '#b58a3d', fontWeight: 'bold', fontSize: '14px' }}>
 {isEditing ? (
-<CurrencyInput value={editData.mixedCogs} onChange={(v:any) => setHistoryEdits({...historyEdits, [h.id]: {...editData, mixedCogs: v}})} className="saas-input no-spinners" style={{ width: '100px', padding: '4px 8px', fontSize: '13px' }} />
+// 🔥 STATE FIX: Use functional updates to prevent dropped keystrokes and stale closures
+<CurrencyInput value={editData.mixedCogs} onChange={(v:any) => setHistoryEdits(prev => ({...prev, [h.id]: {...(prev[h.id] || editData), mixedCogs: v}}))} className="saas-input no-spinners" style={{ width: '100px', padding: '4px 8px', fontSize: '13px' }} />
 ) : (
 formatRiel(h.mixedCogs)
 )}

@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabaseClient'
 import { useRouter } from 'next/navigation'
 import { useUserRole } from '@/lib/useUserRole'
-import AdminGuard from '@/components/AdminGuard' // 🔒 NEW: IMPORT THE BOUNCER
+import AdminGuard from '@/components/AdminGuard'
 
 // ==========================================
 // ROBUST LIVE COMMA FORMATTER 
@@ -62,16 +62,6 @@ export default function SettingsPage() {
 
   // --- FINANCIAL STATE ---
   const [exchangeRate, setExchangeRate] = useState<number>(4000)
-  const [baseCapital, setBaseCapital] = useState<number>(0)
-  const [initCashRiel, setInitCashRiel] = useState<number>(0)
-  const [initCashUsd, setInitCashUsd] = useState<number>(0)
-  const [initQrRiel, setInitQrRiel] = useState<number>(0)
-  const [initQrUsd, setInitQrUsd] = useState<number>(0)
-  const [familyOweRiel, setFamilyOweRiel] = useState<number>(0)
-  const [familyOweUsd, setFamilyOweUsd] = useState<number>(0)
-  const [persOweRiel, setPersOweRiel] = useState<number>(0) 
-  const [persOweUsd, setPersOweUsd] = useState<number>(0) 
-
   const [isResetting, setIsResetting] = useState(false)
 
   useEffect(() => {
@@ -84,26 +74,13 @@ export default function SettingsPage() {
 
   async function fetchSettings() {
     setLoading(true)
-    const keys = [
-      'exchange_rate', 'base_capital', 'initial_cash_riel', 'initial_cash_usd', 
-      'initial_qr_riel', 'initial_qr_usd', 'personal_owe_riel', 'personal_owe_usd', 
-      'family_owe_riel', 'family_owe_usd'
-    ];
+    const keys = ['exchange_rate'];
     
     const { data } = await supabase.from('app_settings').select('*').in('setting_key', keys)
     
     if (data) {
       data.forEach((s: any) => {
         if (s.setting_key === 'exchange_rate') setExchangeRate(Number(s.setting_value) || 4000)
-        if (s.setting_key === 'base_capital') setBaseCapital(Number(s.setting_value) || 0)
-        if (s.setting_key === 'initial_cash_riel') setInitCashRiel(Number(s.setting_value) || 0)
-        if (s.setting_key === 'initial_cash_usd') setInitCashUsd(Number(s.setting_value) || 0)
-        if (s.setting_key === 'initial_qr_riel') setInitQrRiel(Number(s.setting_value) || 0)
-        if (s.setting_key === 'initial_qr_usd') setInitQrUsd(Number(s.setting_value) || 0)
-        if (s.setting_key === 'personal_owe_riel') setPersOweRiel(Number(s.setting_value) || 0)
-        if (s.setting_key === 'personal_owe_usd') setPersOweUsd(Number(s.setting_value) || 0)
-        if (s.setting_key === 'family_owe_riel') setFamilyOweRiel(Number(s.setting_value) || 0)
-        if (s.setting_key === 'family_owe_usd') setFamilyOweUsd(Number(s.setting_value) || 0)
       })
     }
     setLoading(false)
@@ -140,7 +117,15 @@ export default function SettingsPage() {
   }
 
   const handleResetLayouts = async () => {
-    if(!confirm("⚠️ WARNING: This will reset all table column widths, sorts, and layouts across the entire app back to their default state. Are you sure?")) return;
+    // 🛡️ UI FIX: Force user to type 'CONFIRM' to prevent accidental resets
+    const userInput = prompt("⚠️ WARNING: This will reset all table column widths, sorts, and layouts across the entire app back to their default state.\n\nPlease type the word CONFIRM to proceed:");
+    
+    if (userInput !== "CONFIRM") {
+      if (userInput !== null) {
+        alert("❌ Reset canceled. You must type exactly 'CONFIRM' in all caps to proceed.");
+      }
+      return;
+    }
     
     setIsResetting(true);
     try {
@@ -164,27 +149,29 @@ export default function SettingsPage() {
 
   return (
     <AdminGuard>
-      <div className="main-wrapper">
+      <div className="main-wrapper" style={{ display: 'flex', flexDirection: 'column', height: '100dvh', overflow: 'hidden' }}>
         
         {/* HEADER CONTAINER */}
-        <div className="header-container">
+        <div className="header-container" style={{ flexShrink: 0 }}>
           <div className="header-left">
             <h1 className="saas-page-title">⚙️ Access & Settings</h1>
           </div>
         </div>
 
-        <div className="settings-grid">
+        {/* SCROLLABLE CONTENT AREA */}
+        <div className="hide-scrollbar" style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden', paddingBottom: '60px', width: '100%', boxSizing: 'border-box' }}>
+          <div className="settings-grid">
           
           {/* === CARD 1: ACCOUNT === */}
           <div className="saas-card" style={{ display: 'flex', flexDirection: 'column' }}>
-            <h2 className="saas-card-title" style={{ fontSize: '16px', color: '#0f172a' }}>🔐 Active Session Details</h2>
+            <h2 className="saas-card-title" style={{ fontSize: '15px', color: '#0f172a', textTransform: 'uppercase', letterSpacing: '0.5px' }}>🔐 Active Session Details</h2>
             
             <div style={{ background: '#f8fafc', padding: '16px', borderRadius: '8px', border: '1px solid #e2e8f0', marginBottom: '24px' }}>
               <div style={{ fontSize: '11px', color: '#64748b', marginBottom: '4px', fontWeight: 'bold', textTransform: 'uppercase' }}>Currently Authenticated As:</div>
               <div style={{ fontSize: '16px', fontWeight: 'bold', color: '#10b981', wordBreak: 'break-all' }}>
                 {currentUser?.email || 'Unknown User'}
               </div>
-              <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '8px' }}>Session ID: {currentUser?.id || 'N/A'}</div>
+              <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '8px', wordBreak: 'break-all' }}>Session ID: {currentUser?.id || 'N/A'}</div>
             </div>
 
             <h3 style={{ margin: '0 0 8px 0', fontSize: '14px', fontWeight: 'bold', color: '#111827' }}>Account Management</h3>
@@ -199,14 +186,14 @@ export default function SettingsPage() {
 
           {/* === CARD 2: SYSTEM CONSTANTS === */}
           <div className="saas-card">
-            <h2 className="saas-card-title" style={{ fontSize: '16px', color: '#0f172a' }}>🌐 Global Business Constants</h2>
+            <h2 className="saas-card-title" style={{ fontSize: '15px', color: '#0f172a', textTransform: 'uppercase', letterSpacing: '0.5px' }}>🌐 Global Business Constants</h2>
             <p style={{ fontSize: '13px', color: '#64748b', marginBottom: '20px', lineHeight: 1.5 }}>
               These values affect the mathematical formulas across your entire Point of Sale and Accounting platform.
             </p>
 
             <div style={{ background: '#fefcf3', border: '1px solid #fde047', padding: '16px', borderRadius: '8px' }}>
               <div style={{ marginBottom: '12px' }}>
-                <label className="saas-card-title" style={{ color: '#854d0e', display: 'block', fontSize: '11px', marginBottom: '4px' }}>Master Exchange Rate (៛ per $1)</label>
+                <label className="saas-card-title" style={{ color: '#854d0e', display: 'block', fontSize: '11px', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Master Exchange Rate (៛ per $1)</label>
                 <div style={{ fontSize: '11px', color: '#94a3b8', marginBottom: '8px' }}>Updates POS & COGS calculations globally.</div>
               </div>
               <CurrencyInput 
@@ -221,110 +208,77 @@ export default function SettingsPage() {
 
           {/* === CARD 3: USER PERMISSIONS === */}
           <div className="saas-card" style={{ gridColumn: '1 / -1' }}>
-            <h2 className="saas-card-title" style={{ fontSize: '16px', color: '#0f172a' }}>👥 User Permissions & Roles</h2>
+            <h2 className="saas-card-title" style={{ fontSize: '15px', color: '#0f172a', textTransform: 'uppercase', letterSpacing: '0.5px' }}>👥 User Permissions & Roles</h2>
             <div style={{ fontSize: '13px', color: '#64748b', marginBottom: '20px', lineHeight: 1.5 }}>
               Change the access level for your staff. <br/>
               <strong style={{ color: '#b45309' }}>To Add Users:</strong> Create them securely in your <i>Supabase Auth Dashboard</i>. They will instantly appear below so you can assign their role.
             </div>
 
-            <div className="saas-table-wrapper">
-              <div className="saas-table-responsive">
-                <table className="saas-table">
-                  <thead>
-                    <tr>
-                      <th className="saas-th">Name / Account</th>
-                      <th className="saas-th" style={{ width: '150px' }}>Current Access</th>
-                      <th className="saas-th" style={{ width: '200px' }}>Change Permission</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {profiles.map(p => (
-                       <tr key={p.id} className="saas-tr">
-                         <td className="saas-td" style={{ fontWeight: 'bold', color: '#1e293b' }}>
-                           {p.full_name || 'New Staff Member'}
-                           <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '4px', fontWeight: 'normal' }}>ID: {p.id.split('-')[0]}...</div>
-                         </td>
-                         <td className="saas-td">
-                            <span style={{
-                               padding: '4px 10px', borderRadius: '20px', fontSize: '12px', fontWeight: 'bold', display: 'inline-block',
-                               background: p.role === 'admin' ? '#fef3c7' : p.role === 'manager' ? '#e0f2fe' : p.role === 'cashier' ? '#f3e8ff' : '#f1f5f9',
-                               color: p.role === 'admin' ? '#b45309' : p.role === 'manager' ? '#0369a1' : p.role === 'cashier' ? '#7e22ce' : '#475569'
-                            }}>
-                               {p.role ? String(p.role).toUpperCase() : 'NO ACCESS'}
-                            </span>
-                         </td>
-                         <td className="saas-td">
-                           <select
-                             className="saas-input"
-                             value={p.role || ''}
-                             onChange={(e) => handleRoleUpdate(p.id, e.target.value)}
-                             disabled={p.id === currentUser?.id}
-                             style={{ cursor: p.id === currentUser?.id ? 'not-allowed' : 'pointer' }}
-                           >
-                             <option value="">🚫 No Access</option>
-                             <option value="cashier">🛒 Cashier (POS Only)</option>
-                             <option value="manager">🛡️ Manager</option>
-                             <option value="admin">👑 Master Admin</option>
-                           </select>
-                         </td>
-                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              {profiles.map(p => (
+                <div key={p.id} style={{
+                  background: '#ffffff',
+                  border: '1px solid #e2e8f0',
+                  borderRadius: '12px',
+                  padding: '16px',
+                  boxShadow: '0 1px 3px 0 rgba(0, 0, 0, 0.05)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '16px'
+                }}>
+                  
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '12px' }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontWeight: 'bold', color: '#1e293b', fontSize: '15px', wordBreak: 'break-word', lineHeight: 1.3 }}>
+                        {p.full_name || 'New Staff Member'}
+                      </div>
+                      <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '4px' }}>
+                        ID: {p.id.split('-')[0]}...
+                      </div>
+                    </div>
+                    
+                    <div style={{ flexShrink: 0 }}>
+                      <span style={{
+                         padding: '6px 12px', borderRadius: '20px', fontSize: '11px', fontWeight: 'bold', display: 'inline-block',
+                         background: p.role === 'admin' ? '#fef3c7' : p.role === 'manager' ? '#e0f2fe' : p.role === 'cashier' ? '#f3e8ff' : '#f1f5f9',
+                         color: p.role === 'admin' ? '#b45309' : p.role === 'manager' ? '#0369a1' : p.role === 'cashier' ? '#7e22ce' : '#475569',
+                         textTransform: 'uppercase', letterSpacing: '0.5px'
+                      }}>
+                         {p.role ? String(p.role) : 'NO ACCESS'}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div style={{ borderTop: '1px solid #f1f5f9', paddingTop: '12px' }}>
+                    <label style={{ display: 'block', fontSize: '11px', color: '#64748b', marginBottom: '8px', fontWeight: 'bold', textTransform: 'uppercase' }}>
+                      Change Permission Level
+                    </label>
+                    <select
+                      className="saas-input"
+                      value={p.role || ''}
+                      onChange={(e) => handleRoleUpdate(p.id, e.target.value)}
+                      disabled={p.id === currentUser?.id}
+                      style={{ 
+                        cursor: p.id === currentUser?.id ? 'not-allowed' : 'pointer', 
+                        width: '100%',
+                        backgroundColor: p.id === currentUser?.id ? '#f8fafc' : '#ffffff',
+                        padding: '12px'
+                      }}
+                    >
+                      <option value="">🚫 No Access</option>
+                      <option value="cashier">🛒 Cashier (POS Only)</option>
+                      <option value="manager">🛡️ Manager</option>
+                      <option value="admin">👑 Master Admin</option>
+                    </select>
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
 
-          {/* === CARD 4: STARTING BALANCES === */}
-          <div className="saas-card" style={{ gridColumn: '1 / -1' }}>
-            <h2 className="saas-card-title" style={{ fontSize: '16px', color: '#0f172a' }}>⚖️ Manual Starting Balances</h2>
-            <p style={{ fontSize: '13px', color: '#64748b', marginBottom: '20px', lineHeight: 1.5 }}>
-              These base values are added to your live Business Dashboard asset tracking. Click outside the box to save.
-            </p>
-            
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px' }}>
-              <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', padding: '16px', borderRadius: '8px' }}>
-                <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '8px' }}>Base Capital (៛)</label>
-                <CurrencyInput value={baseCapital} onChange={(v: any) => setBaseCapital(Number(v) || 0)} onBlur={() => updateSetting('base_capital', baseCapital)} className="saas-input" />
-              </div>
-              <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', padding: '16px', borderRadius: '8px' }}>
-                <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '8px' }}>Initial Cash (៛)</label>
-                <CurrencyInput value={initCashRiel} onChange={(v: any) => setInitCashRiel(Number(v) || 0)} onBlur={() => updateSetting('initial_cash_riel', initCashRiel)} className="saas-input" />
-              </div>
-              <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', padding: '16px', borderRadius: '8px' }}>
-                <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '8px' }}>Initial Cash ($)</label>
-                <CurrencyInput value={initCashUsd} onChange={(v: any) => setInitCashUsd(Number(v) || 0)} onBlur={() => updateSetting('initial_cash_usd', initCashUsd)} className="saas-input" />
-              </div>
-              <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', padding: '16px', borderRadius: '8px' }}>
-                <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '8px' }}>Initial QR (៛)</label>
-                <CurrencyInput value={initQrRiel} onChange={(v: any) => setInitQrRiel(Number(v) || 0)} onBlur={() => updateSetting('initial_qr_riel', initQrRiel)} className="saas-input" />
-              </div>
-              <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', padding: '16px', borderRadius: '8px' }}>
-                <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '8px' }}>Initial QR ($)</label>
-                <CurrencyInput value={initQrUsd} onChange={(v: any) => setInitQrUsd(Number(v) || 0)} onBlur={() => updateSetting('initial_qr_usd', initQrUsd)} className="saas-input" />
-              </div>
-              <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', padding: '16px', borderRadius: '8px' }}>
-                <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '8px' }}>Family Owes Me (៛)</label>
-                <CurrencyInput value={familyOweRiel} onChange={(v: any) => setFamilyOweRiel(Number(v) || 0)} onBlur={() => updateSetting('family_owe_riel', familyOweRiel)} className="saas-input" />
-              </div>
-              <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', padding: '16px', borderRadius: '8px' }}>
-                <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '8px' }}>Family Owes Me ($)</label>
-                <CurrencyInput value={familyOweUsd} onChange={(v: any) => setFamilyOweUsd(Number(v) || 0)} onBlur={() => updateSetting('family_owe_usd', familyOweUsd)} className="saas-input" />
-              </div>
-              <div style={{ background: '#fef2f2', border: '1px solid #fecaca', padding: '16px', borderRadius: '8px' }}>
-                <label className="saas-card-title" style={{ color: '#991b1b', display: 'block', fontSize: '11px', marginBottom: '8px' }}>Mom Starting Owe (៛)</label>
-                <CurrencyInput value={persOweRiel} onChange={(v: any) => setPersOweRiel(Number(v) || 0)} onBlur={() => updateSetting('personal_owe_riel', persOweRiel)} className="saas-input" />
-              </div>
-              <div style={{ background: '#fef2f2', border: '1px solid #fecaca', padding: '16px', borderRadius: '8px' }}>
-                <label className="saas-card-title" style={{ color: '#991b1b', display: 'block', fontSize: '11px', marginBottom: '8px' }}>Mom Starting Owe ($)</label>
-                <CurrencyInput value={persOweUsd} onChange={(v: any) => setPersOweUsd(Number(v) || 0)} onBlur={() => updateSetting('personal_owe_usd', persOweUsd)} className="saas-input" />
-              </div>
-            </div>
-          </div>
-
-          {/* === CARD 5: SYSTEM MAINTENANCE === */}
+          {/* === CARD 4: SYSTEM MAINTENANCE === */}
           <div className="saas-card red" style={{ gridColumn: '1 / -1', background: '#fff1f2' }}>
-            <h2 className="saas-card-title" style={{ color: '#be123c', fontSize: '16px' }}>🛠️ System Maintenance</h2>
+            <h2 className="saas-card-title" style={{ color: '#be123c', fontSize: '15px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>🛠️ System Maintenance</h2>
             
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px', marginTop: '16px' }}>
               <div style={{ flex: 1, minWidth: '250px' }}>
@@ -339,6 +293,7 @@ export default function SettingsPage() {
             </div>
           </div>
 
+          </div>
         </div>
         
         <style jsx global>{`
@@ -350,8 +305,6 @@ export default function SettingsPage() {
             box-sizing: border-box; 
             color: #333;
             width: 100%;
-            
-            /* 👇 SCROLL FIX 👇 */
             height: 100dvh; 
             overflow-y: auto; 
             -webkit-overflow-scrolling: touch;
@@ -380,22 +333,24 @@ export default function SettingsPage() {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(min(100%, 400px), 1fr));
             gap: 24px;
-            /* Screen Fill Bounds */
             width: 100%;
             max-width: 1600px;
             margin-left: auto;
             margin-right: auto;
           }
+          
+          .saas-card {
+             max-width: 100%;
+             box-sizing: border-box;
+          }
 
           /* 🔥 MATCHED MOBILE OVERRIDES */
           @media (max-width: 1023px) { 
             .main-wrapper { 
-              padding: max(20px, env(safe-area-inset-top, 20px)) 16px 16px 16px !important; 
-              
-              /* 👇 MOBILE SCROLL FIX 👇 */
-              height: 100dvh !important;
-              overflow-y: auto !important;
-              -webkit-overflow-scrolling: touch !important;
+              padding: max(20px, env(safe-area-inset-top, 20px)) 16px 0 16px !important; 
+              max-width: 100vw !important;
+              overflow-x: hidden !important;
+              box-sizing: border-box !important;
             }
             .header-container { 
               margin-left: 54px !important; 
@@ -408,6 +363,7 @@ export default function SettingsPage() {
               align-items: center !important; 
               min-height: 44px !important;
               width: calc(100% - 54px) !important;
+              box-sizing: border-box !important;
             }
             .header-left {
               display: flex !important;
@@ -418,6 +374,16 @@ export default function SettingsPage() {
 
             .settings-grid {
               grid-template-columns: 1fr;
+              width: 100% !important;
+              max-width: 100vw !important;
+              box-sizing: border-box !important;
+              gap: 16px !important;
+            }
+            
+            .saas-card {
+              width: 100% !important;
+              max-width: 100vw !important;
+              box-sizing: border-box !important;
             }
           }
         `}</style>
