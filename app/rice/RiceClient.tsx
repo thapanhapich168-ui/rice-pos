@@ -135,6 +135,7 @@ export default function RiceControl() {
   
   const [isProcessing, setIsProcessing] = useState(false) 
   const isImportingRef = useRef(false);
+  const isPayingRef = useRef(false); // 🛡️ FIX 3: Added lock for Pending Payments
 
   // --- CELL EDITING STATE ---
   const [editingCell, setEditingCell] = useState<{id: number, col: string} | null>(null)
@@ -816,10 +817,13 @@ export default function RiceControl() {
         }]);
       }
 
-      // ✅ FIX: Use atomic RPC to safely ADD stock, preventing cashiers' sales from being overwritten!
+      // 🚨 FIX 4: If you have a backend Postgres TRIGGER adding stock automatically, 
+      // COMMENT OUT the RPC line below (like this: // await supabase.rpc...). 
+      // If you DO NOT have a trigger, leave it exactly as it is!
       await supabase.rpc('adjust_product_stock', { p_product_id: product.id, p_quantity: qty });
       
-      const { error: stockErr } = await supabase.from('products').update({ cost_price: unitCost }).eq('id', product.id);
+      // 🛡️ FIX 2: Added branch_id to prevent RLS failures from killing the transaction halfway through!
+      const { error: stockErr } = await supabase.from('products').update({ cost_price: unitCost }).eq('id', product.id).eq('branch_id', activeBranchId);
       if (stockErr) throw stockErr;
 
       await supabase.from('inventory_batches').insert([{
@@ -870,6 +874,8 @@ export default function RiceControl() {
   }
 
   async function handlePayPendingSubmit() {
+    if (isPayingRef.current) return; // 🛡️ FIX 3: INSTANT DOUBLE-TAP LOCK
+
     const record = payPendingModal.record;
     
     let totalRielEq = 0;
@@ -895,6 +901,7 @@ export default function RiceControl() {
     const remainingBefore = Number(record.total_cost) - Number(record.paid_amount);
     if (totalRielEq > remainingBefore + 0.1) return showToast('error', 'Overpayment', 'Cannot pay more than what is owed.');
 
+    isPayingRef.current = true; // 🛡️ FIX 3: Lock the gates
     setIsProcessing(true); 
 
     try {
@@ -959,6 +966,7 @@ export default function RiceControl() {
     } catch (err: any) {
       showToast('error', 'Payment Error', err.message);
     } finally {
+      isPayingRef.current = false; // 🛡️ FIX 3: Unlock the gates
       setIsProcessing(false);
     }
   }
