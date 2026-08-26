@@ -208,6 +208,7 @@ export default function ExpenseDashboard() {
 
   const [pendingPersonal, setPendingPersonal] = useState<PendingExpense[]>([])
   const [pendingBusiness, setPendingBusiness] = useState<PendingExpense[]>([])
+  // ✂️ Removed pendingRice state since we input rice on the Inventory page!
 
   // --- Staff Management States ---
   const [staffList, setStaffList] = useState<any[]>([])
@@ -240,8 +241,8 @@ export default function ExpenseDashboard() {
   const [dbExpenses, setDbExpenses] = useState<any[]>([])
   const [dbStaffDebt, setDbStaffDebt] = useState<any[]>([])
   
-  const [dbTab, setDbTab] = useState<'personal' | 'business' | 'staff_debt' | 'insight'>('insight')
-  const [dbTabOrder, setDbTabOrder] = useState(['insight', 'personal', 'business', 'staff_debt'])
+  const [dbTab, setDbTab] = useState<'personal' | 'business' | 'rice' | 'staff_debt' | 'insight'>('insight')
+  const [dbTabOrder, setDbTabOrder] = useState(['insight', 'personal', 'business', 'rice', 'staff_debt'])
   
   const [dbSortConfig, setDbSortConfig] = useState<{key: string, direction: 'asc' | 'desc'} | null>(null)
   const [isFetchingDb, setIsFetchingDb] = useState(false)
@@ -261,7 +262,8 @@ export default function ExpenseDashboard() {
     
     const savedPers = localStorage.getItem('expense_ledger_personal');
     const savedBiz = localStorage.getItem('expense_ledger_business');
-    const savedDbTabOrder = localStorage.getItem('expense_db_tab_order');
+    // 🔥 CACHE BUSTER: Added '_v2' so the browser forgets the old tab layout!
+    const savedDbTabOrder = localStorage.getItem('expense_db_tab_order_v2'); 
     
     if (savedPers) setPendingPersonal(JSON.parse(savedPers));
     else setPendingPersonal([createNewExpense()]);
@@ -313,7 +315,8 @@ export default function ExpenseDashboard() {
   }, [pendingBusiness, expenseDate, isMounted]);
 
   useEffect(() => {
-    if (isMounted) localStorage.setItem('expense_db_tab_order', JSON.stringify(dbTabOrder));
+    // 🔥 CACHE BUSTER: Saves to the new v2 layout list
+    if (isMounted) localStorage.setItem('expense_db_tab_order_v2', JSON.stringify(dbTabOrder));
   }, [dbTabOrder, isMounted])
 
   useFocusRefresh(() => {
@@ -387,6 +390,21 @@ export default function ExpenseDashboard() {
     setIsFetchingDb(false)
   }
 
+  // --- Action: Delete Database Record ---
+  async function handleDeleteDbRecord(id: number) {
+    if (!confirm('Are you sure you want to permanently delete this expense? Your total assets and insights will automatically recalculate.')) return;
+    
+    const { error } = await supabase.from('expenses').delete().eq('id', id).eq('branch_id', activeBranchId);
+    
+    if (error) {
+      showToast('error', 'Deletion Failed', `Error: ${error.message}`);
+    } else {
+      showToast('success', 'Deleted', 'Expense record has been removed.');
+      setDbExpenses(prev => prev.filter(e => e.id !== id));
+      window.dispatchEvent(new Event('expense_ledger_synced')); // 🔥 Triggers auto-sync across tabs to update insights
+    }
+  }
+
   // --- Action: Submit Bulk Expenses ---
   async function handleSubmit(e?: React.FormEvent) {
     if (e) e.preventDefault()
@@ -415,7 +433,8 @@ export default function ExpenseDashboard() {
         let totalRiel = 0;
 
         for (const row of activePayments) {
-          let rawAmount = Number(row.amount);
+          // 🔥 RELIABILITY FIX: Strip commas from CurrencyInput strings to prevent NaN database corruption
+          let rawAmount = Number(String(row.amount).replace(/,/g, '')) || 0;
           if (row.method.includes('$')) {
             totalUsd += rawAmount;
           } else {
@@ -478,7 +497,8 @@ export default function ExpenseDashboard() {
   // 🟢 CLEAN MODAL HANDLER: STAFF ADVANCE
   async function handleAdvanceSubmit() {
     const staff = advanceModal.staff;
-    const rawAmount = Number(advanceModal.amount);
+    // 🔥 RELIABILITY FIX: Strip commas to safely parse the advance amount without crashing
+    const rawAmount = Number(String(advanceModal.amount).replace(/,/g, '')) || 0;
     if (!rawAmount || rawAmount === 0) { showToast('error', 'Validation Error', 'Please enter a valid advance amount.'); return; }
     
     let saveRiel = 0, saveUsd = 0;
@@ -496,7 +516,8 @@ export default function ExpenseDashboard() {
     setStaffList(prev => prev.map(s => s.id === staff.id ? { ...s, total_debt_riel: newTotalRiel, total_debt_usd: newTotalUsd } : s));
     setAdvanceModal({ isOpen: false, staff: null, amount: '', method: 'Cash ៛' });
 
-    const { error: staffErr } = await supabase.from('staff').update({ total_debt_riel: newTotalRiel, total_debt_usd: newTotalUsd }).eq('id', staff.id);
+    // 🔥 SECURITY FIX: Lock staff advance updates strictly to the active branch
+    const { error: staffErr } = await supabase.from('staff').update({ total_debt_riel: newTotalRiel, total_debt_usd: newTotalUsd }).eq('id', staff.id).eq('branch_id', activeBranchId);
     if (staffErr) { showToast('error', 'Update Failed', `Error updating debt: ${staffErr.message}`); fetchStaff(); return; }
 
     await supabase.from('staff_debt_history').insert([{ staff_id: staff.id, amount: rawAmount, payment_method: advanceModal.method, branch_id: activeBranchId }]); // 🔥 STAMPED
@@ -530,7 +551,8 @@ export default function ExpenseDashboard() {
     setStaffList(prev => prev.map(s => s.id === staff.id ? { ...s, leave_quota: quota, leave_used: newUsed } : s));
     setLeaveModal({ isOpen: false, staff: null, quota: '', days: 1, reason: '' });
 
-    await supabase.from('staff').update({ leave_quota: quota, leave_used: newUsed }).eq('id', staff.id);
+    // 🔥 SECURITY FIX: Lock staff leave balance updates strictly to the active branch
+    await supabase.from('staff').update({ leave_quota: quota, leave_used: newUsed }).eq('id', staff.id).eq('branch_id', activeBranchId);
 
     await supabase.from('staff_leave_history').insert([{
       staff_id: staff.id,
@@ -546,7 +568,8 @@ export default function ExpenseDashboard() {
   // 🟢 CLEAN MODAL HANDLER: DEBT SETTLEMENT
   async function handleSettleSubmit() {
     const staff = settleModal.staff;
-    const rawAmount = Number(settleModal.amount);
+    // 🔥 RELIABILITY FIX: Strip commas to safely parse the settlement amount without crashing
+    const rawAmount = Number(String(settleModal.amount).replace(/,/g, '')) || 0;
     if (!rawAmount || rawAmount <= 0) { showToast('error', 'Invalid Amount', 'Enter a valid settlement amount.'); return; }
     
     let saveRiel = 0, saveUsd = 0;
@@ -563,19 +586,28 @@ export default function ExpenseDashboard() {
     setStaffList(prev => prev.map(s => s.id === staff.id ? { ...s, total_debt_riel: newTotalRiel, total_debt_usd: newTotalUsd } : s));
     setSettleModal({ isOpen: false, staff: null, amount: '', method: 'Cash ៛' });
 
-    await supabase.from('staff').update({ total_debt_riel: newTotalRiel, total_debt_usd: newTotalUsd }).eq('id', staff.id);
-    await supabase.from('staff_debt_history').insert([{ staff_id: staff.id, amount: rawAmount, payment_method: `Settled: ${settleModal.method}`, branch_id: activeBranchId }]); // 🔥 STAMPED
-    await supabase.from('expenses').insert([{ expense_date: new Date().toISOString().split('T')[0], spender: 'Both', payment_method: settleModal.method, remarks: `Staff Debt Settlement: ${staff.name}`, amount_usd: saveUsd, amount_riel: saveRiel, description: 'STAFF_SETTLEMENT', branch_id: activeBranchId }]); // 🔥 STAMPED
+    // 🔥 SECURITY FIX: Lock staff debt settlements strictly to the active branch
+    await supabase.from('staff').update({ total_debt_riel: newTotalRiel, total_debt_usd: newTotalUsd }).eq('id', staff.id).eq('branch_id', activeBranchId);
     
-    showToast('success', 'Settled', `Settlement recorded for ${staff.name}`);
+    const isWriteOff = settleModal.method === 'Write-off';
+    const historyMethodStr = isWriteOff ? '❌ Bad Debt (Write-off)' : `Settled: ${settleModal.method}`;
+    await supabase.from('staff_debt_history').insert([{ staff_id: staff.id, amount: rawAmount, payment_method: historyMethodStr, branch_id: activeBranchId }]);
+
+    // 🛡️ DASHBOARD FIX: Only log to expenses if actual cash was received. Write-offs skip this to prevent inflating Cash on Hand.
+    if (!isWriteOff) {
+      await supabase.from('expenses').insert([{ expense_date: new Date().toISOString().split('T')[0], spender: 'Both', payment_method: settleModal.method, remarks: `Staff Debt Settlement: ${staff.name}`, amount_usd: saveUsd, amount_riel: saveRiel, description: 'STAFF_SETTLEMENT', branch_id: activeBranchId }]);
+    }
+    
+    showToast('success', isWriteOff ? 'Debt Forgiven' : 'Settled', isWriteOff ? `Debt written off for ${staff.name}` : `Settlement recorded for ${staff.name}`);
     fetchDatabase();
   }
 
   // 🟢 UNIFIED HISTORY MODAL (View both Debt and Leave History)
   async function handleViewHistory(staff: any) {
     const [{ data: debtData }, { data: leaveData }] = await Promise.all([
-      supabase.from('staff_debt_history').select('*').eq('staff_id', staff.id).order('created_at', { ascending: false }),
-      supabase.from('staff_leave_history').select('*').eq('staff_id', staff.id).order('created_at', { ascending: false })
+      // 🔥 SECURITY FIX: Enforce branch isolation on history read operations
+      supabase.from('staff_debt_history').select('*').eq('staff_id', staff.id).eq('branch_id', activeBranchId).order('created_at', { ascending: false }),
+      supabase.from('staff_leave_history').select('*').eq('staff_id', staff.id).eq('branch_id', activeBranchId).order('created_at', { ascending: false })
     ]);
     
     setHistoryModal({ 
@@ -589,29 +621,39 @@ export default function ExpenseDashboard() {
 
   async function saveInlineEdit(id: number, field: string) {
     if (!editValue && editValue !== '0' && field !== 'name') { setEditingCell(null); return; }
+    
+    // 🛡️ DASHBOARD FIX: Block direct edits to debt fields. Debt must ONLY be changed via Advance/Settle buttons to preserve Cash-to-AR ledger symmetry.
+    if (field === 'total_debt_riel' || field === 'total_debt_usd') {
+        showToast('error', 'Action Blocked', 'Debt balances cannot be manually edited. Please use the Advance or Settle buttons to maintain accurate cash ledgers.');
+        setEditingCell(null);
+        return;
+    }
+
     let finalValue: any = editValue;
-    if (field === 'salary' || field === 'total_debt_riel' || field === 'total_debt_usd' || field === 'leave_quota') { 
+    if (field === 'salary' || field === 'leave_quota') { 
       finalValue = Number(editValue.replace(/,/g, '')) || 0; 
     }
-    const staff = staffList.find(s => s.id === id);
+    
     setStaffList(prev => prev.map(s => s.id === id ? { ...s, [field]: finalValue } : s));
     setEditingCell(null);
 
-    const { error } = await supabase.from('staff').update({ [field]: finalValue }).eq('id', id);
-    if (!error && (field === 'total_debt_riel' || field === 'total_debt_usd') && staff) {
-        const difference = finalValue - (Number(staff[field]) || 0);
-        if (difference !== 0) {
-            await supabase.from('staff_debt_history').insert([{ staff_id: id, amount: Math.abs(difference), payment_method: difference > 0 ? `Manual Increase ${field.includes('usd') ? '$' : '៛'}` : `Manual Reduction ${field.includes('usd') ? '$' : '៛'}`, branch_id: activeBranchId }]); // 🔥 STAMPED
-            fetchDatabase();
-        }
-    }
+    const { error } = await supabase.from('staff').update({ [field]: finalValue }).eq('id', id).eq('branch_id', activeBranchId);
+    
     if (error) { showToast('error', 'Update Failed', error.message); fetchStaff(); }
   }
 
   async function handleDeleteStaff(id: number, name: string) {
+    // 🛡️ DASHBOARD FIX: Prevent burning AR Assets by deleting staff who owe money
+    const staff = staffList.find(s => s.id === id);
+    if (staff && (Number(staff.total_debt_riel) > 0 || Number(staff.total_debt_usd) > 0)) {
+       showToast('error', 'Action Blocked', `Cannot delete ${name} because they still owe a debt balance. Settle their debt to 0 first to protect your Net Worth metric.`);
+       return;
+    }
+
     if (!confirm(`Are you sure you want to remove ${name} from the payroll?`)) return;
+    
     setStaffList(prev => prev.filter(s => s.id !== id));
-    const { error } = await supabase.from('staff').delete().eq('id', id);
+    const { error } = await supabase.from('staff').delete().eq('id', id).eq('branch_id', activeBranchId);
     if (error) { showToast('error', 'Deletion Failed', error.message); fetchStaff(); } else showToast('success', 'Deleted', `${name} has been removed.`);
   }
 
@@ -679,6 +721,7 @@ export default function ExpenseDashboard() {
 
     let totalPersRiel = 0, totalPersUsd = 0;
     let totalBizRiel = 0, totalBizUsd = 0;
+    let totalRiceRiel = 0, totalRiceUsd = 0;
     let totalDebtRiel = 0, totalDebtUsd = 0;
 
     validExp.forEach(e => {
@@ -693,6 +736,10 @@ export default function ExpenseDashboard() {
         totalBizRiel += amtRiel;
         totalBizUsd += amtUsd;
       }
+      if (e.description === 'RICE') {
+        totalRiceRiel += amtRiel;
+        totalRiceUsd += amtUsd;
+      }
     });
 
     validDebt.forEach(d => {
@@ -703,8 +750,8 @@ export default function ExpenseDashboard() {
       }
     });
 
-    const totalExpRiel = totalPersRiel + totalBizRiel;
-    const totalExpUsd = totalPersUsd + totalBizUsd;
+    const totalExpRiel = totalPersRiel + totalBizRiel + totalRiceRiel;
+    const totalExpUsd = totalPersUsd + totalBizUsd + totalRiceUsd;
 
     const topPers = validExp.filter(e => e.description === 'PERSONAL').sort((a,b) => ((Number(b.amount_riel)||0) + (Number(b.amount_usd)||0)*EXCHANGE_RATE) - ((Number(a.amount_riel)||0) + (Number(a.amount_usd)||0)*EXCHANGE_RATE)).slice(0, 5);
     const topBiz = validExp.filter(e => e.description === 'BUSINESS').sort((a,b) => ((Number(b.amount_riel)||0) + (Number(b.amount_usd)||0)*EXCHANGE_RATE) - ((Number(a.amount_riel)||0) + (Number(a.amount_usd)||0)*EXCHANGE_RATE)).slice(0, 5);
@@ -723,7 +770,7 @@ export default function ExpenseDashboard() {
     }
 
     dbExpenses.forEach(e => {
-       if (e.description !== 'PERSONAL' && e.description !== 'BUSINESS') return;
+       if (e.description !== 'PERSONAL' && e.description !== 'BUSINESS' && e.description !== 'RICE') return;
        const d = new Date(e.expense_date || e.created_at);
        const dayIdx = d.getDate() - 1;
        const amt = Number(e.amount_riel) + (Number(e.amount_usd) * EXCHANGE_RATE);
@@ -735,7 +782,7 @@ export default function ExpenseDashboard() {
        }
     });
 
-    return { totalPersRiel, totalPersUsd, totalBizRiel, totalBizUsd, totalExpRiel, totalExpUsd, totalDebtRiel, totalDebtUsd, topPers, topBiz, thisMonthData, lastMonthData };
+    return { totalPersRiel, totalPersUsd, totalBizRiel, totalBizUsd, totalRiceRiel, totalRiceUsd, totalExpRiel, totalExpUsd, totalDebtRiel, totalDebtUsd, topPers, topBiz, thisMonthData, lastMonthData };
   }, [dbTab, dbExpenses, dbStaffDebt, insightFilter, insightFrom, insightTo]);
 
   if (!isMounted) return null; 
@@ -1077,7 +1124,12 @@ export default function ExpenseDashboard() {
 
                                   {(totalDebtRiel > 0 || totalDebtUsd > 0) && (
                                     <button 
-                                      onClick={() => setSettleModal({ isOpen: true, staff: staff, amount: '', method: 'Cash ៛' })} 
+                                      onClick={() => {
+                                        // 🔥 AUTO-FILL LOGIC: Detects which currency they owe and defaults the exact amount and method
+                                        const defaultMethod = totalDebtRiel > 0 ? 'Cash ៛' : 'Cash $';
+                                        const defaultAmount = totalDebtRiel > 0 ? totalDebtRiel : totalDebtUsd;
+                                        setSettleModal({ isOpen: true, staff: staff, amount: defaultAmount, method: defaultMethod });
+                                      }} 
                                       className="saas-btn" 
                                       style={{ background: '#ecfdf5', color: '#047857', border: '1px solid #a7f3d0', padding: '4px 8px', fontSize: '11px', fontWeight: 'bold' }}
                                     >
@@ -1118,7 +1170,8 @@ export default function ExpenseDashboard() {
             <div>
               <div className="saas-tab-container hide-scrollbar" style={{ border: 'none', padding: '4px', background: '#f1f5f9', margin: '0 0 24px 0', flexWrap: 'nowrap', overflowX: 'auto', borderRadius: '12px' }}>
                 {dbTabOrder.map(tab => {
-                  const labels: any = { personal: '🏡 Personal Expenses', business: '🏢 Business Expenses', staff_debt: '💸 Staff Debt Log', insight: '📊 Expense Insight' };
+                  // 🔥 FIX 5: Added 'rice' text to the label dictionary!
+                  const labels: any = { personal: '🏡 Personal Expenses', business: '🏢 Business Expenses', rice: '🌾 Rice Purchases', staff_debt: '💸 Staff Debt Log', insight: '📊 Expense Insight' };
                   return (
                     <button
                       key={tab} draggable
@@ -1177,47 +1230,55 @@ export default function ExpenseDashboard() {
 
                   {/* Core Metrics */}
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '16px', marginBottom: '32px' }}>
+                    
                     <div className="saas-card">
                       <div className="saas-card-title">📉 Total Expenses</div>
                       <div style={{ display: 'flex', gap: '16px', marginTop: '16px' }}>
                         <div style={{ flex: 1 }}>
                           <div style={{ fontSize: '20px', color: '#ef4444', fontWeight: 'bold' }}>{formatRiel(insightsData?.totalExpRiel || 0)}</div>
-                          <div style={{ fontSize: '11px', color: '#94a3b8', textTransform: 'uppercase', marginTop: '4px' }}>Total Riel</div>
                         </div>
                         <div style={{ width: '1px', background: '#e2e8f0' }}></div>
                         <div style={{ flex: 1 }}>
                           <div style={{ fontSize: '20px', color: '#ef4444', fontWeight: 'bold' }}>{formatUSD(insightsData?.totalExpUsd || 0)}</div>
-                          <div style={{ fontSize: '11px', color: '#94a3b8', textTransform: 'uppercase', marginTop: '4px' }}>Total USD</div>
                         </div>
                       </div>
                     </div>
 
                     <div className="saas-card">
-                      <div className="saas-card-title">🏢 Business Expenses</div>
+                      <div className="saas-card-title">🏢 Business Operation</div>
                       <div style={{ display: 'flex', gap: '16px', marginTop: '16px' }}>
                         <div style={{ flex: 1 }}>
                           <div style={{ fontSize: '20px', color: '#b91c1c', fontWeight: 'bold' }}>{formatRiel(insightsData?.totalBizRiel || 0)}</div>
-                          <div style={{ fontSize: '11px', color: '#94a3b8', textTransform: 'uppercase', marginTop: '4px' }}>Biz Riel</div>
                         </div>
                         <div style={{ width: '1px', background: '#e2e8f0' }}></div>
                         <div style={{ flex: 1 }}>
                           <div style={{ fontSize: '20px', color: '#b91c1c', fontWeight: 'bold' }}>{formatUSD(insightsData?.totalBizUsd || 0)}</div>
-                          <div style={{ fontSize: '11px', color: '#94a3b8', textTransform: 'uppercase', marginTop: '4px' }}>Biz USD</div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="saas-card" style={{ border: '1px solid #bfdbfe' }}>
+                      <div className="saas-card-title" style={{ color: '#2563eb' }}>🌾 Rice Stock</div>
+                      <div style={{ display: 'flex', gap: '16px', marginTop: '16px' }}>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontSize: '20px', color: '#3b82f6', fontWeight: 'bold' }}>{formatRiel(insightsData?.totalRiceRiel || 0)}</div>
+                        </div>
+                        <div style={{ width: '1px', background: '#e2e8f0' }}></div>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontSize: '20px', color: '#3b82f6', fontWeight: 'bold' }}>{formatUSD(insightsData?.totalRiceUsd || 0)}</div>
                         </div>
                       </div>
                     </div>
 
                     <div className="saas-card">
-                      <div className="saas-card-title">🏡 Personal Expenses</div>
+                      <div className="saas-card-title">🏡 Personal</div>
                       <div style={{ display: 'flex', gap: '16px', marginTop: '16px' }}>
                         <div style={{ flex: 1 }}>
                           <div style={{ fontSize: '20px', color: '#f59e0b', fontWeight: 'bold' }}>{formatRiel(insightsData?.totalPersRiel || 0)}</div>
-                          <div style={{ fontSize: '11px', color: '#94a3b8', textTransform: 'uppercase', marginTop: '4px' }}>Pers Riel</div>
                         </div>
                         <div style={{ width: '1px', background: '#e2e8f0' }}></div>
                         <div style={{ flex: 1 }}>
                           <div style={{ fontSize: '20px', color: '#f59e0b', fontWeight: 'bold' }}>{formatUSD(insightsData?.totalPersUsd || 0)}</div>
-                          <div style={{ fontSize: '11px', color: '#94a3b8', textTransform: 'uppercase', marginTop: '4px' }}>Pers USD</div>
                         </div>
                       </div>
                     </div>
@@ -1227,15 +1288,14 @@ export default function ExpenseDashboard() {
                       <div style={{ display: 'flex', gap: '16px', marginTop: '16px' }}>
                         <div style={{ flex: 1 }}>
                           <div style={{ fontSize: '20px', color: '#64748b', fontWeight: 'bold' }}>{formatRiel(insightsData?.totalDebtRiel || 0)}</div>
-                          <div style={{ fontSize: '11px', color: '#94a3b8', textTransform: 'uppercase', marginTop: '4px' }}>Debt Riel</div>
                         </div>
                         <div style={{ width: '1px', background: '#e2e8f0' }}></div>
                         <div style={{ flex: 1 }}>
                           <div style={{ fontSize: '20px', color: '#64748b', fontWeight: 'bold' }}>{formatUSD(insightsData?.totalDebtUsd || 0)}</div>
-                          <div style={{ fontSize: '11px', color: '#94a3b8', textTransform: 'uppercase', marginTop: '4px' }}>Debt USD</div>
                         </div>
                       </div>
                     </div>
+
                   </div>
 
                   {/* Top 5 Lists */}
@@ -1291,10 +1351,11 @@ export default function ExpenseDashboard() {
                           {[
                             { key: dbTab === 'staff_debt' ? 'created_at' : 'expense_date', label: 'Date', align: 'left' },
                             { key: dbTab === 'staff_debt' ? 'staff_name' : 'remarks', label: dbTab === 'staff_debt' ? 'Staff Name' : 'Description', align: 'left' },
-                            ...(dbTab !== 'staff_debt' ? [{ key: 'spender', label: 'Spender', align: 'center' }] : []),
+                            ...(dbTab !== 'staff_debt' ? [{ key: 'spender', label: 'Spender', align: 'left' }] : []), // 🔥 Left aligned
                             { key: 'payment_method', label: 'Payment Method', align: 'left' },
                             { key: dbTab === 'staff_debt' ? 'amount' : 'amount_riel', label: 'Amount (៛)', align: 'right' },
-                            ...(dbTab !== 'staff_debt' ? [{ key: 'amount_usd', label: 'Amount ($)', align: 'right' }] : [])
+                            ...(dbTab !== 'staff_debt' ? [{ key: 'amount_usd', label: 'Amount ($)', align: 'right' }] : []),
+                            ...(dbTab !== 'staff_debt' ? [{ key: 'actions', label: '', align: 'center' }] : []) // 🗑️ Delete Header
                           ].map((col: any) => (
                             <th 
                               key={col.key} className="saas-th"
@@ -1315,39 +1376,51 @@ export default function ExpenseDashboard() {
                       </thead>
                       <tbody>
                         {isFetchingDb ? (
-                          <TableSkeleton columns={dbTab === 'staff_debt' ? 4 : 6} rows={6} />
+                          <TableSkeleton columns={dbTab === 'staff_debt' ? 4 : 7} rows={6} />
                         ) : filteredAndSortedDb.length === 0 ? (
                           <tr>
-                            <td colSpan={dbTab === 'staff_debt' ? 4 : 6} style={{ padding: 0 }}>
+                            <td colSpan={dbTab === 'staff_debt' ? 4 : 7} style={{ padding: 0 }}>
                               <EmptyState icon="📭" title="No Records" message="No data found in this category." />
                             </td>
                           </tr>
                         ) : (
                           filteredAndSortedDb.map((row: any) => (
                             <tr key={row.id} className="saas-tr">
-                              <td className="saas-td" style={{ fontSize: '14px', color: '#334155' }}>
+                              {/* 🔥 verticalAlign: 'middle' added to EVERY <td> */}
+                              <td className="saas-td" style={{ fontSize: '14px', color: '#334155', verticalAlign: 'middle', textAlign: 'left' }}>
                                 {new Date(dbTab === 'staff_debt' ? row.created_at : row.expense_date).toLocaleDateString('en-GB')}
                               </td>
-                              <td className="saas-td" style={{ fontSize: '14px', fontWeight: 'bold', color: '#0f172a' }}>
+                              <td className="saas-td" style={{ fontSize: '14px', fontWeight: 'bold', color: '#0f172a', verticalAlign: 'middle', textAlign: 'left' }}>
                                 {dbTab === 'staff_debt' ? row.staff?.name : row.remarks}
                               </td>
                               {dbTab !== 'staff_debt' && (
-                                <td className="saas-td" style={{ fontSize: '14px', textAlign: 'center', color: '#64748b' }}>
+                                <td className="saas-td" style={{ fontSize: '14px', color: '#64748b', verticalAlign: 'middle', textAlign: 'left' }}>
                                   {row.spender}
                                 </td>
                               )}
-                              <td className="saas-td" style={{ fontSize: '14px', color: '#3b82f6', fontWeight: 'bold' }}>
+                              <td className="saas-td" style={{ fontSize: '14px', color: '#3b82f6', fontWeight: 'bold', verticalAlign: 'middle', textAlign: 'left' }}>
                                 {row.payment_method}
                               </td>
-                              <td className="saas-td" style={{ fontSize: '14px', textAlign: 'right', fontWeight: 'bold', color: '#ef4444' }}>
+                              <td className="saas-td" style={{ fontSize: '14px', textAlign: 'right', fontWeight: 'bold', color: '#ef4444', verticalAlign: 'middle' }}>
                                 {dbTab === 'staff_debt' ? 
                                   (row.payment_method.includes('$') ? '-' : formatRiel(row.amount)) : 
                                   formatRiel(row.amount_riel)}
                               </td>
                               {dbTab !== 'staff_debt' && (
-                                <td className="saas-td" style={{ fontSize: '14px', textAlign: 'right', fontWeight: 'bold', color: '#ef4444' }}>
-                                  {formatUSD(row.amount_usd)}
-                                </td>
+                                <>
+                                  <td className="saas-td" style={{ fontSize: '14px', textAlign: 'right', fontWeight: 'bold', color: '#ef4444', verticalAlign: 'middle' }}>
+                                    {formatUSD(row.amount_usd)}
+                                  </td>
+                                  <td className="saas-td" style={{ verticalAlign: 'middle', textAlign: 'center' }}>
+                                    <button 
+                                      onClick={() => handleDeleteDbRecord(row.id)} 
+                                      style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '16px', padding: '4px' }}
+                                      title="Delete Expense"
+                                    >
+                                      🗑️
+                                    </button>
+                                  </td>
+                                </>
                               )}
                             </tr>
                           ))
@@ -1553,6 +1626,7 @@ export default function ExpenseDashboard() {
             <option value="Cash $">💵 Cash $</option>
             <option value="QR ៛">📱 QR ៛</option>
             <option value="QR $">📱 QR $</option>
+            <option value="Write-off">❌ Bad Debt (Runaway / Write-off)</option>
           </select>
         </div>
 

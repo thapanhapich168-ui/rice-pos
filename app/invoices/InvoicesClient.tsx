@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { supabase } from '@/lib/supabaseClient'
 import { useFocusRefresh } from '@/lib/useFocusRefresh'
 import { useToast } from '@/components/ToastProvider'
@@ -77,6 +77,11 @@ export default function InvoiceGallery() {
     } else if (filterTab === 'This Month') {
       const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString()
       query = query.gte('created_at', monthStart)
+    } else {
+      // 🛡️ PERFORMANCE FIX: Hard cap "All Time" to prevent infinite downloading and browser RAM crashes
+      const sixMonthsAgo = new Date();
+      sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+      query = query.gte('created_at', sixMonthsAgo.toISOString()).order('created_at', { ascending: false }).limit(2000);
     }
 
     const { data: summaryData, error: summaryError } = await query
@@ -99,6 +104,11 @@ export default function InvoiceGallery() {
     } else if (filterTab === 'This Month') {
       const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString()
       retailQuery = retailQuery.gte('created_at', monthStart)
+    } else {
+      // 🛡️ PERFORMANCE FIX: Hard cap "All Time" to prevent infinite downloading and browser RAM crashes
+      const sixMonthsAgo = new Date();
+      sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+      retailQuery = retailQuery.gte('created_at', sixMonthsAgo.toISOString()).order('created_at', { ascending: false }).limit(2000);
     }
 
     const { data: retailData, error: retailError } = await retailQuery
@@ -183,88 +193,50 @@ export default function InvoiceGallery() {
       if (fetchErr) throw new Error(`Database read failed: ${fetchErr.message}`);
       if (!items || items.length === 0) throw new Error(`Could not locate records for this transaction. It may already be deleted.`);
 
-      // 🟢 2. PROTECTION: DELETE FROM DATABASE *FIRST*!
-      const rowIds = items.map(i => i.id);
-      
-      const { error: delErr } = await supabase
-        .from(tableName)
-        .delete()
-        .in('id', rowIds); // Guaranteed to delete exactly what was fetched
-
-      if (delErr) throw new Error(`Database blocked deletion: ${delErr.message}`);
-
-      // 🟢 3. RESTORE STOCK & BATCHES SAFELY
+      // 🟢 2. RESTORE STOCK & BATCHES SAFELY FIRST
+      // ✅ FIX: Restore inventory before modifying invoices so if Wi-Fi drops, stock is not lost forever!
       for (const item of items) {
-        if (item.status === 'Voided' || item.delivery_status === 'Voided') continue;
+        if (item.status === 'Voided' || item.delivery_status === 'Voided' || item.is_voided) continue;
 
         const qty = Number(item.qty) || 0;
         const riceName = (item.custom_rice_type || item.rice_type || '').trim();
-        const isSpecial = riceName.includes('បានប្រើ') || riceName.includes('សេវាដឹក');
+        
+        // 🛡️ DASHBOARD FIX: Prevent creating ghost stock when voiding non-inventory adjustments
+        const isSpecial = riceName.includes('បានប្រើ') || riceName.includes('សេវាដឹក') || riceName.includes('កក់') || riceName.includes('បញ្ចុះតម្លៃ') || riceName.includes('ថ្លៃបាវ') || riceName.includes('បាវ');
         
         if (qty !== 0 && !isSpecial) {
-          // 🟢 ROBUST ID RESOLUTION: Match by product_id OR rice_type name (case-insensitive)
           let productId = item.product_id;
           if (!productId && riceName) {
-            const { data: prodByName } = await supabase
-              .from('products')
-              .select('id')
-              .eq('branch_id', activeBranchId)
-              .ilike('name', riceName)
-              .maybeSingle();
-            if (prodByName) {
-              productId = prodByName.id;
-            }
+            const { data: prodByName } = await supabase.from('products').select('id').eq('branch_id', activeBranchId).ilike('name', riceName).maybeSingle();
+            if (prodByName) productId = prodByName.id;
           }
 
           if (productId) {
-            // A. Restore Master Stock (Works for retail kg AND wholesale bags!)
-            const { data: prod } = await supabase
-              .from('products')
-              .select('stock, cost_price')
-              .eq('id', productId)
-              .eq('branch_id', activeBranchId)
-              .maybeSingle();
-
-            if (prod) {
-              await supabase.rpc('adjust_product_stock', { p_product_id: productId, p_quantity: qty });
-            }
+            // A. Restore Master Stock
+            await supabase.rpc('adjust_product_stock', { p_product_id: productId, p_quantity: qty });
 
             // B. Restore Inventory Batch
-            const { data: batchesInv } = await supabase.from('inventory_batches')
-              .select('*')
-              .eq('product_id', productId)
-              .eq('branch_id', activeBranchId)
-              .order('id', { ascending: false })
-              .limit(1); 
+            const { data: batchesInv } = await supabase.from('inventory_batches').select('*').eq('product_id', productId).eq('branch_id', activeBranchId).order('id', { ascending: false }).limit(1); 
             
             if (batchesInv && batchesInv.length > 0) {
               await supabase.rpc('adjust_batch_stock', { p_batch_id: batchesInv[0].id, p_quantity: qty });
             } else {
+              const { data: prod } = await supabase.from('products').select('cost_price').eq('id', productId).maybeSingle();
               await supabase.from('inventory_batches').insert([{
-                product_id: productId,
-                product_name: riceName || 'Unknown Product',
-                cost_price: item.cogs_price || prod?.cost_price || 0,
-                remaining_qty: qty,
-                branch_id: activeBranchId 
+                product_id: productId, product_name: riceName || 'Unknown Product', cost_price: item.cogs_price || prod?.cost_price || 0,
+                remaining_qty: qty, branch_id: activeBranchId 
               }]);
             }
 
             // C. Reverse FIFO Batches
             let remainingToReverse = qty;
-            const { data: batches } = await supabase.from('price_history')
-              .select('*')
-              .eq('product_id', productId)
-              .eq('branch_id', activeBranchId)
-              .gt('sold_qty', 0)
-              .order('created_at', { ascending: false }); 
+            const { data: batches } = await supabase.from('price_history').select('*').eq('product_id', productId).eq('branch_id', activeBranchId).gt('sold_qty', 0).order('created_at', { ascending: false }); 
             
             if (batches) {
               for (const b of batches) {
                 if (remainingToReverse <= 0) break;
                 const possibleToReverse = Math.min(b.sold_qty, remainingToReverse);
-                await supabase.from('price_history')
-                  .update({ sold_qty: b.sold_qty - possibleToReverse })
-                  .eq('id', b.id);
+                await supabase.from('price_history').update({ sold_qty: b.sold_qty - possibleToReverse }).eq('id', b.id);
                 remainingToReverse -= possibleToReverse;
               }
             }
@@ -272,8 +244,20 @@ export default function InvoiceGallery() {
         }
       }
 
+      // 🟢 3. SOFT-DELETE FROM DATABASE (PRESERVE AUDIT TRAIL)
+      const rowIds = items.map(i => i.id);
+      
+      // 🔥 SECURITY FIX: Enforce strict branch isolation when soft-deleting transaction rows
+      const { error: delErr } = await supabase
+        .from(tableName)
+        .update({ is_voided: true })
+        .in('id', rowIds)
+        .eq('branch_id', activeBranchId);
+
+      if (delErr) throw new Error(`Database blocked voiding: ${delErr.message}`);
+
       // 🟢 4. CLEANUP SUMMARIES & PAYMENTS
-      await supabase.from('invoice_payments').delete().eq('invoice_id', invoiceId).eq('branch_id', activeBranchId);
+      await supabase.from('invoice_payments').update({ is_voided: true }).eq('invoice_id', invoiceId).eq('branch_id', activeBranchId);
 
       if (!isRetail) {
         await supabase.from('invoice_summaries').update({ 
@@ -329,10 +313,12 @@ export default function InvoiceGallery() {
         if (storageError) console.error("Storage deletion warning:", storageError);
       }
 
+      // 🔥 SECURITY & EDGE CASE FIX: Wipe invoice_url across ALL transaction tables, safely locked to the branch
       const { error: salesError } = await supabase.from('sales').update({ invoice_url: null }).in('invoice_id', idsToUpdate).eq('branch_id', activeBranchId);
       const { error: summaryError } = await supabase.from('invoice_summaries').update({ invoice_url: null }).in('invoice_id', idsToUpdate).eq('branch_id', activeBranchId);
+      const { error: retailError } = await supabase.from('retail_sales').update({ invoice_url: null }).in('transaction_id', idsToUpdate).eq('branch_id', activeBranchId);
 
-      if (salesError || summaryError) {
+      if (salesError || summaryError || retailError) {
         showToast('error', 'Deletion Failed', 'Database Blocked the Update!');
       } else {
         setSelectedInvoices(new Set());
@@ -391,11 +377,13 @@ export default function InvoiceGallery() {
 
     if (isDeviceMobile && typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
       try {
-        const files = await Promise.all(selectedData.map(async (inv) => {
+        // 🛡️ MOBILE STABILITY FIX: Fetch sequentially instead of Promise.all to prevent out-of-memory browser crashes on 20+ images
+        const files = [];
+        for (const inv of selectedData) {
           const res = await fetch(inv.invoice_url);
           const blob = await res.blob();
-          return new File([blob], `Invoice-${inv.invoice_id}.jpg`, { type: 'image/jpeg' });
-        }));
+          files.push(new File([blob], `Invoice-${inv.invoice_id}.jpg`, { type: 'image/jpeg' }));
+        }
 
         await navigator.share({ 
           files, 
@@ -420,36 +408,39 @@ export default function InvoiceGallery() {
     return 'Wholesale';
   };
 
-  const processedInvoices = invoices
-    .filter(inv => {
-      const isVoided = inv.delivery_status === 'Voided';
-      const cat = getInvoiceCategory(inv);
+  // 🔥 PERFORMANCE FIX: Memoize array sorting and filtering to prevent UI freeze on keystrokes
+  const processedInvoices = useMemo(() => {
+    return invoices
+      .filter(inv => {
+        const isVoided = inv.delivery_status === 'Voided';
+        const cat = getInvoiceCategory(inv);
 
-      // 1. Hide voided items when viewing active category tabs
-      if (categoryTab !== 'Voided' && isVoided) return false;
+        // 1. Hide voided items when viewing active category tabs
+        if (categoryTab !== 'Voided' && isVoided) return false;
 
-      // 2. Filter by active category tab
-      if (categoryTab === 'Wholesale' && cat !== 'Wholesale') return false;
-      if (categoryTab === 'WalkinWholesale' && cat !== 'WalkinWholesale') return false;
-      if (categoryTab === 'WalkinRetail' && cat !== 'WalkinRetail') return false;
+        // 2. Filter by active category tab
+        if (categoryTab === 'Wholesale' && cat !== 'Wholesale') return false;
+        if (categoryTab === 'WalkinWholesale' && cat !== 'WalkinWholesale') return false;
+        if (categoryTab === 'WalkinRetail' && cat !== 'WalkinRetail') return false;
 
-      // 3. Filter by sub-tabs when inside the 'Voided' tab
-      if (categoryTab === 'Voided') {
-        if (!isVoided) return false;
-        if (voidSubTab === 'Wholesale' && cat !== 'Wholesale') return false;
-        if (voidSubTab === 'WalkinWholesale' && cat !== 'WalkinWholesale') return false;
-        if (voidSubTab === 'WalkinRetail' && cat !== 'WalkinRetail') return false;
-      }
+        // 3. Filter by sub-tabs when inside the 'Voided' tab
+        if (categoryTab === 'Voided') {
+          if (!isVoided) return false;
+          if (voidSubTab === 'Wholesale' && cat !== 'Wholesale') return false;
+          if (voidSubTab === 'WalkinWholesale' && cat !== 'WalkinWholesale') return false;
+          if (voidSubTab === 'WalkinRetail' && cat !== 'WalkinRetail') return false;
+        }
 
-      if (!debouncedSearch) return true;
-      const term = debouncedSearch.toLowerCase().trim();
-      return (
-        inv.invoice_id?.toLowerCase().includes(term) ||
-        inv.customer_name?.toLowerCase().includes(term) ||
-        inv.rice_types?.toLowerCase().includes(term)
-      );
-    })
-    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+        if (!debouncedSearch) return true;
+        const term = debouncedSearch.toLowerCase().trim();
+        return (
+          inv.invoice_id?.toLowerCase().includes(term) ||
+          inv.customer_name?.toLowerCase().includes(term) ||
+          inv.rice_types?.toLowerCase().includes(term)
+        );
+      })
+      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+  }, [invoices, categoryTab, voidSubTab, debouncedSearch]);
 
   const formatDate = (dateStr: string) => {
     return new Date(dateStr).toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });

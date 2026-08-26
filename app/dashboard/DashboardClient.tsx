@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useState, useMemo } from 'react'
 import { supabase } from '@/lib/supabaseClient'
 import { formatRiel, formatUSD, formatNumber, parseOwner, EXCHANGE_RATE } from '@/utils/formatters'
 import { CurrencyInput } from '@/components/Inputs'
@@ -48,8 +48,8 @@ export default function DashboardPage() {
   const [invSortConfig, setInvSortConfig] = useState<{key: string, direction: 'asc' | 'desc'} | null>(null)
 
   useEffect(() => {
-    async function loadData() {
-      setIsLoading(true);
+    async function loadData(silent = false) {
+      if (!silent) setIsLoading(true);
       const now = new Date();
       const firstDayOfLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1).toISOString();
 
@@ -71,17 +71,17 @@ export default function DashboardPage() {
         {data: staffData}, {data: prodData}, {data: apData}, {data: cogsData}, 
         {data: batchData}, {data: invPayData}
       ] = await Promise.all([
-        buildQNarrow('sales', 'id, created_at, qty, price_per_bag, cogs_price, owner, custom_rice_type, rice_type, invoice_id').gte('created_at', firstDayOfLastMonth),
+        buildQNarrow('sales', 'id, created_at, qty, price_per_bag, cogs_price, owner, custom_rice_type, rice_type, invoice_id').gte('created_at', firstDayOfLastMonth).eq('is_voided', false),
         buildQNarrow('invoice_summaries', 'invoice_id, owner, balance_due').eq('is_done', false),
-        buildQNarrow('retail_sales', 'id, created_at, qty, price_per_bag, cogs_price, owner, custom_rice_type, rice_type, transaction_id, payment_method, total_sales').gte('created_at', firstDayOfLastMonth),
+        buildQNarrow('retail_sales', 'id, created_at, qty, price_per_bag, cogs_price, owner, custom_rice_type, rice_type, transaction_id, payment_method, total_sales').gte('created_at', firstDayOfLastMonth).eq('is_voided', false),
         buildQNarrow('expenses', 'id, created_at, amount_riel, amount_usd, payment_method, spender, description, remarks').gte('created_at', firstDayOfLastMonth),
         buildQ('staff'),
         buildQNarrow('products', 'id, name, stock, cost_price, weight, linked_wholesale_id').order('id'),
         buildQNarrow('accounts_payable', 'id, amount_riel, amount_usd, status').eq('status', 'Unpaid'),
         buildQNarrow('cogs_settlements', 'payment_method, paid_amount_riel, paid_amount_usd, owner_name'),
         buildQNarrow('inventory_batches', 'id, product_id, remaining_qty, cost_price, created_at').gt('remaining_qty', 0),
-        // 🔥 CRITICAL FIX: Removed 'created_at' from this string so Supabase stops rejecting the query!
-        buildQNarrow('invoice_payments', 'invoice_id, payment_method, amount_paid_riel, amount_paid_usd, recorded_by, payment_date') 
+        // 🛡️ PERFORMANCE FIX: Re-applied the date limit using 'payment_date' instead of 'created_at' to prevent infinite memory growth
+        buildQNarrow('invoice_payments', 'invoice_id, payment_method, amount_paid_riel, amount_paid_usd, recorded_by, payment_date').gte('payment_date', firstDayOfLastMonth).eq('is_voided', false) 
       ]);
 
       setWholesaleSales(salesData || []); 
@@ -95,36 +95,42 @@ export default function DashboardPage() {
       setPriceHistory(batchData || []); 
       setInvoicePayments(invPayData || []);
 
-      const keys = ['base_capital', 'initial_cash_riel', 'initial_cash_usd', 'initial_qr_riel', 'initial_qr_usd', 'personal_owe_riel', 'personal_owe_usd', 'family_owe_riel', 'family_owe_usd'];
+      const baseKeys = ['base_capital', 'initial_cash_riel', 'initial_cash_usd', 'initial_qr_riel', 'initial_qr_usd', 'personal_owe_riel', 'personal_owe_usd', 'family_owe_riel', 'family_owe_usd'];
+      // 🔥 SECURITY FIX: Isolate app settings fetches by branch to prevent global cross-tenant data leaks
+      const keys = activeBranchId === 0 ? baseKeys : baseKeys.map(k => `${k}_${activeBranchId}`);
       const { data: capData } = await supabase.from('app_settings').select('*').in('setting_key', keys)
       if (capData) {
         capData.forEach((s: any) => {
-          if (s.setting_key === 'base_capital') setBaseCapital(Number(s.setting_value) || 0)
-          if (s.setting_key === 'initial_cash_riel') setInitCashRiel(Number(s.setting_value) || 0)
-          if (s.setting_key === 'initial_cash_usd') setInitCashUsd(Number(s.setting_value) || 0)
-          if (s.setting_key === 'initial_qr_riel') setInitQrRiel(Number(s.setting_value) || 0)
-          if (s.setting_key === 'initial_qr_usd') setInitQrUsd(Number(s.setting_value) || 0)
-          if (s.setting_key === 'personal_owe_riel') setPersOweRiel(Number(s.setting_value) || 0)
-          if (s.setting_key === 'personal_owe_usd') setPersOweUsd(Number(s.setting_value) || 0)
-          if (s.setting_key === 'family_owe_riel') setFamilyOweRiel(Number(s.setting_value) || 0)
-          if (s.setting_key === 'family_owe_usd') setFamilyOweUsd(Number(s.setting_value) || 0)
+          const rawKey = activeBranchId === 0 ? s.setting_key : s.setting_key.replace(`_${activeBranchId}`, '');
+          if (rawKey === 'base_capital') setBaseCapital(Number(s.setting_value) || 0)
+          if (rawKey === 'initial_cash_riel') setInitCashRiel(Number(s.setting_value) || 0)
+          if (rawKey === 'initial_cash_usd') setInitCashUsd(Number(s.setting_value) || 0)
+          if (rawKey === 'initial_qr_riel') setInitQrRiel(Number(s.setting_value) || 0)
+          if (rawKey === 'initial_qr_usd') setInitQrUsd(Number(s.setting_value) || 0)
+          if (rawKey === 'personal_owe_riel') setPersOweRiel(Number(s.setting_value) || 0)
+          if (rawKey === 'personal_owe_usd') setPersOweUsd(Number(s.setting_value) || 0)
+          if (rawKey === 'family_owe_riel') setFamilyOweRiel(Number(s.setting_value) || 0)
+          if (rawKey === 'family_owe_usd') setFamilyOweUsd(Number(s.setting_value) || 0)
         })
       }
-      setIsLoading(false);
+      if (!silent) setIsLoading(false);
     }
 
     loadData();
     
-    const onFocus = () => loadData();
+    // 🔥 UX/RELIABILITY FIX: Fetch silently on focus so the screen doesn't flash empty skeleton loaders
+    const onFocus = () => loadData(true);
     window.addEventListener('focus', onFocus);
     
     return () => { 
       window.removeEventListener('focus', onFocus); 
     };
-  }, [activeBranchId]) 
+  }, [activeBranchId])
 
   async function updateSetting(key: string, val: number) {
-    const { error } = await supabase.from('app_settings').upsert({ setting_key: key, setting_value: val }, { onConflict: 'setting_key' })
+    // 🔥 SECURITY FIX: Append branch_id to settings key to isolate global table mutations per tenant
+    const branchKey = activeBranchId === 0 ? key : `${key}_${activeBranchId}`;
+    const { error } = await supabase.from('app_settings').upsert({ setting_key: branchKey, setting_value: val }, { onConflict: 'setting_key' })
     if (error) {
       showToast('error', 'Sync Error', 'Failed to update setting.');
     }
@@ -148,21 +154,18 @@ export default function DashboardPage() {
     return true;
   }
 
-  let activeSalesData: any[] = [];
-  let activeInvoicePayments: any[] = [];
+  // 🔥 PERFORMANCE FIX: Memoize array derivations to maintain stable references and stop render thrashing
+  const activeSalesData = useMemo(() => {
+    if (activeTab === 'wholesale') return wholesaleSales;
+    if (activeTab === 'retail') return retailSales;
+    return [...wholesaleSales, ...retailSales];
+  }, [activeTab, wholesaleSales, retailSales]);
 
-  if (activeTab === 'wholesale') {
-    activeSalesData = wholesaleSales;
-    activeInvoicePayments = invoicePayments.filter((p: any) => !String(p.invoice_id).startsWith('RET-'));
-  } 
-  else if (activeTab === 'retail') {
-    activeSalesData = retailSales;
-    activeInvoicePayments = invoicePayments.filter((p: any) => String(p.invoice_id).startsWith('RET-'));
-  } 
-  else if (activeTab === 'summary') {
-    activeSalesData = [...wholesaleSales, ...retailSales];
-    activeInvoicePayments = invoicePayments;
-  }
+  const activeInvoicePayments = useMemo(() => {
+    if (activeTab === 'wholesale') return invoicePayments.filter((p: any) => !String(p.invoice_id).startsWith('RET-'));
+    if (activeTab === 'retail') return invoicePayments.filter((p: any) => String(p.invoice_id).startsWith('RET-'));
+    return invoicePayments;
+  }, [activeTab, invoicePayments]);
 
   function calculateMetrics(dataSet: any[], timeFilter: any) {
     const filtered = dataSet.filter((s: any) => timeFilter(s.created_at));
@@ -170,7 +173,11 @@ export default function DashboardPage() {
     let totalProfit = 0, pichProfit = 0, jingProfit = 0, bothProfit = 0, momProfit = 0;
 
     filtered.forEach((sale: any) => {
-      const qty = Number(sale.qty || 0); 
+      // 🔥 FIX: Ignore deposits here so Gross Sales stays accurate
+      const customName = sale.custom_rice_type || sale.rice_type || '';
+      if (customName.includes('កក់')) return;
+
+      const qty = Number(sale.qty || 0);
       const price = Number(sale.price_per_bag || 0); 
       const cogs = Number(sale.cogs_price || 0);
       
@@ -222,7 +229,7 @@ export default function DashboardPage() {
       if (parseOwner(exp.spender) === 'mom') return; 
       
       const desc = (exp.description || '').toUpperCase();
-      if (desc === 'RETAIL' || desc === 'WHOLESALE' || desc.includes('STAFF_ADVANCE') || desc.includes('STAFF_SETTLEMENT')) return; 
+      if (desc === 'RETAIL' || desc === 'WHOLESALE' || desc.includes('STAFF_ADVANCE')) return;
 
       let amtRiel = Number(exp.amount_riel || 0); let amtUsd = Number(exp.amount_usd || 0);
       if (amtRiel < 0 && amtUsd <= 0) return;
@@ -259,6 +266,9 @@ export default function DashboardPage() {
     
     filtered.forEach((sale: any) => {
       const name = sale.custom_rice_type || sale.rice_type || 'Unknown';
+      // 🔥 FIX: Prevent "Deposit" from appearing as a top-selling product
+      if (name.includes('កក់')) return;
+
       const qty = Number(sale.qty || 0);
       const price = Number(sale.price_per_bag || 0);
       const cogs = Number(sale.cogs_price || 0);
@@ -276,8 +286,11 @@ export default function DashboardPage() {
     return { topByQty, topByProfit };
   }
 
-  const wholesaleTopMTD = getTopPerformers(wholesaleSales, isMTD);
-  const retailTopMTD = getTopPerformers(retailSales, isMTD);
+  // 🔥 PERFORMANCE FIX: Memoize top performers to prevent UI freezing on keystrokes
+  const { wholesaleTopMTD, retailTopMTD } = useMemo(() => ({
+    wholesaleTopMTD: getTopPerformers(wholesaleSales, isMTD),
+    retailTopMTD: getTopPerformers(retailSales, isMTD)
+  }), [wholesaleSales, retailSales]);
 
   function calculateAssets() {
     let liveCashRiel = initCashRiel, liveCashUsd = initCashUsd;
@@ -310,7 +323,7 @@ export default function DashboardPage() {
       let isRetail = Number(p.weight || 50) < 50;
       let effectiveCostPrice = Number(p.cost_price || 0);
 
-      // 🔥 FIX: Correctly calculates retail COGS from its linked parent (/50)
+      // 🔥 FIX: Correctly calculates retail COGS dynamically based on its linked parent's actual weight
       if (isRetail) {
         if (p.linked_wholesale_id) {
           const parent = inventoryList.find(wp => wp.id === p.linked_wholesale_id);
@@ -318,7 +331,10 @@ export default function DashboardPage() {
             const pBatches = priceHistory.filter((b: any) => b.product_id === parent.id && Number(b.remaining_qty) > 0);
             pBatches.sort((a: any, b: any) => new Date((a as any).created_at).getTime() - new Date((b as any).created_at).getTime());
             const liveParentCogs = pBatches.length > 0 ? Number(pBatches[0].cost_price) : Number(parent.cost_price || 0);
-            effectiveCostPrice = liveParentCogs / 50; 
+            
+            // 🛡️ MATH FIX: Divide by the parent's actual weight to support 25kg and 100kg bags
+            const parentWeight = Number(parent.weight) || 50;
+            effectiveCostPrice = liveParentCogs / parentWeight; 
           }
         } else if (effectiveCostPrice > 5000) {
           effectiveCostPrice = effectiveCostPrice / 50;
@@ -449,19 +465,29 @@ export default function DashboardPage() {
 
     retailSales.forEach((rs: any) => {
        const methodStr = (rs.payment_method || 'Cash ៛').toLowerCase();
-       if (methodStr.includes('unpaid') || methodStr.includes('debt') || methodStr.includes('liability')) return;
-
        const totalRiel = Number(rs.total_sales || 0);
 
        if (isBusinessMethod(methodStr)) {
-            addFunds(totalRiel, methodStr);
-            
-            let owner = parseOwner(rs.owner);
-            if (owner === 'mom' || methodStr.includes('mom qr')) {
-                const isUsd = methodStr.includes('$');
-                if (isUsd) momCollectedUsd += (totalRiel / EXCHANGE_RATE);
-                else momCollectedRiel += totalRiel;
-            }
+           // 1. Proper split parsing (You did this correctly!)
+           if (methodStr.includes(':')) {
+               methodStr.split(',').forEach((pStr: string) => {
+                   const [mName, amtStr] = pStr.split(':');
+                   let bAmt = Number(amtStr) || 0;
+                   let isUsd = mName.includes('$');
+                   let bAmtEq = isUsd ? bAmt * EXCHANGE_RATE : bAmt;
+                   addFunds(bAmtEq, mName.trim());
+               });
+           } else {
+               addFunds(totalRiel, methodStr);
+           }
+           
+           // 2. 🚨 RESTORED: Mom Liability Tracking
+           let owner = parseOwner(rs.owner);
+           if (owner === 'mom' || methodStr.includes('mom qr')) {
+               const isUsd = methodStr.includes('$');
+               if (isUsd) momCollectedUsd += (totalRiel / EXCHANGE_RATE);
+               else momCollectedRiel += totalRiel;
+           }
        }
     });
 
@@ -651,56 +677,64 @@ export default function DashboardPage() {
     };
   }
 
-  const todayM = calculateMetrics(activeSalesData, isToday)
-  const mtdM = calculateMetrics(activeSalesData, isMTD)
-  const lastMonthM = calculateMetrics(activeSalesData, isLastMonth)
+  // 🔥 PERFORMANCE FIX: Memoize all 8 heavy dashboard calculations into a single execution block
+  const { todayM, mtdM, lastMonthM, todayC, mtdC, todayE, mtdE, lastMonthE } = useMemo(() => ({
+    todayM: calculateMetrics(activeSalesData, isToday),
+    mtdM: calculateMetrics(activeSalesData, isMTD),
+    lastMonthM: calculateMetrics(activeSalesData, isLastMonth),
+    todayC: calculateCollections(activeInvoicePayments, isToday),
+    mtdC: calculateCollections(activeInvoicePayments, isMTD),
+    todayE: calculateExpenses(expenses, isToday),
+    mtdE: calculateExpenses(expenses, isMTD),
+    lastMonthE: calculateExpenses(expenses, isLastMonth)
+  }), [activeSalesData, activeInvoicePayments, expenses]);
 
-  const todayC = calculateCollections(activeInvoicePayments, isToday)
-  const mtdC = calculateCollections(activeInvoicePayments, isMTD)
-
-  const todayE = calculateExpenses(expenses, isToday)
-  const mtdE = calculateExpenses(expenses, isMTD)
-  const lastMonthE = calculateExpenses(expenses, isLastMonth)
-
-  const assetData = calculateAssets();
+  // 🔥 PERFORMANCE FIX: Memoize massive math calculations to stop typing lag
+  const assetData = useMemo(() => calculateAssets(), [initCashRiel, initCashUsd, initQrRiel, initQrUsd, baseCapital, staffList, inventoryList, priceHistory, accountsPayable, invoicePayments, wholesaleSales, retailSales, cogsSettlements, expenses, persOweRiel, persOweUsd, familyOweRiel, familyOweUsd, assetFilter]);
 
   // --- 🔥 NEW: Filter and Sort Detailed Inventory ---
-  const filteredAndSortedInventory = inventoryList.filter((item: any) => {
-    let isRetail = Number(item.weight || 50) < 50;
-    let stock = Number(item.stock || 0);
-    
-    if (invTab === 'wholesale_active') return !isRetail && stock > 0;
-    if (invTab === 'wholesale_oos') return !isRetail && stock <= 0;
-    if (invTab === 'retail') return isRetail;
-    return true;
-  }).sort((a: any, b: any) => {
-    if (!invSortConfig) return 0;
-    const { key, direction } = invSortConfig;
-    let valA, valB;
+  const filteredAndSortedInventory = useMemo(() => {
+    return inventoryList.filter((item: any) => {
+      let isRetail = Number(item.weight || 50) < 50;
+      let stock = Number(item.stock || 0);
+      
+      if (invTab === 'wholesale_active') return !isRetail && stock > 0;
+      if (invTab === 'wholesale_oos') return !isRetail && stock <= 0;
+      if (invTab === 'retail') return isRetail;
+      return true;
+    }).sort((a: any, b: any) => {
+      if (!invSortConfig) return 0;
+      const { key, direction } = invSortConfig;
+      let valA, valB;
 
-    if (key === 'name') {
-        valA = a.name.toLowerCase();
-        valB = b.name.toLowerCase();
-    } else if (key === 'stock') {
-        valA = Number(a.stock || 0);
-        valB = Number(b.stock || 0);
-    } else if (key === 'cost') {
-        valA = assetData.productValuations[a.id]?.avgCost || 0;
-        valB = assetData.productValuations[b.id]?.avgCost || 0;
-    } else if (key === 'total') {
-        valA = assetData.productValuations[a.id]?.totalValue || 0;
-        valB = assetData.productValuations[b.id]?.totalValue || 0;
-    }
+      if (key === 'name') {
+          valA = a.name.toLowerCase();
+          valB = b.name.toLowerCase();
+      } else if (key === 'stock') {
+          valA = Number(a.stock || 0);
+          valB = Number(b.stock || 0);
+      } else if (key === 'cost') {
+          valA = assetData.productValuations[a.id]?.avgCost || 0;
+          valB = assetData.productValuations[b.id]?.avgCost || 0;
+      } else if (key === 'total') {
+          valA = assetData.productValuations[a.id]?.totalValue || 0;
+          valB = assetData.productValuations[b.id]?.totalValue || 0;
+      }
 
-    if (valA < valB) return direction === 'asc' ? -1 : 1;
-    if (valA > valB) return direction === 'asc' ? 1 : -1;
-    return 0;
-  });
+      if (valA < valB) return direction === 'asc' ? -1 : 1;
+      if (valA > valB) return direction === 'asc' ? 1 : -1;
+      return 0;
+    });
+  }, [inventoryList, invTab, invSortConfig, assetData]);
 
   const generateDailyArray = (dataSet: any[], isTargetMonth: any) => {
     const dailySales = new Array(31).fill(0)
     const dailyProfit = new Array(31).fill(0)
     dataSet.filter((s: any) => isTargetMonth(s.created_at) && parseOwner(s.owner) !== 'mom').forEach((sale: any) => {
+      // 🔥 FIX: Remove deposit from the graph calculations
+      const customName = sale.custom_rice_type || sale.rice_type || '';
+      if (customName.includes('កក់')) return;
+
       const dayIdx = getDayOfMonth(sale.created_at) - 1
       const qty = Number(sale.qty || 0);
       const price = Number(sale.price_per_bag || 0);
@@ -714,8 +748,8 @@ export default function DashboardPage() {
     return { dailySales, dailyProfit }
   }
 
-  const thisMonthData = generateDailyArray(activeSalesData, isMTD)
-  const lastMonthData = generateDailyArray(activeSalesData, isLastMonth)
+  const thisMonthData = useMemo(() => generateDailyArray(activeSalesData, isMTD), [activeSalesData]);
+  const lastMonthData = useMemo(() => generateDailyArray(activeSalesData, isLastMonth), [activeSalesData]);
 
   // 🔥 Determine the Branch Name for the Badge
   const activeBranchName = activeBranchId === 0 ? "Global HQ" : branches.find(b => b.id === activeBranchId)?.name || "Unknown";
@@ -766,7 +800,7 @@ export default function DashboardPage() {
                 className={`saas-tab ${assetFilter === f ? 'active' : ''}`}
                 style={assetFilter === f ? { background: '#0f172a', color: '#fff', padding: '8px 16px' } : { padding: '8px 16px' }}
               >
-                {f === 'week' ? 'This Week' : f === 'month' ? 'This Month' : f === 'all' ? 'All Time' : f}
+                {f === 'today' ? 'Today' : f === 'yesterday' ? 'Yesterday' : f === 'week' ? 'This Week' : f === 'month' ? 'This Month' : f === 'all' ? 'All Time' : f}
               </button>
             ))}
           </div>
@@ -793,41 +827,42 @@ export default function DashboardPage() {
                   
                   {showStartingBalance && (
                     <div style={{ padding: '24px', borderTop: '1px solid #e2e8f0', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '16px', background: '#ffffff' }}>
+                      {/* 🔥 RELIABILITY FIX: Stripped commas from CurrencyInput strings before parsing to prevent NaN math crashes */}
                       <div>
                         <label style={{ display: 'block', fontSize: '12px', color: '#475569', marginBottom: '6px', fontWeight: 'bold' }}>Base Capital (៛)</label>
-                        <CurrencyInput value={baseCapital} onChange={(v: any) => setBaseCapital(Number(v) || 0)} onBlur={() => updateSetting('base_capital', baseCapital)} className="saas-input" style={{ width: '100%', textAlign: 'left' }} />
+                        <CurrencyInput value={baseCapital} onChange={(v: any) => setBaseCapital(Number(String(v).replace(/,/g, '')) || 0)} onBlur={() => updateSetting('base_capital', baseCapital)} className="saas-input" style={{ width: '100%', textAlign: 'left' }} />
                       </div>
                       <div>
                         <label style={{ display: 'block', fontSize: '12px', color: '#475569', marginBottom: '6px', fontWeight: 'bold' }}>Initial Cash (៛)</label>
-                        <CurrencyInput value={initCashRiel} onChange={(v: any) => setInitCashRiel(Number(v) || 0)} onBlur={() => updateSetting('initial_cash_riel', initCashRiel)} className="saas-input" style={{ width: '100%', textAlign: 'left' }} />
+                        <CurrencyInput value={initCashRiel} onChange={(v: any) => setInitCashRiel(Number(String(v).replace(/,/g, '')) || 0)} onBlur={() => updateSetting('initial_cash_riel', initCashRiel)} className="saas-input" style={{ width: '100%', textAlign: 'left' }} />
                       </div>
                       <div>
                         <label style={{ display: 'block', fontSize: '12px', color: '#475569', marginBottom: '6px', fontWeight: 'bold' }}>Initial Cash ($)</label>
-                        <CurrencyInput value={initCashUsd} onChange={(v: any) => setInitCashUsd(Number(v) || 0)} onBlur={() => updateSetting('initial_cash_usd', initCashUsd)} className="saas-input" style={{ width: '100%', textAlign: 'left' }} />
+                        <CurrencyInput value={initCashUsd} onChange={(v: any) => setInitCashUsd(Number(String(v).replace(/,/g, '')) || 0)} onBlur={() => updateSetting('initial_cash_usd', initCashUsd)} className="saas-input" style={{ width: '100%', textAlign: 'left' }} />
                       </div>
                       <div>
                         <label style={{ display: 'block', fontSize: '12px', color: '#475569', marginBottom: '6px', fontWeight: 'bold' }}>Initial QR (៛)</label>
-                        <CurrencyInput value={initQrRiel} onChange={(v: any) => setInitQrRiel(Number(v) || 0)} onBlur={() => updateSetting('initial_qr_riel', initQrRiel)} className="saas-input" style={{ width: '100%', textAlign: 'left' }} />
+                        <CurrencyInput value={initQrRiel} onChange={(v: any) => setInitQrRiel(Number(String(v).replace(/,/g, '')) || 0)} onBlur={() => updateSetting('initial_qr_riel', initQrRiel)} className="saas-input" style={{ width: '100%', textAlign: 'left' }} />
                       </div>
                       <div>
                         <label style={{ display: 'block', fontSize: '12px', color: '#475569', marginBottom: '6px', fontWeight: 'bold' }}>Initial QR ($)</label>
-                        <CurrencyInput value={initQrUsd} onChange={(v: any) => setInitQrUsd(Number(v) || 0)} onBlur={() => updateSetting('initial_qr_usd', initQrUsd)} className="saas-input" style={{ width: '100%', textAlign: 'left' }} />
+                        <CurrencyInput value={initQrUsd} onChange={(v: any) => setInitQrUsd(Number(String(v).replace(/,/g, '')) || 0)} onBlur={() => updateSetting('initial_qr_usd', initQrUsd)} className="saas-input" style={{ width: '100%', textAlign: 'left' }} />
                       </div>
                       <div>
                         <label style={{ display: 'block', fontSize: '12px', color: '#475569', marginBottom: '6px', fontWeight: 'bold' }}>Family Owes Me (៛)</label>
-                        <CurrencyInput value={familyOweRiel} onChange={(v: any) => setFamilyOweRiel(Number(v) || 0)} onBlur={() => updateSetting('family_owe_riel', familyOweRiel)} className="saas-input" style={{ width: '100%', textAlign: 'left' }} />
+                        <CurrencyInput value={familyOweRiel} onChange={(v: any) => setFamilyOweRiel(Number(String(v).replace(/,/g, '')) || 0)} onBlur={() => updateSetting('family_owe_riel', familyOweRiel)} className="saas-input" style={{ width: '100%', textAlign: 'left' }} />
                       </div>
                       <div>
                         <label style={{ display: 'block', fontSize: '12px', color: '#475569', marginBottom: '6px', fontWeight: 'bold' }}>Family Owes Me ($)</label>
-                        <CurrencyInput value={familyOweUsd} onChange={(v: any) => setFamilyOweUsd(Number(v) || 0)} onBlur={() => updateSetting('family_owe_usd', familyOweUsd)} className="saas-input" style={{ width: '100%', textAlign: 'left' }} />
+                        <CurrencyInput value={familyOweUsd} onChange={(v: any) => setFamilyOweUsd(Number(String(v).replace(/,/g, '')) || 0)} onBlur={() => updateSetting('family_owe_usd', familyOweUsd)} className="saas-input" style={{ width: '100%', textAlign: 'left' }} />
                       </div>
                       <div>
                         <label style={{ display: 'block', fontSize: '12px', color: '#475569', marginBottom: '6px', fontWeight: 'bold' }}>Mom Starting Owe (៛)</label>
-                        <CurrencyInput value={persOweRiel} onChange={(v: any) => setPersOweRiel(Number(v) || 0)} onBlur={() => updateSetting('personal_owe_riel', persOweRiel)} className="saas-input" style={{ width: '100%', textAlign: 'left' }} />
+                        <CurrencyInput value={persOweRiel} onChange={(v: any) => setPersOweRiel(Number(String(v).replace(/,/g, '')) || 0)} onBlur={() => updateSetting('personal_owe_riel', persOweRiel)} className="saas-input" style={{ width: '100%', textAlign: 'left' }} />
                       </div>
                       <div>
                         <label style={{ display: 'block', fontSize: '12px', color: '#475569', marginBottom: '6px', fontWeight: 'bold' }}>Mom Starting Owe ($)</label>
-                        <CurrencyInput value={persOweUsd} onChange={(v: any) => setPersOweUsd(Number(v) || 0)} onBlur={() => updateSetting('personal_owe_usd', persOweUsd)} className="saas-input" style={{ width: '100%', textAlign: 'left' }} />
+                        <CurrencyInput value={persOweUsd} onChange={(v: any) => setPersOweUsd(Number(String(v).replace(/,/g, '')) || 0)} onBlur={() => updateSetting('personal_owe_usd', persOweUsd)} className="saas-input" style={{ width: '100%', textAlign: 'left' }} />
                       </div>
                     </div>
                   )}
@@ -853,12 +888,10 @@ export default function DashboardPage() {
                   <div className="saas-card-title">💵 Cash on Hand</div>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginTop: '16px' }}>
                     <div>
-                      <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 'bold', textTransform: 'uppercase' }}>Riel (៛)</span>
-                      <div style={{ fontSize: '20px', color: '#334155', fontWeight: 'bold', marginTop: '4px' }}>{formatRiel(assetData.liveCashRiel)}</div>
+                      <div style={{ fontSize: '24px', color: '#334155', fontWeight: 'bold' }}>{formatRiel(assetData.liveCashRiel)}</div>
                     </div>
                     <div>
-                      <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 'bold', textTransform: 'uppercase' }}>USD ($)</span>
-                      <div style={{ fontSize: '20px', color: '#334155', fontWeight: 'bold', marginTop: '4px' }}>{formatUSD(assetData.liveCashUsd)}</div>
+                      <div style={{ fontSize: '24px', color: '#334155', fontWeight: 'bold' }}>{formatUSD(assetData.liveCashUsd)}</div>
                     </div>
                   </div>
                 </div>
@@ -867,12 +900,10 @@ export default function DashboardPage() {
                   <div className="saas-card-title">📱 Bank (QR Payments)</div>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginTop: '16px' }}>
                     <div>
-                      <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 'bold', textTransform: 'uppercase' }}>Riel (៛)</span>
-                      <div style={{ fontSize: '20px', color: '#3b82f6', fontWeight: 'bold', marginTop: '4px' }}>{formatRiel(assetData.liveQrRiel)}</div>
+                      <div style={{ fontSize: '24px', color: '#3b82f6', fontWeight: 'bold' }}>{formatRiel(assetData.liveQrRiel)}</div>
                     </div>
                     <div>
-                      <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 'bold', textTransform: 'uppercase' }}>USD ($)</span>
-                      <div style={{ fontSize: '20px', color: '#3b82f6', fontWeight: 'bold', marginTop: '4px' }}>{formatUSD(assetData.liveQrUsd)}</div>
+                      <div style={{ fontSize: '24px', color: '#3b82f6', fontWeight: 'bold' }}>{formatUSD(assetData.liveQrUsd)}</div>
                     </div>
                   </div>
                 </div>
@@ -883,11 +914,9 @@ export default function DashboardPage() {
                   <div className="saas-card-title">📒 Accounts Receivable (AR)</div>
                   <div style={{ display: 'flex', gap: '16px', margin: '12px 0' }}>
                     <div>
-                      <div style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 'bold', textTransform: 'uppercase', marginBottom: '2px' }}>Total ៛</div>
                       <div style={{ fontSize: '24px', color: '#f59e0b', fontWeight: 'bold' }}>{formatRiel(assetData.totalArRiel)}</div>
                     </div>
                     <div>
-                      <div style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 'bold', textTransform: 'uppercase', marginBottom: '2px' }}>Total $</div>
                       <div style={{ fontSize: '24px', color: '#f59e0b', fontWeight: 'bold' }}>{formatUSD(assetData.totalArUsd)}</div>
                     </div>
                   </div>
@@ -916,11 +945,11 @@ export default function DashboardPage() {
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginTop: '16px' }}>
                     <div>
                       <span style={{ fontSize: '11px', color: '#059669', fontWeight: 'bold', textTransform: 'uppercase' }}>Owed by Customers</span>
-                      <div style={{ fontSize: '20px', color: '#10b981', fontWeight: 'bold', marginTop: '4px' }}>{formatRiel(assetData.momCustomerArRiel)}</div>
+                      <div style={{ fontSize: '24px', color: '#10b981', fontWeight: 'bold', marginTop: '4px' }}>{formatRiel(assetData.momCustomerArRiel)}</div>
                     </div>
                     <div>
                       <span style={{ fontSize: '11px', color: '#059669', fontWeight: 'bold', textTransform: 'uppercase' }}>COGS Owed to Biz</span>
-                      <div style={{ fontSize: '20px', color: '#10b981', fontWeight: 'bold', marginTop: '4px' }}>{formatRiel(assetData.momCogsArRiel)}</div>
+                      <div style={{ fontSize: '24px', color: '#10b981', fontWeight: 'bold', marginTop: '4px' }}>{formatRiel(assetData.momCogsArRiel)}</div>
                     </div>
                   </div>
                 </div>
@@ -1081,7 +1110,8 @@ export default function DashboardPage() {
                                 qty: valData.unaccountedQty,
                                 cost: valData.unaccountedPrice,
                                 total: valData.unaccountedQty * valData.unaccountedPrice,
-                                id: 'unaccounted'
+                                // 🔥 RELIABILITY FIX: Appended item.id to prevent duplicate React key rendering errors
+                                id: `unaccounted_${item.id}`
                              });
                           }
 
@@ -1092,7 +1122,8 @@ export default function DashboardPage() {
                                 qty: 0,
                                 cost: valData.avgCost,
                                 total: 0,
-                                id: 'empty'
+                                // 🔥 RELIABILITY FIX: Appended item.id to prevent duplicate React key rendering errors
+                                id: `empty_${item.id}`
                              });
                           }
 

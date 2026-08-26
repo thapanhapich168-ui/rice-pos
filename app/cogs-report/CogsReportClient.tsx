@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import { supabase } from '@/lib/supabaseClient'
 import * as htmlToImage from 'html-to-image'
 import { useFocusRefresh } from '@/lib/useFocusRefresh'
@@ -49,9 +49,6 @@ export default function CogsReportPage() {
   // Inline History States
   const [inlinePayments, setInlinePayments] = useState<Record<string, PaymentRow[]>>({})
 
-  // 🔥 NEW FAST MATH METRICS
-  const [fastMetrics, setFastMetrics] = useState({ total_revenue: 0, total_cogs: 0, total_profit: 0 });
-
   useEffect(() => {
     const tzoffset = (new Date()).getTimezoneOffset() * 60000;
     const localISOTime = (new Date(Date.now() - tzoffset)).toISOString().slice(0, 10);
@@ -99,14 +96,10 @@ export default function CogsReportPage() {
 
     // 🔥 NEW PHASE 4: HIGH-SPEED RPC AGGREGATION ENGINE 🔥
     // Instead of downloading everything just to do the math, we ask Supabase to do it for us
-    const { data: metricsData } = await supabase.rpc('get_optimized_sales_metrics', {
+    await supabase.rpc('get_optimized_sales_metrics', {
       p_branch_id: activeBranchId,
       p_start_date: queryStart
     });
-
-    if (metricsData) {
-      setFastMetrics(metricsData as any);
-    }
 
     // 2. Fetch Visual Data (Only what we explicitly need to render the screen)
     const [
@@ -129,8 +122,8 @@ export default function CogsReportPage() {
         supabase.from('retail_sales').select('owner, payment_method, qty, price_per_bag').eq('branch_id', activeBranchId).order('created_at', { ascending: false }).limit(3000),
         supabase.from('cogs_settlements').select('owner_name, payment_method, paid_amount_riel, paid_amount_usd').eq('branch_id', activeBranchId).order('created_at', { ascending: false }).limit(3000),
         
-        // app_settings is Global, so NO branch filter here
-        supabase.from('app_settings').select('*').in('setting_key', ['personal_owe_riel', 'personal_owe_usd']),
+        // 🛡️ ISOLATION FIX: Fetch dynamically mapped settings keys to access branch-specific liabilities
+        supabase.from('app_settings').select('*').in('setting_key', activeBranchId === 0 ? ['personal_owe_riel', 'personal_owe_usd'] : [`personal_owe_riel_${activeBranchId}`, `personal_owe_usd_${activeBranchId}`]),
         
         supabase.from('invoice_summaries').select('invoice_id, owner').eq('branch_id', activeBranchId).order('created_at', { ascending: false }).limit(3000),
         supabase.from('expenses').select('amount_riel, amount_usd, remarks').eq('branch_id', activeBranchId).order('created_at', { ascending: false }).limit(3000),
@@ -210,12 +203,12 @@ export default function CogsReportPage() {
                  const [mName, amtStr] = pStr.split(':');
                  let bAmt = Number(amtStr) || 0;
                  if (mName.includes('$')) bAmt *= EXCHANGE_RATE;
-                 if (!mName.toLowerCase().includes('mom qr')) momCogsSettledRiel += bAmt;
+                 if (mName.toLowerCase().includes('liability')) momCogsSettledRiel += bAmt;
               });
           } else {
               const rielPaid = Number(c.paid_amount_riel || 0);
               const usdPaid = Number(c.paid_amount_usd || 0) * EXCHANGE_RATE;
-              if (!method.includes('mom qr')) momCogsSettledRiel += (rielPaid + usdPaid);
+              if (method.includes('liability')) momCogsSettledRiel += (rielPaid + usdPaid);
           }
       }
     });
@@ -224,8 +217,10 @@ export default function CogsReportPage() {
     let baseOweUsd = 0;
     if (aData) {
       aData.forEach(s => {
-        if (s.setting_key === 'personal_owe_riel') baseOweRiel = Number(s.setting_value) || 0;
-        if (s.setting_key === 'personal_owe_usd') baseOweUsd = Number(s.setting_value) || 0;
+        // 🛡️ ISOLATION FIX: Strip the branch tag so the parser accurately reads the base key
+        const rawKey = activeBranchId === 0 ? s.setting_key : s.setting_key.replace(`_${activeBranchId}`, '');
+        if (rawKey === 'personal_owe_riel') baseOweRiel = Number(s.setting_value) || 0;
+        if (rawKey === 'personal_owe_usd') baseOweUsd = Number(s.setting_value) || 0;
       });
     }
 
@@ -242,6 +237,12 @@ export default function CogsReportPage() {
     showToast('info', 'Generating PDF...', 'Building and downloading exact A4 PDF report...');
 
     try {
+      // 🔥 STABILITY FIX: Strip unused heavy columns to prevent Vercel 4MB Payload Too Large crashes on big months
+      const minimalRecords = reportSales.map(r => ({
+        invoice_id: r.invoice_id, customer_name: r.customer_name, rice_type: r.rice_type, custom_rice_type: r.custom_rice_type, 
+        qty: r.qty, cogs_price: r.cogs_price, created_at: r.created_at, owner: r.owner
+      }));
+
       const res = await fetch('/api/telegram/send-cogs-pdf', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -250,7 +251,7 @@ export default function CogsReportPage() {
           toDate,
           ownerTab: activeOwnerTab,
           downloadOnly: true,
-          records: reportSales
+          records: minimalRecords
         })
       });
 
@@ -285,6 +286,12 @@ export default function CogsReportPage() {
     showToast('info', 'Generating PDF...', 'Building A4 PDF report and sending to Telegram...');
 
     try {
+      // 🔥 STABILITY FIX: Strip unused heavy columns to prevent Vercel 4MB Payload Too Large crashes
+      const minimalRecords = reportSales.map(r => ({
+        invoice_id: r.invoice_id, customer_name: r.customer_name, rice_type: r.rice_type, custom_rice_type: r.custom_rice_type, 
+        qty: r.qty, cogs_price: r.cogs_price, created_at: r.created_at, owner: r.owner
+      }));
+
       const res = await fetch('/api/telegram/send-cogs-pdf', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -292,7 +299,7 @@ export default function CogsReportPage() {
           fromDate,
           toDate,
           ownerTab: activeOwnerTab,
-          records: reportSales
+          records: minimalRecords
         })
       });
 
@@ -310,7 +317,6 @@ export default function CogsReportPage() {
     }
   };
 
-  const now = new Date()
   const isWithinTimeFilter = (dateStr: string, filter: string) => {
     if (filter === 'all') return true;
     if (!dateStr) return false;
@@ -325,24 +331,6 @@ export default function CogsReportPage() {
     if (filter === 'month') return d.getMonth() === today.getMonth() && d.getFullYear() === today.getFullYear();
     return true;
   }
-
-  const reportSales = [...sales, ...retailSales].filter(s => {
-    if (!s.created_at) return false;
-    const d = s.created_at.substring(0, 10);
-    return d >= fromDate && d <= toDate;
-  }).filter(s => {
-    const owner = parseOwner(s.owner || s.customer_name);
-    if (activeOwnerTab === 'mom') return owner === 'mom';
-    else return owner !== 'mom';
-  });
-
-  const groupedBySeller: Record<string, any[]> = {};
-  reportSales.forEach(s => {
-    let seller = parseOwner(s.owner || s.customer_name);
-    seller = seller.charAt(0).toUpperCase() + seller.slice(1);
-    if (!groupedBySeller[seller]) groupedBySeller[seller] = [];
-    groupedBySeller[seller].push(s);
-  });
 
   const processSellerData = (sellerSales: any[]) => {
     const customerGroups: Record<string, any[]> = {};
@@ -405,54 +393,89 @@ export default function CogsReportPage() {
     return { rows: finalRows, sellerGrandTotal };
   };
 
-  const dailyMap: Record<string, any> = {};
-  
-  [...sales, ...retailSales].forEach(s => {
-    const owner = parseOwner(s.owner || s.customer_name);
-    const isMomTab = activeOwnerTab === 'mom';
-    const isMomOwner = owner === 'mom';
+  // 🔥 PERFORMANCE FIX: Memoize report sales to prevent UI lag and render-phase mutations
+  const { reportSales, groupedBySeller, combinedGrandTotal } = useMemo(() => {
+    const rSales = [...sales, ...retailSales].filter(s => {
+      if (!s.created_at) return false;
+      const d = s.created_at.substring(0, 10);
+      return d >= fromDate && d <= toDate;
+    }).filter(s => {
+      const owner = parseOwner(s.owner || s.customer_name);
+      if (activeOwnerTab === 'mom') return owner === 'mom';
+      else return owner !== 'mom';
+    });
+
+    const grouped: Record<string, any[]> = {};
+    rSales.forEach(s => {
+      let seller = parseOwner(s.owner || s.customer_name);
+      seller = seller.charAt(0).toUpperCase() + seller.slice(1);
+      if (!grouped[seller]) grouped[seller] = [];
+      grouped[seller].push(s);
+    });
+
+    let grandTotal = 0;
+    Object.keys(grouped).forEach(seller => {
+      const { sellerGrandTotal } = processSellerData(grouped[seller]);
+      grandTotal += sellerGrandTotal;
+    });
+
+    return { reportSales: rSales, groupedBySeller: grouped, combinedGrandTotal: grandTotal };
+  }, [sales, retailSales, fromDate, toDate, activeOwnerTab]);
+
+  // 🔥 PERFORMANCE FIX: Memoize daily aggregations for Pending/History tabs
+  const { dailyMap, pendingDays, historyDays } = useMemo(() => {
+    const dMap: Record<string, any> = {};
     
-    if (isMomTab !== isMomOwner) return;
-
-    const date = s.created_at.substring(0, 10);
-    const displayOwner = owner.charAt(0).toUpperCase() + owner.slice(1);
-    const key = `${date}_${displayOwner}`;
-
-    if (!dailyMap[key]) {
-      dailyMap[key] = { key, date, owner: displayOwner, totalCogs: 0, totalPaid: 0, methods: new Set<string>() };
-    }
-
-    let qty = Number(s.qty || 0);
-    let price = Number(s.cogs_price || 0);
-    let amount = qty * price;
-    let desc = s.custom_rice_type || s.rice_type || '';
-    
-    if (desc.includes('សេវាដឹក')) return;
-    if (desc.includes('បាវ') && price === 0) return;
-    if (desc.includes('ដូរ') || desc.includes('បញ្ចុះតម្លៃ') || desc.includes('កក់')) amount = -Math.abs(amount);
-    else amount = Math.abs(amount);
-
-    dailyMap[key].totalCogs += amount;
-  });
-
-  cogsSettlements.forEach(c => {
-    const owner = parseOwner(c.owner_name);
-    const displayOwner = owner.charAt(0).toUpperCase() + owner.slice(1);
-    const key = `${c.settlement_date}_${displayOwner}`;
-    if (dailyMap[key]) {
-      const rielPaid = Number(c.paid_amount_riel || 0);
-      const usdPaid = Number(c.paid_amount_usd || 0) * EXCHANGE_RATE;
-      dailyMap[key].totalPaid += (rielPaid + usdPaid);
+    [...sales, ...retailSales].forEach(s => {
+      const owner = parseOwner(s.owner || s.customer_name);
+      const isMomTab = activeOwnerTab === 'mom';
+      const isMomOwner = owner === 'mom';
       
-      if (c.payment_method) dailyMap[key].methods.add(c.payment_method);
-    }
-  });
+      if (isMomTab !== isMomOwner) return;
 
-  const allDays = Object.values(dailyMap).sort((a,b) => b.date.localeCompare(a.date));
-  const filteredDays = allDays.filter(d => isWithinTimeFilter(d.date, timeFilter));
-  
-  const pendingDays = filteredDays.filter(d => d.totalCogs > d.totalPaid + 0.1);
-  const historyDays = filteredDays.filter(d => d.totalPaid > 0);
+      const date = s.created_at.substring(0, 10);
+      const displayOwner = owner.charAt(0).toUpperCase() + owner.slice(1);
+      const key = `${date}_${displayOwner}`;
+
+      if (!dMap[key]) {
+        dMap[key] = { key, date, owner: displayOwner, totalCogs: 0, totalPaid: 0, methods: new Set<string>() };
+      }
+
+      let qty = Number(s.qty || 0);
+      let price = Number(s.cogs_price || 0);
+      let amount = qty * price;
+      let desc = s.custom_rice_type || s.rice_type || '';
+      
+      if (desc.includes('សេវាដឹក')) return;
+      if (desc.includes('បាវ') && price === 0) return;
+      if (desc.includes('ដូរ') || desc.includes('បញ្ចុះតម្លៃ') || desc.includes('កក់')) amount = -Math.abs(amount);
+      else amount = Math.abs(amount);
+
+      dMap[key].totalCogs += amount;
+    });
+
+    cogsSettlements.forEach(c => {
+      const owner = parseOwner(c.owner_name);
+      const displayOwner = owner.charAt(0).toUpperCase() + owner.slice(1);
+      const key = `${c.settlement_date}_${displayOwner}`;
+      if (dMap[key]) {
+        const rielPaid = Number(c.paid_amount_riel || 0);
+        const usdPaid = Number(c.paid_amount_usd || 0) * EXCHANGE_RATE;
+        dMap[key].totalPaid += (rielPaid + usdPaid);
+        
+        if (c.payment_method) dMap[key].methods.add(c.payment_method);
+      }
+    });
+
+    const allDays = Object.values(dMap).sort((a,b) => b.date.localeCompare(a.date));
+    const filteredDays = allDays.filter(d => isWithinTimeFilter(d.date, timeFilter));
+    
+    return {
+      dailyMap: dMap,
+      pendingDays: filteredDays.filter(d => d.totalCogs > d.totalPaid + 0.1),
+      historyDays: filteredDays.filter(d => d.totalPaid > 0)
+    };
+  }, [sales, retailSales, cogsSettlements, activeOwnerTab, timeFilter]);
 
   const handleSelectDay = (key: string) => {
     if (selectedDays.includes(key)) setSelectedDays(selectedDays.filter(k => k !== key));
@@ -477,7 +500,8 @@ export default function CogsReportPage() {
     const totalDue = targetDays.reduce((sum, d) => sum + (d.totalCogs - d.totalPaid), 0);
 
     for (const r of rows) {
-       const amt = Number(r.amount);
+       // 🔥 RELIABILITY FIX: Strip commas from CurrencyInput to prevent NaN math crashes
+       const amt = Number(String(r.amount).replace(/,/g, '')) || 0;
        if (amt <= 0) continue;
        methodStrings.push(`${r.method}: ${amt}`);
 
@@ -569,7 +593,8 @@ export default function CogsReportPage() {
 
   const bulkTotalDue = selectedDays.reduce((sum, k) => sum + (dailyMap[k].totalCogs - dailyMap[k].totalPaid), 0);
   const liveBulkReceived = bulkPaymentRows.reduce((sum, row) => {
-    const amt = Number(row.amount) || 0;
+    // 🔥 RELIABILITY FIX: Strip commas to prevent NaN UI calculation crashes
+    const amt = Number(String(row.amount).replace(/,/g, '')) || 0;
     if (row.method === 'Mom Liability $') return sum + (amt * EXCHANGE_RATE);
     if (row.method === 'Mom Liability ៛') return sum + amt;
     if (row.method.includes('$')) return sum + (amt * EXCHANGE_RATE);
@@ -599,8 +624,6 @@ export default function CogsReportPage() {
       return { ...prev, [key]: rows.filter(r => r.id !== rowId) };
     });
   }
-
-  let combinedGrandTotal = 0;
 
   return (
     <div className="main-wrapper" style={{ display: 'flex', flexDirection: 'column', height: '100dvh', overflow: 'hidden' }}>
@@ -759,7 +782,6 @@ export default function CogsReportPage() {
                     <>
                       {Object.keys(groupedBySeller).map((seller) => {
                         const { rows, sellerGrandTotal } = processSellerData(groupedBySeller[seller]);
-                        combinedGrandTotal += sellerGrandTotal;
 
                         return (
                           <div key={seller} style={{ marginBottom: '30px' }}>
@@ -1315,3 +1337,4 @@ export default function CogsReportPage() {
     </div>
   )
 }
+

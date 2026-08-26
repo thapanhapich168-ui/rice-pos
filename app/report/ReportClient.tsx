@@ -27,7 +27,19 @@ export default function ReportControlPage() {
 
   useEffect(() => {
     fetchReportData()
-  }, [activeBranchId]) 
+
+    // 🛡️ INTEGRATION FIX: Bind the dashboard to the global WebSocket network so it never goes stale
+    const reportSyncChannel = supabase.channel('report-live-sync')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'sales' }, () => fetchReportData())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'retail_sales' }, () => fetchReportData())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'expenses' }, () => fetchReportData())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'invoice_payments' }, () => fetchReportData())
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(reportSyncChannel);
+    }
+  }, [activeBranchId])
 
   // --- 1. FETCH SUPABASE DATA (OPTIMIZED PAYLOADS) ---
   async function fetchReportData() {
@@ -55,7 +67,8 @@ export default function ReportControlPage() {
         buildQNarrow('invoice_summaries', 'invoice_id, created_at, owner, total_sales, total_profit, delivery_status').gte('created_at', firstDayOfLastMonth),
         
         buildQNarrow('retail_sales', 'id, created_at, qty, price_per_bag, cogs_price, owner, custom_rice_type, rice_type').gte('created_at', firstDayOfLastMonth),
-        buildQNarrow('expenses', 'id, created_at, amount_riel, amount_usd, spender, category, description, expense_date').gte('created_at', firstDayOfLastMonth),
+        // 🛡️ BUG FIX: Changed 'category' to 'remarks' to prevent 400 Bad Request database crash
+        buildQNarrow('expenses', 'id, created_at, amount_riel, amount_usd, spender, remarks, description, expense_date').gte('created_at', firstDayOfLastMonth),
         buildQNarrow('invoice_payments', 'invoice_id, amount_paid_usd, amount_paid_riel, payment_method, payment_date').gte('payment_date', firstDayOfLastMonth)
       ])
 
@@ -106,16 +119,23 @@ export default function ReportControlPage() {
       const profitByOwner = { Pich: 0, Jing: 0, Both: 0 }
 
       invSlice.forEach(inv => {
+        const owner = parseOwner(inv.owner);
+        if (owner === 'mom') return; // 🚫 Completely exclude Mom
+
         const sales = Number(inv.total_sales) || 0
         const profit = Number(inv.total_profit) || 0
         totalSales += sales
         totalProfit += profit
 
-        const owner = ['Pich', 'Jing'].includes(inv.owner) ? inv.owner : 'Both'
-        profitByOwner[owner as keyof typeof profitByOwner] += profit
+        if (owner === 'pich') profitByOwner.Pich += profit;
+        else if (owner === 'jing') profitByOwner.Jing += profit;
+        else profitByOwner.Both += profit;
       })
 
       retSlice.forEach(ret => {
+        const owner = parseOwner(ret.owner);
+        if (owner === 'mom') return; // 🚫 Completely exclude Mom
+
         const qty = Number(ret.qty) || 0
         const price = Number(ret.price_per_bag) || 0
         const cogs = Number(ret.cogs_price) || 0
@@ -124,30 +144,51 @@ export default function ReportControlPage() {
 
         totalSales += sales
         totalProfit += profit
-        profitByOwner.Both += profit
+        
+        if (owner === 'pich') profitByOwner.Pich += profit;
+        else if (owner === 'jing') profitByOwner.Jing += profit;
+        else profitByOwner.Both += profit;
       })
 
+      // 🔥 Split expenses into Business vs Personal
       const expenseBySpender = {
-        Pich: { riel: 0, usd: 0 },
-        Jing: { riel: 0, usd: 0 },
-        Both: { riel: 0, usd: 0 }
+        Pich: { bizRiel: 0, bizUsd: 0, persRiel: 0, persUsd: 0 },
+        Jing: { bizRiel: 0, bizUsd: 0, persRiel: 0, persUsd: 0 },
+        Both: { bizRiel: 0, bizUsd: 0, persRiel: 0, persUsd: 0 }
       }
 
-      let totalExpRiel = 0
-      let totalExpUsd = 0
+      let totalBizExpRiel = 0, totalBizExpUsd = 0;
+      let totalPersExpRiel = 0, totalPersExpUsd = 0;
       const categoryBreakdown: Record<string, { riel: number; usd: number }> = {}
 
       expSlice.forEach(exp => {
+        const spender = parseOwner(exp.spender);
+        if (spender === 'mom') return; // 🚫 Completely exclude Mom
+
         const riel = Number(exp.amount_riel) || 0
         const usd = Number(exp.amount_usd) || 0
-        const spender = ['Pich', 'Jing'].includes(exp.spender) ? exp.spender : 'Both'
+        
+        let expKey: 'Pich' | 'Jing' | 'Both' = 'Both';
+        if (spender === 'pich') expKey = 'Pich';
+        else if (spender === 'jing') expKey = 'Jing';
 
-        expenseBySpender[spender as keyof typeof expenseBySpender].riel += riel
-        expenseBySpender[spender as keyof typeof expenseBySpender].usd += usd
-        totalExpRiel += riel
-        totalExpUsd += usd
+        const type = (exp.description || '').toLowerCase()
+        const isBiz = type === 'business' || type === 'biz' || type === 'staff'
 
-        const cat = exp.category || exp.description || 'Uncategorized'
+        if (isBiz) {
+          expenseBySpender[expKey].bizRiel += riel
+          expenseBySpender[expKey].bizUsd += usd
+          totalBizExpRiel += riel
+          totalBizExpUsd += usd
+        } else {
+          expenseBySpender[expKey].persRiel += riel
+          expenseBySpender[expKey].persUsd += usd
+          totalPersExpRiel += riel
+          totalPersExpUsd += usd
+        }
+
+        // 🛡️ BUG FIX: Mapping to 'remarks' instead of the non-existent 'category'
+        const cat = exp.remarks || exp.description || 'Uncategorized'
         if (!categoryBreakdown[cat]) categoryBreakdown[cat] = { riel: 0, usd: 0 }
         categoryBreakdown[cat].riel += riel
         categoryBreakdown[cat].usd += usd
@@ -158,8 +199,12 @@ export default function ReportControlPage() {
         totalProfit,
         profitByOwner,
         expenseBySpender,
-        totalExpRiel,
-        totalExpUsd,
+        totalBizExpRiel,
+        totalBizExpUsd,
+        totalPersExpRiel,
+        totalPersExpUsd,
+        totalExpRiel: totalBizExpRiel + totalPersExpRiel, // Kept for UI dashboard compatibility
+        totalExpUsd: totalBizExpUsd + totalPersExpUsd,    // Kept for UI dashboard compatibility
         categoryBreakdown
       }
     }
@@ -337,34 +382,46 @@ export default function ReportControlPage() {
 📆 THIS MONTH
 💰 Sales      ${formatRiel(month.totalSales)}
 📈 Profit     ${formatRiel(month.totalProfit)}
-💸 Expense    ${formatRiel(month.totalExpRiel)} / ${cleanUSD(month.totalExpUsd)}
+🏢 Biz Exp    ${formatRiel(month.totalBizExpRiel)} / ${cleanUSD(month.totalBizExpUsd)}
+🏠 Pers Exp   ${formatRiel(month.totalPersExpRiel)} / ${cleanUSD(month.totalPersExpUsd)}
 
 👤 MONTH PROFIT
 🟢 Pich       ${formatRiel(month.profitByOwner.Pich)}
 🔵 Jing       ${formatRiel(month.profitByOwner.Jing)}
 🟡 Both       ${formatRiel(month.profitByOwner.Both)}
 
-💸 MONTH EXPENSE
-🟢 Pich       ${formatRiel(month.expenseBySpender.Pich.riel)} / ${cleanUSD(month.expenseBySpender.Pich.usd)}
-🔵 Jing       ${formatRiel(month.expenseBySpender.Jing.riel)} / ${cleanUSD(month.expenseBySpender.Jing.usd)}
-🟡 Both       ${formatRiel(month.expenseBySpender.Both.riel)} / ${cleanUSD(month.expenseBySpender.Both.usd)}
+🏢 MONTH BIZ EXPENSE
+🟢 Pich       ${formatRiel(month.expenseBySpender.Pich.bizRiel)} / ${cleanUSD(month.expenseBySpender.Pich.bizUsd)}
+🔵 Jing       ${formatRiel(month.expenseBySpender.Jing.bizRiel)} / ${cleanUSD(month.expenseBySpender.Jing.bizUsd)}
+🟡 Both       ${formatRiel(month.expenseBySpender.Both.bizRiel)} / ${cleanUSD(month.expenseBySpender.Both.bizUsd)}
+
+🏠 MONTH PERS EXPENSE
+🟢 Pich       ${formatRiel(month.expenseBySpender.Pich.persRiel)} / ${cleanUSD(month.expenseBySpender.Pich.persUsd)}
+🔵 Jing       ${formatRiel(month.expenseBySpender.Jing.persRiel)} / ${cleanUSD(month.expenseBySpender.Jing.persUsd)}
+🟡 Both       ${formatRiel(month.expenseBySpender.Both.persRiel)} / ${cleanUSD(month.expenseBySpender.Both.persUsd)}
 
 ━━━━━━━━━━━━━━━
 
 📅 TODAY
 💰 Sales      ${formatRiel(today.totalSales)}
 📈 Profit     ${formatRiel(today.totalProfit)}
-💸 Expense    ${formatRiel(today.totalExpRiel)} / ${cleanUSD(today.totalExpUsd)}
+🏢 Biz Exp    ${formatRiel(today.totalBizExpRiel)} / ${cleanUSD(today.totalBizExpUsd)}
+🏠 Pers Exp   ${formatRiel(today.totalPersExpRiel)} / ${cleanUSD(today.totalPersExpUsd)}
 
 👤 TODAY PROFIT
 🟢 Pich       ${formatRiel(today.profitByOwner.Pich)}
 🔵 Jing       ${formatRiel(today.profitByOwner.Jing)}
 🟡 Both       ${formatRiel(today.profitByOwner.Both)}
 
-💸 TODAY EXPENSE
-🟢 Pich       ${formatRiel(today.expenseBySpender.Pich.riel)} / ${cleanUSD(today.expenseBySpender.Pich.usd)}
-🔵 Jing       ${formatRiel(today.expenseBySpender.Jing.riel)} / ${cleanUSD(today.expenseBySpender.Jing.usd)}
-🟡 Both       ${formatRiel(today.expenseBySpender.Both.riel)} / ${cleanUSD(today.expenseBySpender.Both.usd)}`
+🏢 TODAY BIZ EXPENSE
+🟢 Pich       ${formatRiel(today.expenseBySpender.Pich.bizRiel)} / ${cleanUSD(today.expenseBySpender.Pich.bizUsd)}
+🔵 Jing       ${formatRiel(today.expenseBySpender.Jing.bizRiel)} / ${cleanUSD(today.expenseBySpender.Jing.bizUsd)}
+🟡 Both       ${formatRiel(today.expenseBySpender.Both.bizRiel)} / ${cleanUSD(today.expenseBySpender.Both.bizUsd)}
+
+🏠 TODAY PERS EXPENSE
+🟢 Pich       ${formatRiel(today.expenseBySpender.Pich.persRiel)} / ${cleanUSD(today.expenseBySpender.Pich.persUsd)}
+🔵 Jing       ${formatRiel(today.expenseBySpender.Jing.persRiel)} / ${cleanUSD(today.expenseBySpender.Jing.persUsd)}
+🟡 Both       ${formatRiel(today.expenseBySpender.Both.persRiel)} / ${cleanUSD(today.expenseBySpender.Both.persUsd)}`
     )
   }
 
@@ -708,8 +765,8 @@ export default function ReportControlPage() {
 
               <h2 className="section-divider" style={{ fontWeight: 'bold' }}>📅 TODAY'S PERFORMANCE</h2>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '16px', marginBottom: '32px' }}>
-                <ComplexCard title="Today Sales" total={todayM.totalSales} pich={todayM.pichSales} jing={todayM.jingSales} both={todayM.bothSales} mom={todayM.momSales} color="#2563eb" hideUsdEquiv={true} />
-                <ComplexCard title="Today Profit" total={todayM.totalProfit} pich={todayM.pichProfit} jing={todayM.jingProfit} both={todayM.bothProfit} mom={todayM.momProfit} color="#10b981" hideUsdEquiv={true} />
+                <ComplexCard title="Today Sales" total={todayM.totalSales} pich={todayM.pichSales} jing={todayM.jingSales} both={todayM.bothSales} color="#2563eb" hideUsdEquiv={true} />
+                <ComplexCard title="Today Profit" total={todayM.totalProfit} pich={todayM.pichProfit} jing={todayM.jingProfit} both={todayM.bothProfit} color="#10b981" hideUsdEquiv={true} />
                 <ExpenseBreakdownCard title="Cash Collected (Direct)" cR={todayC.cR} cU={todayC.cU} qR={todayC.qR} qU={todayC.qU} color="#3b82f6" />
                 <ExpenseBreakdownCard title="Today Biz Expenses" cR={todayE.bizCashRiel} cU={todayE.bizCashUsd} qR={todayE.bizQrRiel} qU={todayE.bizQrUsd} color="#b91c1c" />
                 <ExpenseBreakdownCard title="Today Personal Exp" cR={todayE.persCashRiel} cU={todayE.persCashUsd} qR={todayE.persQrRiel} qU={todayE.persQrUsd} color="#f59e0b" />
@@ -717,8 +774,8 @@ export default function ReportControlPage() {
 
               <h2 className="section-divider" style={{ fontWeight: 'bold' }}>📈 MONTH TO DATE (MTD) PERFORMANCE</h2>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '16px', marginBottom: '32px' }}>
-                <ComplexCard title="MTD Sales" total={mtdM.totalSales} pich={mtdM.pichSales} jing={mtdM.jingSales} both={mtdM.bothSales} mom={mtdM.momSales} color="#2563eb" />
-                <ComplexCard title="MTD Profit" total={mtdM.totalProfit} pich={mtdM.pichProfit} jing={mtdM.jingProfit} both={mtdM.bothProfit} mom={mtdM.momProfit} color="#10b981" />
+                <ComplexCard title="MTD Sales" total={mtdM.totalSales} pich={mtdM.pichSales} jing={mtdM.jingSales} both={mtdM.bothSales} color="#2563eb" />
+                <ComplexCard title="MTD Profit" total={mtdM.totalProfit} pich={mtdM.pichProfit} jing={mtdM.jingProfit} both={mtdM.bothProfit} color="#10b981" />
                 <ExpenseBreakdownCard title="Cash Collected (Direct)" cR={mtdC.cR} cU={mtdC.cU} qR={mtdC.qR} qU={mtdC.qU} color="#3b82f6" />
                 <ExpenseBreakdownCard title="MTD Biz Expenses" cR={mtdE.bizCashRiel} cU={mtdE.bizCashUsd} qR={mtdE.bizQrRiel} qU={mtdE.bizQrUsd} color="#b91c1c" />
                 <ExpenseBreakdownCard title="MTD Personal Exp" cR={mtdE.persCashRiel} cU={mtdE.persCashUsd} qR={mtdE.persQrRiel} qU={mtdE.persQrUsd} color="#f59e0b" />
@@ -985,7 +1042,7 @@ function TopPerformersCard({ title, data, type }: any) {
   )
 }
 
-function ComplexCard({ title, total, pich = 0, jing = 0, both = 0, mom = 0, hideSubboxes = false, hideUsdEquiv = false, color = '#1e293b' }: any) {
+function ComplexCard({ title, total, pich = 0, jing = 0, both = 0, hideSubboxes = false, hideUsdEquiv = false, color = '#1e293b' }: any) {
   return (
     <div className="saas-card">
       <h3 className="saas-card-title">{title}</h3>
@@ -998,7 +1055,7 @@ function ComplexCard({ title, total, pich = 0, jing = 0, both = 0, mom = 0, hide
       {hideUsdEquiv && <div style={{ height: '16px', marginBottom: '16px' }}></div>}
       
       {!hideSubboxes && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '6px', borderTop: '1px solid #f1f5f9', paddingTop: '16px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '6px', borderTop: '1px solid #f1f5f9', paddingTop: '16px' }}>
           <div style={{ background: '#f8fafc', padding: '6px', borderRadius: '6px', textAlign: 'center' }}>
             <div style={{ fontSize: '10px', color: '#94a3b8', textTransform: 'uppercase', fontWeight: 'bold' }}>Pich</div>
             <div style={{ fontSize: '12px', color: '#334155', marginTop: '2px', fontWeight: 'bold' }}>{formatRiel(pich)}</div>
@@ -1010,10 +1067,6 @@ function ComplexCard({ title, total, pich = 0, jing = 0, both = 0, mom = 0, hide
           <div style={{ background: '#f8fafc', padding: '6px', borderRadius: '6px', textAlign: 'center' }}>
             <div style={{ fontSize: '10px', color: '#94a3b8', textTransform: 'uppercase', fontWeight: 'bold' }}>Both</div>
             <div style={{ fontSize: '12px', color: '#334155', marginTop: '2px', fontWeight: 'bold' }}>{formatRiel(both)}</div>
-          </div>
-          <div style={{ background: '#fefcf3', padding: '6px', borderRadius: '6px', textAlign: 'center', border: '1px solid #fde047' }}>
-            <div style={{ fontSize: '10px', color: '#ca8a04', textTransform: 'uppercase', fontWeight: 'bold' }}>Mom</div>
-            <div style={{ fontSize: '12px', color: '#854d0e', marginTop: '2px', fontWeight: 'bold' }}>{formatRiel(mom)}</div>
           </div>
         </div>
       )}

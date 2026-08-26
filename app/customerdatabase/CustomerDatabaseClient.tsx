@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useRef } from 'react'
+import { useEffect, useState, useMemo } from 'react'
 import { supabase } from '@/lib/supabaseClient'
 import { useFocusRefresh } from '@/lib/useFocusRefresh'
 import { Customer } from '@/types'
@@ -8,7 +8,7 @@ import { useToast } from '@/components/ToastProvider'
 import { useDebounce } from '@/lib/useDebounce'
 import EmptyState from '@/components/EmptyState'
 import Modal from '@/components/Modal'
-import { useBranch } from '@/components/BranchContext' // 🔥 GLOBAL MEMORY IMPORTED
+import { useBranch } from '@/components/BranchContext' 
 
 type SortConfig = {
   key: keyof Customer;
@@ -27,7 +27,7 @@ const DEFAULT_ORDER: Array<keyof Customer> = [
 
 export default function CustomerDatabasePage() {
   const { showToast } = useToast();
-  const { activeBranchId } = useBranch(); // 🔥 TUNED INTO RADIO TOWER
+  const { activeBranchId } = useBranch(); 
 
   // --- CORE STATE ---
   const [customers, setCustomers] = useState<Customer[]>([])
@@ -36,7 +36,6 @@ export default function CustomerDatabasePage() {
   const debouncedSearch = useDebounce(searchQuery, 300) 
   const [edits, setEdits] = useState<Record<string, Partial<Customer>>>({})
   const [selectedToDelete, setSelectedToDelete] = useState<Set<string>>(new Set())
-  const [hoveredId, setHoveredId] = useState<string | null>(null)
 
   // --- CELL EDITING STATE ---
   const [editingCell, setEditingCell] = useState<{id: string, col: string} | null>(null)
@@ -49,8 +48,6 @@ export default function CustomerDatabasePage() {
   // --- COLUMN PREFERENCE STATE ---
   const [columnWidths, setColumnWidths] = useState<Record<string, number>>(DEFAULT_WIDTHS)
   const [columnOrder, setColumnOrder] = useState<Array<keyof Customer>>(DEFAULT_ORDER)
-  const widthsRef = useRef(columnWidths)
-  widthsRef.current = columnWidths
 
   // --- MODALS ---
   const [showAddModal, setShowAddModal] = useState(false)
@@ -62,7 +59,7 @@ export default function CustomerDatabasePage() {
   useEffect(() => {
     loadCustomers()
     fetchSettings()
-  }, [activeBranchId]) // 🔥 RE-RUNS ON BRANCH SWITCH
+  }, [activeBranchId]) 
 
   useFocusRefresh(loadCustomers);
 
@@ -92,7 +89,7 @@ export default function CustomerDatabasePage() {
       .from('customers')
       .select('*')
       .eq('is_archived', false)
-      .eq('branch_id', activeBranchId) // 🔥 FILTERED BY BRANCH
+      .eq('branch_id', activeBranchId) 
       .order('created_at', { ascending: false })
       
     if (!error && data) {
@@ -111,7 +108,11 @@ export default function CustomerDatabasePage() {
       return;
     }
 
-    const { error } = await supabase.from('customers').update(edits[id]).eq('id', id)
+    const { error } = await supabase.from('customers')
+      .update(edits[id])
+      .eq('id', id)
+      .eq('branch_id', activeBranchId)
+
     if (!error) {
       setEdits(prev => { const n = { ...prev }; delete n[id]; return n })
       setEditingCell(null)
@@ -129,6 +130,7 @@ export default function CustomerDatabasePage() {
       .from('customers')
       .update({ is_archived: true })
       .in('id', Array.from(selectedToDelete))
+      .eq('branch_id', activeBranchId)
       
     if (!error) { 
       setSelectedToDelete(new Set()); 
@@ -146,7 +148,7 @@ export default function CustomerDatabasePage() {
     const { error } = await supabase.from('customers').insert([{
       name: newCustomer.name, owner: newCustomer.owner, type: newCustomer.type, 
       phone: newCustomer.phone, location: newCustomer.location, google_map: newCustomer.google_map,
-      branch_id: activeBranchId // 🔥 STAMPED WITH BRANCH ID
+      branch_id: activeBranchId 
     }])
 
     if (!error) {
@@ -159,59 +161,6 @@ export default function CustomerDatabasePage() {
     }
   }
 
-  // --- COLUMN DRAG & DROP LOGIC ---
-  const handleDragStart = (e: React.DragEvent, col: string) => {
-    e.dataTransfer.setData('text/plain', col)
-    e.dataTransfer.effectAllowed = 'move'
-  }
-
-  const handleDragOver = (e: React.DragEvent) => { e.preventDefault() }
-
-  const handleDrop = async (e: React.DragEvent, targetCol: string) => {
-    e.preventDefault()
-    const sourceCol = e.dataTransfer.getData('text/plain') as keyof Customer
-    if (!sourceCol || sourceCol === targetCol) return
-
-    setColumnOrder(prev => {
-      const newOrder = prev.filter(c => c !== sourceCol)
-      const targetIdx = newOrder.indexOf(targetCol as keyof Customer)
-      newOrder.splice(targetIdx, 0, sourceCol)
-      
-      supabase.from('app_settings').upsert({ setting_key: 'cust_col_order', setting_value: newOrder }, { onConflict: 'setting_key' }).then()
-      return newOrder
-    })
-  }
-
-  // --- COLUMN RESIZE LOGIC ---
-  const handleResizeStart = (e: React.MouseEvent | React.TouchEvent, columnKey: string) => {
-    e.preventDefault()
-    e.stopPropagation() 
-    const startX = 'touches' in e ? e.touches[0].pageX : e.pageX
-    const startWidth = widthsRef.current[columnKey] || 150
-
-    const handleMove = (moveEvent: MouseEvent | TouchEvent) => {
-      const currentX = 'touches' in moveEvent ? moveEvent.touches[0].pageX : moveEvent.pageX
-      const newWidth = Math.max(60, startWidth + (currentX - startX))
-      setColumnWidths(prev => ({ ...prev, [columnKey]: newWidth }))
-    }
-
-    const handleUp = async () => {
-      document.removeEventListener('mousemove', handleMove)
-      document.removeEventListener('mouseup', handleUp)
-      document.removeEventListener('touchmove', handleMove)
-      document.removeEventListener('touchmove', handleMove)
-      document.removeEventListener('touchend', handleUp)
-      
-      await supabase.from('app_settings').upsert({ setting_key: 'cust_col_widths', setting_value: widthsRef.current }, { onConflict: 'setting_key' })
-    }
-
-    document.addEventListener('mousemove', handleMove)
-    document.addEventListener('mouseup', handleUp)
-    document.addEventListener('touchmove', handleMove, { passive: false })
-    document.addEventListener('touchmove', handleMove)
-    document.addEventListener('touchend', handleUp)
-  }
-
   const handleSort = (key: keyof Customer) => {
     let direction: 'asc' | 'desc' = 'asc';
     if (sortConfig && sortConfig.key === key && sortConfig.direction === 'asc') {
@@ -221,50 +170,51 @@ export default function CustomerDatabasePage() {
   }
 
   // --- DATA PROCESSING ---
-  const now = new Date().getTime(); 
+  const processedCustomers = useMemo(() => {
+    const now = new Date().getTime(); 
+    return customers
+      .map(c => {
+        const cid = String(c.id);
+        const merged = { ...c, ...edits[cid] };
+        
+        let daysSince = null;
+        if (merged.last_purchase_date) {
+          const diffTime = now - new Date(merged.last_purchase_date).getTime();
+          daysSince = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+          if (daysSince < 0) daysSince = 0; 
+        }
+        
+        return { ...merged, days_since_last_purchase: daysSince };
+      })
+      .filter(c => {
+        if (customerTypeFilter !== 'All' && c.type !== customerTypeFilter) return false;
+        if (ownerFilter !== 'All' && c.owner !== ownerFilter) return false;
 
-  const processedCustomers = customers
-    .map(c => {
-      const cid = String(c.id);
-      const merged = { ...c, ...edits[cid] };
-      
-      let daysSince = null;
-      if (merged.last_purchase_date) {
-        const diffTime = now - new Date(merged.last_purchase_date).getTime();
-        daysSince = Math.floor(diffTime / (1000 * 60 * 60 * 24));
-        if (daysSince < 0) daysSince = 0; 
-      }
-      
-      return { ...merged, days_since_last_purchase: daysSince };
-    })
-    .filter(c => {
-      if (customerTypeFilter !== 'All' && c.type !== customerTypeFilter) return false;
-      if (ownerFilter !== 'All' && c.owner !== ownerFilter) return false;
+        if (debouncedSearch) {
+          const q = debouncedSearch.toLowerCase();
+          return (
+            c.name?.toLowerCase().includes(q) ||
+            c.phone?.toLowerCase().includes(q) ||
+            c.location?.toLowerCase().includes(q)
+          )
+        }
+        return true;
+      })
+      .sort((a, b) => {
+        if (!sortConfig) return 0;
+        const { key, direction } = sortConfig;
+        
+        let valA = (a as any)[key];
+        let valB = (b as any)[key];
 
-      if (debouncedSearch) {
-        const q = debouncedSearch.toLowerCase();
-        return (
-          c.name?.toLowerCase().includes(q) ||
-          c.phone?.toLowerCase().includes(q) ||
-          c.location?.toLowerCase().includes(q)
-        )
-      }
-      return true;
-    })
-    .sort((a, b) => {
-      if (!sortConfig) return 0;
-      const { key, direction } = sortConfig;
-      
-      let valA = a[key];
-      let valB = b[key];
+        if (valA === null || valA === undefined || valA === '') return 1;
+        if (valB === null || valB === undefined || valB === '') return -1;
 
-      if (valA === null || valA === undefined || valA === '') return 1;
-      if (valB === null || valB === undefined || valB === '') return -1;
-
-      if (valA < valB) return direction === 'asc' ? -1 : 1;
-      if (valA > valB) return direction === 'asc' ? 1 : -1;
-      return 0;
-    })
+        if (valA < valB) return direction === 'asc' ? -1 : 1;
+        if (valA > valB) return direction === 'asc' ? 1 : -1;
+        return 0;
+      });
+  }, [customers, edits, customerTypeFilter, ownerFilter, debouncedSearch, sortConfig]);
 
   // --- FORMATTERS ---
   const formatHeader = (key: string) => {
@@ -306,14 +256,6 @@ export default function CustomerDatabasePage() {
   }
 
   const isReadOnly = (col: string) => ['id', 'created_at', 'last_purchase_date', 'days_since_last_purchase'].includes(col);
-
-  const Resizer = ({ columnKey }: { columnKey: string }) => (
-    <div
-      onMouseDown={(e) => handleResizeStart(e, columnKey)}
-      onTouchStart={(e) => handleResizeStart(e, columnKey)}
-      style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: '14px', cursor: 'col-resize', background: 'transparent', zIndex: 10, transform: 'translateX(50%)' }}
-    />
-  )
 
   return (
     <div className="main-wrapper" style={{ display: 'flex', flexDirection: 'column', height: '100dvh', overflow: 'hidden' }}>
@@ -427,10 +369,6 @@ export default function CustomerDatabasePage() {
                   <th 
                     key={key} 
                     className="saas-th"
-                    draggable 
-                    onDragStart={(e) => handleDragStart(e, key as string)}
-                    onDragOver={handleDragOver}
-                    onDrop={(e) => handleDrop(e, key as string)}
                     onClick={() => handleSort(key)}
                     style={{ 
                       width: columnWidths[key as string] || 150, 
@@ -442,13 +380,12 @@ export default function CustomerDatabasePage() {
                       backgroundColor: '#f8fafc', 
                       boxShadow: 'inset 0 -2px 0 0 #e2e8f0'
                     }}
-                    title="Click to Sort, Drag to Reorder"
+                    title="Click to Sort"
                   >
                     {formatHeader(key as string)}
                     <span style={{ marginLeft: '6px', fontSize: '12px', opacity: sortConfig?.key === key ? 1 : 0.3 }}>
                       {sortConfig?.key === key ? (sortConfig.direction === 'asc' ? '↑' : '↓') : '↕'}
                     </span>
-                    <Resizer columnKey={key as string} />
                   </th>
                 ))}
               </tr>
@@ -468,7 +405,7 @@ export default function CustomerDatabasePage() {
                 processedCustomers.map((c, index) => {
                   const cid = String(c.id);
                   return (
-                    <tr key={cid} onMouseEnter={() => setHoveredId(cid)} onMouseLeave={() => setHoveredId(null)} className={`saas-tr ${selectedToDelete.has(cid) ? 'selected' : ''} ${edits[cid] ? 'editing' : ''}`}>
+                    <tr key={cid} className={`saas-tr ${selectedToDelete.has(cid) ? 'selected' : ''} ${edits[cid] ? 'editing' : ''}`}>
                       
                       <td className="saas-td" style={{ width: '46px', padding: '8px', textAlign: 'center', borderRight: '1px solid #f1f5f9' }}>
                         <input 
@@ -483,7 +420,7 @@ export default function CustomerDatabasePage() {
                         />
                       </td>
 
-                      {/* NUMBER COLUMN ROW (Normal font weight now) */}
+                      {/* NUMBER COLUMN ROW */}
                       <td className="saas-td" style={{ width: '50px', padding: '8px', textAlign: 'center', borderRight: '1px solid #f1f5f9', color: '#64748b', fontWeight: 'normal' }}>
                         {index + 1}
                       </td>
@@ -543,7 +480,6 @@ export default function CustomerDatabasePage() {
                                 className="cell-display"
                                 style={{ 
                                   paddingLeft: '12px', 
-                                  /* ALL FONTS ARE NOW NORMAL WEIGHT AND DEFAULT FONT */
                                   fontWeight: 'normal', 
                                   color: readOnly ? '#94a3b8' : '#334155',
                                   cursor: readOnly ? 'default' : 'text',

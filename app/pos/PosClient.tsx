@@ -13,8 +13,9 @@ import EmptyState from '@/components/EmptyState'
 import { useBranch } from '@/components/BranchContext' 
 // 🔥 NEW DND-KIT IMPORTS
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
-import { arrayMove, SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
+import { arrayMove, SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy, horizontalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
+import { TELEGRAM_CONFIG } from '@/lib/telegramConfig'
 
 // --- LOCAL TYPES ---
 interface CartItem extends Product {
@@ -157,10 +158,47 @@ function SortableCategoryItem({ id, cat, lang }: { id: string, cat: string, lang
   );
 }
 
+// 🔥 NEW: PROFESSIONAL SORTABLE HORIZONTAL TAB COMPONENT
+function SortableHorizontalTab({ cat, isActive, lang, onClick }: { cat: string, isActive: boolean, lang: 'en' | 'kh', onClick: () => void }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: cat });
+  
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    zIndex: isDragging ? 100 : 'auto',
+    opacity: isDragging ? 0.85 : 1,
+    borderRadius: '20px',
+    minWidth: 'max-content',
+    padding: '8px 16px',
+    fontSize: '14px',
+    fontWeight: '500',
+    backgroundColor: isActive ? '#b58a3d' : '#ffffff',
+    color: isActive ? '#ffffff' : '#334155',
+    border: isActive ? '1px solid #b58a3d' : '1px solid #cbd5e1',
+    boxShadow: isDragging ? '0 10px 25px rgba(0,0,0,0.15)' : '0 1px 2px 0 rgba(0, 0, 0, 0.05)',
+    cursor: isDragging ? 'grabbing' : 'pointer',
+    touchAction: 'pan-y' // Allows vertical scrolling on mobile while blocking horizontal drag interference
+  };
+
+  return (
+    <button
+      ref={setNodeRef}
+      {...attributes}
+      {...listeners}
+      onClick={onClick}
+      className={`saas-tab ${isActive ? 'active' : ''}`}
+      style={style}
+    >
+      {cat === 'All' ? (lang === 'kh' ? 'ទាំងអស់' : 'All') : cat}
+    </button>
+  );
+}
+
 // 🔥 FIX: THIS LINE WAS ACCIDENTALLY DELETED! IT STARTS YOUR ENTIRE PAGE COMPONENT!
 export default function POSPage() {
   const { showToast } = useToast();
-  const { activeBranchId } = useBranch(); 
+  // ✅ FIX: Added 'branches' here to pull the exact branch name for the notification
+  const { activeBranchId, branches } = useBranch(); 
   const [isPosMounted, setIsPosMounted] = useState(false);
 
   const [products, setProducts] = useState<Product[]>([])
@@ -182,6 +220,30 @@ export default function POSPage() {
   const [riceCategories, setRiceCategories] = useState<string[]>(RICE_CATEGORIES)
   const [isCategorySettingsOpen, setIsCategorySettingsOpen] = useState(false);
 
+  // 🔥 TELEGRAM STOCK ALERT ENGINE
+  const triggerStockAlert = async (productName: string = 'Unknown Product', currentStock: number = 0, minStockLevel: number = 0, weight: number = 50) => {
+    // Only alert if stock drops to or below the minimum threshold
+    if (currentStock > minStockLevel && currentStock > 0) return;
+    
+    const dateStr = new Date().toLocaleString('en-GB');
+    const branchName = activeBranchId === 0 ? "Global HQ" : branches?.find((b: any) => b.id === activeBranchId)?.name || "Unknown Branch";
+    const productType = weight < 50 ? 'Retail' : 'Wholesale';
+    
+    // ✅ FIX: Formatted exactly to your spec without the redundant title header
+    const message = `📅 Date: ${dateStr}\n🏬 Branch: *${activeBranchId} - ${branchName}*\n🌾 ${productType} Product: *${productName}*\n📦 Current Stock: *${currentStock}*`;
+
+    const botToken = TELEGRAM_CONFIG.botToken || process.env.NEXT_PUBLIC_TELEGRAM_BOT_TOKEN;
+    const chatId = (TELEGRAM_CONFIG as any).newGroupChatId || (TELEGRAM_CONFIG as any).stockChatId || TELEGRAM_CONFIG.chatId;
+
+    if (botToken && chatId) {
+      fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chat_id: chatId, text: message, parse_mode: 'Markdown' })
+      }).catch(console.error);
+    }
+  };
+
   // 🔥 NEW: PROFESSIONAL DND-KIT SENSORS & HANDLERS
   const sensors = useSensors(
     // 5px distance prevents accidental drags when a user is just tapping on mobile
@@ -197,9 +259,10 @@ export default function POSPage() {
         const newIndex = items.indexOf(over.id);
         const newOrder = arrayMove(items, oldIndex, newIndex);
         
-        // Save to database instantly in the background
+        // 🛡️ ISOLATION FIX: Lock category reordering to the active branch
+        const branchKey = activeBranchId === 0 ? 'category_order' : `category_order_${activeBranchId}`;
         supabase.from('app_settings').upsert(
-          { setting_key: 'category_order', setting_value: newOrder },
+          { setting_key: branchKey, setting_value: newOrder },
           { onConflict: 'setting_key' }
         ).then();
         
@@ -416,6 +479,7 @@ export default function POSPage() {
     window.addEventListener('resize', checkDeviceType);
 
     const stabilizeConnection = async () => {
+      // 🔥 FIX: Ensures data fetches immediately regardless of hydration delay
       try {
         await loadProductsAndSettings()
         await loadCustomers()
@@ -581,14 +645,19 @@ export default function POSPage() {
     const { data: prodData } = await supabase.from('products').select('*').eq('is_archived', false).eq('branch_id', activeBranchId).order('id', { ascending: true })
     if (prodData) setProducts(prodData)
     
-    const { data: setObj } = await supabase.from('app_settings').select('*').eq('setting_key', 'pos_product_order').maybeSingle()
+    // 🔥 SECURITY FIX: Isolate settings fetches to the active branch
+    const orderKey = activeBranchId === 0 ? 'pos_product_order' : `pos_product_order_${activeBranchId}`;
+    const hiddenKey = activeBranchId === 0 ? 'hidden_retail_ids' : `hidden_retail_ids_${activeBranchId}`;
+    const catOrderKey = activeBranchId === 0 ? 'category_order' : `category_order_${activeBranchId}`;
+
+    const { data: setObj } = await supabase.from('app_settings').select('*').eq('setting_key', orderKey).maybeSingle()
     if (setObj && setObj.setting_value) setProductOrder(setObj.setting_value)
 
-    const { data: hiddenSet } = await supabase.from('app_settings').select('*').eq('setting_key', 'hidden_retail_ids').maybeSingle()
+    const { data: hiddenSet } = await supabase.from('app_settings').select('*').eq('setting_key', hiddenKey).maybeSingle()
     if (hiddenSet && hiddenSet.setting_value) setHiddenRetailIds(hiddenSet.setting_value)
 
     // 🔥 LOAD CUSTOM CATEGORY ORDER
-    const { data: catOrderSet } = await supabase.from('app_settings').select('*').eq('setting_key', 'category_order').maybeSingle();
+    const { data: catOrderSet } = await supabase.from('app_settings').select('*').eq('setting_key', catOrderKey).maybeSingle();
     if (catOrderSet && catOrderSet.setting_value) {
       const savedCats = catOrderSet.setting_value;
       const missingCats = RICE_CATEGORIES.filter(c => !savedCats.includes(c)); // In case new standard categories were added
@@ -941,11 +1010,26 @@ export default function POSPage() {
 
   function handleAddMobileProductToCart() {
     if (!selectedMobileProduct) return;
-    const finalQty = typeof mobileQty === 'number' ? mobileQty : (parseFloat(mobileQty as string) || 0);
-    const finalPrice = typeof mobilePrice === 'number' ? mobilePrice : (parseFloat(mobilePrice as string) || 0);
+    // 🛡️ RELIABILITY FIX: Fallback to exact DOM input values if React state batching lags behind rapid user tapping
+    const rawQtyStr = String(mobileQty).replace(/,/g, '');
+    const finalQty = parseFloat(rawQtyStr) || 0;
+    const finalPrice = typeof mobilePrice === 'number' ? mobilePrice : (parseFloat(String(mobilePrice).replace(/,/g, '')) || 0);
     
-    if (finalQty <= 0) {
-      showToast('error', 'Invalid Input', 'Please enter a valid quantity.');
+    // 🛑 REQUIRE QUANTITY
+    if (finalQty <= 0 || mobileQty === '') {
+      showToast('error', 'Missing Quantity', 'Please enter a quantity greater than 0.');
+      return;
+    }
+
+    // 🛑 REQUIRE PRICE
+    if (finalPrice <= 0 || mobilePrice === '') {
+      showToast('error', 'Missing Price', 'Please enter the selling price before adding to cart.');
+      return;
+    }
+
+    // 🧠 SMART GUARD: Hard limit to prevent typing Price into the Qty field
+    if (finalQty > 10000) {
+      showToast('error', 'Hold on! 🛑', `Quantity (${finalQty.toLocaleString()}) cannot exceed 10,000. Did you accidentally type the price in the quantity field?`);
       return;
     }
 
@@ -1053,8 +1137,10 @@ export default function POSPage() {
 
          const newHidden = Array.from(new Set([...hiddenRetailIds, newProd.id]));
          setHiddenRetailIds(newHidden);
+         // 🔥 SECURITY FIX: Isolate the setting_key by branch to prevent cross-tenant UI overrides
+         const branchKey = activeBranchId === 0 ? 'hidden_retail_ids' : `hidden_retail_ids_${activeBranchId}`;
          await supabase.from('app_settings').upsert(
-           { setting_key: 'hidden_retail_ids', setting_value: newHidden },
+           { setting_key: branchKey, setting_value: newHidden },
            { onConflict: 'setting_key' }
          );
       }
@@ -1110,26 +1196,28 @@ export default function POSPage() {
   }
 
   function updateCartItem(id: number, field: string, value: any) {
-    let updatedCart = cart.map((item) => item.id === id ? { ...item, [field]: value } : item);
+    // 🔥 UI FIX: Wrapped in functional state update to prevent dropped inputs from rapid scanner/tablet tapping
+    setCart(prevCart => {
+      let updatedCart = prevCart.map((item) => item.id === id ? { ...item, [field]: value } : item);
 
-    if (field === 'custom_price_riel') {
-      const editedItem = updatedCart.find(i => i.id === id);
-      if (editedItem && editedItem.custom_name.startsWith('ដូរ ')) {
-        const baseName = editedItem.custom_name.replace('ដូរ ', '');
-        const consumedName = `បានប្រើ ${baseName}`;
-        const wWeight = Number(editedItem.weight) || 50;
-        const newPerKgPrice = Math.round(Number(value) / wWeight) || 0;
+      if (field === 'custom_price_riel') {
+        const editedItem = updatedCart.find(i => i.id === id);
+        if (editedItem && editedItem.custom_name.startsWith('ដូរ ')) {
+          const baseName = editedItem.custom_name.replace('ដូរ ', '');
+          const consumedName = `បានប្រើ ${baseName}`;
+          const wWeight = Number(editedItem.weight) || 50;
+          const newPerKgPrice = Math.round(Number(value) / wWeight) || 0;
 
-        updatedCart = updatedCart.map(item => {
-          if (item.custom_name === consumedName) {
-            return { ...item, custom_price_riel: newPerKgPrice };
-          }
-          return item;
-        });
+          updatedCart = updatedCart.map(item => {
+            if (item.custom_name === consumedName) {
+              return { ...item, custom_price_riel: newPerKgPrice };
+            }
+            return item;
+          });
+        }
       }
-    }
-
-    setCart(updatedCart);
+      return updatedCart;
+    });
   }
 
   function removeFromCart(id: number) {
@@ -1158,7 +1246,9 @@ export default function POSPage() {
     currentOrder.splice(tIdx, 0, sourceId);
 
     setProductOrder(currentOrder);
-    await supabase.from('app_settings').upsert({ setting_key: 'pos_product_order', setting_value: currentOrder }, { onConflict: 'setting_key' });
+    // 🔥 SECURITY FIX: Isolate product reordering strictly to the active branch
+    const branchKey = activeBranchId === 0 ? 'pos_product_order' : `pos_product_order_${activeBranchId}`;
+    await supabase.from('app_settings').upsert({ setting_key: branchKey, setting_value: currentOrder }, { onConflict: 'setting_key' });
   }
 
   async function handleCreateCustomer(e: React.FormEvent) {
@@ -1181,23 +1271,40 @@ export default function POSPage() {
     }
   }
 
-  async function getFIFOSplits(productId: number, qtySold: number, fallbackCogs: number) {
+  // ✅ FIX: Passed localBatchUsage AND freshBatches to prevent React State delays
+  async function getFIFOSplits(productId: number, qtySold: number, fallbackCogs: number, localBatchUsage: Record<number, number>, freshBatches?: Record<number, InventoryBatch[]>) {
     let remainingQtyToFulfill = qtySold;
     const splits: any[] = [];
-    const { data: batches } = await supabase.from('inventory_batches')
-      .select('*')
-      .eq('product_id', productId)
-      .eq('branch_id', activeBranchId) 
-      .gt('remaining_qty', 0)
-      .order('created_at', { ascending: true });
-      
-    const availableBatches = batches || [];
+    
+    let availableBatches = [];
+    
+    // 1. Bypass React State: Use fresh batches if injected from Auto-Open
+    if (freshBatches && freshBatches[productId]) {
+      availableBatches = freshBatches[productId];
+    } else {
+      const { data: batches } = await supabase.from('inventory_batches')
+        .select('*')
+        .eq('product_id', productId)
+        .eq('branch_id', activeBranchId) 
+        .gt('remaining_qty', 0)
+        .order('created_at', { ascending: true });
+      availableBatches = batches || [];
+    }
 
     for (const batch of availableBatches) {
       if (remainingQtyToFulfill <= 0) break;
-      const availableInBatch = batch.remaining_qty || 0;
+      
+      // Calculate TRUE available stock by subtracting what we already used in this checkout loop
+      const alreadyUsed = localBatchUsage[batch.id] || 0;
+      const availableInBatch = Math.max(0, (batch.remaining_qty || 0) - alreadyUsed);
+      
+      if (availableInBatch <= 0) continue;
+
       const qtyTaken = Math.min(availableInBatch, remainingQtyToFulfill);
       splits.push({ qty: qtyTaken, cogs_price: batch.cost_price, batch_id: batch.id, current_remaining: availableInBatch });
+      
+      // Track usage to prevent the next cart item from double-dipping this batch
+      localBatchUsage[batch.id] = alreadyUsed + qtyTaken;
       remainingQtyToFulfill -= qtyTaken;
     }
     if (remainingQtyToFulfill > 0) splits.push({ qty: remainingQtyToFulfill, cogs_price: fallbackCogs, batch_id: null, current_remaining: 0 });
@@ -1215,10 +1322,35 @@ export default function POSPage() {
   }
 
   async function initiateCheckout() {
+    // 🧠 SMART GUARD & REQUIRED FIELDS: Verify entire cart before allowing checkout
+    for (const item of cart) {
+      const qty = Number(item.quantity) || 0;
+      const price = Number(item.custom_price_riel) || 0;
+      
+      // Skip required checks for discounts, free bags, or returns
+      const isSpecial = item.custom_name.includes('ដូរ') || item.custom_name.includes('បញ្ចុះតម្លៃ') || item.custom_name.includes('កក់') || item.custom_name.includes('បានប្រើ');
+
+      if (!isSpecial) {
+        if (qty <= 0 || item.quantity === '') {
+          showToast('error', 'Missing Quantity', `Please enter a valid quantity for [${item.custom_name}].`);
+          return;
+        }
+        if (price <= 0 || item.custom_price_riel === '') {
+          showToast('error', 'Missing Price', `You forgot to enter the price for [${item.custom_name}].`);
+          return;
+        }
+        if (qty > 10000) {
+          showToast('error', 'Hold on! 🛑', `Item [${item.custom_name}] has a quantity of ${qty.toLocaleString()}. Quantity cannot exceed 10,000.`);
+          return;
+        }
+      }
+    }
+
     if (!isCartValid) {
       showToast('error', 'Invalid Cart', 'Please ensure all items have a valid quantity and price.');
       return;
     }
+
     if (activeTab === 'wholesale' && !selectedCustomerId) {
       showToast('error', 'Customer Required', lang === 'kh' ? 'សូមជ្រើសរើសអតិថិជនសម្រាប់ដុំ!' : 'Please select a customer for wholesale');
       return;
@@ -1236,7 +1368,7 @@ export default function POSPage() {
          const isBypass = item.bypass_stock || isCharge;
          const finalQty = isReturn ? -Math.abs(Number(item.quantity)) : Number(item.quantity);
          
-         if (!editingInvoiceId && !isBypass) {
+         if (!isBypass) {
              simulatedStockUpdates[item.product_id] = (simulatedStockUpdates[item.product_id] ?? products.find(p=>p.id===item.product_id)?.stock ?? 0) - finalQty;
          }
          if (item.add_loose_kg && item.loose_retail_id && !editingInvoiceId) {
@@ -1256,9 +1388,11 @@ export default function POSPage() {
                 itemsNeedingBags.push({ ...p, bags_needed: bagsNeeded });
             } else if (p && pWeight < 25 && !p.linked_wholesale_id) {
                 showToast('error', 'Out of Stock', `Not enough stock for ${p.name} and no linked wholesale bag to open!`);
+                setIsProcessing(false); // 🛡️ STABILITY FIX: Unlock the UI engine before aborting!
                 return;
             } else if (p && pWeight >= 25) {
                 showToast('error', 'Out of Stock', `Not enough stock for wholesale bag ${p.name}!`);
+                setIsProcessing(false); // 🛡️ STABILITY FIX: Unlock the UI engine before aborting!
                 return;
             }
         }
@@ -1288,7 +1422,7 @@ export default function POSPage() {
         return;
     }
 
-    executeCheckout(products, preCheckoutStock);
+    executeCheckout(products, undefined, preCheckoutStock);
   }
 
   async function handleConfirmAutoOpen() {
@@ -1309,12 +1443,9 @@ export default function POSPage() {
             });
             if (error) throw error;
 
-            // 🔥 FIX: If you manually chose a NEW bag from the dropdown, permanently update the link in the database!
-            if (targetWholesaleId !== p.linked_wholesale_id) {
-                await supabase.from('products')
-                  .update({ linked_wholesale_id: targetWholesaleId })
-                  .eq('id', p.id);
-            }
+            // 🔥 NEW: Check if pulling this bag empties the Wholesale stock!
+            const newWholesaleStock = Number(wholesaleProd.stock) - p.bags_needed;
+            triggerStockAlert(wholesaleProd.name, newWholesaleStock, Number(wholesaleProd.min_stock_level) || 0, Number(wholesaleProd.weight) || 50);
         }
         
         setAutoOpenModal({ isOpen: false, items: [] });
@@ -1324,11 +1455,22 @@ export default function POSPage() {
         
         // This refresh will now pull the newly linked bag data, syncing POS and Rice Inventory automatically
         const { data: prodData } = await supabase.from('products').select('*').eq('is_archived', false).eq('branch_id', activeBranchId).order('id', { ascending: true });
+        
+        // ✅ FIX: Fetch fresh batches explicitly and pass them directly into Checkout bypassing React State
+        const { data: batchData } = await supabase.from('inventory_batches').select('*').eq('branch_id', activeBranchId).gt('remaining_qty', 0).order('created_at', { ascending: true });
+        
+        let newBatchMap: Record<number, InventoryBatch[]> = {};
+        if (batchData) {
+            batchData.forEach((b: any) => {
+                if (!newBatchMap[b.product_id]) newBatchMap[b.product_id] = [];
+                newBatchMap[b.product_id].push(b);
+            });
+        }
+
         if (prodData) {
             setProducts(prodData);
-            await loadBatches(); 
-            // 🔥 STRICT FIFO: Inject the captured memory snapshot into the execution engine
-            await executeCheckout(prodData, autoOpenModal.preCheckoutStock);
+            setActiveBatches(newBatchMap);
+            await executeCheckout(prodData, newBatchMap, autoOpenModal.preCheckoutStock);
         }
     } catch (err: any) {
         showToast('error', 'Auto-Open Failed', err.message);
@@ -1337,8 +1479,15 @@ export default function POSPage() {
   }
   
   // MAIN CHECKOUT ENGINE
-  async function executeCheckout(latestProducts: Product[], preCheckoutStock?: Record<number, { stock: number, cost_price: number }>) {
+  async function executeCheckout(
+  latestProducts: Product[], 
+  latestBatchesOverride?: Record<number, InventoryBatch[]>,
+  preCheckoutStockParams?: Record<number, { stock: number, cost_price: number }>
+) {
     setIsProcessing(true);
+
+    const localBatchUsage: Record<number, number> = {};
+    const currentBatches = latestBatchesOverride || activeBatches;
 
     try {
       const currentCart = [...cart];
@@ -1354,6 +1503,18 @@ export default function POSPage() {
       const actualRemaining = currentTotalRiel - actualTotalReceived;
 
       let effectiveSplits: { method: string, amount_usd: number, amount_riel: number, face_amount: number }[] = [];
+
+      // 🔥 Extract Deposits to register as actual Payments
+      let depositTotalRiel = 0;
+      let depositMethod = 'Cash ៛';
+      currentCart.forEach(item => {
+         if (item.custom_name.includes('កក់')) {
+             depositTotalRiel += (Number(item.custom_price_riel) || 0) * Math.abs(Number(item.quantity) || 0);
+             if (item.custom_name.toLowerCase().includes('qr')) {
+                 depositMethod = 'QR ៛';
+             }
+         }
+      });
 
       if (activePayments.length === 0) {
         if (!isSimpleCustomer) {
@@ -1381,9 +1542,16 @@ export default function POSPage() {
         }
       }
 
+      // 🟢 Inject Deposit as Payment
+      if (depositTotalRiel > 0) {
+          effectiveSplits.push({ method: depositMethod, amount_usd: 0, amount_riel: depositTotalRiel, face_amount: depositTotalRiel });
+      }
+
+      // 🔥 STABILITY FIX: Prevents fatal Postgres UNIQUE constraint crashes by generating a collision-proof ID
+      const uniqueSuffix = Date.now().toString(36).toUpperCase() + '-' + Math.floor(1000 + Math.random() * 9000);
       const activeTxId = activeTab === 'retail' 
-          ? `RET-${Date.now().toString().slice(-6)}` 
-          : (editingInvoiceId ? editingInvoiceId : `INV-${Date.now().toString().slice(-6)}`);
+          ? `RET-${uniqueSuffix}` 
+          : (editingInvoiceId ? editingInvoiceId : `INV-${uniqueSuffix}`);
 
       let primaryMethodStr = effectiveSplits.map(s => {
         if (s.method === 'Unpaid / Debt') return s.method;
@@ -1395,13 +1563,14 @@ export default function POSPage() {
         const stockUpdates: Record<number, number> = {};
 
         for (const item of currentCart) {
+           // 🔥 RESTORED: We NO LONGER skip the deposit so it saves to the database!
            const dbProduct = latestProducts.find(p => p.id === item.product_id);
            let retailCogsPerKg = Number(item.cost_price || 0);
 
            if (dbProduct && dbProduct.linked_wholesale_id) {
                 const wholesaleProd = latestProducts.find(wp => wp.id === dbProduct.linked_wholesale_id);
                 if (wholesaleProd) {
-                   const wBatches = activeBatches[wholesaleProd.id] || [];
+                   const wBatches = currentBatches[wholesaleProd.id] || [];
                    const currentBatch = wBatches.length > 0 ? [...wBatches].sort((a,b) => a.id - b.id)[0] : null;
                    const wholesaleBagCogs = currentBatch ? Number(currentBatch.cost_price) : Number(wholesaleProd.cost_price || 0);
                    const wholesaleWeight = Number(wholesaleProd.weight) || 50;
@@ -1410,28 +1579,26 @@ export default function POSPage() {
              }
 
            const isDiscount = item.custom_name.includes('បញ្ចុះតម្លៃ');
-           const isDeposit = item.custom_name.includes('កក់');
            const isReturn = item.custom_name.includes('ដូរ');
+           const isDeposit = item.custom_name.includes('កក់');
            
-           const isNegativeItem = isDiscount || isDeposit || isReturn;
+           const isNegativeItem = isDiscount || isReturn || isDeposit;
            const finalQty = isNegativeItem ? -Math.abs(Number(item.quantity)) : Number(item.quantity);
 
            let finalCogs = retailCogsPerKg;
            if (isDiscount) finalCogs = 0; 
-           if (isDeposit) finalCogs = Number(item.custom_price_riel || 0); 
+           if (isDeposit) finalCogs = Number(item.custom_price_riel || 0); // Balances out profit
 
-           // 🔥 STRICT RETAIL FIFO SPLIT LOGIC
-           const oldData = preCheckoutStock?.[item.product_id];
+           const oldData = preCheckoutStockParams?.[item.product_id];
            const oldStock = oldData ? oldData.stock : 0;
            const oldCogs = oldData ? oldData.cost_price : finalCogs;
 
            const needsSplit = !isNegativeItem && !item.bypass_stock && !editingInvoiceId && oldStock > 0 && oldStock < finalQty;
 
            if (needsSplit) {
-               const qty1 = oldStock; // The old rice remaining in the bin
-               const qty2 = finalQty - oldStock; // The new rice poured from the new bag
+               const qty1 = oldStock; 
+               const qty2 = finalQty - oldStock; 
 
-               // Split 1: Sell the old stock exactly at the old COGS
                retailRows.push({
                    transaction_id: activeTxId,
                    branch_id: activeBranchId,
@@ -1445,7 +1612,6 @@ export default function POSPage() {
                    owner: 'Both'
                });
 
-               // Split 2: Sell the remaining quantity exactly at the new COGS
                retailRows.push({
                    transaction_id: activeTxId,
                    branch_id: activeBranchId,
@@ -1463,7 +1629,6 @@ export default function POSPage() {
                    stockUpdates[item.product_id] = (stockUpdates[item.product_id] || 0) - finalQty;
                }
            } else {
-               // Standard single-row logic (no split needed)
                retailRows.push({
                  transaction_id: activeTxId,
                  branch_id: activeBranchId, 
@@ -1488,6 +1653,13 @@ export default function POSPage() {
 
         for (const [prodIdStr, delta] of Object.entries(stockUpdates)) {
             await supabase.rpc('adjust_product_stock', { p_product_id: Number(prodIdStr), p_quantity: delta });
+            
+            // 🔥 RELIABILITY FIX: Added the missing Telegram Alert trigger for Retail sales!
+            const prod = latestProducts.find(p => p.id === Number(prodIdStr));
+            if (prod) {
+                const updatedStock = Number(prod.stock || 0) + delta; 
+                triggerStockAlert(prod.name, updatedStock, Number(prod.min_stock_level) || 0, Number(prod.weight) || 50);
+            }
         }
 
       } else {
@@ -1497,18 +1669,20 @@ export default function POSPage() {
         const fifoUpdates: Record<number, number> = {}; 
 
         for (const item of currentCart) {
+           // 🔥 RESTORED: We NO LONGER skip the deposit!
+
            const isReturn = item.custom_name.includes('ដូរ');
            const isDiscount = item.custom_name.includes('បញ្ចុះតម្លៃ');
            const isDeposit = item.custom_name.includes('កក់');
            const isCharge = item.custom_name.includes('បានប្រើ');
 
            const isNegativeItem = isReturn || isDiscount || isDeposit;
-           const isBypass = item.bypass_stock || isCharge;
+           const isBypass = item.bypass_stock || isCharge || isDeposit; // Don't deduct stock for a deposit!
            const finalQty = isNegativeItem ? -Math.abs(Number(item.quantity)) : Number(item.quantity);
 
            let finalCogs = Number(item.cost_price || 0);
            if (isDiscount) finalCogs = 0; 
-           if (isDeposit) finalCogs = Number(item.custom_price_riel || 0); 
+           if (isDeposit) finalCogs = Number(item.custom_price_riel || 0);
 
           if (item.isReturnFullBag && !editingInvoiceId) {
              const { data: dbBatches } = await supabase.from('inventory_batches')
@@ -1567,7 +1741,7 @@ export default function POSPage() {
                 fifoUpdates[specificBatch.id] = (fifoUpdates[specificBatch.id] || 0) - finalQty;
             }
           } else {
-            const splits = await getFIFOSplits(item.product_id, finalQty, finalCogs);
+            const splits = await getFIFOSplits(item.product_id, finalQty, finalCogs, localBatchUsage, currentBatches);
             for (const split of splits) {
               baseSaleRows.push({
                 branch_id: activeBranchId, 
@@ -1583,14 +1757,40 @@ export default function POSPage() {
             }
           }
 
-          if (!editingInvoiceId && !isBypass) {
+          if (!isBypass) {
             stockUpdates[item.product_id] = (stockUpdates[item.product_id] || 0) - finalQty;
           }
         }
 
-        if (editingInvoiceId) {
-          const { data: existingSales } = await supabase.from('sales').select('id').eq('invoice_id', editingInvoiceId);
+       if (editingInvoiceId) {
+          const { data: existingSales } = await supabase.from('sales').select('*').eq('invoice_id', editingInvoiceId);
           if (existingSales) {
+            
+            for (const old of existingSales) {
+                if (old.product_id && old.qty) {
+                    await supabase.rpc('adjust_product_stock', { p_product_id: old.product_id, p_quantity: old.qty });
+                    
+                    const { data: batches } = await supabase.from('inventory_batches')
+                        .select('id')
+                        .eq('product_id', old.product_id)
+                        .eq('branch_id', activeBranchId)
+                        .order('id', { ascending: false })
+                        .limit(1);
+
+                    if (batches && batches.length > 0) {
+                        await supabase.rpc('adjust_batch_stock', { p_batch_id: batches[0].id, p_quantity: old.qty });
+                    } else {
+                        await supabase.from('inventory_batches').insert([{
+                            product_id: old.product_id,
+                            product_name: old.rice_type || 'Restored',
+                            cost_price: old.cogs_price || 0,
+                            remaining_qty: old.qty,
+                            branch_id: activeBranchId
+                        }]);
+                    }
+                }
+            }
+
             const cartIds = currentCart.map(c => c.db_row_id).filter(Boolean);
             const idsToDelete = existingSales.map(s => s.id).filter(id => !cartIds.includes(id));
             if (idsToDelete.length > 0) {
@@ -1600,8 +1800,18 @@ export default function POSPage() {
           await supabase.from('invoice_payments').delete().eq('invoice_id', editingInvoiceId);
         }
 
-        let splitCogsSum = baseSaleRows.reduce((sum, r) => sum + (Number(r.qty) * Number(r.cogs_price)), 0);
-        let splitSalesSum = baseSaleRows.reduce((sum, r) => sum + (Number(r.qty) * Number(r.price_per_bag)), 0);
+        // 🔥 CRITICAL FIX: Tell the Summaries Table to ignore the Deposit so Gross Sales stays at $4!
+        let splitCogsSum = baseSaleRows.reduce((sum, r) => {
+            const rowName = r.custom_rice_type || r.rice_type || '';
+            if (rowName.includes('កក់')) return sum;
+            return sum + (Number(r.qty) * Number(r.cogs_price));
+        }, 0);
+        
+        let splitSalesSum = baseSaleRows.reduce((sum, r) => {
+            const rowName = r.custom_rice_type || r.rice_type || '';
+            if (rowName.includes('កក់')) return sum;
+            return sum + (Number(r.qty) * Number(r.price_per_bag));
+        }, 0);
 
         const finalSaleRows = baseSaleRows.map(r => {
           const { db_row_id, ...cleanRow } = r;
@@ -1614,12 +1824,12 @@ export default function POSPage() {
           customer_name: finalCustomerName,
           owner: finalOwner,
           rice_types: combinedRiceTypes,
-          total_sales: splitSalesSum,
+          total_sales: splitSalesSum, // Records Gross Sales ($4)
           total_cogs: splitCogsSum,
           total_profit: splitSalesSum - splitCogsSum,
           delivery_status: actualRemaining > 0 ? 'Pending' : 'Delivered',
           payment_method: primaryMethodStr,
-          balance_due: actualRemaining > 0 ? actualRemaining : 0,
+          balance_due: actualRemaining > 0 ? actualRemaining : 0, // Calculates remainder correctly ($3)
           customer_location: finalLocation,
           is_done: actualRemaining <= 0 
         };
@@ -1627,18 +1837,27 @@ export default function POSPage() {
         const { error: summaryErr } = await supabase.from('invoice_summaries').upsert([summaryRow], { onConflict: 'invoice_id' });
         if (summaryErr) throw new Error(`Failed to save to Summaries table: ${summaryErr.message}`);
 
-        const { error: salesErr } = await supabase.from('sales').upsert(finalSaleRows, { onConflict: 'id' });
-        if (salesErr) throw new Error(`Failed to save to Sales table: ${salesErr.message}`);
+        // 🛡️ STABILITY FIX: Prevent 400 Bad Request crashes on empty arrays
+        if (finalSaleRows && finalSaleRows.length > 0) {
+          const { error: salesErr } = await supabase.from('sales').upsert(finalSaleRows, { onConflict: 'id' });
+          if (salesErr) throw new Error(`Failed to save to Sales table: ${salesErr.message}`);
+        }
 
         for (const [prodIdStr, delta] of Object.entries(stockUpdates)) {
             await supabase.rpc('adjust_product_stock', { p_product_id: Number(prodIdStr), p_quantity: delta });
+            
+            const prod = latestProducts.find(p => p.id === Number(prodIdStr));
+            if (prod) {
+                const updatedStock = Number(prod.stock || 0) + delta; 
+                triggerStockAlert(prod.name, updatedStock, Number(prod.min_stock_level) || 0);
+            }
         }
         for (const [batchIdStr, delta] of Object.entries(fifoUpdates)) {
             await supabase.rpc('adjust_batch_stock', { p_batch_id: Number(batchIdStr), p_quantity: delta });
         }
       }
 
-      if (showPaymentSelector || !isSimpleCustomer) {
+      if (showPaymentSelector || !isSimpleCustomer || depositTotalRiel > 0) {
          for (const split of effectiveSplits) {
             if (split.method === 'Unpaid / Debt') continue;
             await supabase.from('invoice_payments').insert([{
@@ -1659,7 +1878,7 @@ export default function POSPage() {
         customer: { name: finalCustomerName, phone: finalPhone, location: finalLocation },
         dateObj: { day: String(currentDate.getDate()).padStart(2, '0'), month: String(currentDate.getMonth() + 1).padStart(2, '0'), year: currentDate.getFullYear() },
         changeDue: actualRemaining < 0 ? Math.abs(actualRemaining) : 0,
-        amountReceived: actualTotalReceived
+        amountReceived: actualTotalReceived + depositTotalRiel 
       });
 
       if (activeTab === 'wholesale' && !isSimpleCustomer) {
@@ -1669,13 +1888,13 @@ export default function POSPage() {
       } else {
         setShowInvoicePreview(false);
         setSaleSummary({ 
-          total: currentTotalRiel, 
+          total: currentTotalRiel + depositTotalRiel, 
           receivedRiel: 0, 
           receivedUsd: 0, 
-          totalReceivedInRiel: actualTotalReceived,
+          totalReceivedInRiel: actualTotalReceived + depositTotalRiel,
           change: actualRemaining < 0 ? Math.abs(actualRemaining) : 0, 
           type: activeTab, 
-          isCashless: actualTotalReceived === 0, 
+          isCashless: (actualTotalReceived + depositTotalRiel) === 0, 
           items: currentCart,
           isDebt: actualRemaining > 0 && !isSimpleCustomer
         });
@@ -1881,8 +2100,10 @@ export default function POSPage() {
                   }
                 }}
                 onChange={(val: any) => {
+                  // 🔥 RELIABILITY & TS FIX: Strip commas, then convert back to number to satisfy `number | ''` type
                   const newRows = [...paymentRows];
-                  newRows[index].amount = val;
+                  const cleanVal = String(val).replace(/,/g, '');
+                  newRows[index].amount = cleanVal === '' ? '' : Number(cleanVal);
                   newRows[index].isAuto = false;
                   setPaymentRows(newRows);
                 }}
@@ -1918,12 +2139,17 @@ export default function POSPage() {
           >
             🏷️ Discount (បញ្ចុះតម្លៃ)
           </button>
-          <button 
-            onClick={() => { setAdjustmentModal({ isOpen: true, type: 'deposit', amount: '', qty: 1, note: '', isCoveredByDepot: false, selectedBagName: 'ថ្លៃបាវ ប្រ៊េន', isBagMenuOpen: false }); setShowAdjustmentMenu(false); }} 
-            style={{ width: '100%', padding: '10px 14px', textAlign: 'left', background: 'none', border: 'none', borderBottom: '1px solid #f1f5f9', fontSize: '13px', color: '#334155', cursor: 'pointer', display: 'block' }}
-          >
-            💵 Deposit / Prepayment (កក់)
-          </button>
+          
+          {/* 🔥 ONLY SHOW DEPOSIT IF IT IS A WHOLESALE CUSTOMER WITH AN ACCOUNT */}
+          {!isSimpleCustomer && activeTab === 'wholesale' && (
+            <button 
+              onClick={() => { setAdjustmentModal({ isOpen: true, type: 'deposit', amount: '', qty: 1, note: '', isCoveredByDepot: false, selectedBagName: 'ថ្លៃបាវ ប្រ៊េន', isBagMenuOpen: false }); setShowAdjustmentMenu(false); }} 
+              style={{ width: '100%', padding: '10px 14px', textAlign: 'left', background: 'none', border: 'none', borderBottom: '1px solid #f1f5f9', fontSize: '13px', color: '#334155', cursor: 'pointer', display: 'block' }}
+            >
+              💵 Deposit / Prepayment (កក់)
+            </button>
+          )}
+
           <button 
             onClick={() => { setAdjustmentModal({ isOpen: true, type: 'bag', amount: 2000, qty: 1, note: '', isCoveredByDepot: false, selectedBagName: 'ថ្លៃបាវ ប្រ៊េន', isBagMenuOpen: false }); setShowAdjustmentMenu(false); }} 
             style={{ width: '100%', padding: '10px 14px', textAlign: 'left', background: 'none', border: 'none', fontSize: '13px', color: '#334155', cursor: 'pointer', display: 'block' }}
@@ -2068,7 +2294,7 @@ export default function POSPage() {
                           <div style={{ position: 'absolute', top: 'calc(100% + 6px)', left: 0, right: 0, backgroundColor: '#ffffff', borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: '0 10px 30px rgba(0,0,0,0.15)', zIndex: 101, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
                             <div className="hide-scrollbar" style={{ maxHeight: '350px', overflowY: 'auto', padding: '0', display: 'flex', flexDirection: 'column', backgroundColor: '#ffffff' }}>
                               
-                              <button onMouseDown={(e) => { e.preventDefault(); setIsCreateCustomerModalOpen(true); setIsCustomerModalOpen(false); }} className="saas-btn" style={{ width: 'calc(100% - 16px)', margin: '8px', padding: '10px', backgroundColor: '#f8fafc', color: '#0f172a', border: '1px dashed #cbd5e1', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold', fontSize: '14px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', flexShrink: 0 }}>
+                              <button onMouseDown={(e) => { e.preventDefault(); setIsCreateCustomerModalOpen(true); setIsCustomerModalOpen(false); }} className="saas-btn" style={{ width: 'calc(100% - 16px)', margin: '8px', padding: '10px', backgroundColor: '#f8fafc', color: '#0f172a', border: '1px dashed #cbd5e1', borderRadius: '8px', cursor: 'pointer', fontWeight: 'normal', fontSize: '14px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', flexShrink: 0 }}>
                                 <span style={{ fontSize: '16px' }}>+</span> Add New Customer
                               </button>
                               
@@ -2081,7 +2307,7 @@ export default function POSPage() {
                                     onMouseDown={(e) => { e.preventDefault(); setSelectedCustomerId(c.id.toString()); setCustomerSearchTerm(''); setIsCustomerModalOpen(false); }} 
                                     style={{ padding: '12px 16px', cursor: 'pointer', transition: 'background 0.2s', borderBottom: '1px solid #f1f5f9', backgroundColor: '#ffffff', display: 'flex', flexDirection: 'column', gap: '4px' }}
                                   >
-                                    <div style={{ fontWeight: 'bold', fontSize: '14px', color: '#0f172a' }}>{c.name}</div>
+                                    <div style={{ fontWeight: 'normal', fontSize: '14px', color: '#0f172a' }}>{c.name}</div>
                                     <div style={{ fontSize: '12px', color: '#64748b', display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
                                       {c.phone && <span>📞 {c.phone}</span>}
                                       {c.location && <span>📍 {c.location}</span>}
@@ -2095,12 +2321,29 @@ export default function POSPage() {
                         )}
                       </div>
                     ) : (
-                      <div style={{ width: '100%', padding: '12px', backgroundColor: '#fefcf3', border: '1px solid #eadeca', borderRadius: '8px', fontSize: '14px', color: '#4a3b1b', position: 'relative', boxSizing: 'border-box' }}>
-                        <button onClick={() => { setSelectedCustomerId(''); setCustomerSearchTerm(''); }} style={{ position: 'absolute', top: '6px', right: '6px', background: 'none', border: 'none', cursor: 'pointer', fontSize: '14px' }}>❌</button>
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '10px', paddingRight: '20px' }}>
-                          <div><span style={{ color: '#8a7650', fontSize: '11px', display: 'block', marginBottom: '2px', fontWeight: 'bold' }}>👤 NAME</span>{selectedCustomer.name}</div>
-                          <div><span style={{ color: '#8a7650', fontSize: '11px', display: 'block', marginBottom: '2px', fontWeight: 'bold' }}>📞 PHONE</span>{selectedCustomer.phone || '-'}</div>
-                          <div><span style={{ color: '#8a7650', fontSize: '11px', display: 'block', marginBottom: '2px', fontWeight: 'bold' }}>📍 LOCATION</span>{selectedCustomer.location || '-'}</div>
+                      <div className="saas-input" style={{ backgroundColor: '#fefcf3', borderColor: '#eadeca', color: '#4a3b1b', position: 'relative', display: 'flex', alignItems: 'center', paddingRight: '36px' }}>
+                        <button onClick={() => { setSelectedCustomerId(''); setCustomerSearchTerm(''); }} style={{ position: 'absolute', top: '50%', right: '8px', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#ef4444' }}>
+                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                        </button>
+                        
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', alignItems: 'center', width: '100%', gap: '10px' }}>
+                          {/* 1. NAME (Left Aligned) */}
+                          <div style={{ fontWeight: '500', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: '6px', overflow: 'hidden' }}>
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#8a7650" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
+                            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{selectedCustomer.name}</span>
+                          </div>
+                          
+                          {/* 2. PHONE (Center Aligned) */}
+                          <div style={{ color: '#8a7650', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px', whiteSpace: 'nowrap', fontSize: '13px' }}>
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"></path></svg>
+                            <span>{selectedCustomer.phone || '-'}</span>
+                          </div>
+
+                          {/* 3. LOCATION (Right Aligned) */}
+                          <div style={{ color: '#8a7650', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '4px', whiteSpace: 'nowrap', overflow: 'hidden', fontSize: '13px' }}>
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path><circle cx="12" cy="10" r="3"></circle></svg>
+                            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{selectedCustomer.location || '-'}</span>
+                          </div>
                         </div>
                       </div>
                     )}
@@ -2111,25 +2354,27 @@ export default function POSPage() {
               {/* SCROLLABLE CATEGORY TABS WITH MIX & IMPORT BUTTONS APPENDED */}
               {activeTab !== 'retail' && (
                 <div className="saas-tab-container hide-scrollbar" style={{ display: 'flex', flexWrap: 'nowrap', overflowX: 'auto', width: '100%', border: 'none', boxShadow: 'none', padding: 0, background: 'transparent', gap: '8px', margin: 0 }}>
-                  {riceCategories.map(cat => (
-                    <button 
-                      key={cat} 
-                      onClick={() => setActiveCategory(cat)} 
-                      className={`saas-tab ${activeCategory === cat ? 'active' : ''}`}
-                      style={activeCategory === cat 
-                        ? { borderRadius: '20px', minWidth: 'max-content' } 
-                        : { borderRadius: '20px', minWidth: 'max-content', border: '1px solid #94a3b8', background: '#ffffff', color: '#334155' }
-                      }
-                    >
-                      {cat === 'All' ? (lang === 'kh' ? 'ទាំងអស់' : 'All') : cat}
-                    </button>
-                  ))}
+                  
+                  {/* 🔥 ADDED DIRECT HORIZONTAL SORTING */}
+                  <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+                    <SortableContext items={riceCategories} strategy={horizontalListSortingStrategy}>
+                      {riceCategories.map(cat => (
+                        <SortableHorizontalTab 
+                          key={cat} 
+                          cat={cat} 
+                          isActive={activeCategory === cat} 
+                          lang={lang} 
+                          onClick={() => setActiveCategory(cat)} 
+                        />
+                      ))}
+                    </SortableContext>
+                  </DndContext>
 
                   {/* ⚙️ NEW: SETTINGS BUTTON FOR CATEGORY ORDER */}
                   <button 
                     onClick={() => setIsCategorySettingsOpen(true)} 
                     className="saas-tab" 
-                    style={{ padding: '8px 12px', minWidth: 'max-content', borderRadius: '20px', border: '1px solid #cbd5e1', background: '#ffffff', color: '#64748b', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                    style={{ padding: '8px 16px', fontSize: '14px', minWidth: 'max-content', borderRadius: '20px', border: '1px solid #cbd5e1', background: '#ffffff', color: '#64748b', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 1px 2px 0 rgba(0, 0, 0, 0.05)', cursor: 'pointer' }}
                     title="Manage Categories"
                   >
                     ⚙️
@@ -2139,14 +2384,14 @@ export default function POSPage() {
                   <button 
                     onClick={() => setActiveFullScreen('import')}
                     className="saas-tab"
-                    style={{ borderRadius: '20px', minWidth: 'max-content', border: '1px dashed #3b82f6', background: '#eff6ff', color: '#1d4ed8', fontWeight: 'bold' }}
+                    style={{ padding: '8px 16px', fontSize: '14px', borderRadius: '20px', minWidth: 'max-content', border: '1px dashed #3b82f6', background: '#eff6ff', color: '#1d4ed8', fontWeight: 'bold', boxShadow: '0 1px 2px 0 rgba(0, 0, 0, 0.05)', cursor: 'pointer' }}
                   >
                     📦 Import Stock
                   </button>
                   <button 
                     onClick={() => setActiveFullScreen('mix')}
                     className="saas-tab"
-                    style={{ borderRadius: '20px', minWidth: 'max-content', border: '1px dashed #8b5cf6', background: '#f5f3ff', color: '#6d28d9', fontWeight: 'bold' }}
+                    style={{ padding: '8px 16px', fontSize: '14px', borderRadius: '20px', minWidth: 'max-content', border: '1px dashed #8b5cf6', background: '#f5f3ff', color: '#6d28d9', fontWeight: 'bold', boxShadow: '0 1px 2px 0 rgba(0, 0, 0, 0.05)', cursor: 'pointer' }}
                   >
                     🥣 Mix Rice
                   </button>
@@ -2743,12 +2988,13 @@ export default function POSPage() {
             onClick={async () => {
               setIsProcessing(true);
               try {
+                // 🔥 SECURITY FIX: Lock customer database updates to the active branch
                 const { error } = await supabase.from('customers').update({
                   name: cartCustomerEditForm.name,
                   phone: cartCustomerEditForm.phone,
                   location: cartCustomerEditForm.location,
                   google_map: cartCustomerEditForm.google_map
-                }).eq('id', selectedCustomerId);
+                }).eq('id', selectedCustomerId).eq('branch_id', activeBranchId);
                 
                 if (error) throw error;
                 
@@ -3256,7 +3502,7 @@ export default function POSPage() {
             <img 
               src={invoiceImages.watermark} 
               className="invoice-watermark" 
-              style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', width: '40%', height: 'auto', opacity: 0.14, zIndex: 0, pointerEvents: 'none', objectFit: 'contain' }} 
+              style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', width: '22%', height: 'auto', opacity: 0.12, zIndex: 0, pointerEvents: 'none', objectFit: 'contain' }} 
               alt="Watermark" 
               decoding="sync"
             />
