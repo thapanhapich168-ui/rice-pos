@@ -54,6 +54,7 @@ export default function CustomerDatabasePage() {
   const [newCustomer, setNewCustomer] = useState({
     name: '', owner: 'Both', type: 'ហូប', phone: '', location: '', google_map: ''
   })
+  const [mobileEditCustomer, setMobileEditCustomer] = useState<Customer | null>(null); // 🔥 Mobile Control Center
 
   // --- LIFECYCLE ---
   useEffect(() => {
@@ -226,7 +227,7 @@ export default function CustomerDatabasePage() {
 
   const formatDisplayValue = (col: string, val: any) => {
     if (val === null || val === undefined || val === '') {
-      if (col === 'days_since_last_purchase') return 'No purchases';
+      if (col === 'days_since_last_purchase') return '-';
       return '—';
     }
     
@@ -278,26 +279,43 @@ export default function CustomerDatabasePage() {
       {/* TOOLBAR (Frozen) */}
       <div className="saas-card" style={{ padding: '16px', marginBottom: '24px', flexShrink: 0 }}>
         
-        <div style={{ display: 'flex', gap: '12px', marginBottom: '16px', flexWrap: 'wrap' }}>
+        <div className="mobile-action-row" style={{ display: 'flex', gap: '12px', marginBottom: '16px', flexWrap: 'wrap', width: '100%' }}>
           <input 
             className="saas-input" 
-            placeholder="🔍 Search by name, phone, or location..." 
+            placeholder="🔍 Quick search..." 
             value={searchQuery} 
             onChange={(e) => setSearchQuery(e.target.value)} 
             onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
-            style={{ flex: 1, minWidth: '200px' }}
+            style={{ flex: 1, minWidth: '0' }}
           />
-          <button className="saas-btn saas-btn-primary" onClick={() => setShowAddModal(true)}>
-            <span style={{ fontSize: '16px', marginRight: '4px', fontWeight: 'bold' }}>+</span>
-            Add Customer
+          
+          {/* ⏳ New Sort Button */}
+          <button 
+             className="saas-btn saas-btn-secondary" 
+             onClick={() => handleSort('days_since_last_purchase')}
+             style={{ padding: '0 16px', height: '40px', display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 'bold' }}
+             title="Sort by days since last purchase"
+          >
+             ⏳ <span className="hide-on-mobile">Sort by Days</span>
+             <span style={{ fontSize: '12px', opacity: sortConfig?.key === 'days_since_last_purchase' ? 1 : 0.3 }}>
+                {sortConfig?.key === 'days_since_last_purchase' ? (sortConfig.direction === 'asc' ? '↑' : '↓') : '↕'}
+             </span>
+          </button>
+
+          <button className="saas-btn saas-btn-primary desktop-only-btn" onClick={() => setShowAddModal(true)} style={{ height: '40px' }}>
+            + Add Customer
+          </button>
+          {/* 📱 Mobile "+" Button */}
+          <button className="saas-btn saas-btn-primary mobile-only-btn" onClick={() => setShowAddModal(true)} style={{ padding: '0', width: '40px', height: '40px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#ffffff" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
           </button>
         </div>
 
-        {/* OWNER PRE-FILTERS */}
-        <div className="saas-tab-container hide-scrollbar" style={{ border: 'none', padding: 0, boxShadow: 'none', margin: '0 0 12px 0', flexWrap: 'nowrap', overflowX: 'auto' }}>
+        {/* 🔥 PROFESSIONAL PILL TABS: OWNER */}
+        <div className="hide-scrollbar" style={{ display: 'flex', gap: '10px', overflowX: 'auto', paddingRight: '12px', paddingBottom: '4px', marginBottom: '12px', margin: 0, WebkitOverflowScrolling: 'touch', maxWidth: '100%' }}>
           <button 
             onClick={() => setOwnerFilter('All')} 
-            className={`saas-tab ${ownerFilter === 'All' ? 'active' : ''}`}
+            style={{ background: ownerFilter === 'All' ? '#b58a3d' : '#f1f5f9', color: ownerFilter === 'All' ? '#fff' : '#475569', border: 'none', borderRadius: '20px', padding: '8px 16px', fontSize: '14px', fontWeight: 'bold', flexShrink: 0, cursor: 'pointer', transition: 'all 0.2s' }}
           >
             All Owners
           </button>
@@ -308,7 +326,7 @@ export default function CustomerDatabasePage() {
               <button 
                 key={ownerItem} 
                 onClick={() => setOwnerFilter(ownerItem)} 
-                className={`saas-tab ${ownerFilter === ownerItem ? 'active' : ''}`}
+                style={{ background: ownerFilter === ownerItem ? '#b58a3d' : '#f1f5f9', color: ownerFilter === ownerItem ? '#fff' : '#475569', border: 'none', borderRadius: '20px', padding: '8px 16px', fontSize: '14px', fontWeight: 'bold', flexShrink: 0, cursor: 'pointer', transition: 'all 0.2s' }}
               >
                 👤 {ownerItem} ({count})
               </button>
@@ -316,11 +334,11 @@ export default function CustomerDatabasePage() {
           })}
         </div>
 
-        {/* CUSTOMER TYPE FILTERS */}
-        <div className="saas-tab-container hide-scrollbar" style={{ border: 'none', padding: 0, boxShadow: 'none', margin: 0, flexWrap: 'nowrap', overflowX: 'auto' }}>
+        {/* 🔥 PROFESSIONAL PILL TABS: CUSTOMER TYPE */}
+        <div className="hide-scrollbar" style={{ display: 'flex', gap: '10px', overflowX: 'auto', paddingRight: '12px', paddingBottom: '4px', paddingTop: '12px', margin: 0, WebkitOverflowScrolling: 'touch', maxWidth: '100%' }}>
           <button 
             onClick={() => setCustomerTypeFilter('All')} 
-            className={`saas-tab ${customerTypeFilter === 'All' ? 'active' : ''}`}
+            style={{ background: customerTypeFilter === 'All' ? '#b58a3d' : '#f1f5f9', color: customerTypeFilter === 'All' ? '#fff' : '#475569', border: 'none', borderRadius: '20px', padding: '8px 16px', fontSize: '14px', fontWeight: 'bold', flexShrink: 0, cursor: 'pointer', transition: 'all 0.2s' }}
           >
             All Types ({ownerFilter === 'All' ? customers.length : customers.filter(c => c.owner === ownerFilter).length})
           </button>
@@ -331,7 +349,7 @@ export default function CustomerDatabasePage() {
               <button 
                 key={typeItem} 
                 onClick={() => setCustomerTypeFilter(typeItem)} 
-                className={`saas-tab ${customerTypeFilter === typeItem ? 'active' : ''}`}
+                style={{ background: customerTypeFilter === typeItem ? '#b58a3d' : '#f1f5f9', color: customerTypeFilter === typeItem ? '#fff' : '#475569', border: 'none', borderRadius: '20px', padding: '8px 16px', fontSize: '14px', fontWeight: 'bold', flexShrink: 0, cursor: 'pointer', transition: 'all 0.2s' }}
               >
                 🏷️ {typeItem} ({count})
               </button>
@@ -340,8 +358,8 @@ export default function CustomerDatabasePage() {
         </div>
       </div>
 
-      {/* SPREADSHEET TABLE */}
-      <div className="saas-table-wrapper" style={{ flex: 1, minHeight: 0, marginBottom: 0, display: 'flex', flexDirection: 'column' }}>
+      {/* DESKTOP SPREADSHEET TABLE */}
+      <div className="saas-table-wrapper fade-in hide-on-mobile" style={{ flex: 1, minHeight: 0, marginBottom: 0, display: 'flex', flexDirection: 'column' }}>
         <div className="saas-table-responsive" style={{ flex: 1, overflow: 'auto' }}>
           <table className="saas-table" style={{ width: 'max-content', tableLayout: 'fixed' }}>
             <thead>
@@ -514,6 +532,102 @@ export default function CustomerDatabasePage() {
         </div>
       </div>
 
+      {/* 📱 MOBILE VIEW: CUSTOMER CARDS (ULTRA-COMPACT) */}
+      <div className="mobile-only-list fade-in">
+        {isLoading ? (
+           <div style={{ padding: '20px', textAlign: 'center', color: '#64748b' }}>Loading customers...</div>
+        ) : processedCustomers.length === 0 ? (
+           <EmptyState icon="🔍" title="No customers found" message="Try adjusting your search or filters." />
+        ) : (
+           processedCustomers.map((c, index) => {
+              const cid = String(c.id);
+              const daysVal = Number(c.days_since_last_purchase) || 0;
+              const lastOrderText = formatDisplayValue('days_since_last_purchase', c.days_since_last_purchase);
+              const lastDateText = formatDisplayValue('last_purchase_date', c.last_purchase_date);
+              const isOld = c.days_since_last_purchase !== null && daysVal > 30; // Safe comparison avoiding null errors
+              
+              return (
+                <div key={cid} className="saas-mobile-card compact-card" onClick={() => { 
+                    setMobileEditCustomer(c); 
+                    setEdits({ [cid]: { name: c.name, owner: c.owner, type: c.type, phone: c.phone, location: c.location, google_map: c.google_map } }); 
+                }}>
+                   <div className="compact-card-left">
+                      <span style={{ fontWeight: 'bold', color: '#94a3b8', fontSize: '14px', minWidth: '22px' }}>{index + 1}.</span>
+                      <div className="compact-text-group">
+                         <div className="compact-title" style={{ fontWeight: 'normal' }}>{c.name}</div>
+                         <div className="compact-sub">📞 {c.phone || 'No phone'} • 📍 {c.location || 'No loc'}</div>
+                      </div>
+                   </div>
+                   <div className="compact-card-right" style={{ justifyContent: 'center', alignItems: 'flex-end', minWidth: '70px', textAlign: 'right' }}>
+                      {/* 🔥 Top: Last Purchase Date */}
+                      <div style={{ fontSize: '11px', color: '#64748b', fontWeight: 'normal', lineHeight: '1.2' }}>
+                         {lastDateText === '—' || lastDateText === '-' ? <span style={{ color: '#94a3b8' }}>—</span> : lastDateText}
+                      </div>
+                      {/* 🔥 Bottom: Days Since Last Purchase */}
+                      <div className="compact-date" style={{ color: isOld ? '#dc2626' : '#0f172a', fontSize: '13px', fontWeight: 'normal', lineHeight: '1.4' }}>
+                         {lastOrderText === '-' ? <span style={{ color: '#94a3b8' }}>—</span> : `${lastOrderText} ago`}
+                      </div>
+                   </div>
+                </div>
+              )
+           })
+        )}
+      </div>
+
+      {/* 📱 MOBILE EDIT CUSTOMER MODAL */}
+      <Modal isOpen={!!mobileEditCustomer} onClose={() => { setMobileEditCustomer(null); setEdits(prev => { const n = { ...prev }; if(mobileEditCustomer) delete n[String(mobileEditCustomer.id)]; return n; }); }} title={`Edit: ${mobileEditCustomer?.name}`} maxWidth="400px">
+        {mobileEditCustomer && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+            <div>
+              <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', margin: '0 0 6px 0' }}>Customer Name</label>
+              <input type="text" className="saas-input" value={edits[String(mobileEditCustomer.id)]?.name ?? mobileEditCustomer.name} onChange={e => setEdits(prev => ({ ...prev, [String(mobileEditCustomer.id)]: { ...(prev[String(mobileEditCustomer.id)] || {}), name: e.target.value } }))} />
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+              <div>
+                <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', margin: '0 0 6px 0' }}>Account Owner</label>
+                <select className="saas-input" value={edits[String(mobileEditCustomer.id)]?.owner ?? mobileEditCustomer.owner} onChange={e => setEdits(prev => ({ ...prev, [String(mobileEditCustomer.id)]: { ...(prev[String(mobileEditCustomer.id)] || {}), owner: e.target.value } }))}>
+                  <option value="Both">Both</option>
+                  <option value="Jing">Jing</option>
+                  <option value="Pich">Pich</option>
+                  <option value="Mom">Mom</option>
+                </select>
+              </div>
+              <div>
+                <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', margin: '0 0 6px 0' }}>Customer Type</label>
+                <select className="saas-input" value={edits[String(mobileEditCustomer.id)]?.type ?? mobileEditCustomer.type} onChange={e => setEdits(prev => ({ ...prev, [String(mobileEditCustomer.id)]: { ...(prev[String(mobileEditCustomer.id)] || {}), type: e.target.value } }))}>
+                  <option value="ហូប">ហូប</option>
+                  <option value="លក់បាយ">លក់បាយ</option>
+                  <option value="លក់ត">លក់ត</option>
+                  <option value="ធ្វើនំ">ធ្វើនំ</option>
+                  <option value="អំណោយ">អំណោយ</option>
+                </select>
+              </div>
+            </div>
+            <div>
+              <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', margin: '0 0 6px 0' }}>Phone Number</label>
+              <input type="text" className="saas-input" value={edits[String(mobileEditCustomer.id)]?.phone ?? mobileEditCustomer.phone ?? ''} onChange={e => setEdits(prev => ({ ...prev, [String(mobileEditCustomer.id)]: { ...(prev[String(mobileEditCustomer.id)] || {}), phone: e.target.value } }))} />
+            </div>
+            <div>
+              <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', margin: '0 0 6px 0' }}>Location</label>
+              <input type="text" className="saas-input" value={edits[String(mobileEditCustomer.id)]?.location ?? mobileEditCustomer.location ?? ''} onChange={e => setEdits(prev => ({ ...prev, [String(mobileEditCustomer.id)]: { ...(prev[String(mobileEditCustomer.id)] || {}), location: e.target.value } }))} />
+            </div>
+
+            <div style={{ marginTop: '16px', display: 'flex', justifyContent: 'space-between', gap: '12px' }}>
+               <button onClick={async () => {
+                  if (!confirm('Are you sure you want to delete this customer?')) return;
+                  await supabase.from('customers').update({ is_archived: true }).eq('id', mobileEditCustomer.id).eq('branch_id', activeBranchId);
+                  loadCustomers(); setMobileEditCustomer(null); showToast('success', 'Deleted', 'Customer safely removed.');
+               }} className="saas-btn" style={{ background: '#fee2e2', color: '#dc2626', padding: '10px 14px' }}>🗑️ Delete</button>
+               
+               <div style={{ display: 'flex', gap: '8px' }}>
+                 <button onClick={() => { setMobileEditCustomer(null); setEdits(prev => { const n = { ...prev }; delete n[String(mobileEditCustomer.id)]; return n; }); }} className="saas-btn saas-btn-secondary">Cancel</button>
+                 <button onClick={async () => { await handleSaveRecord(String(mobileEditCustomer.id)); setMobileEditCustomer(null); }} className="saas-btn saas-btn-primary">Save</button>
+               </div>
+            </div>
+          </div>
+        )}
+      </Modal>
+
       {/* --- ADD CUSTOMER MODAL --- */}
       <Modal isOpen={showAddModal} onClose={() => setShowAddModal(false)} title="Add New Customer" icon="👤" maxWidth="460px">
         <form onSubmit={handleAddCustomer}>
@@ -631,7 +745,96 @@ export default function CustomerDatabasePage() {
           padding-right: 60px; 
         }
 
+        /* 📱 RESPONSIVE CLASSES */
+        .desktop-only-btn { display: block; }
+        .mobile-only-btn { display: none !important; }
+        .hide-on-mobile { display: inline; }
+
+        .fade-in {
+          animation: fadeIn 0.3s ease-in-out;
+        }
+        @keyframes fadeIn {
+          from { opacity: 0; transform: translateY(5px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* 📱 ULTRA-COMPACT MOBILE LIST UI */
+        .mobile-only-list {
+           display: none;
+           flex-direction: column;
+           gap: 10px;
+           padding: 0 16px 24px 16px;
+           overflow-y: auto;
+           height: 100%;
+        }
+        .compact-card {
+           background: #ffffff;
+           border-radius: 10px;
+           border: 1px solid #e2e8f0;
+           box-shadow: 0 2px 4px rgba(0,0,0,0.02);
+           padding: 14px 16px;
+           display: flex;
+           justify-content: space-between;
+           align-items: center;
+           cursor: pointer;
+           transition: background 0.2s;
+        }
+        .compact-card:active { background: #f8fafc; }
+        
+        .compact-card-left {
+           display: flex;
+           align-items: center;
+           gap: 12px;
+           flex: 1;
+           min-width: 0; 
+        }
+        .compact-card-right {
+           display: flex;
+           flex-direction: column;
+           align-items: flex-end;
+           gap: 4px;
+           flex-shrink: 0;
+           text-align: right;
+        }
+        .compact-text-group {
+           display: flex;
+           flex-direction: column;
+           gap: 2px;
+           min-width: 0;
+        }
+        .compact-title {
+           font-weight: 700;
+           font-size: 15px;
+           color: #0f172a;
+           white-space: nowrap;
+           overflow: hidden;
+           text-overflow: ellipsis;
+        }
+        .compact-sub {
+           font-size: 12px;
+           color: #64748b;
+        }
+        .compact-stock {
+           font-weight: bold;
+           font-size: 14px;
+        }
+
         @media (max-width: 1023px) {
+          .saas-table-wrapper { display: none !important; }
+          .mobile-only-list { display: flex !important; }
+          .hide-on-mobile { display: none !important; }
+          .desktop-only-btn { display: none !important; }
+          .mobile-only-btn { display: flex !important; }
+
+          .mobile-action-row {
+            display: flex;
+            flex: 1;
+            gap: 8px !important;
+            align-items: center;
+            min-width: 0 !important;
+            justify-content: space-between;
+          }
+
           .header-container { 
             margin-left: 54px !important; 
             margin-right: 0 !important;
@@ -650,6 +853,14 @@ export default function CustomerDatabasePage() {
             flex-direction: row !important;
             align-items: center !important;
             gap: 12px !important;
+            flex: 1;
+            min-width: 0;
+          }
+          
+          .saas-page-title {
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
           }
 
           .header-actions {
