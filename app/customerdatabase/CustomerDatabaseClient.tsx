@@ -62,7 +62,7 @@ export default function CustomerDatabasePage() {
     fetchSettings()
   }, [activeBranchId]) 
 
-  useFocusRefresh(loadCustomers);
+  // useFocusRefresh(loadCustomers); // 🔥 Disabled to stop constant re-fetching on tab focus
 
   // --- DATABASE OPERATIONS ---
   async function fetchSettings() {
