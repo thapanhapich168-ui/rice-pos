@@ -1834,7 +1834,8 @@ const addProduct = async () => {
                            <div className="compact-title">🌾 {p.name}</div>
                            {activeView === 'wholesale' ? (
                                <div className="compact-sub" style={{ color: '#ef4444', fontWeight: 'bold', marginTop: '4px', fontSize: '13px' }}>
-                                  {formatRiel(currentBatch?.cost_price || p.cost_price)}
+                                  {/* 🛡️ Explicitly cast as Number so TypeScript never panics */}
+                                  {formatRiel(currentBatch ? Number(currentBatch.cost_price) : Number(p.cost_price || 0))}
                                </div>
                            ) : (
                                <div className="compact-sub">{p.weight}kg {wholesaleProd ? `🔗 ${wholesaleProd.name}` : ''}</div>
@@ -1845,12 +1846,13 @@ const addProduct = async () => {
                         {activeView === 'wholesale' ? (
                             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px' }}>
                               <div className="compact-stock" style={{ color: '#b58a3d', fontSize: '14px' }}>📦 {totalActiveBatchStock} left</div>
-                              <div className="compact-date" style={{ color: '#15803d', fontSize: '12px', fontWeight: 'bold' }}>🟢 1st: {currentBatch?.remaining_qty || 0}</div>
+                              {/* 🛡️ Safely parse quantity */}
+                              <div className="compact-date" style={{ color: '#15803d', fontSize: '12px', fontWeight: 'bold' }}>🟢 1st: {currentBatch ? Number(currentBatch.remaining_qty) : 0}</div>
                             </div>
                         ) : (
                             <>
                               <div className="compact-stock" style={{ color: isLowStock ? '#ef4444' : '#10b981' }}>{displayStock} left</div>
-                              <div className="compact-price" style={{ marginTop: '2px' }}>{formatRiel(p.price)}</div>
+                              <div className="compact-price" style={{ marginTop: '2px' }}>{formatRiel(Number(p.price || 0))}</div>
                             </>
                         )}
                      </div>
@@ -2270,67 +2272,69 @@ const addProduct = async () => {
       <Modal 
         isOpen={!!mobileEditProduct} 
         onClose={() => { setMobileEditProduct(null); setEdits(prev => { const n = { ...prev }; if(mobileEditProduct) delete n[mobileEditProduct.id]; return n; }); }} 
-        title={`Control: ${mobileEditProduct?.name}`} 
+        title="" 
         maxWidth="400px"
       >
         {mobileEditProduct && (() => {
+            const p = mobileEditProduct; 
+
             const wpList = products.filter(wp => wp.weight >= 25);
-            const parentWp = mobileEditProduct.linked_wholesale_id ? wpList.find(x => x.id === mobileEditProduct.linked_wholesale_id) : null;
+            const parentWp = p.linked_wholesale_id ? wpList.find(x => x.id === p.linked_wholesale_id) : null;
             
-            // Extract the active 1st batch for this specific product
-            const mBatches = activeBatchesMap[mobileEditProduct.id] || [];
+            // Extract the active batches for this specific product
+            const mBatches = activeBatchesMap[p.id] || [];
             mBatches.sort((a,b) => a.id - b.id);
-            const currentMBatch = mBatches.length > 0 ? mBatches[0] : null;
 
             return (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
                 
-                {/* 🔥 PULL BUTTON: Floating at the top right of the modal body */}
-                {activeView === 'retail' && mobileEditProduct.linked_wholesale_id && (
-                    <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '-8px' }}>
-                      <button 
-                        className="saas-btn" 
-                        style={{ background: '#10b981', color: '#fff', padding: '6px 14px', fontSize: '13px', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', boxShadow: '0 2px 4px rgba(16, 185, 129, 0.2)' }} 
-                        onClick={() => { 
-                          setMobileEditProduct(null); 
-                          handleManualPull(mobileEditProduct.id, mobileEditProduct.linked_wholesale_id!); 
-                        }}
-                      >
-                        ♻️ Pull 1 Bag
-                      </button>
-                    </div>
-                )}
-
+                {/* 🔥 PERFECT HEADER POSITION: Title on the left, Pull 1 Bag button on the right */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '-8px' }}>
+                  <h2 style={{ margin: 0, fontSize: '18px', fontWeight: 'bold', color: '#0f172a' }}>Control: {p.name}</h2>
+                  {activeView === 'retail' && p.linked_wholesale_id && (
+                    <button 
+                      className="saas-btn" 
+                      style={{ background: '#10b981', color: '#fff', padding: '6px 14px', fontSize: '13px', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', boxShadow: '0 2px 4px rgba(16, 185, 129, 0.2)' }} 
+                      onClick={() => { 
+                        setMobileEditProduct(null); 
+                        handleManualPull(p.id, p.linked_wholesale_id!); 
+                      }}
+                    >
+                      ♻️ Pull 1 Bag
+                    </button>
+                  )}
+                </div>
+                
                 {/* Action Buttons Hub */}
                 <div style={{ background: '#f8fafc', padding: '16px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
                    <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', margin: '0 0 12px 0' }}>⚡ Quick Actions</label>
                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
-                      <button className="saas-btn saas-btn-primary" onClick={() => { setMobileEditProduct(null); openImportModal(mobileEditProduct); }}>📦 Import</button>
-                      <button className="saas-btn saas-btn-secondary" onClick={() => { setMobileEditProduct(null); fetchHistory(mobileEditProduct); }}>🕒 History</button>
+                      <button className="saas-btn saas-btn-primary" onClick={() => { setMobileEditProduct(null); openImportModal(p); }}>📦 Import</button>
+                      <button className="saas-btn saas-btn-secondary" onClick={() => { setMobileEditProduct(null); fetchHistory(p); }}>🕒 History</button>
                       
                       {/* Repack Button spans both columns now for a cleaner layout */}
-                      {activeView === 'retail' && parentWp && Number(mobileEditProduct.stock) >= Number(parentWp.weight) && (
-                          <button className="saas-btn" style={{ background: '#f0fdf4', color: '#166534', border: '1px solid #bbf7d0', gridColumn: 'span 2' }} onClick={() => { setMobileEditProduct(null); setRepackModal({ isOpen: true, product: mobileEditProduct }); }}>📦 Repack</button>
+                      {activeView === 'retail' && parentWp && Number(p.stock) >= Number(parentWp.weight) && (
+                          <button className="saas-btn" style={{ background: '#f0fdf4', color: '#166534', border: '1px solid #bbf7d0', gridColumn: 'span 2' }} onClick={() => { setMobileEditProduct(null); setRepackModal({ isOpen: true, product: p }); }}>📦 Repack</button>
                       )}
                    </div>
                 </div>
 
-                {/* Edit Inputs */}
+                {/* 🔥 SAFARI JUMP FIX: Inputs are now simple and stacked! */}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                  <div onClickCapture={() => { if (Number(edits[mobileEditProduct.id]?.price ?? mobileEditProduct.price) === 0) setEdits(prev => ({ ...prev, [mobileEditProduct.id]: { ...(prev[mobileEditProduct.id] || {}), price: '' as any } })) }}>
+                  <div>
                     <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', margin: '0 0 6px 0' }}>Selling Price (៛)</label>
                     <CurrencyInput 
                       className="saas-input" 
-                      value={(edits[mobileEditProduct.id]?.price ?? mobileEditProduct.price) === 0 ? '0' : (edits[mobileEditProduct.id]?.price ?? mobileEditProduct.price)} 
-                      onChange={(val: any) => setEdits(prev => ({ ...prev, [mobileEditProduct.id]: { ...(prev[mobileEditProduct.id] || {}), price: val } }))} 
+                      value={edits[p.id]?.price ?? p.price} 
+                      onChange={(val: any) => setEdits(prev => ({ ...prev, [p.id]: { ...(prev[p.id] || {}), price: val } }))} 
                     />
                   </div>
-                  <div onClickCapture={() => { if (Number(edits[mobileEditProduct.id]?.cost_price ?? mobileEditProduct.cost_price) === 0) setEdits(prev => ({ ...prev, [mobileEditProduct.id]: { ...(prev[mobileEditProduct.id] || {}), cost_price: '' as any } })) }}>
+                  <div>
                     <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', margin: '0 0 6px 0' }}>Cost Price (៛)</label>
                     <CurrencyInput 
                       className="saas-input" 
-                      value={(edits[mobileEditProduct.id]?.cost_price ?? mobileEditProduct.cost_price) === 0 ? '0' : (edits[mobileEditProduct.id]?.cost_price ?? mobileEditProduct.cost_price)} 
-                      onChange={(val: any) => setEdits(prev => ({ ...prev, [mobileEditProduct.id]: { ...(prev[mobileEditProduct.id] || {}), cost_price: val } }))} 
+                      value={edits[p.id]?.cost_price ?? p.cost_price} 
+                      onChange={(val: any) => setEdits(prev => ({ ...prev, [p.id]: { ...(prev[p.id] || {}), cost_price: val } }))} 
                     />
                   </div>
 
@@ -2352,7 +2356,7 @@ const addProduct = async () => {
                               </div>
                               <div style={{ textAlign: 'right' }}>
                                  <div style={{ fontSize: '11px', color: titleColor, textTransform: 'uppercase' }}>Batch COGS</div>
-                                 <div style={{ fontSize: '15px', color: valColor, fontWeight: 'bold', marginTop: '4px' }}>{formatRiel(batch.cost_price)}</div>
+                                 <div style={{ fontSize: '15px', color: valColor, fontWeight: 'bold', marginTop: '4px' }}>{formatRiel(Number(batch.cost_price))}</div>
                               </div>
                            </div>
                          )
@@ -2376,11 +2380,11 @@ const addProduct = async () => {
                             onKeyDown={e => e.key === 'Escape' && setIsMobileLinkDropdownOpen(false)} 
                           />
                           <div className="dropdown-results-tray">
-                            <div className="dropdown-row clear-option" onMouseDown={(e) => { e.stopPropagation(); handleLinkWholesaleBag(mobileEditProduct.id, null); setMobileEditProduct({...mobileEditProduct, linked_wholesale_id: null}); setIsMobileLinkDropdownOpen(false); }}>❌ Clear Linked Bag</div>
+                            <div className="dropdown-row clear-option" onMouseDown={(e) => { e.stopPropagation(); handleLinkWholesaleBag(p.id, null); setMobileEditProduct({...p, linked_wholesale_id: null}); setIsMobileLinkDropdownOpen(false); }}>❌ Clear Linked Bag</div>
                             {wpList.filter(wp => wp.name.toLowerCase().includes(mobileLinkSearch.toLowerCase())).map(wp => (
-                               <div key={wp.id} className="dropdown-row" onMouseDown={(e) => { e.stopPropagation(); handleLinkWholesaleBag(mobileEditProduct.id, wp); setMobileEditProduct({...mobileEditProduct, linked_wholesale_id: wp.id}); setIsMobileLinkDropdownOpen(false); }}>
+                               <div key={wp.id} className="dropdown-row" onMouseDown={(e) => { e.stopPropagation(); handleLinkWholesaleBag(p.id, wp); setMobileEditProduct({...p, linked_wholesale_id: wp.id}); setIsMobileLinkDropdownOpen(false); }}>
                                   <span style={{ fontWeight: 'normal', color: '#334155' }}>{wp.name}</span>
-                                  <span style={{ fontSize: '11px', color: '#64748b', marginLeft: '8px' }}>({formatRiel(wp.cost_price)})</span>
+                                  <span style={{ fontSize: '11px', color: '#64748b', marginLeft: '8px' }}>({formatRiel(Number(wp.cost_price))})</span>
                                </div>
                             ))}
                           </div>
@@ -2397,13 +2401,13 @@ const addProduct = async () => {
                    <button onClick={async () => {
                       if (!confirm('Are you sure you want to delete this product?')) return;
                       setIsProcessing(true);
-                      await supabase.from('products').update({ is_archived: true }).eq('id', mobileEditProduct.id).eq('branch_id', activeBranchId);
+                      await supabase.from('products').update({ is_archived: true }).eq('id', p.id).eq('branch_id', activeBranchId);
                       fetchProducts(); setMobileEditProduct(null); setIsProcessing(false); showToast('success', 'Deleted', 'Product safely removed.');
                    }} className="saas-btn" style={{ background: '#fee2e2', color: '#dc2626', padding: '10px 14px' }}>🗑️ Delete</button>
                    
                    <div style={{ display: 'flex', gap: '8px' }}>
-                     <button onClick={() => { setMobileEditProduct(null); setEdits(prev => { const n = { ...prev }; delete n[mobileEditProduct.id]; return n; }); }} className="saas-btn saas-btn-secondary">Cancel</button>
-                     <button onClick={async () => { await handleSaveRecord(mobileEditProduct.id); setMobileEditProduct(null); }} className="saas-btn saas-btn-primary">Save</button>
+                     <button onClick={() => { setMobileEditProduct(null); setEdits(prev => { const n = { ...prev }; delete n[p.id]; return n; }); }} className="saas-btn saas-btn-secondary">Cancel</button>
+                     <button onClick={async () => { await handleSaveRecord(p.id); setMobileEditProduct(null); }} className="saas-btn saas-btn-primary">Save</button>
                    </div>
                 </div>
               </div>
