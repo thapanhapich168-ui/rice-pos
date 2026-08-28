@@ -2288,18 +2288,13 @@ const addProduct = async () => {
             return (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
                 
-                {/* Action Buttons Hub (Includes Pull 1 Bag neatly grouped with Import & History) */}
+                {/* Action Buttons Hub (Cleaned up: Only Import, History, and Repack) */}
                 <div style={{ background: '#f8fafc', padding: '16px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
                    <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', margin: '0 0 12px 0' }}>⚡ Quick Actions</label>
                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
                       <button className="saas-btn saas-btn-primary" onClick={() => { setMobileEditProduct(null); openImportModal(p); }}>📦 Import</button>
                       <button className="saas-btn saas-btn-secondary" onClick={() => { setMobileEditProduct(null); fetchHistory(p); }}>🕒 History</button>
                       
-                      {/* Pull 1 Bag sits right in the action grid for easy access */}
-                      {activeView === 'retail' && p.linked_wholesale_id && (
-                          <button className="saas-btn" style={{ background: '#10b981', color: '#fff', gridColumn: 'span 2' }} onClick={() => { setMobileEditProduct(null); handleManualPull(p.id, p.linked_wholesale_id!); }}>♻️ Pull 1 Bag</button>
-                      )}
-
                       {/* Repack Button */}
                       {activeView === 'retail' && parentWp && Number(p.stock) >= Number(parentWp.weight) && (
                           <button className="saas-btn" style={{ background: '#f0fdf4', color: '#166534', border: '1px solid #bbf7d0', gridColumn: 'span 2' }} onClick={() => { setMobileEditProduct(null); setRepackModal({ isOpen: true, product: p }); }}>📦 Repack</button>
@@ -2307,7 +2302,7 @@ const addProduct = async () => {
                    </div>
                 </div>
 
-                {/* 🔥 SAFARI JUMP FIX: Inputs are now simple and stacked! */}
+                {/* Edit Inputs */}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
                   <div>
                     <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', margin: '0 0 6px 0' }}>Selling Price (៛)</label>
@@ -2353,34 +2348,51 @@ const addProduct = async () => {
                   )}
                 </div>
 
+                {/* Link to Wholesale Bag & Pull 1 Bag Button placed neatly together below */}
                 {activeView === 'retail' && (
-                  <div style={{ position: 'relative', zIndex: isMobileLinkDropdownOpen ? 100 : 2 }}>
-                    <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', margin: '0 0 6px 0' }}>🔗 Link to Wholesale Bag</label>
-                    {isMobileLinkDropdownOpen ? (
-                       <div style={{ position: 'relative' }}>
-                          <input 
-                            autoFocus 
-                            className="saas-input" 
-                            placeholder="Search Wholesale bag..." 
-                            value={mobileLinkSearch} 
-                            onChange={e => setMobileLinkSearch(e.target.value)} 
-                            onBlur={() => setTimeout(() => setIsMobileLinkDropdownOpen(false), 200)} 
-                            onKeyDown={e => e.key === 'Escape' && setIsMobileLinkDropdownOpen(false)} 
-                          />
-                          <div className="dropdown-results-tray">
-                            <div className="dropdown-row clear-option" onMouseDown={(e) => { e.stopPropagation(); handleLinkWholesaleBag(p.id, null); setMobileEditProduct({...p, linked_wholesale_id: null}); setIsMobileLinkDropdownOpen(false); }}>❌ Clear Linked Bag</div>
-                            {wpList.filter(wp => wp.name.toLowerCase().includes(mobileLinkSearch.toLowerCase())).map(wp => (
-                               <div key={wp.id} className="dropdown-row" onMouseDown={(e) => { e.stopPropagation(); handleLinkWholesaleBag(p.id, wp); setMobileEditProduct({...p, linked_wholesale_id: wp.id}); setIsMobileLinkDropdownOpen(false); }}>
-                                  <span style={{ fontWeight: 'normal', color: '#334155' }}>{wp.name}</span>
-                                  <span style={{ fontSize: '11px', color: '#64748b', marginLeft: '8px' }}>({formatRiel(Number(wp.cost_price))})</span>
-                               </div>
-                            ))}
-                          </div>
-                       </div>
-                    ) : (
-                       <div className="interactive-select-trigger" onClick={() => { setIsMobileLinkDropdownOpen(true); setMobileLinkSearch(''); }} style={{ width: '100%', background: '#fff' }}>
-                          {parentWp ? `🌾 ${parentWp.name}` : '🔍 Search & Link Wholesale Bag...'}
-                       </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                    <div style={{ position: 'relative', zIndex: isMobileLinkDropdownOpen ? 100 : 2 }}>
+                      <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', margin: '0 0 6px 0' }}>🔗 Link to Wholesale Bag</label>
+                      {isMobileLinkDropdownOpen ? (
+                         <div style={{ position: 'relative' }}>
+                            <input 
+                              autoFocus 
+                              className="saas-input" 
+                              placeholder="Search Wholesale bag..." 
+                              value={mobileLinkSearch} 
+                              onChange={e => setMobileLinkSearch(e.target.value)} 
+                              onBlur={() => setTimeout(() => setIsMobileLinkDropdownOpen(false), 200)} 
+                              onKeyDown={e => e.key === 'Escape' && setIsMobileLinkDropdownOpen(false)} 
+                            />
+                            <div className="dropdown-results-tray">
+                              <div className="dropdown-row clear-option" onMouseDown={(e) => { e.stopPropagation(); handleLinkWholesaleBag(p.id, null); setMobileEditProduct({...p, linked_wholesale_id: null}); setIsMobileLinkDropdownOpen(false); }}>❌ Clear Linked Bag</div>
+                              {wpList.filter(wp => wp.name.toLowerCase().includes(mobileLinkSearch.toLowerCase())).map(wp => (
+                                 <div key={wp.id} className="dropdown-row" onMouseDown={(e) => { e.stopPropagation(); handleLinkWholesaleBag(p.id, wp); setMobileEditProduct({...p, linked_wholesale_id: wp.id}); setIsMobileLinkDropdownOpen(false); }}>
+                                    <span style={{ fontWeight: 'normal', color: '#334155' }}>{wp.name}</span>
+                                    <span style={{ fontSize: '11px', color: '#64748b', marginLeft: '8px' }}>({formatRiel(Number(wp.cost_price))})</span>
+                                 </div>
+                              ))}
+                            </div>
+                         </div>
+                      ) : (
+                         <div className="interactive-select-trigger" onClick={() => { setIsMobileLinkDropdownOpen(true); setMobileLinkSearch(''); }} style={{ width: '100%', background: '#fff' }}>
+                            {parentWp ? `🌾 ${parentWp.name}` : '🔍 Search & Link Wholesale Bag...'}
+                         </div>
+                      )}
+                    </div>
+
+                    {/* 🔥 PULL 1 BAG BUTTON: Positioned right below the Link box */}
+                    {p.linked_wholesale_id && (
+                      <button 
+                        className="saas-btn" 
+                        style={{ background: '#10b981', color: '#fff', width: '100%', padding: '12px', fontSize: '14px', fontWeight: 'bold', border: 'none', borderRadius: '8px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }} 
+                        onClick={() => { 
+                          setMobileEditProduct(null); 
+                          handleManualPull(p.id, p.linked_wholesale_id!); 
+                        }}
+                      >
+                        ♻️ Pull 1 Bag (Convert to Retail)
+                      </button>
                     )}
                   </div>
                 )}
