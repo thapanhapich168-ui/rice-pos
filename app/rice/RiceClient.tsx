@@ -2288,17 +2288,12 @@ const addProduct = async () => {
             return (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
                 
-                {/* Action Buttons Hub (Cleaned up: Only Import, History, and Repack) */}
+                {/* Action Buttons Hub (Only Import and History here) */}
                 <div style={{ background: '#f8fafc', padding: '16px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
                    <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', margin: '0 0 12px 0' }}>⚡ Quick Actions</label>
                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
                       <button className="saas-btn saas-btn-primary" onClick={() => { setMobileEditProduct(null); openImportModal(p); }}>📦 Import</button>
                       <button className="saas-btn saas-btn-secondary" onClick={() => { setMobileEditProduct(null); fetchHistory(p); }}>🕒 History</button>
-                      
-                      {/* Repack Button */}
-                      {activeView === 'retail' && parentWp && Number(p.stock) >= Number(parentWp.weight) && (
-                          <button className="saas-btn" style={{ background: '#f0fdf4', color: '#166534', border: '1px solid #bbf7d0', gridColumn: 'span 2' }} onClick={() => { setMobileEditProduct(null); setRepackModal({ isOpen: true, product: p }); }}>📦 Repack</button>
-                      )}
                    </div>
                 </div>
 
@@ -2348,7 +2343,6 @@ const addProduct = async () => {
                   )}
                 </div>
 
-                {/* Link to Wholesale Bag & Pull 1 Bag Button placed neatly together below */}
                 {activeView === 'retail' && (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                     <div style={{ position: 'relative', zIndex: isMobileLinkDropdownOpen ? 100 : 2 }}>
@@ -2381,18 +2375,33 @@ const addProduct = async () => {
                       )}
                     </div>
 
-                    {/* 🔥 PULL 1 BAG BUTTON: Positioned right below the Link box */}
+                    {/* 🔥 SIDE-BY-SIDE BUTTON ROW: Pull 1 Bag & Repack */}
                     {p.linked_wholesale_id && (
-                      <button 
-                        className="saas-btn" 
-                        style={{ background: '#10b981', color: '#fff', width: '100%', padding: '12px', fontSize: '14px', fontWeight: 'bold', border: 'none', borderRadius: '8px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }} 
-                        onClick={() => { 
-                          setMobileEditProduct(null); 
-                          handleManualPull(p.id, p.linked_wholesale_id!); 
-                        }}
-                      >
-                        ♻️ Pull 1 Bag (Convert to Retail)
-                      </button>
+                      <div style={{ display: 'grid', gridTemplateColumns: (parentWp && Number(p.stock) >= Number(parentWp.weight)) ? '1fr 1fr' : '1fr', gap: '8px' }}>
+                        <button 
+                          className="saas-btn" 
+                          style={{ background: '#f0fdf4', color: '#166534', padding: '10px 12px', fontSize: '13px', fontWeight: '600', border: '1px solid #bbf7d0', borderRadius: '8px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }} 
+                          onClick={() => { 
+                            setMobileEditProduct(null); 
+                            handleManualPull(p.id, p.linked_wholesale_id!); 
+                          }}
+                        >
+                          ♻️ Pull 1 Bag
+                        </button>
+
+                        {parentWp && Number(p.stock) >= Number(parentWp.weight) && (
+                          <button 
+                            className="saas-btn" 
+                            style={{ background: '#f0fdf4', color: '#166534', padding: '10px 12px', fontSize: '13px', fontWeight: '600', border: '1px solid #bbf7d0', borderRadius: '8px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }} 
+                            onClick={() => { 
+                              setMobileEditProduct(null); 
+                              setRepackModal({ isOpen: true, product: p }); 
+                            }}
+                          >
+                            📦 Repack
+                          </button>
+                        )}
+                      </div>
                     )}
                   </div>
                 )}
