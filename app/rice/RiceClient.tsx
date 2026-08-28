@@ -2270,7 +2270,7 @@ const addProduct = async () => {
       <Modal 
         isOpen={!!mobileEditProduct} 
         onClose={() => { setMobileEditProduct(null); setEdits(prev => { const n = { ...prev }; if(mobileEditProduct) delete n[mobileEditProduct.id]; return n; }); }} 
-        title={`Control: ${mobileEditProduct?.name}`} 
+        title="" 
         maxWidth="400px"
       >
         {mobileEditProduct && (() => {
@@ -2285,21 +2285,22 @@ const addProduct = async () => {
             return (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
                 
-                {/* 🔥 PULL BUTTON: Floating at the top right of the modal body */}
-                {activeView === 'retail' && mobileEditProduct.linked_wholesale_id && (
-                    <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '-8px' }}>
-                      <button 
-                        className="saas-btn" 
-                        style={{ background: '#10b981', color: '#fff', padding: '6px 14px', fontSize: '13px', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', boxShadow: '0 2px 4px rgba(16, 185, 129, 0.2)' }} 
-                        onClick={() => { 
-                          setMobileEditProduct(null); 
-                          handleManualPull(mobileEditProduct.id, mobileEditProduct.linked_wholesale_id!); 
-                        }}
-                      >
-                        ♻️ Pull 1 Bag
-                      </button>
-                    </div>
-                )}
+                {/* 🔥 CUSTOM HEADER: Fixes Safari alignment by acting as the modal title */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '-8px' }}>
+                  <h2 style={{ margin: 0, fontSize: '18px', color: '#0f172a' }}>Control: {mobileEditProduct.name}</h2>
+                  {activeView === 'retail' && mobileEditProduct.linked_wholesale_id && (
+                    <button 
+                      className="saas-btn" 
+                      style={{ background: '#10b981', color: '#fff', padding: '6px 14px', fontSize: '13px', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', boxShadow: '0 2px 4px rgba(16, 185, 129, 0.2)' }} 
+                      onClick={() => { 
+                        setMobileEditProduct(null); 
+                        handleManualPull(mobileEditProduct.id, mobileEditProduct.linked_wholesale_id!); 
+                      }}
+                    >
+                      ♻️ Pull 1 Bag
+                    </button>
+                  )}
+                </div>
 
                 {/* Action Buttons Hub */}
                 <div style={{ background: '#f8fafc', padding: '16px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
@@ -2317,19 +2318,19 @@ const addProduct = async () => {
 
                 {/* Edit Inputs */}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                  <div onClickCapture={() => { if (Number(edits[mobileEditProduct.id]?.price ?? mobileEditProduct.price) === 0) setEdits(prev => ({ ...prev, [mobileEditProduct.id]: { ...(prev[mobileEditProduct.id] || {}), price: '' as any } })) }}>
+                  <div>
                     <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', margin: '0 0 6px 0' }}>Selling Price (៛)</label>
                     <CurrencyInput 
                       className="saas-input" 
-                      value={(edits[mobileEditProduct.id]?.price ?? mobileEditProduct.price) === 0 ? '0' : (edits[mobileEditProduct.id]?.price ?? mobileEditProduct.price)} 
+                      value={edits[mobileEditProduct.id]?.price ?? mobileEditProduct.price} 
                       onChange={(val: any) => setEdits(prev => ({ ...prev, [mobileEditProduct.id]: { ...(prev[mobileEditProduct.id] || {}), price: val } }))} 
                     />
                   </div>
-                  <div onClickCapture={() => { if (Number(edits[mobileEditProduct.id]?.cost_price ?? mobileEditProduct.cost_price) === 0) setEdits(prev => ({ ...prev, [mobileEditProduct.id]: { ...(prev[mobileEditProduct.id] || {}), cost_price: '' as any } })) }}>
+                  <div>
                     <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', margin: '0 0 6px 0' }}>Cost Price (៛)</label>
                     <CurrencyInput 
                       className="saas-input" 
-                      value={(edits[mobileEditProduct.id]?.cost_price ?? mobileEditProduct.cost_price) === 0 ? '0' : (edits[mobileEditProduct.id]?.cost_price ?? mobileEditProduct.cost_price)} 
+                      value={edits[mobileEditProduct.id]?.cost_price ?? mobileEditProduct.cost_price} 
                       onChange={(val: any) => setEdits(prev => ({ ...prev, [mobileEditProduct.id]: { ...(prev[mobileEditProduct.id] || {}), cost_price: val } }))} 
                     />
                   </div>
