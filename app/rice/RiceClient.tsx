@@ -2272,7 +2272,7 @@ const addProduct = async () => {
       <Modal 
         isOpen={!!mobileEditProduct} 
         onClose={() => { setMobileEditProduct(null); setEdits(prev => { const n = { ...prev }; if(mobileEditProduct) delete n[mobileEditProduct.id]; return n; }); }} 
-        title="" 
+        title={`Control: ${mobileEditProduct?.name || ''}`} 
         maxWidth="400px"
       >
         {mobileEditProduct && (() => {
@@ -2288,31 +2288,19 @@ const addProduct = async () => {
             return (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
                 
-                {/* 🔥 PERFECT HEADER POSITION: Title on the left, Pull 1 Bag button on the right */}
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '-8px' }}>
-                  <h2 style={{ margin: 0, fontSize: '18px', fontWeight: 'bold', color: '#0f172a' }}>Control: {p.name}</h2>
-                  {activeView === 'retail' && p.linked_wholesale_id && (
-                    <button 
-                      className="saas-btn" 
-                      style={{ background: '#10b981', color: '#fff', padding: '6px 14px', fontSize: '13px', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', boxShadow: '0 2px 4px rgba(16, 185, 129, 0.2)' }} 
-                      onClick={() => { 
-                        setMobileEditProduct(null); 
-                        handleManualPull(p.id, p.linked_wholesale_id!); 
-                      }}
-                    >
-                      ♻️ Pull 1 Bag
-                    </button>
-                  )}
-                </div>
-                
-                {/* Action Buttons Hub */}
+                {/* Action Buttons Hub (Includes Pull 1 Bag neatly grouped with Import & History) */}
                 <div style={{ background: '#f8fafc', padding: '16px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
                    <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', margin: '0 0 12px 0' }}>⚡ Quick Actions</label>
                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
                       <button className="saas-btn saas-btn-primary" onClick={() => { setMobileEditProduct(null); openImportModal(p); }}>📦 Import</button>
                       <button className="saas-btn saas-btn-secondary" onClick={() => { setMobileEditProduct(null); fetchHistory(p); }}>🕒 History</button>
                       
-                      {/* Repack Button spans both columns now for a cleaner layout */}
+                      {/* Pull 1 Bag sits right in the action grid for easy access */}
+                      {activeView === 'retail' && p.linked_wholesale_id && (
+                          <button className="saas-btn" style={{ background: '#10b981', color: '#fff', gridColumn: 'span 2' }} onClick={() => { setMobileEditProduct(null); handleManualPull(p.id, p.linked_wholesale_id!); }}>♻️ Pull 1 Bag</button>
+                      )}
+
+                      {/* Repack Button */}
                       {activeView === 'retail' && parentWp && Number(p.stock) >= Number(parentWp.weight) && (
                           <button className="saas-btn" style={{ background: '#f0fdf4', color: '#166534', border: '1px solid #bbf7d0', gridColumn: 'span 2' }} onClick={() => { setMobileEditProduct(null); setRepackModal({ isOpen: true, product: p }); }}>📦 Repack</button>
                       )}
