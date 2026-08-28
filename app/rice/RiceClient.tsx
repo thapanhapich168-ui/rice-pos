@@ -2301,18 +2301,26 @@ const addProduct = async () => {
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
                   <div>
                     <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', margin: '0 0 6px 0' }}>Selling Price (៛)</label>
-                    <CurrencyInput 
-                      className="saas-input" 
+                    <input 
+                      type="number"
+                      className="saas-input no-spinners" 
                       value={edits[p.id]?.price ?? p.price} 
-                      onChange={(val: any) => setEdits(prev => ({ ...prev, [p.id]: { ...(prev[p.id] || {}), price: val } }))} 
+                      onChange={(e) => {
+                        const val = e.target.value === '' ? '' : Number(e.target.value);
+                        setEdits(prev => ({ ...prev, [p.id]: { ...(prev[p.id] || {}), price: val as any } }));
+                      }} 
                     />
                   </div>
                   <div>
                     <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', margin: '0 0 6px 0' }}>Cost Price (៛)</label>
-                    <CurrencyInput 
-                      className="saas-input" 
+                    <input 
+                      type="number"
+                      className="saas-input no-spinners" 
                       value={edits[p.id]?.cost_price ?? p.cost_price} 
-                      onChange={(val: any) => setEdits(prev => ({ ...prev, [p.id]: { ...(prev[p.id] || {}), cost_price: val } }))} 
+                      onChange={(e) => {
+                        const val = e.target.value === '' ? '' : Number(e.target.value);
+                        setEdits(prev => ({ ...prev, [p.id]: { ...(prev[p.id] || {}), cost_price: val as any } }));
+                      }} 
                     />
                   </div>
 
