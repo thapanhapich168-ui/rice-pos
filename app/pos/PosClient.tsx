@@ -75,7 +75,7 @@ const fetchImageAsBase64 = async (path: string): Promise<string> => {
   }
 };
 
-const RICE_CATEGORIES = ['🔥 Hot', 'All', 'មិញ', 'ខុន', 'ខ្ញី', 'ម្លិះ', 'រំដួល', 'សែនក្រអូប', '54151', 'បីកំណាត់', 'ដំណើប', 'សម្រូប', 'ផ្សេងៗ', '❌ Out of Stock'];
+const RICE_CATEGORIES = ['🔥 Hot', 'All', 'មិញ', 'ខុន', 'ខ្ញី', 'ម្លិះ', 'រំដួល', 'សែនក្រអូប', '5451', 'បីកំណាត់', 'ដំណើប', 'សម្រូប', 'ផ្សេងៗ', '❌ Out of Stock'];
 const MAIN_KEYWORDS = ['មិញ', 'ខុន', 'ខ្ញី', 'ម្លិះ', 'រំដួល', 'សែនក្រអូប', '54151', 'បីកំណាត់', 'ដំណើប', 'សម្រូប'];
 
 const t: Record<'en' | 'kh', any> = {
