@@ -1390,7 +1390,7 @@ const addProduct = async () => {
       {/* HEADER (Frozen) */}
       <div className="header-container" style={{ flexShrink: 0 }}>
         <div className="header-left">
-          <h1 className="saas-page-title">🌾 Inventory and Suppliers</h1>
+          <h1 className="saas-page-title">🌾 Inventory & Suppliers</h1>
         </div>
         <div className="header-actions">
           <button className="saas-btn saas-btn-secondary" onClick={handleSendInventoryReport} disabled={isProcessing}>

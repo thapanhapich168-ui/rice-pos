@@ -22,7 +22,7 @@ const defaultMenuItems: MenuItem[] = [
   { label: '🛒 POS System', href: '/pos', adminOnly: false },
   { label: '🚚 Delivery & Credit', href: '/delivery', adminOnly: false },
   { label: '💸 Expense & Payroll', href: '/expense', adminOnly: false },
-  { label: '🌾 Rice Control', href: '/rice', adminOnly: false },
+  { label: '🌾 Inventory & Suppliers', href: '/rice', adminOnly: false },
   { label: '🧮 Mix Calculator', href: '/calculator', adminOnly: false },
   { label: '🖼️ Invoice Gallery', href: '/invoices', adminOnly: false },
   { label: '🧾 COGS Accounting', href: '/cogs-report', adminOnly: false },
