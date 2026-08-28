@@ -1819,6 +1819,8 @@ const addProduct = async () => {
           ) : (
              processedProducts.map((p, index) => {
                 const pBatches = activeBatchesMap[p.id] || [];
+                pBatches.sort((a,b) => a.id - b.id); // Ensures chronological order
+                const currentBatch = pBatches.length > 0 ? pBatches[0] : null;
                 const totalActiveBatchStock = pBatches.reduce((sum, b) => sum + Number(b.remaining_qty), 0);
                 const displayStock = activeView === 'wholesale' ? totalActiveBatchStock : p.stock;
                 const isLowStock = Number(displayStock) <= Number(p.min_stock_level);
@@ -1830,12 +1832,27 @@ const addProduct = async () => {
                         <span style={{ fontWeight: 'bold', color: '#94a3b8', fontSize: '14px', minWidth: '22px' }}>{index + 1}.</span>
                         <div className="compact-text-group">
                            <div className="compact-title">🌾 {p.name}</div>
-                           <div className="compact-sub">{p.weight}kg {activeView === 'retail' && wholesaleProd ? `🔗 ${wholesaleProd.name}` : ''}</div>
+                           {activeView === 'wholesale' ? (
+                               <div className="compact-sub" style={{ color: '#ef4444', fontWeight: 'bold', marginTop: '4px', fontSize: '13px' }}>
+                                  {formatRiel(currentBatch?.cost_price || p.cost_price)}
+                               </div>
+                           ) : (
+                               <div className="compact-sub">{p.weight}kg {wholesaleProd ? `🔗 ${wholesaleProd.name}` : ''}</div>
+                           )}
                         </div>
                      </div>
-                     <div className="compact-card-right">
-                        <div className="compact-stock" style={{ color: isLowStock ? '#ef4444' : '#10b981' }}>{displayStock} left</div>
-                        <div className="compact-price">{formatRiel(p.price)}</div>
+                     <div className="compact-card-right" style={{ justifyContent: 'center' }}>
+                        {activeView === 'wholesale' ? (
+                            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px' }}>
+                              <div className="compact-stock" style={{ color: '#b58a3d', fontSize: '14px' }}>📦 {totalActiveBatchStock} left</div>
+                              <div className="compact-date" style={{ color: '#15803d', fontSize: '12px', fontWeight: 'bold' }}>🟢 1st: {currentBatch?.remaining_qty || 0}</div>
+                            </div>
+                        ) : (
+                            <>
+                              <div className="compact-stock" style={{ color: isLowStock ? '#ef4444' : '#10b981' }}>{displayStock} left</div>
+                              <div className="compact-price" style={{ marginTop: '2px' }}>{formatRiel(p.price)}</div>
+                            </>
+                        )}
                      </div>
                   </div>
                 )
@@ -2250,30 +2267,56 @@ const addProduct = async () => {
       {/* === GLOBAL MODALS === */}
 
       {/* 📱 1. MOBILE PRODUCT CONTROL CENTER MODAL */}
-      <Modal isOpen={!!mobileEditProduct} onClose={() => { setMobileEditProduct(null); setEdits(prev => { const n = { ...prev }; if(mobileEditProduct) delete n[mobileEditProduct.id]; return n; }); }} title={`Control: ${mobileEditProduct?.name}`} maxWidth="400px">
+      <Modal 
+        isOpen={!!mobileEditProduct} 
+        onClose={() => { setMobileEditProduct(null); setEdits(prev => { const n = { ...prev }; if(mobileEditProduct) delete n[mobileEditProduct.id]; return n; }); }} 
+        title={`Control: ${mobileEditProduct?.name}`} 
+        maxWidth="400px"
+      >
         {mobileEditProduct && (() => {
             const wpList = products.filter(wp => wp.weight >= 25);
             const parentWp = mobileEditProduct.linked_wholesale_id ? wpList.find(x => x.id === mobileEditProduct.linked_wholesale_id) : null;
+            
+            // Extract the active 1st batch for this specific product
+            const mBatches = activeBatchesMap[mobileEditProduct.id] || [];
+            mBatches.sort((a,b) => a.id - b.id);
+            const currentMBatch = mBatches.length > 0 ? mBatches[0] : null;
+
             return (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
                 
+                {/* 🔥 PULL BUTTON: Floating at the top right of the modal body */}
+                {activeView === 'retail' && mobileEditProduct.linked_wholesale_id && (
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '-8px' }}>
+                      <button 
+                        className="saas-btn" 
+                        style={{ background: '#10b981', color: '#fff', padding: '6px 14px', fontSize: '13px', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', boxShadow: '0 2px 4px rgba(16, 185, 129, 0.2)' }} 
+                        onClick={() => { 
+                          setMobileEditProduct(null); 
+                          handleManualPull(mobileEditProduct.id, mobileEditProduct.linked_wholesale_id!); 
+                        }}
+                      >
+                        ♻️ Pull 1 Bag
+                      </button>
+                    </div>
+                )}
+
                 {/* Action Buttons Hub */}
                 <div style={{ background: '#f8fafc', padding: '16px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
                    <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', margin: '0 0 12px 0' }}>⚡ Quick Actions</label>
                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
                       <button className="saas-btn saas-btn-primary" onClick={() => { setMobileEditProduct(null); openImportModal(mobileEditProduct); }}>📦 Import</button>
                       <button className="saas-btn saas-btn-secondary" onClick={() => { setMobileEditProduct(null); fetchHistory(mobileEditProduct); }}>🕒 History</button>
-                      {activeView === 'retail' && mobileEditProduct.linked_wholesale_id && (
-                          <button className="saas-btn" style={{ background: '#10b981', color: '#fff' }} onClick={() => { setMobileEditProduct(null); handleManualPull(mobileEditProduct.id, mobileEditProduct.linked_wholesale_id!); }}>♻️ Pull 1 Bag</button>
-                      )}
+                      
+                      {/* Repack Button spans both columns now for a cleaner layout */}
                       {activeView === 'retail' && parentWp && Number(mobileEditProduct.stock) >= Number(parentWp.weight) && (
-                          <button className="saas-btn" style={{ background: '#f0fdf4', color: '#166534', border: '1px solid #bbf7d0' }} onClick={() => { setMobileEditProduct(null); setRepackModal({ isOpen: true, product: mobileEditProduct }); }}>📦 Repack</button>
+                          <button className="saas-btn" style={{ background: '#f0fdf4', color: '#166534', border: '1px solid #bbf7d0', gridColumn: 'span 2' }} onClick={() => { setMobileEditProduct(null); setRepackModal({ isOpen: true, product: mobileEditProduct }); }}>📦 Repack</button>
                       )}
                    </div>
                 </div>
 
                 {/* Edit Inputs */}
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
                   <div onClickCapture={() => { if (Number(edits[mobileEditProduct.id]?.price ?? mobileEditProduct.price) === 0) setEdits(prev => ({ ...prev, [mobileEditProduct.id]: { ...(prev[mobileEditProduct.id] || {}), price: '' as any } })) }}>
                     <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', margin: '0 0 6px 0' }}>Selling Price (៛)</label>
                     <CurrencyInput 
@@ -2290,6 +2333,32 @@ const addProduct = async () => {
                       onChange={(val: any) => setEdits(prev => ({ ...prev, [mobileEditProduct.id]: { ...(prev[mobileEditProduct.id] || {}), cost_price: val } }))} 
                     />
                   </div>
+
+                  {/* 🔥 ALL ACTIVE BATCHES INFO */}
+                  {activeView === 'wholesale' && mBatches.length > 0 && (
+                     <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                       {mBatches.map((batch, idx) => {
+                         const label = idx === 0 ? '🟢 Active 1st Batch' : idx === 1 ? '🟡 2nd Batch' : `⚪ ${idx + 1}th Batch`;
+                         const bgColor = idx === 0 ? '#f0fdf4' : '#f8fafc';
+                         const borderColor = idx === 0 ? '#bbf7d0' : '#e2e8f0';
+                         const titleColor = idx === 0 ? '#166534' : '#475569';
+                         const valColor = idx === 0 ? '#15803d' : '#334155';
+
+                         return (
+                           <div key={batch.id} style={{ background: bgColor, padding: '12px 16px', borderRadius: '8px', border: `1px solid ${borderColor}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                              <div>
+                                 <div style={{ fontSize: '11px', color: titleColor, fontWeight: 'bold', textTransform: 'uppercase' }}>{label}</div>
+                                 <div style={{ fontSize: '15px', color: valColor, fontWeight: 'bold', marginTop: '4px' }}>{batch.remaining_qty} Bags Left</div>
+                              </div>
+                              <div style={{ textAlign: 'right' }}>
+                                 <div style={{ fontSize: '11px', color: titleColor, textTransform: 'uppercase' }}>Batch COGS</div>
+                                 <div style={{ fontSize: '15px', color: valColor, fontWeight: 'bold', marginTop: '4px' }}>{formatRiel(batch.cost_price)}</div>
+                              </div>
+                           </div>
+                         )
+                       })}
+                     </div>
+                  )}
                 </div>
 
                 {activeView === 'retail' && (

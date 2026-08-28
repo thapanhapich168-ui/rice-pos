@@ -561,11 +561,11 @@ export default function CustomerDatabasePage() {
                    <div className="compact-card-right" style={{ justifyContent: 'center', alignItems: 'flex-end', minWidth: '70px', textAlign: 'right' }}>
                       {/* 🔥 Top: Last Purchase Date */}
                       <div style={{ fontSize: '11px', color: '#64748b', fontWeight: 'normal', lineHeight: '1.2' }}>
-                         {lastDateText === '—' || lastDateText === '-' ? <span style={{ color: '#94a3b8' }}>—</span> : lastDateText}
+                         {lastDateText === '—' || lastDateText === '-' ? <span style={{ color: '#94a3b8', fontSize: '14px' }}>—</span> : lastDateText}
                       </div>
                       {/* 🔥 Bottom: Days Since Last Purchase */}
                       <div className="compact-date" style={{ color: isOld ? '#dc2626' : '#0f172a', fontSize: '13px', fontWeight: 'normal', lineHeight: '1.4' }}>
-                         {lastOrderText === '-' ? <span style={{ color: '#94a3b8' }}>—</span> : `${lastOrderText} ago`}
+                         {lastOrderText === '-' ? <span style={{ color: '#94a3b8', fontSize: '14px' }}>—</span> : `${lastOrderText} ago`}
                       </div>
                    </div>
                 </div>
