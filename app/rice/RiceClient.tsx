@@ -390,12 +390,12 @@ export default function RiceControl() {
      if (error) throw new Error(error.message);
       showToast('success', 'Bags Pulled', 'Wholesale stock converted to retail successfully.');
 
-      // Check if pulling this bag dropped the wholesale stock to alert levels
       const newWholesaleStock = Number(wholesaleProduct.stock) - 1;
       triggerStockAlert(wholesaleProduct.name || 'Unknown', newWholesaleStock, Number(wholesaleProduct.min_stock_level) || 0);
 
-      fetchProducts();
-      fetchBatches();
+      // 🔥 Await fetches so the UI updates smoothly before unlocking
+      await fetchProducts();
+      await fetchBatches();
 
     } catch (err: any) {
       showToast('error', 'Error', err.message);
@@ -421,9 +421,9 @@ export default function RiceControl() {
         if (fetchErr || !freshWholesale) throw new Error("Linked wholesale product not found.");
 
         const { error } = await supabase.rpc('execute_repack', {
-           p_retail_id: retailId,
-           p_wholesale_id: wholesaleId,
-           p_cogs: Number(freshWholesale.cost_price) || 0
+            p_retail_id: retailId,
+            p_wholesale_id: wholesaleId,
+            p_cogs: Number(freshWholesale.cost_price) || 0
         });
 
         if (error) throw new Error(error.message);
@@ -438,14 +438,14 @@ export default function RiceControl() {
         showToast('success', 'Repack Successful', 'Converted 50kg loose rice into 1 sealed bag.');
         setRepackModal({ isOpen: false, product: null });
         
-        // Check if repacking dropped the loose retail stock to alert levels
         const wProd = products.find(p => p.id === wholesaleId);
         const wWeight = wProd ? Number(wProd.weight) || 50 : 50;
         const newRetailStock = Number(repackModal.product!.stock) - wWeight;
         triggerStockAlert(repackModal.product?.name || 'Unknown', newRetailStock, Number(repackModal.product?.min_stock_level) || 0);
 
-        fetchProducts();
-        fetchBatches();
+        // 🔥 Await fetches so the UI updates smoothly before unlocking
+        await fetchProducts();
+        await fetchBatches();
 
     } catch (err: any) {
         showToast('error', 'Repack Error', err.message);
@@ -1979,17 +1979,33 @@ const addProduct = async () => {
                   onClick={() => handleProcessImport(true)} 
                   disabled={isProcessing}
                   className="saas-btn"
-                  style={{ flex: 1, padding: '14px', background: '#f59e0b', color: '#fff', fontSize: '15px' }}
+                  style={{ 
+                    flex: 1, 
+                    padding: '14px', 
+                    background: '#f59e0b', 
+                    color: '#fff', 
+                    fontSize: '15px', 
+                    cursor: isProcessing ? 'not-allowed' : 'pointer',
+                    opacity: isProcessing ? 0.7 : 1,
+                    transition: 'opacity 0.2s'
+                  }}
                 >
-                  ⏳ Save as Pending/Partial
+                  {isProcessing ? '⏳ Saving Pending Bill...' : '⏳ Save as Pending/Partial'}
                 </button>
                 <button 
                   onClick={() => handleProcessImport(false)} 
                   disabled={isProcessing}
                   className="saas-btn saas-btn-primary"
-                  style={{ flex: 1, padding: '14px', fontSize: '15px' }}
+                  style={{ 
+                    flex: 1, 
+                    padding: '14px', 
+                    fontSize: '15px', 
+                    cursor: isProcessing ? 'not-allowed' : 'pointer',
+                    opacity: isProcessing ? 0.7 : 1,
+                    transition: 'opacity 0.2s'
+                  }}
                 >
-                  ✅ Paid Full & Import
+                  {isProcessing ? '⏳ Processing Import...' : '✅ Paid Full & Import'}
                 </button>
               </div>
 
