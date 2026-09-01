@@ -1073,12 +1073,7 @@ export default function POSPage() {
 
     let cogsVal = 0;
     if (adjustmentModal.type === 'bag') {
-      // 🔥 FIX: If covered by the depot, set the business cost to exactly 1000៛
-      if (isCoveredBag) {
-         cogsVal = 1000;
-      } else {
-         cogsVal = matchedBagProd ? Number(matchedBagProd.cost_price || 1200) : 1200;
-      }
+      cogsVal = matchedBagProd ? Number(matchedBagProd.cost_price || 1200) : 1200;
     }
     if (adjustmentModal.type === 'deposit') cogsVal = Math.abs(amountVal);
 
@@ -2156,7 +2151,7 @@ export default function POSPage() {
           )}
 
           <button 
-            onClick={() => { setAdjustmentModal({ isOpen: true, type: 'bag', amount: 2000, qty: 1, note: '', isCoveredByDepot: false, selectedBagName: 'ថ្លៃបាវ ប្រ៊េន', isBagMenuOpen: false }); setShowAdjustmentMenu(false); }} 
+            onClick={() => { setAdjustmentModal({ isOpen: true, type: 'bag', amount: 1000, qty: 1, note: '', isCoveredByDepot: false, selectedBagName: 'ថ្លៃបាវ ប្រ៊េន', isBagMenuOpen: false }); setShowAdjustmentMenu(false); }} 
             style={{ width: '100%', padding: '10px 14px', textAlign: 'left', background: 'none', border: 'none', fontSize: '13px', color: '#334155', cursor: 'pointer', display: 'block' }}
           >
             🛍️ Bag Fee (ថ្លៃបាវ)
@@ -2784,7 +2779,7 @@ export default function POSPage() {
                       {/* 1. Quantity Input */}
                       <div style={{ width: activeTab === 'retail' ? '65px' : '75px' }}>
                         <CurrencyInput 
-                          value={item.quantity} 
+                          value={item.quantity === 0 ? '0' : item.quantity} 
                           onChange={(v: any) => updateCartItem(item.id, 'quantity', v)} 
                           onFocus={() => updateCartItem(item.id, 'quantity', '')} 
                           className="saas-input" 
@@ -2798,7 +2793,7 @@ export default function POSPage() {
                       {/* 2. Unit Price Input */}
                       <div style={{ flex: 1 }}>
                         <CurrencyInput 
-                          value={item.custom_price_riel} 
+                          value={item.custom_price_riel === 0 ? '0' : item.custom_price_riel} 
                           onChange={(v: any) => updateCartItem(item.id, 'custom_price_riel', v)} 
                           onFocus={() => updateCartItem(item.id, 'custom_price_riel', '')} 
                           className="saas-input" 
@@ -3114,7 +3109,8 @@ export default function POSPage() {
         {/* 🟢 SLEEK WHITE BAG TYPE DROPDOWN TRAY (With Price & COGS Display) */}
         {adjustmentModal.type === 'bag' && (() => {
           const defaultBagProd = products.find(p => p.name === 'ថ្លៃបាវ ប្រ៊េន');
-          const defaultPrice = defaultBagProd ? Number(defaultBagProd.price || 2000) : 2000;
+          // 🔥 FIX: Display 1000៛ as the default selling price
+          const defaultPrice = defaultBagProd ? Number(defaultBagProd.price || 1000) : 1000;
           const defaultCogs = defaultBagProd ? Number(defaultBagProd.cost_price || 1200) : 1200;
 
           return (
