@@ -165,7 +165,7 @@ export default function BizDatabase() {
       summaryData.forEach(s => {
         if (s.invoice_id) invoiceDict[s.invoice_id] = s;
         const custName = s.customer_name || 'Walk-in';
-        const isWalkIn = custName.trim().toLowerCase() === 'walk-in';
+        const isWalkIn = ['walk-in', 'walk in'].includes(custName.trim().toLowerCase());
 
         if (isWalkIn) return;
 
@@ -329,22 +329,29 @@ export default function BizDatabase() {
             await supabase.from('products').update({ stock: Number(prod.stock) + qty }).eq('id', item.product_id).eq('branch_id', activeBranchId);
           }
 
-          let remainingToReverse = qty;
-          // 🔥 BRANCH FILTER ON BATCHES
-          const { data: batches } = await supabase.from('price_history')
+          // 🔥 RESTORE BATCH FIFO: Push the physical bags back into the most recent active batch
+          const { data: batches } = await supabase.from('inventory_batches')
             .select('*')
             .eq('product_id', item.product_id)
             .eq('branch_id', activeBranchId)
-            .gt('sold_qty', 0)
-            .order('created_at', { ascending: false }); 
+            .order('id', { ascending: false }) // Grab the most recently opened batch
+            .limit(1);
           
-          if (batches) {
-            for (const b of batches) {
-              if (remainingToReverse <= 0) break;
-              const possibleToReverse = Math.min(b.sold_qty, remainingToReverse);
-              await supabase.from('price_history').update({ sold_qty: b.sold_qty - possibleToReverse }).eq('id', b.id);
-              remainingToReverse -= possibleToReverse;
-            }
+          if (batches && batches.length > 0) {
+            // Because POS uses adjust_batch_stock with -qty, we pass positive qty to restore it!
+            await supabase.rpc('adjust_batch_stock', { 
+               p_batch_id: batches[0].id, 
+               p_quantity: qty 
+            });
+          } else {
+            // Failsafe: If no batch exists at all, create a restoration batch
+            await supabase.from('inventory_batches').insert([{
+               product_id: item.product_id,
+               branch_id: activeBranchId,
+               cost_price: item.cogs_price,
+               remaining_qty: qty,
+               notes: 'Restored from deleted transaction'
+            }]);
           }
         }
       }
@@ -779,7 +786,8 @@ export default function BizDatabase() {
                         const val = edits[t.id]?.[col] ?? t[col] ?? '';
 
                         const isParentFieldOnChild = (t.source === 'Walk-in Wholesale' || t.source === 'Non-Walk-in Wholesale') && ['customer_name', 'owner'].includes(col);
-                        const isUneditable = ['created_at', 'invoice_id', 'transaction_id'].includes(col) || isParentFieldOnChild;
+                        // 🔥 INVENTORY LOCK: Lock physical movement fields to prevent stock leaks. Price adjustments are still allowed!
+const isUneditable = ['created_at', 'invoice_id', 'transaction_id', 'qty', 'cogs_price', 'rice_type'].includes(col) || isParentFieldOnChild;
 
                         return (
                           <td 
