@@ -101,12 +101,12 @@ export default function CustomerDatabasePage() {
   }
 
   // --- RECORD OPERATIONS ---
-  const handleSaveRecord = async (id: string) => {
-    if (!edits[id]) return;
+  const handleSaveRecord = async (id: string): Promise<boolean> => {
+    if (!edits[id]) return true;
     
     if (edits[id].name !== undefined && edits[id].name?.trim() === '') {
       showToast('error', 'Validation Error', 'Customer Name cannot be empty.');
-      return;
+      return false; // Block closure
     }
 
     const { error } = await supabase.from('customers')
@@ -119,8 +119,10 @@ export default function CustomerDatabasePage() {
       setEditingCell(null)
       showToast('success', 'Saved', 'Customer updated successfully.');
       loadCustomers()
+      return true; // Allow closure
     } else {
       showToast('error', 'Save Failed', error.message);
+      return false; // Block closure
     }
   }
 
@@ -512,7 +514,11 @@ export default function CustomerDatabasePage() {
                               >
                                 <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                                   {col === 'google_map' && val ? (
-                                    <a href={val} target="_blank" rel="noreferrer" style={{ color: '#2563eb', textDecoration: 'none' }} onClick={e => e.stopPropagation()}>🗺️ Open Map</a>
+                                    String(val).startsWith('http') ? (
+                                      <a href={val} target="_blank" rel="noreferrer" style={{ color: '#2563eb', textDecoration: 'none' }} onClick={e => e.stopPropagation()}>🗺️ Open Map</a>
+                                    ) : (
+                                      <span style={{ color: '#94a3b8' }}>Invalid Map Link</span>
+                                    )
                                   ) : (
                                     formatDisplayValue(col as string, val)
                                   )}
@@ -621,7 +627,7 @@ export default function CustomerDatabasePage() {
                
                <div style={{ display: 'flex', gap: '8px' }}>
                  <button onClick={() => { setMobileEditCustomer(null); setEdits(prev => { const n = { ...prev }; delete n[String(mobileEditCustomer.id)]; return n; }); }} className="saas-btn saas-btn-secondary">Cancel</button>
-                 <button onClick={async () => { await handleSaveRecord(String(mobileEditCustomer.id)); setMobileEditCustomer(null); }} className="saas-btn saas-btn-primary">Save</button>
+                 <button onClick={async () => { const success = await handleSaveRecord(String(mobileEditCustomer.id)); if (success) setMobileEditCustomer(null); }} className="saas-btn saas-btn-primary">Save</button>
                </div>
             </div>
           </div>

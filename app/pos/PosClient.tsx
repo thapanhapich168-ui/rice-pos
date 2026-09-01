@@ -1837,10 +1837,34 @@ export default function POSPage() {
         const { error: summaryErr } = await supabase.from('invoice_summaries').upsert([summaryRow], { onConflict: 'invoice_id' });
         if (summaryErr) throw new Error(`Failed to save to Summaries table: ${summaryErr.message}`);
 
-        // 🛡️ STABILITY FIX: Prevent 400 Bad Request crashes on empty arrays
+        // 🛡️ STABILITY FIX: Prevent 400 Bad Request crashes & Fix the "null ID" Edit Error
         if (finalSaleRows && finalSaleRows.length > 0) {
-          const { error: salesErr } = await supabase.from('sales').upsert(finalSaleRows, { onConflict: 'id' });
-          if (salesErr) throw new Error(`Failed to save to Sales table: ${salesErr.message}`);
+          if (editingInvoiceId) {
+             // When editing, separate existing rows (upsert) from newly added items (insert)
+             const rowsWithId = finalSaleRows.filter(r => r.id);
+             const rowsWithoutId = finalSaleRows.filter(r => !r.id);
+             
+             if (rowsWithId.length > 0) {
+               const { error: updateErr } = await supabase.from('sales').upsert(rowsWithId, { onConflict: 'id' });
+               if (updateErr) throw new Error(`Failed to update Sales table: ${updateErr.message}`);
+             }
+             if (rowsWithoutId.length > 0) {
+               const { error: insertErr } = await supabase.from('sales').insert(rowsWithoutId);
+               if (insertErr) throw new Error(`Failed to insert new items to Sales table: ${insertErr.message}`);
+             }
+          } else {
+             // For brand new sales, strictly use INSERT so Postgres auto-generates the IDs safely
+             const { error: salesErr } = await supabase.from('sales').insert(finalSaleRows);
+             if (salesErr) throw new Error(`Failed to save to Sales table: ${salesErr.message}`);
+          }
+        }
+
+        // 🔥 BRIDGE FIX: Update the Customer's Last Purchase Date for the Customer Database!
+        if (!isSimpleCustomer && selectedCustomerId) {
+           await supabase.from('customers')
+             .update({ last_purchase_date: new Date().toISOString() })
+             .eq('id', selectedCustomerId)
+             .eq('branch_id', activeBranchId);
         }
 
         for (const [prodIdStr, delta] of Object.entries(stockUpdates)) {
