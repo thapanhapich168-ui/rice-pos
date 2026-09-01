@@ -1073,7 +1073,12 @@ export default function POSPage() {
 
     let cogsVal = 0;
     if (adjustmentModal.type === 'bag') {
-      cogsVal = matchedBagProd ? Number(matchedBagProd.cost_price || 1200) : 1200;
+      // 🔥 FIX: If covered by the depot, set the business cost to exactly 1000៛
+      if (isCoveredBag) {
+         cogsVal = 1000;
+      } else {
+         cogsVal = matchedBagProd ? Number(matchedBagProd.cost_price || 1200) : 1200;
+      }
     }
     if (adjustmentModal.type === 'deposit') cogsVal = Math.abs(amountVal);
 
@@ -1327,8 +1332,8 @@ export default function POSPage() {
       const qty = Number(item.quantity) || 0;
       const price = Number(item.custom_price_riel) || 0;
       
-      // Skip required checks for discounts, free bags, or returns
-      const isSpecial = item.custom_name.includes('ដូរ') || item.custom_name.includes('បញ្ចុះតម្លៃ') || item.custom_name.includes('កក់') || item.custom_name.includes('បានប្រើ');
+      // 🔥 FIX: Include item.isSpecial and 'Covered by Depot' / 'ថ្លៃបាវ' (Bag Fees) to allow 0៛ checkout
+      const isSpecial = item.isSpecial || item.custom_name.includes('ដូរ') || item.custom_name.includes('បញ្ចុះតម្លៃ') || item.custom_name.includes('កក់') || item.custom_name.includes('បានប្រើ') || item.custom_name.includes('ថ្លៃបាវ') || item.custom_name.includes('Covered by Depot');
 
       if (!isSpecial) {
         if (qty <= 0 || item.quantity === '') {
