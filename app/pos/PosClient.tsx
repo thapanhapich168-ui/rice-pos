@@ -12,7 +12,7 @@ import Modal from '@/components/Modal'
 import EmptyState from '@/components/EmptyState'
 import { useBranch } from '@/components/BranchContext' 
 // 🔥 NEW DND-KIT IMPORTS
-import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
+import { DndContext, closestCenter, KeyboardSensor, MouseSensor, TouchSensor, useSensor, useSensors } from '@dnd-kit/core';
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy, horizontalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { TELEGRAM_CONFIG } from '@/lib/telegramConfig'
@@ -177,7 +177,7 @@ function SortableHorizontalTab({ cat, isActive, lang, onClick }: { cat: string, 
     border: isActive ? '1px solid #b58a3d' : '1px solid #cbd5e1',
     boxShadow: isDragging ? '0 10px 25px rgba(0,0,0,0.15)' : '0 1px 2px 0 rgba(0, 0, 0, 0.05)',
     cursor: isDragging ? 'grabbing' : 'pointer',
-    touchAction: 'pan-y' // Allows vertical scrolling on mobile while blocking horizontal drag interference
+    touchAction: 'auto' // 🔥 FIX: Set to auto to restore native horizontal scrolling on mobile!
   };
 
   return (
@@ -246,9 +246,20 @@ export default function POSPage() {
 
   // 🔥 NEW: PROFESSIONAL DND-KIT SENSORS & HANDLERS
   const sensors = useSensors(
-    // 5px distance prevents accidental drags when a user is just tapping on mobile
-    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }), 
-    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
+    useSensor(MouseSensor, {
+      activationConstraint: {
+        distance: 5, // Desktop: requires 5px of movement before drag starts (Instant feeling)
+      },
+    }),
+    useSensor(TouchSensor, {
+      activationConstraint: {
+        delay: 250, // 🔥 MOBILE FIX: Requires a 250ms Long-Press to pick up the item!
+        tolerance: 5, // Allows 5px of finger wiggle without canceling the long-press
+      },
+    }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    })
   );
 
   const handleDragEnd = (event: any) => {
@@ -2195,19 +2206,21 @@ export default function POSPage() {
           
           {/* 🟢 STICKY HEADER WRAPPER AROUND TITLE, TABS & SEARCH */}
           <div className="pos-sticky-header">
-            <div className="header-container" style={{ marginBottom: '16px' }}>
-              <div className="header-left">
-                <h1 className="saas-page-title">{editingInvoiceId ? `✏️ Editing: ${editingInvoiceId}` : `🛒 ${currentT.title}`}</h1>
-                {editingInvoiceId && (
-                  <button 
-                    onClick={cancelEditMode} 
-                    className="saas-btn saas-btn-danger"
-                    style={{ marginLeft: '16px', padding: '6px 12px', fontSize: '13px' }}
-                  >
-                    ❌ Cancel
-                  </button>
-                )}
+            <div className="header-container" style={{ marginBottom: '16px', display: 'flex', alignItems: 'center' }}>
+              <div className="header-left" style={{ flex: 1, minWidth: 0, marginRight: '12px' }}>
+                <h1 className="saas-page-title" style={{ margin: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  {editingInvoiceId ? `✏️ Editing: ${editingInvoiceId}` : `🛒 ${currentT.title}`}
+                </h1>
               </div>
+              {editingInvoiceId && (
+                <button 
+                  onClick={cancelEditMode} 
+                  className="saas-btn saas-btn-danger"
+                  style={{ flexShrink: 0, padding: '6px 12px', fontSize: '13px' }}
+                >
+                  ❌ Cancel
+                </button>
+              )}
             </div>
 
             <div style={{ marginBottom: '16px' }}>
@@ -2269,7 +2282,8 @@ export default function POSPage() {
             </div>
 
             {/* 🟢 SEARCH AND CATEGORY TABS MOVED INSIDE STICKY HEADER */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', width: '100%' }}>
+            {/* 🔥 FIX: Added minWidth: 0 to lock the flex wrapper to the physical screen width */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', width: '100%', minWidth: 0 }}>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px', alignItems: 'flex-start', width: '100%' }}>
                 
                 {/* PRODUCT SEARCH */}
@@ -2377,7 +2391,8 @@ export default function POSPage() {
 
               {/* SCROLLABLE CATEGORY TABS WITH MIX & IMPORT BUTTONS APPENDED */}
               {activeTab !== 'retail' && (
-                <div className="saas-tab-container hide-scrollbar" style={{ display: 'flex', flexWrap: 'nowrap', overflowX: 'auto', width: '100%', border: 'none', boxShadow: 'none', padding: 0, background: 'transparent', gap: '8px', margin: 0 }}>
+                // 🔥 FIX: Added maxWidth: '100%' and paddingBottom to smoothly allow scroll without clipping drop shadows
+                <div className="saas-tab-container hide-scrollbar" style={{ display: 'flex', flexWrap: 'nowrap', overflowX: 'auto', width: '100%', maxWidth: '100%', minWidth: 0, border: 'none', boxShadow: 'none', padding: '0 4px 8px 4px', background: 'transparent', gap: '8px', margin: 0 }}>
                   
                   {/* 🔥 ADDED DIRECT HORIZONTAL SORTING */}
                   <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
