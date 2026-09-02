@@ -1876,7 +1876,7 @@ const addProduct = async () => {
               <div style={{ position: 'relative', zIndex: isSupplierDropdownOpen ? 100 : 2 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: '6px' }}>
                   <label className="saas-card-title" style={{ fontSize: '11px', margin: 0 }}>Select Supplier</label>
-                  <button onClick={() => setIsAddSupplierOpen(true)} className="saas-btn" style={{ background: 'none', border: 'none', color: '#3b82f6', fontSize: '12px', padding: 0 }}>+ Add New Supplier</button>
+                  <button type="button" onClick={() => setIsAddSupplierOpen(true)} className="saas-btn" style={{ background: 'none', border: 'none', color: '#3b82f6', fontSize: '12px', padding: 0 }}>+ Add New Supplier</button>
                 </div>
                 {isSupplierDropdownOpen ? (
                   <div style={{ position: 'relative' }}>
@@ -1908,7 +1908,7 @@ const addProduct = async () => {
               <div style={{ position: 'relative', zIndex: isProductDropdownOpen ? 90 : 1 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: '6px' }}>
                   <label className="saas-card-title" style={{ fontSize: '11px', margin: 0 }}>Select Product (Rice)</label>
-                  <button onClick={handleOpenAddProduct} className="saas-btn" style={{ background: 'none', border: 'none', color: '#3b82f6', fontSize: '12px', padding: 0 }}>+ Create New Product</button>
+                  <button type="button" onClick={handleOpenAddProduct} className="saas-btn" style={{ background: 'none', border: 'none', color: '#3b82f6', fontSize: '12px', padding: 0 }}>+ Create New Product</button>
                 </div>
                 {isProductDropdownOpen ? (
                   <div style={{ position: 'relative' }}>
@@ -1975,39 +1975,41 @@ const addProduct = async () => {
               </div>
 
               <div style={{ display: 'flex', gap: '12px', marginTop: '10px' }}>
-                <button 
-                  onClick={() => handleProcessImport(true)} 
-                  disabled={isProcessing}
-                  className="saas-btn"
-                  style={{ 
-                    flex: 1, 
-                    padding: '14px', 
-                    background: '#f59e0b', 
-                    color: '#fff', 
-                    fontSize: '15px', 
-                    cursor: isProcessing ? 'not-allowed' : 'pointer',
-                    opacity: isProcessing ? 0.7 : 1,
-                    transition: 'opacity 0.2s'
-                  }}
-                >
-                  {isProcessing ? '⏳ Saving Pending Bill...' : '⏳ Save as Pending/Partial'}
-                </button>
-                <button 
-                  onClick={() => handleProcessImport(false)} 
-                  disabled={isProcessing}
-                  className="saas-btn saas-btn-primary"
-                  style={{ 
-                    flex: 1, 
-                    padding: '14px', 
-                    fontSize: '15px', 
-                    cursor: isProcessing ? 'not-allowed' : 'pointer',
-                    opacity: isProcessing ? 0.7 : 1,
-                    transition: 'opacity 0.2s'
-                  }}
-                >
-                  {isProcessing ? '⏳ Processing Import...' : '✅ Paid Full & Import'}
-                </button>
-              </div>
+                  <button 
+                    type="button"
+                    onClick={() => handleProcessImport(true)} 
+                    disabled={isProcessing}
+                    className="saas-btn"
+                    style={{ 
+                      flex: 1, 
+                      padding: '14px', 
+                      background: '#f59e0b', 
+                      color: '#fff', 
+                      fontSize: '15px', 
+                      cursor: isProcessing ? 'not-allowed' : 'pointer',
+                      opacity: isProcessing ? 0.7 : 1,
+                      transition: 'opacity 0.2s'
+                    }}
+                  >
+                    {isProcessing ? '⏳ Saving Pending Bill...' : '⏳ Save as Pending/Partial'}
+                  </button>
+                  <button 
+                    type="button"
+                    onClick={() => handleProcessImport(false)} 
+                    disabled={isProcessing}
+                    className="saas-btn saas-btn-primary"
+                    style={{ 
+                      flex: 1, 
+                      padding: '14px', 
+                      fontSize: '15px', 
+                      cursor: isProcessing ? 'not-allowed' : 'pointer',
+                      opacity: isProcessing ? 0.7 : 1,
+                      transition: 'opacity 0.2s'
+                    }}
+                  >
+                    {isProcessing ? '⏳ Processing Import...' : '✅ Paid Full & Import'}
+                  </button>
+                </div>
 
             </div>
           </div>
