@@ -2167,7 +2167,7 @@ export default function POSPage() {
                     value={searchQuery} 
                     onChange={(e) => setSearchQuery(e.target.value)} 
                     className="saas-input"
-                    style={{ paddingLeft: '38px', paddingRight: searchQuery ? '38px' : '14px', width: '100%' }} 
+                    style={{ paddingLeft: '38px', paddingRight: searchQuery ? '38px' : '14px', width: '100%', fontSize: isDeviceMobile ? '15px' : undefined }} 
                   />
                   {searchQuery && (
                     <button
@@ -2196,7 +2196,7 @@ export default function POSPage() {
                           onChange={e => setCustomerSearchTerm(e.target.value)}
                           onFocus={() => setIsCustomerModalOpen(true)}
                           className="saas-input"
-                          style={{ paddingLeft: '38px', width: '100%', position: 'relative', zIndex: isCustomerModalOpen ? 100 : 1, borderColor: isCustomerModalOpen ? '#b58a3d' : undefined }}
+                          style={{ paddingLeft: '38px', width: '100%', position: 'relative', zIndex: isCustomerModalOpen ? 100 : 1, borderColor: isCustomerModalOpen ? '#b58a3d' : undefined, fontSize: isDeviceMobile ? '15px' : undefined }}
                         />
 
                         {/* Inline Dropdown Menu */}
@@ -2335,7 +2335,7 @@ export default function POSPage() {
                     onMouseUp={e => e.currentTarget.style.transform = 'scale(1)'}
                   >
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                      <div style={{ fontSize: '14px', color: '#334155', marginBottom: '8px', fontWeight: 'normal' }}>{p.name}</div>
+                      <div style={{ fontSize: isDeviceMobile ? '15px' : '14px', color: '#334155', marginBottom: '8px', fontWeight: 'normal' }}>{p.name}</div>
                     </div>
 
                     <div style={{ borderTop: '1px dashed #f1f5f9', paddingTop: '8px', marginTop: 'auto', position: 'relative', minHeight: activeTab === 'wholesale' ? '35px' : 'auto' }}>
