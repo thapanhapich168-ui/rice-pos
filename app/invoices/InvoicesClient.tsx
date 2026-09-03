@@ -45,8 +45,16 @@ export default function InvoiceGallery() {
   const [searchQuery, setSearchQuery] = useState<string>('')
   const debouncedSearch = useDebounce(searchQuery, 300)
 
-  // 🟢 DEFAULT TO TABLE VIEW
+  // 🟢 DYNAMIC DEFAULT VIEW MODE
   const [viewMode, setViewMode] = useState<'grid' | 'table'>('table')
+
+  // 🔥 NEW: Set default view automatically on first load based on device screen size!
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const isMobile = window.innerWidth < 1024 || /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+      setViewMode(isMobile ? 'grid' : 'table');
+    }
+  }, []); // Empty array ensures this only overwrites the default ONCE when opening the page.
 
   useEffect(() => {
     setMounted(true);
@@ -462,35 +470,35 @@ export default function InvoiceGallery() {
       {/* 🟢 2. CATEGORY TABS (FROZEN): TouchAction pan-x allows side scroll but blocks Safari bounce */}
       <div className="saas-tab-container hide-scrollbar" style={{ flexShrink: 0, width: '100%', border: 'none', padding: 0, boxShadow: 'none', background: 'transparent', marginBottom: categoryTab === 'Voided' ? '8px' : '16px', display: 'flex', flexWrap: 'nowrap', overflowX: 'auto', WebkitOverflowScrolling: 'touch', gap: '8px', touchAction: 'pan-x' }}>
         <button 
-          onClick={() => { setCategoryTab('All'); setSelectedInvoices(new Set()); setViewMode('table'); }} 
+          onClick={() => { setCategoryTab('All'); setSelectedInvoices(new Set()); }} 
           className={`saas-tab ${categoryTab === 'All' ? 'active' : ''}`}
           style={{ ...(categoryTab === 'All' ? { background: '#10b981', color: '#fff' } : { border: '1px solid #cbd5e1', background: '#fff' }), minWidth: 'max-content', flexShrink: 0 }}
         >
           ✅ All Active
         </button>
         <button 
-          onClick={() => { setCategoryTab('Wholesale'); setSelectedInvoices(new Set()); setViewMode('grid'); }} 
+          onClick={() => { setCategoryTab('Wholesale'); setSelectedInvoices(new Set()); }} 
           className={`saas-tab ${categoryTab === 'Wholesale' ? 'active' : ''}`}
           style={{ ...(categoryTab === 'Wholesale' ? { background: '#10b981', color: '#fff' } : { border: '1px solid #cbd5e1', background: '#fff' }), minWidth: 'max-content', flexShrink: 0 }}
         >
           🌾 Wholesale
         </button>
         <button 
-          onClick={() => { setCategoryTab('WalkinWholesale'); setSelectedInvoices(new Set()); setViewMode('table'); }} 
+          onClick={() => { setCategoryTab('WalkinWholesale'); setSelectedInvoices(new Set()); }} 
           className={`saas-tab ${categoryTab === 'WalkinWholesale' ? 'active' : ''}`}
           style={{ ...(categoryTab === 'WalkinWholesale' ? { background: '#10b981', color: '#fff' } : { border: '1px solid #cbd5e1', background: '#fff' }), minWidth: 'max-content', flexShrink: 0 }}
         >
           🏬 Walk-in Wholesale
         </button>
         <button 
-          onClick={() => { setCategoryTab('WalkinRetail'); setSelectedInvoices(new Set()); setViewMode('table'); }} 
+          onClick={() => { setCategoryTab('WalkinRetail'); setSelectedInvoices(new Set()); }} 
           className={`saas-tab ${categoryTab === 'WalkinRetail' ? 'active' : ''}`}
           style={{ ...(categoryTab === 'WalkinRetail' ? { background: '#10b981', color: '#fff' } : { border: '1px solid #cbd5e1', background: '#fff' }), minWidth: 'max-content', flexShrink: 0 }}
         >
           🛍️ Walk-in Retail
         </button>
         <button 
-          onClick={() => { setCategoryTab('Voided'); setVoidSubTab('All'); setSelectedInvoices(new Set()); setViewMode('table'); }} 
+          onClick={() => { setCategoryTab('Voided'); setVoidSubTab('All'); setSelectedInvoices(new Set()); }} 
           className={`saas-tab ${categoryTab === 'Voided' ? 'active' : ''}`}
           style={{ ...(categoryTab === 'Voided' ? { background: '#ef4444', color: '#fff' } : { border: '1px solid #cbd5e1', background: '#fff' }), minWidth: 'max-content', flexShrink: 0 }}
         >

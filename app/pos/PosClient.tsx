@@ -1489,12 +1489,12 @@ export default function POSPage() {
     }
   }
   
-  // MAIN CHECKOUT ENGINE
+  // MAIN CHECKOUT ENGINE (ATOMIC VERSION)
   async function executeCheckout(
-  latestProducts: Product[], 
-  latestBatchesOverride?: Record<number, InventoryBatch[]>,
-  preCheckoutStockParams?: Record<number, { stock: number, cost_price: number }>
-) {
+    latestProducts: Product[], 
+    latestBatchesOverride?: Record<number, InventoryBatch[]>,
+    preCheckoutStockParams?: Record<number, { stock: number, cost_price: number }>
+  ) {
     setIsProcessing(true);
 
     const localBatchUsage: Record<number, number> = {};
@@ -1558,7 +1558,7 @@ export default function POSPage() {
           effectiveSplits.push({ method: depositMethod, amount_usd: 0, amount_riel: depositTotalRiel, face_amount: depositTotalRiel });
       }
 
-      // 🔥 STABILITY FIX: Prevents fatal Postgres UNIQUE constraint crashes by generating a collision-proof ID
+      // 🔥 Generate a collision-proof ID
       const uniqueSuffix = Date.now().toString(36).toUpperCase() + '-' + Math.floor(1000 + Math.random() * 9000);
       const activeTxId = activeTab === 'retail' 
           ? `RET-${uniqueSuffix}` 
@@ -1569,200 +1569,80 @@ export default function POSPage() {
         return `${s.method}: ${s.face_amount}`;
       }).join(', ');
 
-      if (activeTab === 'retail') {
-        const retailRows = [];
-        const stockUpdates: Record<number, number> = {};
+      const combinedRiceTypes = currentCart.map(item => `${item.custom_name} (x${item.quantity})`).join(', ');
+      const baseSaleRows: any[] = [];
+      const stockUpdates: Record<number, number> = {}; 
+      const fifoUpdates: Record<number, number> = {}; 
 
-        for (const item of currentCart) {
-           // 🔥 RESTORED: We NO LONGER skip the deposit so it saves to the database!
-           const dbProduct = latestProducts.find(p => p.id === item.product_id);
-           let retailCogsPerKg = Number(item.cost_price || 0);
+      // 🟢 BUILD SALES ROWS AND INVENTORY DEDUCTIONS
+      for (const item of currentCart) {
+          const isReturn = item.custom_name.includes('ដូរ');
+          const isDiscount = item.custom_name.includes('បញ្ចុះតម្លៃ');
+          const isDeposit = item.custom_name.includes('កក់');
+          const isCharge = item.custom_name.includes('បានប្រើ');
 
-           if (dbProduct && dbProduct.linked_wholesale_id) {
-                const wholesaleProd = latestProducts.find(wp => wp.id === dbProduct.linked_wholesale_id);
-                if (wholesaleProd) {
-                   const wBatches = currentBatches[wholesaleProd.id] || [];
-                   const currentBatch = wBatches.length > 0 ? [...wBatches].sort((a,b) => a.id - b.id)[0] : null;
-                   const wholesaleBagCogs = currentBatch ? Number(currentBatch.cost_price) : Number(wholesaleProd.cost_price || 0);
-                   const wholesaleWeight = Number(wholesaleProd.weight) || 50;
-                   retailCogsPerKg = wholesaleBagCogs / wholesaleWeight;
-                }
-             }
+          const isNegativeItem = isReturn || isDiscount || isDeposit;
+          const isBypass = item.bypass_stock || isCharge || isDeposit; 
+          const finalQty = isNegativeItem ? -Math.abs(Number(item.quantity)) : Number(item.quantity);
 
-           const isDiscount = item.custom_name.includes('បញ្ចុះតម្លៃ');
-           const isReturn = item.custom_name.includes('ដូរ');
-           const isDeposit = item.custom_name.includes('កក់');
-           
-           const isNegativeItem = isDiscount || isReturn || isDeposit;
-           const finalQty = isNegativeItem ? -Math.abs(Number(item.quantity)) : Number(item.quantity);
-
-           let finalCogs = retailCogsPerKg;
-           if (isDiscount) finalCogs = 0; 
-           if (isDeposit) finalCogs = Number(item.custom_price_riel || 0); // Balances out profit
-
-           const oldData = preCheckoutStockParams?.[item.product_id];
-           const oldStock = oldData ? oldData.stock : 0;
-           const oldCogs = oldData ? oldData.cost_price : finalCogs;
-
-           const needsSplit = !isNegativeItem && !item.bypass_stock && !editingInvoiceId && oldStock > 0 && oldStock < finalQty;
-
-           if (needsSplit) {
-               const qty1 = oldStock; 
-               const qty2 = finalQty - oldStock; 
-
-               retailRows.push({
-                   transaction_id: activeTxId,
-                   branch_id: activeBranchId,
-                   product_id: item.product_id,
-                   rice_type: item.name,
-                   custom_rice_type: item.custom_name !== item.name ? item.custom_name : null,
-                   qty: qty1,
-                   price_per_bag: Number(item.custom_price_riel || 0),
-                   cogs_price: oldCogs,
-                   payment_method: primaryMethodStr,
-                   owner: 'Both'
-               });
-
-               retailRows.push({
-                   transaction_id: activeTxId,
-                   branch_id: activeBranchId,
-                   product_id: item.product_id,
-                   rice_type: item.name,
-                   custom_rice_type: item.custom_name !== item.name ? item.custom_name : null,
-                   qty: qty2,
-                   price_per_bag: Number(item.custom_price_riel || 0),
-                   cogs_price: finalCogs,
-                   payment_method: primaryMethodStr,
-                   owner: 'Both'
-               });
-               
-               if (!item.bypass_stock) {
-                   stockUpdates[item.product_id] = (stockUpdates[item.product_id] || 0) - finalQty;
-               }
-           } else {
-               retailRows.push({
-                 transaction_id: activeTxId,
-                 branch_id: activeBranchId, 
-                 product_id: item.product_id, 
-                 rice_type: item.name,
-                 custom_rice_type: item.custom_name !== item.name ? item.custom_name : null,
-                 qty: finalQty,
-                 price_per_bag: Number(item.custom_price_riel || 0),
-                 cogs_price: finalCogs,
-                 payment_method: primaryMethodStr,
-                 owner: 'Both'
-               });
-               
-               if (!item.bypass_stock) {
-                 stockUpdates[item.product_id] = (stockUpdates[item.product_id] || 0) - finalQty;
-               }
-           }
-        }
-
-        const { error: retailErr } = await supabase.from('retail_sales').insert(retailRows);
-        if (retailErr) throw new Error(`Retail Error: ${retailErr.message}`);
-
-        for (const [prodIdStr, delta] of Object.entries(stockUpdates)) {
-            await supabase.rpc('adjust_product_stock', { p_product_id: Number(prodIdStr), p_quantity: delta });
-            
-            // 🔥 RELIABILITY FIX: Added the missing Telegram Alert trigger for Retail sales!
-            const prod = latestProducts.find(p => p.id === Number(prodIdStr));
-            if (prod) {
-                const updatedStock = Number(prod.stock || 0) + delta; 
-                triggerStockAlert(prod.name, updatedStock, Number(prod.min_stock_level) || 0, Number(prod.weight) || 50);
-            }
-        }
-
-      } else {
-        const combinedRiceTypes = currentCart.map(item => `${item.custom_name} (x${item.quantity})`).join(', ');
-        const baseSaleRows: any[] = [];
-        const stockUpdates: Record<number, number> = {}; 
-        const fifoUpdates: Record<number, number> = {}; 
-
-        for (const item of currentCart) {
-           // 🔥 RESTORED: We NO LONGER skip the deposit!
-
-           const isReturn = item.custom_name.includes('ដូរ');
-           const isDiscount = item.custom_name.includes('បញ្ចុះតម្លៃ');
-           const isDeposit = item.custom_name.includes('កក់');
-           const isCharge = item.custom_name.includes('បានប្រើ');
-
-           const isNegativeItem = isReturn || isDiscount || isDeposit;
-           const isBypass = item.bypass_stock || isCharge || isDeposit; // Don't deduct stock for a deposit!
-           const finalQty = isNegativeItem ? -Math.abs(Number(item.quantity)) : Number(item.quantity);
-
-           let finalCogs = Number(item.cost_price || 0);
-           if (isDiscount) finalCogs = 0; 
-           if (isDeposit) finalCogs = Number(item.custom_price_riel || 0);
-
-          if (item.isReturnFullBag && !editingInvoiceId) {
-             const { data: dbBatches } = await supabase.from('inventory_batches')
-                .select('*')
-                .eq('product_id', item.product_id)
-                .eq('branch_id', activeBranchId) 
-                .order('id', { ascending: true });
-
-             let targetBatch = null;
-             if (dbBatches && dbBatches.length > 0) {
-                 targetBatch = dbBatches.find(b => b.remaining_qty > 0);
-                 if (!targetBatch) {
-                     targetBatch = dbBatches[dbBatches.length - 1];
-                 }
-             }
-
-             if (targetBatch) {
-                 fifoUpdates[targetBatch.id] = (fifoUpdates[targetBatch.id] || 0) + 1;
-             } else {
-                 const returnedProd = latestProducts.find(p => p.id === item.product_id);
-                 await supabase.from('inventory_batches').insert([{
-                     product_id: item.product_id,
-                     branch_id: activeBranchId,
-                     cost_price: returnedProd ? returnedProd.cost_price : item.cost_price,
-                     remaining_qty: 1
-                 }]);
-             }
+          let finalCogs = Number(item.cost_price || 0);
+          if (activeTab === 'retail') {
+              const dbProduct = latestProducts.find(p => p.id === item.product_id);
+              if (dbProduct && dbProduct.linked_wholesale_id) {
+                  const wholesaleProd = latestProducts.find(wp => wp.id === dbProduct.linked_wholesale_id);
+                  if (wholesaleProd) {
+                     const wBatches = currentBatches[wholesaleProd.id] || [];
+                     const currentBatch = wBatches.length > 0 ? [...wBatches].sort((a,b) => a.id - b.id)[0] : null;
+                     const wholesaleBagCogs = currentBatch ? Number(currentBatch.cost_price) : Number(wholesaleProd.cost_price || 0);
+                     finalCogs = wholesaleBagCogs / (Number(wholesaleProd.weight) || 50);
+                  }
+              }
           }
+
+          if (isDiscount) finalCogs = 0; 
+          if (isDeposit) finalCogs = Number(item.custom_price_riel || 0);
 
           if (item.add_loose_kg && item.loose_retail_id && !editingInvoiceId) {
              stockUpdates[item.loose_retail_id] = (stockUpdates[item.loose_retail_id] || 0) + item.add_loose_kg;
           }
           
-          if (isNegativeItem || isBypass || editingInvoiceId) {
-            const newRow: any = {
-              branch_id: activeBranchId, 
-              product_id: item.product_id, customer_name: finalCustomerName, rice_type: item.name,
-              custom_rice_type: item.custom_name !== item.name ? item.custom_name : null, 
-              qty: finalQty, price_per_bag: Number(item.custom_price_riel || 0), cogs_price: finalCogs, 
-              owner: finalOwner
-            };
-            if (item.db_row_id) newRow.id = item.db_row_id;
-            baseSaleRows.push(newRow);
-          } else if (item.selected_batch_id) {
-            const specificBatch = activeBatches[item.product_id]?.find(b => b.id === item.selected_batch_id);
-            const specificCogs = specificBatch ? specificBatch.cost_price : finalCogs;
-            
+          if (isNegativeItem || isBypass || editingInvoiceId || item.selected_batch_id) {
+            const specificBatch = item.selected_batch_id ? activeBatches[item.product_id]?.find(b => b.id === item.selected_batch_id) : null;
+            const rowCogs = specificBatch ? specificBatch.cost_price : finalCogs;
+
             baseSaleRows.push({
+              db_row_id: item.db_row_id,
               branch_id: activeBranchId, 
-              product_id: item.product_id, customer_name: finalCustomerName, rice_type: item.name,
+              product_id: item.product_id, 
+              customer_name: finalCustomerName, 
+              rice_type: item.name,
               custom_rice_type: item.custom_name !== item.name ? item.custom_name : null, 
-              qty: finalQty, price_per_bag: Number(item.custom_price_riel || 0), cogs_price: specificCogs, 
+              qty: finalQty, 
+              price_per_bag: Number(item.custom_price_riel || 0), 
+              cogs_price: rowCogs, 
               owner: finalOwner
             });
-            if (specificBatch) {
+
+            if (specificBatch && !isBypass) {
                 fifoUpdates[specificBatch.id] = (fifoUpdates[specificBatch.id] || 0) - finalQty;
             }
           } else {
             const splits = await getFIFOSplits(item.product_id, finalQty, finalCogs, localBatchUsage, currentBatches);
             for (const split of splits) {
               baseSaleRows.push({
+                db_row_id: item.db_row_id,
                 branch_id: activeBranchId, 
-                product_id: item.product_id, customer_name: finalCustomerName, rice_type: item.name,
+                product_id: item.product_id, 
+                customer_name: finalCustomerName, 
+                rice_type: item.name,
                 custom_rice_type: item.custom_name !== item.name ? item.custom_name : null, 
-                qty: split.qty, price_per_bag: Number(item.custom_price_riel || 0), cogs_price: split.cogs_price, 
+                qty: split.qty, 
+                price_per_bag: Number(item.custom_price_riel || 0), 
+                cogs_price: split.cogs_price, 
                 owner: finalOwner
               });
               
-              if (split.batch_id) {
+              if (split.batch_id && !isBypass) {
                 fifoUpdates[split.batch_id] = (fifoUpdates[split.batch_id] || 0) - split.qty;
               }
             }
@@ -1771,139 +1651,131 @@ export default function POSPage() {
           if (!isBypass) {
             stockUpdates[item.product_id] = (stockUpdates[item.product_id] || 0) - finalQty;
           }
-        }
+      }
 
-       if (editingInvoiceId) {
-          const { data: existingSales } = await supabase.from('sales').select('*').eq('invoice_id', editingInvoiceId);
-          if (existingSales) {
-            
-            for (const old of existingSales) {
-                if (old.product_id && old.qty) {
-                    await supabase.rpc('adjust_product_stock', { p_product_id: old.product_id, p_quantity: old.qty });
-                    
-                    const { data: batches } = await supabase.from('inventory_batches')
-                        .select('id')
-                        .eq('product_id', old.product_id)
-                        .eq('branch_id', activeBranchId)
-                        .order('id', { ascending: false })
-                        .limit(1);
+      // 🟢 PREPARE ATOMIC PAYLOAD DATA
+      const newBatchesToCreate: any[] = [];
+      let deletedSaleIds: string[] = [];
 
-                    if (batches && batches.length > 0) {
-                        await supabase.rpc('adjust_batch_stock', { p_batch_id: batches[0].id, p_quantity: old.qty });
-                    } else {
-                        await supabase.from('inventory_batches').insert([{
-                            product_id: old.product_id,
-                            product_name: old.rice_type || 'Restored',
-                            cost_price: old.cogs_price || 0,
-                            remaining_qty: old.qty,
-                            branch_id: activeBranchId
-                        }]);
-                    }
-                }
-            }
+      if (editingInvoiceId) {
+        const { data: existingSales } = await supabase.from('sales').select('*').eq('invoice_id', editingInvoiceId);
+        if (existingSales) {
+          for (const old of existingSales) {
+              if (old.product_id && old.qty) {
+                  stockUpdates[old.product_id] = (stockUpdates[old.product_id] || 0) + Number(old.qty);
+                  
+                  const { data: batches } = await supabase.from('inventory_batches')
+                      .select('id')
+                      .eq('product_id', old.product_id)
+                      .eq('branch_id', activeBranchId)
+                      .order('id', { ascending: false })
+                      .limit(1);
 
-            const cartIds = currentCart.map(c => c.db_row_id).filter(Boolean);
-            const idsToDelete = existingSales.map(s => s.id).filter(id => !cartIds.includes(id));
-            if (idsToDelete.length > 0) {
-              await supabase.from('sales').delete().in('id', idsToDelete);
-            }
+                  if (batches && batches.length > 0) {
+                      fifoUpdates[batches[0].id] = (fifoUpdates[batches[0].id] || 0) + Number(old.qty);
+                  } else {
+                      newBatchesToCreate.push({
+                          product_id: old.product_id,
+                          product_name: old.rice_type || 'Restored',
+                          cost_price: old.cogs_price || 0,
+                          remaining_qty: old.qty,
+                          branch_id: activeBranchId
+                      });
+                  }
+              }
           }
-          await supabase.from('invoice_payments').delete().eq('invoice_id', editingInvoiceId);
-        }
 
-        // 🔥 CRITICAL FIX: Tell the Summaries Table to ignore the Deposit so Gross Sales stays at $4!
-        let splitCogsSum = baseSaleRows.reduce((sum, r) => {
-            const rowName = r.custom_rice_type || r.rice_type || '';
-            if (rowName.includes('កក់')) return sum;
-            return sum + (Number(r.qty) * Number(r.cogs_price));
-        }, 0);
-        
-        let splitSalesSum = baseSaleRows.reduce((sum, r) => {
-            const rowName = r.custom_rice_type || r.rice_type || '';
-            if (rowName.includes('កក់')) return sum;
-            return sum + (Number(r.qty) * Number(r.price_per_bag));
-        }, 0);
-
-        const finalSaleRows = baseSaleRows.map(r => {
-          const { db_row_id, ...cleanRow } = r;
-          return { ...cleanRow, invoice_id: activeTxId, payment_method: primaryMethodStr };
-        });
-
-        const summaryRow = {
-          invoice_id: activeTxId,
-          branch_id: activeBranchId, 
-          customer_name: finalCustomerName,
-          owner: finalOwner,
-          rice_types: combinedRiceTypes,
-          total_sales: splitSalesSum, // Records Gross Sales ($4)
-          total_cogs: splitCogsSum,
-          total_profit: splitSalesSum - splitCogsSum,
-          delivery_status: actualRemaining > 0 ? 'Pending' : 'Delivered',
-          payment_method: primaryMethodStr,
-          balance_due: actualRemaining > 0 ? actualRemaining : 0, // Calculates remainder correctly ($3)
-          customer_location: finalLocation,
-          is_done: actualRemaining <= 0 
-        };
-
-        const { error: summaryErr } = await supabase.from('invoice_summaries').upsert([summaryRow], { onConflict: 'invoice_id' });
-        if (summaryErr) throw new Error(`Failed to save to Summaries table: ${summaryErr.message}`);
-
-        // 🛡️ STABILITY FIX: Prevent 400 Bad Request crashes & Fix the "null ID" Edit Error
-        if (finalSaleRows && finalSaleRows.length > 0) {
-          if (editingInvoiceId) {
-             // When editing, separate existing rows (upsert) from newly added items (insert)
-             const rowsWithId = finalSaleRows.filter(r => r.id);
-             const rowsWithoutId = finalSaleRows.filter(r => !r.id);
-             
-             if (rowsWithId.length > 0) {
-               const { error: updateErr } = await supabase.from('sales').upsert(rowsWithId, { onConflict: 'id' });
-               if (updateErr) throw new Error(`Failed to update Sales table: ${updateErr.message}`);
-             }
-             if (rowsWithoutId.length > 0) {
-               const { error: insertErr } = await supabase.from('sales').insert(rowsWithoutId);
-               if (insertErr) throw new Error(`Failed to insert new items to Sales table: ${insertErr.message}`);
-             }
-          } else {
-             // For brand new sales, strictly use INSERT so Postgres auto-generates the IDs safely
-             const { error: salesErr } = await supabase.from('sales').insert(finalSaleRows);
-             if (salesErr) throw new Error(`Failed to save to Sales table: ${salesErr.message}`);
-          }
-        }
-
-        // 🔥 BRIDGE FIX: Update the Customer's Last Purchase Date for the Customer Database!
-        if (!isSimpleCustomer && selectedCustomerId) {
-           await supabase.from('customers')
-             .update({ last_purchase_date: new Date().toISOString() })
-             .eq('id', selectedCustomerId)
-             .eq('branch_id', activeBranchId);
-        }
-
-        for (const [prodIdStr, delta] of Object.entries(stockUpdates)) {
-            await supabase.rpc('adjust_product_stock', { p_product_id: Number(prodIdStr), p_quantity: delta });
-            
-            const prod = latestProducts.find(p => p.id === Number(prodIdStr));
-            if (prod) {
-                const updatedStock = Number(prod.stock || 0) + delta; 
-                triggerStockAlert(prod.name, updatedStock, Number(prod.min_stock_level) || 0);
-            }
-        }
-        for (const [batchIdStr, delta] of Object.entries(fifoUpdates)) {
-            await supabase.rpc('adjust_batch_stock', { p_batch_id: Number(batchIdStr), p_quantity: delta });
+          const cartIds = currentCart.map(c => c.db_row_id).filter(Boolean);
+          deletedSaleIds = existingSales.map(s => String(s.id)).filter(id => !cartIds.includes(Number(id)));
         }
       }
 
-      if (showPaymentSelector || !isSimpleCustomer || depositTotalRiel > 0) {
-         for (const split of effectiveSplits) {
-            if (split.method === 'Unpaid / Debt') continue;
-            await supabase.from('invoice_payments').insert([{
-              invoice_id: activeTxId,
-              branch_id: activeBranchId, 
-              amount_paid_usd: split.amount_usd, 
-              amount_paid_riel: split.amount_riel, 
-              payment_method: split.method,
-              recorded_by: finalOwner || 'System'
-            }]);
-         }
+      let splitCogsSum = baseSaleRows.reduce((sum, r) => {
+          const rowName = r.custom_rice_type || r.rice_type || '';
+          if (rowName.includes('កក់')) return sum;
+          return sum + (Number(r.qty) * Number(r.cogs_price));
+      }, 0);
+      
+      let splitSalesSum = baseSaleRows.reduce((sum, r) => {
+          const rowName = r.custom_rice_type || r.rice_type || '';
+          if (rowName.includes('កក់')) return sum;
+          return sum + (Number(r.qty) * Number(r.price_per_bag));
+      }, 0);
+
+      const finalSaleRows = baseSaleRows.map(r => {
+        const { db_row_id, ...cleanRow } = r;
+        if (db_row_id) return { ...cleanRow, id: db_row_id, invoice_id: activeTxId, payment_method: primaryMethodStr };
+        return { ...cleanRow, invoice_id: activeTxId, payment_method: primaryMethodStr };
+      });
+
+      const rowsWithId = finalSaleRows.filter(r => r.id);
+      const rowsWithoutId = finalSaleRows.filter(r => !r.id);
+
+      const summaryRow = {
+        invoice_id: activeTxId,
+        branch_id: activeBranchId, 
+        customer_id: selectedCustomerId ? Number(selectedCustomerId) : null,
+        customer_name: finalCustomerName,
+        owner: finalOwner,
+        rice_types: combinedRiceTypes,
+        total_sales: splitSalesSum,
+        total_cogs: splitCogsSum,
+        total_profit: splitSalesSum - splitCogsSum,
+        delivery_status: actualRemaining > 0 ? 'Pending' : 'Delivered',
+        payment_method: primaryMethodStr,
+        balance_due: actualRemaining > 0 ? actualRemaining : 0,
+        customer_location: finalLocation,
+        is_done: actualRemaining <= 0 
+      };
+
+      const mappedPayments = effectiveSplits.filter(split => split.method !== 'Unpaid / Debt').map(split => ({
+         invoice_id: activeTxId,
+         branch_id: activeBranchId, 
+         amount_paid_usd: split.amount_usd, 
+         amount_paid_riel: split.amount_riel, 
+         payment_method: split.method,
+         recorded_by: finalOwner || 'System'
+      }));
+
+      const customerUpdatePayload = (!isSimpleCustomer && selectedCustomerId) ? {
+          customer_id: selectedCustomerId,
+          branch_id: activeBranchId,
+          last_purchase_date: new Date().toISOString()
+      } : null;
+
+      // 📦 THE MASTER ATOMIC PAYLOAD 📦
+      const atomicPayload = {
+          invoice_summary: summaryRow,
+          is_edit: !!editingInvoiceId,
+          deleted_sale_ids: deletedSaleIds,
+          insert_sales: activeTab === 'wholesale' ? rowsWithoutId : [],
+          update_sales: activeTab === 'wholesale' ? rowsWithId : [],
+          insert_retail_sales: activeTab === 'retail' ? rowsWithoutId : [],
+          update_retail_sales: activeTab === 'retail' ? rowsWithId : [],
+          payments: mappedPayments,
+          stock_updates: Object.entries(stockUpdates).map(([id, delta]) => ({ product_id: id, delta })),
+          batch_updates: Object.entries(fifoUpdates).map(([id, delta]) => ({ batch_id: id, delta })),
+          new_batches: newBatchesToCreate,
+          customer_update: customerUpdatePayload
+      };
+
+      // 🚀 ONE SECURE TRIP TO THE DATABASE
+      const { error: atomicError } = await supabase.rpc('process_checkout', { p_payload: atomicPayload });
+      
+      if (atomicError) {
+          throw new Error(`Transaction Failed: ${atomicError.message}`);
+      }
+
+      // 🔥 FIRE TELEGRAM ALERTS FOR DEDUCTED STOCK (Safe to do after DB succeeds)
+      for (const [prodIdStr, delta] of Object.entries(stockUpdates)) {
+          const numericDelta = Number(delta);
+          if (numericDelta < 0) { // Only alert if stock was deducted
+              const prod = latestProducts.find(p => p.id === Number(prodIdStr));
+              if (prod) {
+                  const updatedStock = Number(prod.stock || 0) + numericDelta; 
+                  triggerStockAlert(prod.name, updatedStock, Number(prod.min_stock_level) || 0);
+              }
+          }
       }
 
       const currentDate = new Date();
@@ -2340,19 +2212,19 @@ export default function POSPage() {
                                 <div style={{ textAlign: 'center', padding: '20px', color: '#94a3b8', fontSize: '14px' }}>No customers found</div>
                               ) : (
                                 filteredCustomers.map(c => (
-                                  <div 
-                                    key={c.id} 
-                                    onMouseDown={(e) => { e.preventDefault(); setSelectedCustomerId(c.id.toString()); setCustomerSearchTerm(''); setIsCustomerModalOpen(false); }} 
-                                    style={{ padding: '12px 16px', cursor: 'pointer', transition: 'background 0.2s', borderBottom: '1px solid #f1f5f9', backgroundColor: '#ffffff', display: 'flex', flexDirection: 'column', gap: '4px' }}
-                                  >
-                                    <div style={{ fontWeight: 'normal', fontSize: '14px', color: '#0f172a' }}>{c.name}</div>
-                                    <div style={{ fontSize: '12px', color: '#64748b', display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
-                                      {c.phone && <span>📞 {c.phone}</span>}
-                                      {c.location && <span>📍 {c.location}</span>}
-                                      {c.type && <span>🏷️ {c.type}</span>}
-                                    </div>
+                                <div 
+                                  key={c.id} 
+                                  onMouseDown={(e) => { e.preventDefault(); setSelectedCustomerId(c.id.toString()); setCustomerSearchTerm(''); setIsCustomerModalOpen(false); }} 
+                                  style={{ padding: '12px 16px', cursor: 'pointer', transition: 'background 0.2s', borderBottom: '1px solid #f1f5f9', backgroundColor: '#ffffff', display: 'flex', flexDirection: 'column', gap: '4px' }}
+                                >
+                                  <div style={{ fontWeight: '500', fontSize: '15px', color: '#0f172a' }}>{c.name}</div>
+                                  <div style={{ fontSize: '14px', color: '#64748b', display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
+                                    {c.phone && <span>📞 {c.phone}</span>}
+                                    {c.location && <span>📍 {c.location}</span>}
+                                    {c.type && <span>🏷️ {c.type}</span>}
                                   </div>
-                                ))
+                                </div>
+                              ))
                               )}
                             </div>
                           </div>
