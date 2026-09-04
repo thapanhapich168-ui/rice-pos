@@ -788,79 +788,32 @@ export default function RiceControl() {
       return showToast('error', 'Invalid Amount', 'Cannot pay more than the total cost.');
     }
 
-    const status = paidAmount >= totalCost ? 'Paid' : 'Pending';
-    const remainingDebt = totalCost - paidAmount;
-
     try {
       const supplierName = suppliers.find(s => String(s.id) === String(importForm.supplier_id))?.name || 'Unknown Supplier';
       const product = products.find(p => String(p.id) === String(importForm.product_id));
       if (!product) throw new Error("Product ID mismatch");
 
-      // 🔥 ALL INSERTS ARE STAMPED WITH BRANCH ID
-      const { error: importErr } = await supabase.from('imports').insert([{
+      let amtUsd = 0, amtRiel = paidAmount;
+      if (importForm.payment_method.includes('$')) { amtUsd = paidAmount; amtRiel = paidAmount * EXCHANGE_RATE; }
+
+      const payload = {
+        branch_id: activeBranchId,
         supplier_id: Number(importForm.supplier_id),
+        supplier_name: supplierName,
         product_id: Number(importForm.product_id),
         product_name: product.name,
         qty: qty,
         unit_cost: unitCost,
         total_cost: totalCost,
         paid_amount: paidAmount,
-        status: status,
-        branch_id: activeBranchId
-      }]);
-      if (importErr) throw importErr;
+        payment_method: importForm.payment_method,
+        status: paidAmount >= totalCost ? 'Paid' : 'Pending',
+        amt_usd: amtUsd,
+        amt_riel: amtRiel
+      };
 
-      if (remainingDebt > 0) {
-        const supplier = suppliers.find(s => String(s.id) === String(importForm.supplier_id));
-        const newTotalOwed = Number(supplier?.total_owed_riel || 0) + remainingDebt;
-        await supabase.from('suppliers').update({ total_owed_riel: newTotalOwed }).eq('id', supplier?.id);
-
-        await supabase.from('accounts_payable').insert([{
-          supplier_name: supplierName,
-          amount_riel: remainingDebt,
-          amount_usd: 0,
-          notes: `Stock Import: ${qty} bags`,
-          status: 'Unpaid',
-          branch_id: activeBranchId
-        }]);
-      }
-
-      // 🚨 FIX 4: If you have a backend Postgres TRIGGER adding stock automatically, 
-      // COMMENT OUT the RPC line below (like this: // await supabase.rpc...). 
-      // If you DO NOT have a trigger, leave it exactly as it is!
-      await supabase.rpc('adjust_product_stock', { p_product_id: product.id, p_quantity: qty });
-      
-      // 🛡️ FIX 2: Added branch_id to prevent RLS failures from killing the transaction halfway through!
-      const { error: stockErr } = await supabase.from('products').update({ cost_price: unitCost }).eq('id', product.id).eq('branch_id', activeBranchId);
-      if (stockErr) throw stockErr;
-
-      await supabase.from('inventory_batches').insert([{
-        product_id: Number(importForm.product_id),
-        product_name: product.name, 
-        cost_price: unitCost,
-        remaining_qty: qty,
-        branch_id: activeBranchId
-      }]);
-
-      if (paidAmount > 0) {
-        let amtUsd = 0;
-        let amtRiel = paidAmount;
-        if (importForm.payment_method.includes('$')) {
-          amtUsd = paidAmount;
-          amtRiel = 0; // 🛡️ DASHBOARD FIX: Set to 0 so the Dashboard doesn't double-count the expense
-        }
-
-        await supabase.from('expenses').insert([{
-          expense_date: new Date().toISOString().split('T')[0],
-          spender: 'Both',
-          payment_method: importForm.payment_method,
-          remarks: `Stock Import: ${supplierName}`,
-          amount_usd: Math.abs(amtUsd),
-          amount_riel: Math.abs(amtRiel),
-          description: 'RICE',
-          branch_id: activeBranchId
-        }]);
-      }
+      const { error: rpcError } = await supabase.rpc('process_stock_import', { p_payload: payload });
+      if (rpcError) throw rpcError;
 
       setImportForm({ supplier_id: '', product_id: '', qty: '', unit_cost: '', paid_amount: '', payment_method: 'Cash ៛' });
       showToast('success', 'Stock Received', `${qty} bags added to inventory. Batch logged.`);
@@ -882,7 +835,7 @@ export default function RiceControl() {
   }
 
   async function handlePayPendingSubmit() {
-    if (isPayingRef.current) return; // 🛡️ FIX 3: INSTANT DOUBLE-TAP LOCK
+    if (isPayingRef.current) return;
 
     const record = payPendingModal.record;
     
@@ -892,14 +845,15 @@ export default function RiceControl() {
     let methodStrings: string[] = [];
 
     for (const r of pendingPaymentRows) {
-      const amt = Number(r.amount) || 0;
+      const cleanAmount = String(r.amount).replace(/,/g, '');
+      const amt = Math.abs(Number(cleanAmount) || 0);
       if (amt <= 0) continue;
       
       if (r.method.includes('$')) {
-        totalRielEq += (amt * EXCHANGE_RATE);
+        totalRielEq += Math.round(amt * EXCHANGE_RATE);
         totalUsdFace += amt;
       } else {
-        totalRielEq += amt;
+        totalRielEq += Math.round(amt);
         totalRielFace += amt;
       }
       methodStrings.push(`${r.method}: ${amt}`);
@@ -909,55 +863,29 @@ export default function RiceControl() {
     const remainingBefore = Number(record.total_cost) - Number(record.paid_amount);
     if (totalRielEq > remainingBefore + 0.1) return showToast('error', 'Overpayment', 'Cannot pay more than what is owed.');
 
-    isPayingRef.current = true; // 🛡️ FIX 3: Lock the gates
+    isPayingRef.current = true;
     setIsProcessing(true); 
 
     try {
       const newPaidAmount = Number(record.paid_amount) + totalRielEq;
       const newStatus = newPaidAmount >= Number(record.total_cost) ? 'Paid' : 'Pending';
-
-      // 🔥 SECURITY FIX: Apply branch isolation to import payment updates
-      await supabase.from('imports').update({ paid_amount: newPaidAmount, status: newStatus }).eq('id', record.id).eq('branch_id', activeBranchId);
-
       const supplier = suppliers.find(s => String(s.id) === String(record.supplier_id));
-      const newTotalOwed = Math.max(0, Number(supplier?.total_owed_riel || 0) - totalRielEq);
-      // 🔥 SECURITY FIX: Apply branch isolation to supplier debt updates
-      await supabase.from('suppliers').update({ total_owed_riel: newTotalOwed }).eq('id', supplier?.id).eq('branch_id', activeBranchId);
 
-      const { data: apRows } = await supabase.from('accounts_payable')
-        .select('*')
-        .eq('supplier_name', supplier?.name)
-        .eq('status', 'Unpaid')
-        .eq('branch_id', activeBranchId) // 🛡️ DASHBOARD FIX: Prevent wiping out other branches' AP data
-        .order('created_at', { ascending: true });
-      
-      if (apRows && apRows.length > 0) {
-          let debtRemainingToOffset = totalRielEq;
-          for (let apRow of apRows) {
-              if (debtRemainingToOffset <= 0) break;
-              let apRowAmount = Number(apRow.amount_riel);
-              let apply = Math.min(apRowAmount, debtRemainingToOffset);
-              let newRowBalance = apRowAmount - apply;
-              
-              await supabase.from('accounts_payable').update({
-                  amount_riel: newRowBalance,
-                  status: newRowBalance <= 0 ? 'Paid' : 'Unpaid'
-              }).eq('id', apRow.id);
-              
-              debtRemainingToOffset -= apply;
-          }
-      }
+      const payload = {
+        branch_id: activeBranchId,
+        import_id: record.id,
+        supplier_id: supplier?.id,
+        supplier_name: supplier?.name,
+        total_riel_eq: totalRielEq,
+        new_paid_amount: newPaidAmount,
+        new_status: newStatus,
+        total_usd_face: totalUsdFace,
+        total_riel_face: totalRielFace,
+        method_strings: methodStrings.join(', ')
+      };
 
-     await supabase.from('expenses').insert([{
-        expense_date: new Date().toISOString().split('T')[0],
-        spender: 'Both',
-        payment_method: methodStrings.join(', '),
-        remarks: `Paid Debt: ${supplier?.name || 'Supplier'}`,
-        amount_usd: Math.abs(totalUsdFace),
-        amount_riel: Math.abs(totalRielFace),
-        description: 'RICE', // ✅ Changed from 'BUSINESS' to 'RICE'
-        branch_id: activeBranchId // 🔥 STAMPED
-      }]);
+      const { error: rpcError } = await supabase.rpc('process_pending_payment', { p_payload: payload });
+      if (rpcError) throw rpcError;
 
       setPayPendingModal({ isOpen: false, record: null, totalDue: 0 });
       setPendingPaymentRows([{ id: Date.now(), method: 'Cash ៛', amount: '' }]);
@@ -974,7 +902,7 @@ export default function RiceControl() {
     } catch (err: any) {
       showToast('error', 'Payment Error', err.message);
     } finally {
-      isPayingRef.current = false; // 🛡️ FIX 3: Unlock the gates
+      isPayingRef.current = false;
       setIsProcessing(false);
     }
   }
@@ -1940,11 +1868,11 @@ const addProduct = async () => {
               <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap' }}>
                 <div style={{ flex: 1, minWidth: '150px' }}>
                   <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '6px' }}>Quantity Imported</label>
-                  <input type="number" className="saas-input no-spinners" value={importForm.qty} onChange={e => setImportForm({...importForm, qty: e.target.value})} />
+                  <input type="number" placeholder="0" className="saas-input no-spinners" value={importForm.qty} onChange={e => setImportForm({...importForm, qty: e.target.value})} />
                 </div>
                 <div style={{ flex: 1, minWidth: '150px' }}>
                   <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '6px' }}>Unit Cost (៛)</label>
-                  <input type="number" className="saas-input no-spinners" value={importForm.unit_cost} onChange={e => setImportForm({...importForm, unit_cost: e.target.value})} />
+                  <CurrencyInput placeholder="0" value={importForm.unit_cost} onChange={(v:any) => setImportForm({...importForm, unit_cost: v})} className="saas-input" />
                 </div>
               </div>
 
@@ -1958,7 +1886,7 @@ const addProduct = async () => {
                 <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap' }}>
                   <div style={{ flex: 2, minWidth: '150px' }}>
                     <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '6px' }}>Amount Paying Now (៛)</label>
-                    <input type="number" className="saas-input no-spinners" value={importForm.paid_amount} onChange={e => setImportForm({...importForm, paid_amount: e.target.value})} />
+                    <CurrencyInput placeholder="0" value={importForm.paid_amount} onChange={(v:any) => setImportForm({...importForm, paid_amount: v})} className="saas-input" />
                   </div>
                   <div style={{ flex: 1, minWidth: '120px' }}>
                     <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '6px' }}>Payment Method</label>
@@ -2793,11 +2721,11 @@ const addProduct = async () => {
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
             <div>
               <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', margin: '0 0 6px 0' }}>Selling Price (៛)</label>
-              <CurrencyInput placeholder="0" value={newItem.price} onChange={(v:any) => setNewItem({...newItem, price: v})} className="saas-input" />
+              <CurrencyInput placeholder="0" value={newItem.price === 0 ? '' : newItem.price} onChange={(v:any) => setNewItem({...newItem, price: v})} className="saas-input" style={{width:'100%'}}/>
             </div>
             <div>
               <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', margin: '0 0 6px 0' }}>Cost Price (៛)</label>
-              <CurrencyInput placeholder="0" value={newItem.cost_price} onChange={(v:any) => setNewItem({...newItem, cost_price: v})} className="saas-input" />
+              <CurrencyInput placeholder="0" value={newItem.cost_price === 0 ? '' : newItem.cost_price} onChange={(v:any) => setNewItem({...newItem, cost_price: v})} className="saas-input" style={{width:'100%'}}/>
             </div>
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '8px' }}>

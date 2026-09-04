@@ -5,6 +5,7 @@ import { supabase } from '@/lib/supabaseClient'
 import { useRouter } from 'next/navigation'
 import { useUserRole } from '@/lib/useUserRole'
 import AdminGuard from '@/components/AdminGuard'
+import { useBranch } from '@/components/BranchContext' // 🔥 ADDED: Multi-Tenant Architecture
 
 // ==========================================
 // ROBUST LIVE COMMA FORMATTER 
@@ -53,6 +54,7 @@ function CurrencyInput({ value, onChange, onBlur, placeholder, style, className 
 
 export default function SettingsPage() {
   const router = useRouter()
+  const { activeBranchId } = useBranch() // 🔥 TUNED INTO GLOBAL MEMORY
   
   // 🚀 AUTH & ROLE STATE
   const { role, loadingRole } = useUserRole()
@@ -68,20 +70,25 @@ export default function SettingsPage() {
     supabase.auth.getUser().then(({ data: { user } }) => {
       setCurrentUser(user)
     })
-    fetchSettings()
     fetchProfiles()
   }, [])
 
+  // 🔥 FIX: Dynamically refresh settings if the active branch changes
+  useEffect(() => {
+    fetchSettings()
+  }, [activeBranchId])
+
   async function fetchSettings() {
     setLoading(true)
-    const keys = ['exchange_rate'];
+    const branchKey = activeBranchId === 0 ? 'exchange_rate' : `exchange_rate_${activeBranchId}`;
+    const keys = [branchKey, 'exchange_rate'];
     
     const { data } = await supabase.from('app_settings').select('*').in('setting_key', keys)
     
     if (data) {
-      data.forEach((s: any) => {
-        if (s.setting_key === 'exchange_rate') setExchangeRate(Number(s.setting_value) || 4000)
-      })
+      // Prioritize the branch-specific rate, fallback to global
+      const setting = data.find((s: any) => s.setting_key === branchKey) || data.find((s: any) => s.setting_key === 'exchange_rate');
+      if (setting) setExchangeRate(Number(setting.setting_value) || 4000)
     }
     setLoading(false)
   }
@@ -92,7 +99,9 @@ export default function SettingsPage() {
   }
 
   async function updateSetting(key: string, val: number) {
-    const { error } = await supabase.from('app_settings').upsert({ setting_key: key, setting_value: val }, { onConflict: 'setting_key' })
+    // 🔥 SECURITY FIX: Isolate setting overrides to the active branch
+    const branchKey = activeBranchId === 0 ? key : `${key}_${activeBranchId}`;
+    const { error } = await supabase.from('app_settings').upsert({ setting_key: branchKey, setting_value: val }, { onConflict: 'setting_key' })
     if (error) alert(`Error saving ${key}: ${error.message}`)
   }
 
@@ -129,11 +138,16 @@ export default function SettingsPage() {
     
     setIsResetting(true);
     try {
+      // 🔥 FIX: Collect the new POS/Rice layout keys and isolate the deletion to the active branch
+      const branchSuffix = activeBranchId === 0 ? '' : `_${activeBranchId}`;
       const layoutKeys = [
-        'pos_product_order', 
-        'column_widths', 'column_order', 
-        'cust_col_widths', 'cust_col_order', 
-        'biz_col_widths', 'biz_sum_cols', 'biz_daily_cols', 'biz_retail_cols', 'biz_exp_cols'
+        `pos_product_order${branchSuffix}`, `category_order${branchSuffix}`,
+        `column_widths${branchSuffix}`, `column_order${branchSuffix}`, 
+        `pending_col_widths${branchSuffix}`, `pending_col_order${branchSuffix}`,
+        `supplier_col_widths${branchSuffix}`, `supplier_col_order${branchSuffix}`,
+        `product_sort${branchSuffix}`, `pending_sort${branchSuffix}`, `supplier_sort${branchSuffix}`,
+        `cust_col_widths${branchSuffix}`, `cust_col_order${branchSuffix}`, 
+        `biz_col_widths${branchSuffix}`, `biz_sum_cols${branchSuffix}`, `biz_daily_cols${branchSuffix}`, `biz_retail_cols${branchSuffix}`, `biz_exp_cols${branchSuffix}`
       ];
       
       const { error } = await supabase.from('app_settings').delete().in('setting_key', layoutKeys);
