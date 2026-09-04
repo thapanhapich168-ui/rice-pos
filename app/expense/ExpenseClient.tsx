@@ -494,112 +494,135 @@ export default function ExpenseDashboard() {
     }
   }
 
-  // 🟢 CLEAN MODAL HANDLER: STAFF ADVANCE
+  // 🟢 CLEAN MODAL HANDLER: STAFF ADVANCE (ATOMIC)
   async function handleAdvanceSubmit() {
+    if (loading) return;
     const staff = advanceModal.staff;
-    // 🔥 RELIABILITY FIX: Strip commas to safely parse the advance amount without crashing
     const rawAmount = Number(String(advanceModal.amount).replace(/,/g, '')) || 0;
     if (!rawAmount || rawAmount === 0) { showToast('error', 'Validation Error', 'Please enter a valid advance amount.'); return; }
     
-    let saveRiel = 0, saveUsd = 0;
-    let newTotalRiel = Number(staff.total_debt_riel || 0); 
-    let newTotalUsd = Number(staff.total_debt_usd || 0);
+    setLoading(true);
+    try {
+      let saveRiel = 0, saveUsd = 0;
+      if (advanceModal.method.includes('$')) saveUsd = rawAmount; 
+      else saveRiel = rawAmount;
 
-    if (advanceModal.method.includes('$')) { 
-      saveUsd = rawAmount; 
-      newTotalUsd += rawAmount; 
-    } else { 
-      saveRiel = rawAmount; 
-      newTotalRiel += rawAmount; 
+      const payload = {
+          staff_id: staff.id,
+          branch_id: activeBranchId,
+          type: 'ADVANCE',
+          amount_riel: saveRiel,
+          amount_usd: saveUsd,
+          method: advanceModal.method,
+          remarks: `Staff Advance: ${staff.name}`,
+          log_expense: 'true'
+      };
+
+      const { error } = await supabase.rpc('process_staff_transaction', { p_payload: payload });
+      if (error) throw error;
+
+      setAdvanceModal({ isOpen: false, staff: null, amount: '', method: 'Cash ៛' });
+      showToast('success', 'Advance Added', `Advance added for ${staff.name}`);
+      fetchStaff();
+      fetchDatabase();
+    } catch (err: any) {
+      showToast('error', 'Update Failed', err.message);
+    } finally {
+      setLoading(false);
     }
-
-    setStaffList(prev => prev.map(s => s.id === staff.id ? { ...s, total_debt_riel: newTotalRiel, total_debt_usd: newTotalUsd } : s));
-    setAdvanceModal({ isOpen: false, staff: null, amount: '', method: 'Cash ៛' });
-
-    // 🔥 SECURITY FIX: Lock staff advance updates strictly to the active branch
-    const { error: staffErr } = await supabase.from('staff').update({ total_debt_riel: newTotalRiel, total_debt_usd: newTotalUsd }).eq('id', staff.id).eq('branch_id', activeBranchId);
-    if (staffErr) { showToast('error', 'Update Failed', `Error updating debt: ${staffErr.message}`); fetchStaff(); return; }
-
-    await supabase.from('staff_debt_history').insert([{ staff_id: staff.id, amount: rawAmount, payment_method: advanceModal.method, branch_id: activeBranchId }]); // 🔥 STAMPED
-    await supabase.from('expenses').insert([{ expense_date: new Date().toISOString().split('T')[0], spender: 'Both', payment_method: advanceModal.method, remarks: `Staff Advance: ${staff.name}`, amount_usd: saveUsd, amount_riel: saveRiel, description: 'STAFF_ADVANCE', branch_id: activeBranchId }]); // 🔥 STAMPED
-    
-    showToast('success', 'Advance Added', `Advance added for ${staff.name}`);
-    fetchDatabase();
   }
 
-  // 🟢 CLEAN MODAL HANDLER: LEAVE MANAGEMENT
+  // 🟢 CLEAN MODAL HANDLER: LEAVE MANAGEMENT (ATOMIC)
   async function handleLeaveSubmit() {
+    if (loading) return;
     const staff = leaveModal.staff;
     const days = Number(leaveModal.days) || 0;
     const quota = Number(leaveModal.quota) || 12;
     const reason = leaveModal.reason.trim() || 'Annual / Personal Leave';
 
-    if (days <= 0) {
-      showToast('error', 'Invalid Input', 'Please enter a valid number of leave days (e.g., 0.5 or 1).');
-      return;
-    }
+    if (days <= 0) { showToast('error', 'Invalid Input', 'Please enter a valid number of leave days.'); return; }
 
     const newUsed = Number(staff.leave_used || 0) + days;
     const remaining = quota - newUsed;
 
     if (remaining < 0) {
-      if (!confirm(`⚠️ Warning: Taking ${days} days will exceed their leave quota by ${Math.abs(remaining)} days. Continue anyway?`)) {
-        return;
-      }
+      if (!confirm(`⚠️ Warning: Taking ${days} days will exceed their leave quota by ${Math.abs(remaining)} days. Continue anyway?`)) return;
     }
 
-    setStaffList(prev => prev.map(s => s.id === staff.id ? { ...s, leave_quota: quota, leave_used: newUsed } : s));
-    setLeaveModal({ isOpen: false, staff: null, quota: '', days: 1, reason: '' });
+    setLoading(true);
+    try {
+      if (quota !== Number(staff.leave_quota)) {
+          await supabase.from('staff').update({ leave_quota: quota }).eq('id', staff.id).eq('branch_id', activeBranchId);
+      }
 
-    // 🔥 SECURITY FIX: Lock staff leave balance updates strictly to the active branch
-    await supabase.from('staff').update({ leave_quota: quota, leave_used: newUsed }).eq('id', staff.id).eq('branch_id', activeBranchId);
+      const payload = {
+          staff_id: staff.id,
+          branch_id: activeBranchId,
+          type: 'LEAVE',
+          days: days,
+          reason: reason
+      };
 
-    await supabase.from('staff_leave_history').insert([{
-      staff_id: staff.id,
-      days: days,
-      reason: reason,
-      branch_id: activeBranchId // 🔥 STAMPED
-    }]);
+      const { error } = await supabase.rpc('process_staff_transaction', { p_payload: payload });
+      if (error) throw error;
 
-    showToast('success', 'Leave Logged', `${days} day(s) leave recorded for ${staff.name}`);
-    fetchStaff();
+      setLeaveModal({ isOpen: false, staff: null, quota: '', days: 1, reason: '' });
+      showToast('success', 'Leave Logged', `${days} day(s) leave recorded for ${staff.name}`);
+      fetchStaff();
+    } catch (err: any) {
+      showToast('error', 'Update Failed', err.message);
+    } finally {
+      setLoading(false);
+    }
   }
 
-  // 🟢 CLEAN MODAL HANDLER: DEBT SETTLEMENT
+  // 🟢 CLEAN MODAL HANDLER: DEBT SETTLEMENT (ATOMIC)
   async function handleSettleSubmit() {
+    if (loading) return;
     const staff = settleModal.staff;
-    // 🔥 RELIABILITY FIX: Strip commas to safely parse the settlement amount without crashing
     const rawAmount = Number(String(settleModal.amount).replace(/,/g, '')) || 0;
     if (!rawAmount || rawAmount <= 0) { showToast('error', 'Invalid Amount', 'Enter a valid settlement amount.'); return; }
     
-    let saveRiel = 0, saveUsd = 0;
-    let newTotalRiel = Number(staff.total_debt_riel || 0); let newTotalUsd = Number(staff.total_debt_usd || 0);
+    setLoading(true);
+    try {
+      let saveRiel = 0, saveUsd = 0;
+      let currentRiel = Number(staff.total_debt_riel || 0); 
+      let currentUsd = Number(staff.total_debt_usd || 0);
 
-    if (settleModal.method.includes('$')) {
-      if (rawAmount > newTotalUsd) { showToast('error', 'Overpayment', 'Cannot settle more USD than they owe.'); return; }
-      saveUsd = -Math.abs(rawAmount); newTotalUsd -= rawAmount;
-    } else {
-      if (rawAmount > newTotalRiel) { showToast('error', 'Overpayment', 'Cannot settle more Riel than they owe.'); return; }
-      saveRiel = -Math.abs(rawAmount); newTotalRiel -= rawAmount;
+      if (settleModal.method.includes('$')) {
+        if (rawAmount > currentUsd) { showToast('error', 'Overpayment', 'Cannot settle more USD than they owe.'); setLoading(false); return; }
+        saveUsd = -Math.abs(rawAmount); 
+      } else {
+        if (rawAmount > currentRiel) { showToast('error', 'Overpayment', 'Cannot settle more Riel than they owe.'); setLoading(false); return; }
+        saveRiel = -Math.abs(rawAmount); 
+      }
+
+      const isWriteOff = settleModal.method === 'Write-off';
+      const historyMethodStr = isWriteOff ? '❌ Bad Debt (Write-off)' : `Settled: ${settleModal.method}`;
+
+      const payload = {
+          staff_id: staff.id,
+          branch_id: activeBranchId,
+          type: 'SETTLE',
+          amount_riel: saveRiel,
+          amount_usd: saveUsd,
+          method: historyMethodStr,
+          remarks: `Staff Debt Settlement: ${staff.name}`,
+          log_expense: isWriteOff ? 'false' : 'true'
+      };
+
+      const { error } = await supabase.rpc('process_staff_transaction', { p_payload: payload });
+      if (error) throw error;
+
+      setSettleModal({ isOpen: false, staff: null, amount: '', method: 'Cash ៛' });
+      showToast('success', isWriteOff ? 'Debt Forgiven' : 'Settled', isWriteOff ? `Debt written off for ${staff.name}` : `Settlement recorded for ${staff.name}`);
+      fetchStaff();
+      fetchDatabase();
+    } catch (err: any) {
+      showToast('error', 'Update Failed', err.message);
+    } finally {
+      setLoading(false);
     }
-
-    setStaffList(prev => prev.map(s => s.id === staff.id ? { ...s, total_debt_riel: newTotalRiel, total_debt_usd: newTotalUsd } : s));
-    setSettleModal({ isOpen: false, staff: null, amount: '', method: 'Cash ៛' });
-
-    // 🔥 SECURITY FIX: Lock staff debt settlements strictly to the active branch
-    await supabase.from('staff').update({ total_debt_riel: newTotalRiel, total_debt_usd: newTotalUsd }).eq('id', staff.id).eq('branch_id', activeBranchId);
-    
-    const isWriteOff = settleModal.method === 'Write-off';
-    const historyMethodStr = isWriteOff ? '❌ Bad Debt (Write-off)' : `Settled: ${settleModal.method}`;
-    await supabase.from('staff_debt_history').insert([{ staff_id: staff.id, amount: rawAmount, payment_method: historyMethodStr, branch_id: activeBranchId }]);
-
-    // 🛡️ DASHBOARD FIX: Only log to expenses if actual cash was received. Write-offs skip this to prevent inflating Cash on Hand.
-    if (!isWriteOff) {
-      await supabase.from('expenses').insert([{ expense_date: new Date().toISOString().split('T')[0], spender: 'Both', payment_method: settleModal.method, remarks: `Staff Debt Settlement: ${staff.name}`, amount_usd: saveUsd, amount_riel: saveRiel, description: 'STAFF_SETTLEMENT', branch_id: activeBranchId }]);
-    }
-    
-    showToast('success', isWriteOff ? 'Debt Forgiven' : 'Settled', isWriteOff ? `Debt written off for ${staff.name}` : `Settlement recorded for ${staff.name}`);
-    fetchDatabase();
   }
 
   // 🟢 UNIFIED HISTORY MODAL (View both Debt and Leave History)
@@ -1454,8 +1477,8 @@ export default function ExpenseDashboard() {
         </div>
 
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
-          <button onClick={() => setAdvanceModal({ isOpen: false, staff: null, amount: '', method: 'Cash ៛' })} className="saas-btn saas-btn-secondary">Cancel</button>
-          <button onClick={handleAdvanceSubmit} className="saas-btn saas-btn-primary">Confirm Advance</button>
+          <button onClick={() => setAdvanceModal({ isOpen: false, staff: null, amount: '', method: 'Cash ៛' })} disabled={loading} className="saas-btn saas-btn-secondary">Cancel</button>
+          <button onClick={handleAdvanceSubmit} disabled={loading} className="saas-btn saas-btn-primary">{loading ? 'Processing...' : 'Confirm Advance'}</button>
         </div>
       </Modal>
 
@@ -1522,8 +1545,8 @@ export default function ExpenseDashboard() {
         </div>
 
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
-          <button onClick={() => setLeaveModal({ isOpen: false, staff: null, quota: '', days: 1, reason: '' })} className="saas-btn saas-btn-secondary">Cancel</button>
-          <button onClick={handleLeaveSubmit} className="saas-btn saas-btn-primary">Confirm Leave</button>
+          <button onClick={() => setLeaveModal({ isOpen: false, staff: null, quota: '', days: 1, reason: '' })} disabled={loading} className="saas-btn saas-btn-secondary">Cancel</button>
+          <button onClick={handleLeaveSubmit} disabled={loading} className="saas-btn saas-btn-primary">{loading ? 'Processing...' : 'Confirm Leave'}</button>
         </div>
       </Modal>
 
@@ -1631,8 +1654,8 @@ export default function ExpenseDashboard() {
         </div>
 
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
-          <button onClick={() => setSettleModal({ isOpen: false, staff: null, amount: '', method: 'Cash ៛' })} className="saas-btn saas-btn-secondary">Cancel</button>
-          <button onClick={handleSettleSubmit} className="saas-btn saas-btn-primary">Confirm Settlement</button>
+          <button onClick={() => setSettleModal({ isOpen: false, staff: null, amount: '', method: 'Cash ៛' })} disabled={loading} className="saas-btn saas-btn-secondary">Cancel</button>
+          <button onClick={handleSettleSubmit} disabled={loading} className="saas-btn saas-btn-primary">{loading ? 'Processing...' : 'Confirm Settlement'}</button>
         </div>
       </Modal>
 

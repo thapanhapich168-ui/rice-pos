@@ -106,28 +106,15 @@ export default function CogsReportPage() {
       { data: sData }, 
       { data: rDataView }, 
       { data: cDataView }, 
-      { data: rDataLiability },
-      { data: cDataLiability },
-      { data: aData }, 
-      { data: invData }, 
-      { data: expData }, 
-      { data: payData }
+      { data: liabilityData }
     ] = await Promise.all([
         // 🔥 VIEW DATA: Only fetches exact date range required
         supabase.from('sales').select('*').gte('created_at', queryStart).lte('created_at', queryEnd).eq('branch_id', activeBranchId).order('created_at', { ascending: false }),
         supabase.from('retail_sales').select('*').gte('created_at', queryStart).lte('created_at', queryEnd).eq('branch_id', activeBranchId).order('created_at', { ascending: false }),
         supabase.from('cogs_settlements').select('*').gte('settlement_date', startJustDate).lte('settlement_date', endJustDate).eq('branch_id', activeBranchId).order('created_at', { ascending: false }),
         
-        // ⚖️ LIABILITY DATA: Fetches historical records but ONLY specific tiny columns
-        supabase.from('retail_sales').select('owner, payment_method, qty, price_per_bag').eq('branch_id', activeBranchId).order('created_at', { ascending: false }).limit(3000),
-        supabase.from('cogs_settlements').select('owner_name, payment_method, paid_amount_riel, paid_amount_usd').eq('branch_id', activeBranchId).order('created_at', { ascending: false }).limit(3000),
-        
-        // 🛡️ ISOLATION FIX: Fetch dynamically mapped settings keys to access branch-specific liabilities
-        supabase.from('app_settings').select('*').in('setting_key', activeBranchId === 0 ? ['personal_owe_riel', 'personal_owe_usd'] : [`personal_owe_riel_${activeBranchId}`, `personal_owe_usd_${activeBranchId}`]),
-        
-        supabase.from('invoice_summaries').select('invoice_id, owner').eq('branch_id', activeBranchId).order('created_at', { ascending: false }).limit(3000),
-        supabase.from('expenses').select('amount_riel, amount_usd, remarks').eq('branch_id', activeBranchId).order('created_at', { ascending: false }).limit(3000),
-        supabase.from('invoice_payments').select('invoice_id, amount_paid_usd, amount_paid_riel, payment_method').eq('branch_id', activeBranchId).order('created_at', { ascending: false }).limit(3000)
+        // ⚖️ LIABILITY DATA: Offloaded entirely to Postgres for instant calculation!
+        supabase.rpc('get_mom_liability', { p_branch_id: activeBranchId })
     ]);
 
     // Populate View State
@@ -135,98 +122,9 @@ export default function CogsReportPage() {
     setRetailSales(rDataView || [])
     setCogsSettlements(cDataView || [])
 
-    // Calculate Liability based on Historical Data
-    const isBusinessMethod = (m: string) => {
-        const lowerM = m.toLowerCase();
-        if (lowerM.includes('mom qr')) return false; 
-        return true; 
-    };
+    // Set Lightning-Fast Liability
+    setLiveMomLiability(Number(liabilityData) || 0);
 
-    let momCollectedRiel = 0;
-    
-    (rDataLiability || []).forEach((r: any) => {
-      const owner = parseOwner(r.owner);
-      const methodStr = r.payment_method || 'Cash ៛';
-      const totalSale = Number(r.qty || 0) * Number(r.price_per_bag || 0);
-
-      if (owner === 'mom') {
-          if (methodStr.includes(':')) {
-              methodStr.split(',').forEach((pStr: string) => {
-                  const [mName, amtStr] = pStr.split(':');
-                  let bAmt = Number(amtStr) || 0;
-                  if (mName.includes('$')) bAmt *= EXCHANGE_RATE;
-                  if (isBusinessMethod(mName.trim())) momCollectedRiel += bAmt; 
-              });
-          } else {
-              if (isBusinessMethod(methodStr)) momCollectedRiel += totalSale;
-          }
-      }
-    });
-
-    (payData || []).forEach((p: any) => {
-       const amtUsd = Number(p.amount_paid_usd || 0);
-       const amtRiel = Number(p.amount_paid_riel || 0);
-       const amtRielEq = amtRiel + (amtUsd * EXCHANGE_RATE);
-       
-       const methodStr = p.payment_method || 'Cash ៛';
-       const parentInv = (invData || []).find((i: any) => i.invoice_id === p.invoice_id);
-       
-       if (parentInv && parseOwner(parentInv.owner) === 'mom') {
-           if (methodStr.includes(':')) {
-               methodStr.split(',').forEach((pStr: string) => {
-                  const [mName, amtStr] = pStr.split(':');
-                  let bAmt = Number(amtStr) || 0;
-                  if (mName.includes('$')) bAmt *= EXCHANGE_RATE;
-                  if (isBusinessMethod(mName.trim())) momCollectedRiel += bAmt;
-               });
-           } else {
-               if (isBusinessMethod(methodStr)) momCollectedRiel += amtRielEq;
-           }
-       }
-    });
-
-    let momPaidOutRiel = 0;
-    (expData || []).forEach((e: any) => {
-      const amtRiel = Number(e.amount_riel || 0);
-      const amtUsd = Number(e.amount_usd || 0);
-      if ((e.remarks || '').toLowerCase().includes("settled mom's account liability")) {
-         momPaidOutRiel += Math.abs(amtRiel) + (Math.abs(amtUsd) * EXCHANGE_RATE);
-      }
-    });
-
-    let momCogsSettledRiel = 0;
-    (cDataLiability || []).forEach((c: any) => {
-      if (parseOwner(c.owner_name) === 'mom') {
-          const method = (c.payment_method || '').toLowerCase();
-          if (method.includes(':')) {
-              method.split(',').forEach((pStr: string) => {
-                 const [mName, amtStr] = pStr.split(':');
-                 let bAmt = Number(amtStr) || 0;
-                 if (mName.includes('$')) bAmt *= EXCHANGE_RATE;
-                 if (mName.toLowerCase().includes('liability')) momCogsSettledRiel += bAmt;
-              });
-          } else {
-              const rielPaid = Number(c.paid_amount_riel || 0);
-              const usdPaid = Number(c.paid_amount_usd || 0) * EXCHANGE_RATE;
-              if (method.includes('liability')) momCogsSettledRiel += (rielPaid + usdPaid);
-          }
-      }
-    });
-
-    let baseOweRiel = 0;
-    let baseOweUsd = 0;
-    if (aData) {
-      aData.forEach(s => {
-        // 🛡️ ISOLATION FIX: Strip the branch tag so the parser accurately reads the base key
-        const rawKey = activeBranchId === 0 ? s.setting_key : s.setting_key.replace(`_${activeBranchId}`, '');
-        if (rawKey === 'personal_owe_riel') baseOweRiel = Number(s.setting_value) || 0;
-        if (rawKey === 'personal_owe_usd') baseOweUsd = Number(s.setting_value) || 0;
-      });
-    }
-
-    const liveLiabilityRiel = Math.max(0, baseOweRiel + (baseOweUsd * EXCHANGE_RATE) + momCollectedRiel - momPaidOutRiel - momCogsSettledRiel);
-    setLiveMomLiability(liveLiabilityRiel);
-    
     setLoading(false)
   }
 
@@ -566,7 +464,13 @@ export default function CogsReportPage() {
          remainingToDistribute -= apply;
       }
 
-      const { error } = await supabase.from('cogs_settlements').insert(settlesToInsert);
+      // 🚀 ONE SECURE TRIP TO POSTGRES (Atomic Execution)
+      const { error } = await supabase.rpc('process_cogs_payment', { 
+        p_payload: { 
+          branch_id: activeBranchId, 
+          settlements: settlesToInsert 
+        } 
+      });
       if (error) throw error;
       
       if (isBulk) {

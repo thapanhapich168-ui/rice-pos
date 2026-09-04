@@ -169,7 +169,7 @@ export default function InvoiceGallery() {
     setIsLoading(false);
   }
 
-  // --- 🔥 BULLETPROOF VOID AUTOMATION ---
+  // --- 🔥 BULLETPROOF VOID AUTOMATION (ATOMIC RPC) ---
   const handleVoidInvoice = async (invoiceId: string) => {
     if (!confirm(`🚨 Are you sure you want to VOID transaction ${invoiceId}?\n\nThis will instantly:\n1. Verify and permanently delete the record\n2. Safely restore stock\n3. Reverse dashboard numbers`)) return;
 
@@ -178,7 +178,6 @@ export default function InvoiceGallery() {
     try {
       const targetInvoice = invoices.find(inv => inv.invoice_id === invoiceId);
       const isRetail = targetInvoice ? targetInvoice.is_retail : (invoiceId.startsWith('RET-') || invoiceId.startsWith('ret-'));
-      const tableName = isRetail ? 'retail_sales' : 'sales';
 
       // 🟢 1. FETCH EXACT ROWS TO MEMORY FIRST
       let items: any[] = [];
@@ -201,79 +200,19 @@ export default function InvoiceGallery() {
       if (fetchErr) throw new Error(`Database read failed: ${fetchErr.message}`);
       if (!items || items.length === 0) throw new Error(`Could not locate records for this transaction. It may already be deleted.`);
 
-      // 🟢 2. RESTORE STOCK & BATCHES SAFELY FIRST
-      // ✅ FIX: Restore inventory before modifying invoices so if Wi-Fi drops, stock is not lost forever!
-      for (const item of items) {
-        if (item.status === 'Voided' || item.delivery_status === 'Voided' || item.is_voided) continue;
+      // Filter valid items (ignoring already voided ones)
+      const validItems = items.filter(item => !(item.status === 'Voided' || item.delivery_status === 'Voided' || item.is_voided));
 
-        const qty = Number(item.qty) || 0;
-        const riceName = (item.custom_rice_type || item.rice_type || '').trim();
-        
-        // 🛡️ DASHBOARD FIX: Prevent creating ghost stock when voiding non-inventory adjustments
-        const isSpecial = riceName.includes('បានប្រើ') || riceName.includes('សេវាដឹក') || riceName.includes('កក់') || riceName.includes('បញ្ចុះតម្លៃ') || riceName.includes('ថ្លៃបាវ') || riceName.includes('បាវ');
-        
-        if (qty !== 0 && !isSpecial) {
-          let productId = item.product_id;
-          if (!productId && riceName) {
-            const { data: prodByName } = await supabase.from('products').select('id').eq('branch_id', activeBranchId).ilike('name', riceName).maybeSingle();
-            if (prodByName) productId = prodByName.id;
-          }
+      // 🟢 2. SEND TO SECURE ATOMIC RPC
+      const payload = {
+        branch_id: activeBranchId,
+        invoice_id: invoiceId,
+        is_retail: isRetail,
+        items: validItems
+      };
 
-          if (productId) {
-            // A. Restore Master Stock
-            await supabase.rpc('adjust_product_stock', { p_product_id: productId, p_quantity: qty });
-
-            // B. Restore Inventory Batch
-            const { data: batchesInv } = await supabase.from('inventory_batches').select('*').eq('product_id', productId).eq('branch_id', activeBranchId).order('id', { ascending: false }).limit(1); 
-            
-            if (batchesInv && batchesInv.length > 0) {
-              await supabase.rpc('adjust_batch_stock', { p_batch_id: batchesInv[0].id, p_quantity: qty });
-            } else {
-              const { data: prod } = await supabase.from('products').select('cost_price').eq('id', productId).maybeSingle();
-              await supabase.from('inventory_batches').insert([{
-                product_id: productId, product_name: riceName || 'Unknown Product', cost_price: item.cogs_price || prod?.cost_price || 0,
-                remaining_qty: qty, branch_id: activeBranchId 
-              }]);
-            }
-
-            // C. Reverse FIFO Batches
-            let remainingToReverse = qty;
-            const { data: batches } = await supabase.from('price_history').select('*').eq('product_id', productId).eq('branch_id', activeBranchId).gt('sold_qty', 0).order('created_at', { ascending: false }); 
-            
-            if (batches) {
-              for (const b of batches) {
-                if (remainingToReverse <= 0) break;
-                const possibleToReverse = Math.min(b.sold_qty, remainingToReverse);
-                await supabase.from('price_history').update({ sold_qty: b.sold_qty - possibleToReverse }).eq('id', b.id);
-                remainingToReverse -= possibleToReverse;
-              }
-            }
-          }
-        }
-      }
-
-      // 🟢 3. SOFT-DELETE FROM DATABASE (PRESERVE AUDIT TRAIL)
-      const rowIds = items.map(i => i.id);
-      
-      // 🔥 SECURITY FIX: Enforce strict branch isolation when soft-deleting transaction rows
-      const { error: delErr } = await supabase
-        .from(tableName)
-        .update({ is_voided: true })
-        .in('id', rowIds)
-        .eq('branch_id', activeBranchId);
-
-      if (delErr) throw new Error(`Database blocked voiding: ${delErr.message}`);
-
-      // 🟢 4. CLEANUP SUMMARIES & PAYMENTS
-      await supabase.from('invoice_payments').update({ is_voided: true }).eq('invoice_id', invoiceId).eq('branch_id', activeBranchId);
-
-      if (!isRetail) {
-        await supabase.from('invoice_summaries').update({ 
-          delivery_status: 'Voided',
-          balance_due: 0,
-          is_done: true
-        }).eq('invoice_id', invoiceId).eq('branch_id', activeBranchId);
-      }
+      const { error: rpcError } = await supabase.rpc('void_invoice_atomic', { p_payload: payload });
+      if (rpcError) throw new Error(`Database blocked voiding: ${rpcError.message}`);
 
       showToast('success', 'Void Successful', `Transaction ${invoiceId} was permanently deleted and stock was correctly restored.`);
       setSelectedInvoices(new Set());
@@ -584,10 +523,10 @@ export default function InvoiceGallery() {
 
               {selectedInvoices.size > 0 && (
                 <>
-                  <button onClick={deleteSelected} className="saas-btn saas-btn-danger" style={{ padding: '8px 12px', fontSize: '13px' }}>
+                  <button onClick={deleteSelected} disabled={isLoading || isProcessing} className="saas-btn saas-btn-danger" style={{ padding: '8px 12px', fontSize: '13px', opacity: (isLoading || isProcessing) ? 0.6 : 1 }}>
                     Clear ({selectedInvoices.size})
                   </button>
-                  <button onClick={handleBulkAction} className="saas-btn saas-btn-primary" style={{ padding: '8px 12px', fontSize: '13px' }}>
+                  <button onClick={handleBulkAction} disabled={isLoading || isProcessing} className="saas-btn saas-btn-primary" style={{ padding: '8px 12px', fontSize: '13px', opacity: (isLoading || isProcessing) ? 0.6 : 1 }}>
                     {isDeviceMobile ? `Share (${selectedInvoices.size})` : `Download (${selectedInvoices.size})`}
                   </button>
                 </>

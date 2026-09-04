@@ -237,7 +237,7 @@ export default function DeliveryPage() {
       if (amt <= 0) continue;
       
       const isUsd = r.method.includes('$');
-      let convertedAmt = isUsd ? amt * EXCHANGE_RATE : amt;
+      let convertedAmt = isUsd ? Math.round(amt * EXCHANGE_RATE) : Math.round(amt);
       
       totalRielEq += convertedAmt;
       methodStrings.push(`${r.method}: ${amt}`);
@@ -249,8 +249,7 @@ export default function DeliveryPage() {
         payment_method: r.method,
         recorded_by: validSpender,
         payment_date: new Date().toISOString(), 
-        remarks: `Inline Delivery Settlement`,
-        branch_id: d.branch_id || activeBranchId 
+        remarks: `Inline Delivery Settlement`
       });
     }
 
@@ -262,14 +261,10 @@ export default function DeliveryPage() {
     setIsProcessing(true);
 
     try {
-      const { error: ledgerError } = await supabase.from('invoice_payments').insert(paymentRecordsToInsert);
-      if (ledgerError) throw new Error("Failed to log payment ledger: " + ledgerError.message);
-      
-      // 🔥 SECURITY & MATH FIX: Fetch absolute latest balance to prevent checkout race conditions
       const { data: latestInv } = await supabase.from('invoice_summaries').select('balance_due, payment_method').eq('invoice_id', d.invoice_id).single();
       const actualBalance = latestInv ? Number(latestInv.balance_due) : d.balance_due;
       
-      const newBalance = actualBalance - totalRielEq;
+      const newBalance = Math.round(actualBalance - totalRielEq);
       let newPaymentMethodStr = latestInv ? latestInv.payment_method : d.payment_method;
       
       newPaymentMethodStr = d.payment_method && d.payment_method !== '-' && d.payment_method !== 'Unpaid / Debt'
@@ -277,6 +272,23 @@ export default function DeliveryPage() {
           : methodStrings.join(', ');
 
       const isDone = newBalance <= 0;
+
+      // 📦 ATOMIC RPC PAYLOAD
+      const atomicPayload = {
+        branch_id: activeBranchId,
+        payments: paymentRecordsToInsert,
+        invoices: [{
+          invoice_id: d.invoice_id,
+          balance_due: newBalance,
+          payment_method: newPaymentMethodStr,
+          is_done: isDone,
+          delivery_status: 'Delivered'
+        }]
+      };
+
+      // 🚀 ONE SECURE TRIP TO POSTGRES
+      const { error: rpcError } = await supabase.rpc('process_delivery_payments', { p_payload: atomicPayload });
+      if (rpcError) throw new Error("Transaction Failed: " + rpcError.message);
 
       setDeliveries(prev => prev.map(inv => inv.invoice_id === d.invoice_id ? {
         ...inv,
@@ -287,17 +299,6 @@ export default function DeliveryPage() {
       } : inv));
       
       setInlinePayments(prev => { const n = {...prev}; delete n[d.invoice_id]; return n; });
-
-      // 🔥 SECURITY FIX: Enforce branch isolation on inline payment invoice updates
-      await supabase.from('invoice_summaries')
-        .update({
-            balance_due: newBalance,
-            payment_method: newPaymentMethodStr,
-            is_done: isDone,
-            delivery_status: 'Delivered'
-        })
-        .eq('invoice_id', d.invoice_id)
-        .eq('branch_id', activeBranchId);
 
       try {
         let message = `📦 *Delivery Payment Update*\n`;
@@ -313,7 +314,7 @@ export default function DeliveryPage() {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ chat_id: TELEGRAM_CONFIG.chatId, text: message, parse_mode: 'Markdown' })
-        });
+        }).catch(console.error);
       } catch (teleErr) { console.error("Telegram Error", teleErr); }
 
       showToast('success', 'Payment Saved', 'Delivery payment logged successfully.');
@@ -331,18 +332,16 @@ export default function DeliveryPage() {
     
     setIsProcessing(true);
     try {
-      // 🔥 SECURITY FIX: Enforce branch isolation on payment deletion
-      const { error: delErr } = await supabase.from('invoice_payments').delete().eq('invoice_id', d.invoice_id).eq('branch_id', activeBranchId);
-      if (delErr) throw delErr;
+      // 📦 ATOMIC RPC PAYLOAD
+      const atomicPayload = {
+        branch_id: activeBranchId,
+        invoice_id: d.invoice_id,
+        total_sales: d.total_sales
+      };
 
-      // 🔥 SECURITY FIX: Enforce branch isolation on invoice reversion
-      const { error: updErr } = await supabase.from('invoice_summaries').update({
-          balance_due: d.total_sales, 
-          payment_method: '-',
-          is_done: false,
-          delivery_status: 'Pending'
-      }).eq('invoice_id', d.invoice_id).eq('branch_id', activeBranchId);
-      if (updErr) throw updErr;
+      // 🚀 ONE SECURE TRIP TO POSTGRES
+      const { error: rpcError } = await supabase.rpc('undo_delivery_payment', { p_payload: atomicPayload });
+      if (rpcError) throw rpcError;
 
       showToast('success', 'Undo Successful', 'Payment reversed and returned to pending.');
       fetchDeliveries();
@@ -393,7 +392,7 @@ export default function DeliveryPage() {
       if (amt <= 0) continue;
       
       const isUsd = r.method.includes('$');
-      let convertedAmt = isUsd ? amt * EXCHANGE_RATE : amt;
+      let convertedAmt = isUsd ? Math.round(amt * EXCHANGE_RATE) : Math.round(amt);
       
       totalRielEq += convertedAmt;
       methodStrings.push(`${r.method}: ${amt}`);
@@ -431,7 +430,7 @@ export default function DeliveryPage() {
             if (invBalance <= 0) break;
 
             let applyEq = Math.min(invBalance, fund.eqRemaining);
-            let applyFace = fund.isUsd ? applyEq / EXCHANGE_RATE : applyEq;
+            let applyFace = fund.isUsd ? applyEq / EXCHANGE_RATE : Math.round(applyEq);
 
             paymentRecordsToInsert.push({
                 invoice_id: inv.invoice_id,
@@ -440,8 +439,7 @@ export default function DeliveryPage() {
                 payment_method: fund.method,
                 recorded_by: validSpender,
                 payment_date: new Date().toISOString(), 
-                remarks: `Bulk Credit Settlement`,
-                branch_id: inv.branch_id || activeBranchId 
+                remarks: `Bulk Credit Settlement`
             });
 
             fund.eqRemaining -= applyEq;
@@ -451,7 +449,7 @@ export default function DeliveryPage() {
         }
         
         if (amountAppliedToThisInvoiceRielEq > 0) {
-            let newBalance = (Number(inv.balance_due) || 0) - amountAppliedToThisInvoiceRielEq;
+            let newBalance = Math.round((Number(inv.balance_due) || 0) - amountAppliedToThisInvoiceRielEq);
             let newPaymentMethodStr = inv.payment_method;
             const appliedStr = `Paid: ${formatRiel(amountAppliedToThisInvoiceRielEq)} via [${combinedMethodStr}]`;
 
@@ -471,10 +469,16 @@ export default function DeliveryPage() {
         }
       }
 
-      if (paymentRecordsToInsert.length > 0) {
-        const { error: ledgerError } = await supabase.from('invoice_payments').insert(paymentRecordsToInsert);
-        if (ledgerError) throw new Error("Failed to log payment ledger: " + ledgerError.message);
-      }
+      // 📦 ATOMIC RPC PAYLOAD
+      const atomicPayload = {
+        branch_id: activeBranchId,
+        payments: paymentRecordsToInsert,
+        invoices: updatedInvoices
+      };
+
+      // 🚀 ONE SECURE TRIP TO POSTGRES
+      const { error: rpcError } = await supabase.rpc('process_delivery_payments', { p_payload: atomicPayload });
+      if (rpcError) throw new Error("Transaction Failed: " + rpcError.message);
 
       const uniqueKey = `${debtor.owner}_${debtor.name}`;
       setDeliveries(prev => prev.map(d => {
@@ -482,16 +486,6 @@ export default function DeliveryPage() {
         return matched ? { ...d, ...matched } : d;
       }));
       setCreditPayments(prev => { const n = {...prev}; delete n[uniqueKey]; return n; });
-
-      for (const u of updatedInvoices) {
-        // 🔥 SECURITY FIX: Lock the bulk invoice update to the active branch
-        await supabase.from('invoice_summaries').update({
-          balance_due: u.balance_due,
-          payment_method: u.payment_method,
-          is_done: u.is_done,
-          delivery_status: u.delivery_status
-        }).eq('invoice_id', u.invoice_id).eq('branch_id', activeBranchId);
-      }
 
       showToast('success', 'Credit Settled', 'Account balance updated successfully.');
 

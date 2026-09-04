@@ -151,12 +151,16 @@ setActiveBatches(bMap)
 }
 
 async function fetchHistory() {
-const { data } = await supabase.from('app_settings').select('setting_value').eq('setting_key', 'calculator_history').single()
-if (data && data.setting_value) {
-setGlobalHistory(data.setting_value);
-setHistory(data.setting_value.filter((h: any) => h.branch_id === activeBranchId || !h.branch_id));
-}
-}
+    const branchKey = activeBranchId === 0 ? 'calculator_history' : `calculator_history_${activeBranchId}`;
+    const { data } = await supabase.from('app_settings').select('setting_value').eq('setting_key', branchKey).maybeSingle()
+    if (data && data.setting_value) {
+      setGlobalHistory(data.setting_value);
+      setHistory(data.setting_value); // No need to filter locally, it is already isolated!
+    } else {
+      setGlobalHistory([]);
+      setHistory([]);
+    }
+  }
 
 const handleReset = () => {
 setRice1Id(''); setRice1Qty(''); setRice1BatchId(null);
@@ -171,15 +175,15 @@ setActiveDropdown(null);
 }
 
 const clearHistory = async () => {
-if (!confirm('Are you sure you want to clear all calculator history for this branch?')) return
-const keptHistory = globalHistory.filter(h => h.branch_id !== activeBranchId && h.branch_id !== undefined);
-setGlobalHistory(keptHistory);
-setHistory([]);
-await supabase.from('app_settings').upsert({
-setting_key: 'calculator_history',
-setting_value: keptHistory
-}, { onConflict: 'setting_key' })
-}
+    if (!confirm('Are you sure you want to clear all calculator history for this branch?')) return
+    setGlobalHistory([]);
+    setHistory([]);
+    const branchKey = activeBranchId === 0 ? 'calculator_history' : `calculator_history_${activeBranchId}`;
+    await supabase.from('app_settings').upsert({
+      setting_key: branchKey,
+      setting_value: []
+    }, { onConflict: 'setting_key' })
+  }
 
 // 🔥 PERFORMANCE FIX: Memoize complex array filtering to prevent UI freezing on input keystrokes
 const dropdownFilteredProducts = useMemo(() => {
@@ -240,335 +244,165 @@ setBagQty(Math.ceil(finalYield));
 }, [finalYield, bagId]);
 
 const handleExecuteInventorySync = async () => {
-if (!calcResult || !rice1 || !rice2) return;
-if (showThirdRice && !rice3) {
-showToast('error', 'Missing Information', 'Please select the 3rd rice or remove it.');
-return;
-}
-// 🔥 RELIABILITY FIX: Strip commas to prevent NaN crashes which bypass strict stock validation
-const qtyToDeduct1 = Number(String(rice1Qty).replace(/,/g, '')) || 0;
-const qtyToDeduct2 = Number(String(rice2Qty).replace(/,/g, '')) || 0;
-const qtyToDeduct3 = showThirdRice ? (Number(String(rice3Qty).replace(/,/g, '')) || 0) : 0;
-const qtyToDeductBag = Number(String(bagQty).replace(/,/g, '')) || 0;
-
-if (syncMode === 'new' && (!newMixName || newMixPrice === '')) {
-showToast('error', 'Missing Information', 'Please enter a name for the new mix.');
-return;
-}
-if (syncMode === 'existing' && !targetProductId) {
-showToast('error', 'Missing Information', 'Please select an existing product to update.');
-return;
-}
-
-// 🔥 1. MANDATORY BAG VALIDATION
-if (!bagId || qtyToDeductBag <= 0) {
-showToast('error', 'Missing Bag', 'Please select a packaging bag and enter the quantity.');
-return;
-}
-
-// 🔥 1.5 STRICT STOCK VALIDATION (Prevents Negative Inventory)
-const requiredStock: Record<number, { name: string, needed: number, available: number }> = {};
-
-if (rice1 && qtyToDeduct1 > 0) {
-  requiredStock[rice1.id] = { name: rice1.name, needed: (requiredStock[rice1.id]?.needed || 0) + qtyToDeduct1, available: Number(rice1.stock) };
-}
-if (rice2 && qtyToDeduct2 > 0) {
-  requiredStock[rice2.id] = { name: rice2.name, needed: (requiredStock[rice2.id]?.needed || 0) + qtyToDeduct2, available: Number(rice2.stock) };
-}
-if (showThirdRice && rice3 && qtyToDeduct3 > 0) {
-  requiredStock[rice3.id] = { name: rice3.name, needed: (requiredStock[rice3.id]?.needed || 0) + qtyToDeduct3, available: Number(rice3.stock) };
-}
-if (bagProd && qtyToDeductBag > 0) {
-  requiredStock[bagProd.id] = { name: bagProd.name, needed: (requiredStock[bagProd.id]?.needed || 0) + qtyToDeductBag, available: Number(bagProd.stock) };
-}
-
-for (const prodId in requiredStock) {
-  const req = requiredStock[prodId];
-  if (req.needed > req.available) {
-      showToast('error', 'Insufficient Stock', `Not enough ${req.name}. You need ${req.needed} but only have ${req.available} in stock.`);
-      return; // 🛑 Blocks the mix entirely
+  if (!calcResult || !rice1 || !rice2) return;
+  if (showThirdRice && !rice3) {
+    showToast('error', 'Missing Information', 'Please select the 3rd rice or remove it.');
+    return;
   }
-}
 
-setIsProcessing(true);
+  // 🔥 RELIABILITY FIX: Strip commas to prevent NaN crashes
+  const qtyToDeduct1 = Number(String(rice1Qty).replace(/,/g, '')) || 0;
+  const qtyToDeduct2 = Number(String(rice2Qty).replace(/,/g, '')) || 0;
+  const qtyToDeduct3 = showThirdRice ? (Number(String(rice3Qty).replace(/,/g, '')) || 0) : 0;
+  const qtyToDeductBag = Number(String(bagQty).replace(/,/g, '')) || 0;
 
-try {
-// 🔥 2. DUPLICATE NAME PREVENTION
-if (syncMode === 'new') {
-const { data: existingProd } = await supabase
-.from('products')
-.select('id')
-.ilike('name', newMixName.trim())
-.eq('branch_id', activeBranchId)
-.eq('is_archived', false)
-.maybeSingle();
-if (existingProd) {
-showToast('error', 'Duplicate Name', 'A product with this name already exists. Please use a different name or select "Add to Existing".');
-setIsProcessing(false);
-return;
-}
-}
+  if (syncMode === 'new' && (!newMixName || newMixPrice === '')) {
+    showToast('error', 'Missing Information', 'Please enter a name for the new mix.');
+    return;
+  }
+  if (syncMode === 'existing' && !targetProductId) {
+    showToast('error', 'Missing Information', 'Please select an existing product to update.');
+    return;
+  }
 
-// 🟢 HELPER: DEDUCT FROM MASTER STOCK AND FIFO BATCHES
-// 🔥 FIX: Now strictly returns an array of EXACTLY which batches were hit and by how much!
-const processDeduction = async (prodId: number, qty: number, specificBatchId: number | null) => {
-  if (qty <= 0) return [];
-  const deductions: { batchId: number | null, qty: number }[] = [];
+  if (!bagId || qtyToDeductBag <= 0) {
+    showToast('error', 'Missing Bag', 'Please select a packaging bag and enter the quantity.');
+    return;
+  }
 
-  if (specificBatchId) {
-    const batchCheck = activeBatches[prodId]?.find(b => b.id === specificBatchId);
-    if (batchCheck && batchCheck.remaining_qty < qty) {
-      throw new Error(`The selected batch for ${products.find(p=>p.id===prodId)?.name} only has ${batchCheck.remaining_qty} bags left, but you are trying to use ${qty}.`);
+  // 🔥 STRICT STOCK VALIDATION (Prevents Negative Inventory)
+  const requiredStock: Record<number, { name: string, needed: number, available: number }> = {};
+  if (rice1 && qtyToDeduct1 > 0) requiredStock[rice1.id] = { name: rice1.name, needed: (requiredStock[rice1.id]?.needed || 0) + qtyToDeduct1, available: Number(rice1.stock) };
+  if (rice2 && qtyToDeduct2 > 0) requiredStock[rice2.id] = { name: rice2.name, needed: (requiredStock[rice2.id]?.needed || 0) + qtyToDeduct2, available: Number(rice2.stock) };
+  if (showThirdRice && rice3 && qtyToDeduct3 > 0) requiredStock[rice3.id] = { name: rice3.name, needed: (requiredStock[rice3.id]?.needed || 0) + qtyToDeduct3, available: Number(rice3.stock) };
+  if (bagProd && qtyToDeductBag > 0) requiredStock[bagProd.id] = { name: bagProd.name, needed: (requiredStock[bagProd.id]?.needed || 0) + qtyToDeductBag, available: Number(bagProd.stock) };
+
+  for (const prodId in requiredStock) {
+    const req = requiredStock[prodId];
+    if (req.needed > req.available) {
+        showToast('error', 'Insufficient Stock', `Not enough ${req.name}. You need ${req.needed} but only have ${req.available} in stock.`);
+        return;
     }
-    
-    await supabase.rpc('adjust_product_stock', { p_product_id: prodId, p_quantity: -qty });
-    await supabase.rpc('adjust_batch_stock', { p_batch_id: specificBatchId, p_quantity: -qty });
-    deductions.push({ batchId: specificBatchId, qty });
-  } else {
-    await supabase.rpc('adjust_product_stock', { p_product_id: prodId, p_quantity: -qty });
-    const { data: batches } = await supabase.from('inventory_batches')
-      .select('*')
-      .eq('product_id', prodId)
-      .eq('branch_id', activeBranchId)
-      .gt('remaining_qty', 0)
-      .order('id', { ascending: true });
-      
-    let leftToDeduct = qty;
-    if (batches) {
-      for (const b of batches) {
-        if (leftToDeduct <= 0) break;
-        const available = b.remaining_qty;
-        const take = Math.min(available, leftToDeduct);
-        
-        await supabase.rpc('adjust_batch_stock', { p_batch_id: b.id, p_quantity: -take });
-        deductions.push({ batchId: b.id, qty: take });
-        leftToDeduct -= take;
+  }
+
+  setIsProcessing(true);
+
+  try {
+    if (syncMode === 'new') {
+      const { data: existingProd } = await supabase.from('products').select('id').ilike('name', newMixName.trim()).eq('branch_id', activeBranchId).eq('is_archived', false).maybeSingle();
+      if (existingProd) {
+        showToast('error', 'Duplicate Name', 'A product with this name already exists. Please use a different name or select "Add to Existing".');
+        setIsProcessing(false);
+        return;
       }
     }
-    
-    // 🔥 FIX: "GHOST STOCK" PREVENTION
-    // If batches ran out but master stock allowed the deduction, log the remainder 
-    // as null so it is 100% refunded during a void!
-    if (leftToDeduct > 0) {
-      deductions.push({ batchId: null, qty: leftToDeduct });
+
+    // 📦 PREPARE THE ATOMIC PAYLOAD
+    const recipeString = `Recipe: ${qtyToDeduct1}x ${rice1.name} + ${qtyToDeduct2}x ${rice2.name}${showThirdRice && rice3 ? ` + ${qtyToDeduct3}x ${rice3.name}` : ''}`;
+    const ingredientsPayload = [];
+    if (rice1 && qtyToDeduct1 > 0) ingredientsPayload.push({ id: rice1.id, qty: qtyToDeduct1, batchId: rice1BatchId });
+    if (rice2 && qtyToDeduct2 > 0) ingredientsPayload.push({ id: rice2.id, qty: qtyToDeduct2, batchId: rice2BatchId });
+    if (showThirdRice && rice3 && qtyToDeduct3 > 0) ingredientsPayload.push({ id: rice3.id, qty: qtyToDeduct3, batchId: rice3BatchId });
+
+    const mixPayload: any = {
+        branch_id: activeBranchId,
+        sync_mode: syncMode,
+        yield_kg: finalYield,
+        final_cogs: finalCogs,
+        recipe_string: recipeString,
+        ingredients: ingredientsPayload,
+        bag: bagProd && qtyToDeductBag > 0 ? { id: bagProd.id, qty: qtyToDeductBag } : null
+    };
+
+    if (syncMode === 'new') {
+        mixPayload.new_product = {
+            name: newMixName,
+            price: Number(String(newMixPrice).replace(/,/g, '')) || 0,
+            cost_price: Math.round(finalCogs),
+            weight: newMixType === 'wholesale' ? 50 : newMixType === 'half' ? 25 : 1
+        };
+    } else {
+        mixPayload.target_product = { id: targetProd?.id, name: targetProd?.name };
     }
+
+    // 🚀 ONE SECURE TRIP TO POSTGRES
+    const { data: rpcData, error: rpcError } = await supabase.rpc('execute_rice_mix', { p_payload: mixPayload });
+    if (rpcError) throw rpcError;
+
+    // Build & Save History Record
+    const yieldStr = `${finalYield.toLocaleString('en-US', { maximumFractionDigits: 2 })} ${outputUnit}`;
+    const newRecord: MixHistory = {
+      id: Date.now().toString(),
+      time: new Date().toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }),
+      rice1Name: rice1.name, rice1Ratio: qtyToDeduct1, rice2Name: rice2.name, rice2Ratio: qtyToDeduct2,
+      rice3Name: showThirdRice && rice3 ? rice3.name : undefined, rice3Ratio: showThirdRice ? qtyToDeduct3 : undefined,
+      mixedCogs: finalCogs, yieldStr: yieldStr, bagUsed: bagProd ? bagProd.name : undefined, bagQty: bagProd ? qtyToDeductBag : undefined,
+      branch_id: activeBranchId, targetProductId: rpcData.targetProductId, targetBatchId: rpcData.targetBatchId,
+      yieldKg: finalYield, ingredients: rpcData.usedIngredients, bagId: bagProd ? bagProd.id : undefined,
+    }
+    
+    const updatedGlobalHistory = [newRecord, ...globalHistory].slice(0, 100); 
+    setGlobalHistory(updatedGlobalHistory);
+    setHistory(updatedGlobalHistory);
+    
+    const branchKey = activeBranchId === 0 ? 'calculator_history' : `calculator_history_${activeBranchId}`;
+    await supabase.from('app_settings').upsert({ setting_key: branchKey, setting_value: updatedGlobalHistory }, { onConflict: 'setting_key' })
+
+    showToast('success', 'Sync Successful', 'Inventory synced and Recipe stored in batch!');
+    handleReset();
+    fetchProducts();
+    fetchBatches();
+
+  } catch (err: any) {
+    showToast('error', 'Sync Failed', err.message);
+  } finally {
+    setIsProcessing(false);
   }
-  return deductions;
+}
+
+// 🔥 NEW: VOID MIX HISTORY (ATOMIC VERSION)
+const handleVoidMix = async (historyId: string) => {
+  const record = globalHistory.find(h => h.id === historyId);
+  if (!record) return;
+  if (!record.targetProductId || !record.targetBatchId) {
+    showToast('error', 'Legacy Record', 'Cannot automatically void this older record.');
+    return;
+  }
+  if (!confirm('🚨 Are you sure you want to VOID this mix?\n\nThis will instantly:\n1. Delete the generated batch\n2. Deduct the output stock\n3. Restore all original ingredients back to inventory.')) return;
+  
+  setIsProcessing(true);
+  try {
+    const payload = {
+      branch_id: activeBranchId,
+      targetProductId: record.targetProductId,
+      targetBatchId: record.targetBatchId,
+      yieldKg: record.yieldKg,
+      ingredients: record.ingredients,
+      bagId: record.bagId,
+      bagQty: record.bagQty
+    };
+
+    // 🚀 ONE SECURE TRIP TO REVERSE EVERYTHING
+    const { error } = await supabase.rpc('void_rice_mix', { p_payload: payload });
+    if (error) throw error;
+
+    // Clean up history JSON
+    const updatedHistory = globalHistory.filter(h => h.id !== historyId);
+    setGlobalHistory(updatedHistory);
+    setHistory(updatedHistory);
+    
+    const branchKey = activeBranchId === 0 ? 'calculator_history' : `calculator_history_${activeBranchId}`;
+    await supabase.from('app_settings').upsert({ setting_key: branchKey, setting_value: updatedHistory }, { onConflict: 'setting_key' });
+
+    showToast('success', 'Mix Voided', 'Inventory has been fully restored.');
+    fetchProducts();
+    fetchBatches();
+  } catch(err:any) {
+     showToast('error', 'Void Failed', err.message);
+  } finally {
+     setIsProcessing(false);
+  }
 };
-
-// 1. EXECUTE INGREDIENT DEDUCTIONS (Tracking the exact splits!)
-let r1D = [] as any[];
-let r2D = [] as any[];
-let r3D = [] as any[];
-
-if (rice1 && qtyToDeduct1 > 0) r1D = await processDeduction(rice1.id, qtyToDeduct1, rice1BatchId);
-if (rice2 && qtyToDeduct2 > 0) r2D = await processDeduction(rice2.id, qtyToDeduct2, rice2BatchId);
-if (showThirdRice && rice3 && qtyToDeduct3 > 0) r3D = await processDeduction(rice3.id, qtyToDeduct3, rice3BatchId);
-
-// 2. EXECUTE BAG DEDUCTION
-if (bagProd && qtyToDeductBag > 0) await processDeduction(bagProd.id, qtyToDeductBag, null);
-
-let finalTargetId = targetProductId;
-let finalTargetName = targetProd?.name || ''; 
-
-// 3. ADD MIXED RICE TO TARGET
-if (syncMode === 'new') {
-  const payload = {
-    name: newMixName,
-    // 🔥 RELIABILITY FIX: Strip commas to prevent NaN database corruption
-    price: Number(String(newMixPrice).replace(/,/g, '')) || 0,
-    cost_price: Math.round(finalCogs),
-    weight: newMixType === 'wholesale' ? 50 : newMixType === 'half' ? 25 : 1, 
-    stock: finalYield,
-    branch_id: activeBranchId 
-  }
-  const { data: newProd, error } = await supabase.from('products').insert([payload]).select().single();
-  if (error) throw error;
-  finalTargetId = newProd.id.toString();
-  finalTargetName = newMixName; 
-
-} else if (targetProd) {
-  await supabase.rpc('adjust_product_stock', { p_product_id: targetProd.id, p_quantity: finalYield });
-  // 🔥 SECURITY FIX: Cryptographically lock the product update strictly to the active branch
-  const { error } = await supabase.from('products').update({ cost_price: Math.round(finalCogs) }).eq('id', targetProd.id).eq('branch_id', activeBranchId);
-  if (error) throw error;
-  finalTargetId = targetProd.id.toString();
-  finalTargetName = targetProd.name; 
-}
-
-// 4. CREATE NEW BATCH RECORD (🔥 Now we capture the returned ID)
-const recipeString = `Recipe: ${qtyToDeduct1}x ${rice1.name} + ${qtyToDeduct2}x ${rice2.name}${showThirdRice && rice3 ? ` + ${qtyToDeduct3}x ${rice3.name}` : ''}`;
-
-const { data: generatedBatch, error: batchErr } = await supabase.from('inventory_batches').insert([{
-  product_id: Number(finalTargetId),
-  product_name: finalTargetName, 
-  cost_price: Math.round(finalCogs),
-  remaining_qty: finalYield,
-  branch_id: activeBranchId,
-  notes: recipeString 
-}]).select().single();
-
-if (batchErr) throw batchErr;
-
-// 🔥 COLLECT INGREDIENT TRACKING FOR POTENTIAL VOID
-// FIX: By saving the exact batches returned by processDeduction, the Void function will never have to guess!
-const usedIngredients: {id: number, qty: number, batchId?: number | null}[] = [];
-if (rice1) r1D.forEach((d: any) => usedIngredients.push({ id: rice1.id, qty: d.qty, batchId: d.batchId }));
-if (rice2) r2D.forEach((d: any) => usedIngredients.push({ id: rice2.id, qty: d.qty, batchId: d.batchId }));
-if (showThirdRice && rice3) r3D.forEach((d: any) => usedIngredients.push({ id: rice3.id, qty: d.qty, batchId: d.batchId }));
-
-// 5. UPDATE INTERNAL APP HISTORY
-const yieldStr = `${finalYield.toLocaleString('en-US', { maximumFractionDigits: 2 })} ${outputUnit}`;
-const newRecord: MixHistory = {
-id: Date.now().toString(),
-time: new Date().toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }),
-rice1Name: rice1.name,
-rice1Ratio: qtyToDeduct1,
-rice2Name: rice2.name,
-rice2Ratio: qtyToDeduct2,
-rice3Name: showThirdRice && rice3 ? rice3.name : undefined,
-rice3Ratio: showThirdRice ? qtyToDeduct3 : undefined,
-mixedCogs: finalCogs,
-yieldStr: yieldStr,
-bagUsed: bagProd ? bagProd.name : undefined,
-bagQty: bagProd ? qtyToDeductBag : undefined,
-branch_id: activeBranchId,
-// 🔥 STORE TRACKING IDs
-targetProductId: Number(finalTargetId),
-targetBatchId: generatedBatch.id,
-yieldKg: finalYield,
-ingredients: usedIngredients,
-bagId: bagProd ? bagProd.id : undefined,
-}
-const updatedGlobalHistory = [newRecord, ...globalHistory].slice(0, 100);
-setGlobalHistory(updatedGlobalHistory);
-setHistory(updatedGlobalHistory.filter(h => h.branch_id === activeBranchId || !h.branch_id));
-await supabase.from('app_settings').upsert({ setting_key: 'calculator_history', setting_value: updatedGlobalHistory }, { onConflict: 'setting_key' })
-
-showToast('success', 'Sync Successful', 'Inventory synced and Recipe stored in batch!');
-handleReset();
-fetchProducts();
-fetchBatches();
-
-} catch (err: any) {
-showToast('error', 'Sync Failed', err.message);
-} finally {
-setIsProcessing(false);
-}
-}
-
-// 🔥 NEW: VOID MIX HISTORY
-  const handleVoidMix = async (historyId: string) => {
-    const record = globalHistory.find(h => h.id === historyId);
-    if (!record) return;
-    if (!record.targetProductId || !record.targetBatchId) {
-      showToast('error', 'Legacy Record', 'Cannot automatically void this older record.');
-      return;
-    }
-    if (!confirm('🚨 Are you sure you want to VOID this mix?\n\nThis will instantly:\n1. Delete the generated batch\n2. Deduct the output stock\n3. Restore all original ingredients back to inventory.')) return;
-    
-    setIsProcessing(true);
-    try {
-      // 1. Reverse Target Product & Batch
-      await supabase.rpc('adjust_product_stock', { p_product_id: record.targetProductId, p_quantity: -(record.yieldKg || 0) });
-      // 🔥 SECURITY FIX: Enforce strict branch isolation on batch deletion
-      await supabase.from('inventory_batches').delete().eq('id', record.targetBatchId).eq('branch_id', activeBranchId);
-
-      // 2. Restore Ingredients
-      if (record.ingredients) {
-        // 🔥 FIX: Group identical rice types together so they process in a single safe database 
-        // transaction. This eliminates the race condition of mixing the same rice twice!
-        const mergedIngredients = Object.values(record.ingredients.reduce((acc: any, ing) => {
-            const key = `${ing.id}_${ing.batchId || 'AUTO'}`;
-            if (!acc[key]) {
-                acc[key] = { ...ing };
-            } else {
-                acc[key].qty += ing.qty;
-            }
-            return acc;
-        }, {}));
-
-        for (const ing of mergedIngredients as any[]) {
-          // Restore Master Product Stock
-          await supabase.rpc('adjust_product_stock', { p_product_id: ing.id, p_quantity: ing.qty });
-          
-          if (ing.batchId) {
-            // ✅ FIX: Use atomic RPC to prevent race conditions during mix voids
-            await supabase.rpc('adjust_batch_stock', { p_batch_id: ing.batchId, p_quantity: ing.qty });
-          } else {
-             // 🔥 FIX: Auto-FIFO Restoration Logic
-             let targetBatchId = null;
-             let currentQty = 0;
-
-             // Step A: Find the OLDEST ACTIVE batch (This matches what the UI shows on the main row!)
-             const { data: activeBatches } = await supabase.from('inventory_batches')
-               .select('id, remaining_qty')
-               .eq('product_id', ing.id)
-               .eq('branch_id', activeBranchId)
-               .gt('remaining_qty', 0)
-               .order('id', { ascending: true }) // <--- FIX: Sorts oldest first to match UI
-               .limit(1);
-
-             if (activeBatches && activeBatches.length > 0) {
-                 targetBatchId = activeBatches[0].id;
-                 currentQty = activeBatches[0].remaining_qty;
-             } else {
-                 // Step B: If completely out of stock, resurrect the newest empty batch
-                 const { data: recentBatches } = await supabase.from('inventory_batches')
-                   .select('id, remaining_qty')
-                   .eq('product_id', ing.id)
-                   .eq('branch_id', activeBranchId)
-                   .order('id', { ascending: false })
-                   .limit(1);
-                 
-                 if (recentBatches && recentBatches.length > 0) {
-                     targetBatchId = recentBatches[0].id;
-                     currentQty = recentBatches[0].remaining_qty;
-                 }
-             }
-
-             // Apply the restoration
-             if (targetBatchId) {
-                 // ✅ FIX: Use atomic RPC
-                 await supabase.rpc('adjust_batch_stock', { p_batch_id: targetBatchId, p_quantity: ing.qty });
-             } else {
-                 // Step C: Absolute Fallback (Create new)
-                 const prodData = products.find(p => p.id === ing.id);
-                 if (prodData) {
-                     await supabase.from('inventory_batches').insert([{
-                         product_id: ing.id,
-                         product_name: prodData.name,
-                         cost_price: prodData.cost_price,
-                         remaining_qty: ing.qty,
-                         branch_id: activeBranchId,
-                         notes: `Restored from Voided Mix`
-                     }]);
-                 }
-             }
-          }
-        }
-      }
-      
-      // 3. Restore Bags
-      if (record.bagId && record.bagQty) {
-        await supabase.rpc('adjust_product_stock', { p_product_id: record.bagId, p_quantity: record.bagQty });
-      }
-
-      // 4. Remove from history JSON
-      const updatedHistory = globalHistory.filter(h => h.id !== historyId);
-      setGlobalHistory(updatedHistory);
-      setHistory(updatedHistory.filter(h => h.branch_id === activeBranchId || !h.branch_id));
-      await supabase.from('app_settings').upsert({ setting_key: 'calculator_history', setting_value: updatedHistory }, { onConflict: 'setting_key' });
-
-      showToast('success', 'Mix Voided', 'Inventory has been fully restored.');
-      fetchProducts();
-      fetchBatches();
-    } catch(err:any) {
-       showToast('error', 'Void Failed', err.message);
-    } finally {
-       setIsProcessing(false);
-    }
-  };
 
 // 🔥 NEW: SAVE HISTORY EDIT (Updates Batch + History JSON)
 const handleSaveHistoryEdit = async (historyId: string) => {
@@ -600,19 +434,21 @@ const batchPayload = { cost_price: cleanMixedCogs };
 await supabase.from('inventory_batches').update(batchPayload).eq('id', record.targetBatchId).eq('branch_id', activeBranchId);
 
 // Update local history JSON
-const updatedHistory = globalHistory.map(h => {
-if (h.id === historyId) {
-const newUnit = h.yieldStr.replace(/[0-9.,]+/, '').trim();
-return { ...h, mixedCogs: cleanMixedCogs, yieldKg: cleanYieldKg, yieldStr: `${cleanYieldKg.toLocaleString('en-US', { maximumFractionDigits: 2 })} ${newUnit}` };
-}
-return h;
-});
+      const updatedHistory = globalHistory.map(h => {
+        if (h.id === historyId) {
+          const newUnit = h.yieldStr.replace(/[0-9.,]+/, '').trim();
+          return { ...h, mixedCogs: cleanMixedCogs, yieldKg: cleanYieldKg, yieldStr: `${cleanYieldKg.toLocaleString('en-US', { maximumFractionDigits: 2 })} ${newUnit}` };
+        }
+        return h;
+      });
 
-setGlobalHistory(updatedHistory);
-setHistory(updatedHistory.filter(h => h.branch_id === activeBranchId || !h.branch_id));
-await supabase.from('app_settings').upsert({ setting_key: 'calculator_history', setting_value: updatedHistory }, { onConflict: 'setting_key' });
+      setGlobalHistory(updatedHistory);
+      setHistory(updatedHistory);
+      
+      const branchKey = activeBranchId === 0 ? 'calculator_history' : `calculator_history_${activeBranchId}`;
+      await supabase.from('app_settings').upsert({ setting_key: branchKey, setting_value: updatedHistory }, { onConflict: 'setting_key' });
 
-showToast('success', 'History Updated', 'The mix record and database have been updated.');
+      showToast('success', 'History Updated', 'The mix record and database have been updated.');
 setEditingHistoryId(null);
 fetchProducts();
 fetchBatches();
