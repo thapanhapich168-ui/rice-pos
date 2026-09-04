@@ -2076,246 +2076,271 @@ export default function POSPage() {
     <div style={{ display: 'flex', width: '100%', height: '100dvh', overflow: 'hidden', backgroundColor: '#ffffff', boxSizing: 'border-box' }}>
       
       {/* SELECTION ENGINE VIEW GRID PANEL */}
-      <div className="hide-scrollbar" style={{ flex: 1, height: '100%', overflowY: 'auto', backgroundColor: '#f8fafc', minWidth: 0, WebkitOverflowScrolling: 'touch' }}>
+      <div style={{ flex: 1, height: '100%', display: 'flex', flexDirection: 'column', backgroundColor: '#f8fafc', minWidth: 0 }}>
         
-        <div className="main-wrapper">
+        {/* 🟢 TRULY FROZEN HEADER WRAPPER (Outside of scrollable div!) */}
+        <div style={{ flexShrink: 0, backgroundColor: '#f8fafc', zIndex: 40, paddingTop: 'max(12px, env(safe-area-inset-top, 12px))', borderBottom: '1px solid #e2e8f0', paddingBottom: '16px', paddingLeft: isDeviceMobile ? '16px' : '24px', paddingRight: isDeviceMobile ? '16px' : '24px' }}>
           
-          {/* 🟢 STICKY HEADER WRAPPER AROUND TITLE, TABS & SEARCH */}
-          <div className="pos-sticky-header">
-            <div className="header-container" style={{ marginBottom: '16px', display: 'flex', alignItems: 'center' }}>
-              <div className="header-left" style={{ flex: 1, minWidth: 0, marginRight: '12px' }}>
-                <h1 className="saas-page-title" style={{ margin: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                  {editingInvoiceId ? `✏️ Editing: ${editingInvoiceId}` : `🛒 ${currentT.title}`}
-                </h1>
-              </div>
-              {editingInvoiceId && (
+          <div className="header-container" style={{ marginBottom: '16px', display: 'flex', alignItems: 'center', marginLeft: isDeviceMobile ? '54px' : '0', width: isDeviceMobile ? 'calc(100% - 54px)' : '100%' }}>
+            <div className="header-left" style={{ flex: 1, minWidth: 0, marginRight: '12px' }}>
+              <h1 className="saas-page-title" style={{ margin: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                {editingInvoiceId ? `✏️ Editing: ${editingInvoiceId}` : `🛒 ${currentT.title}`}
+              </h1>
+            </div>
+            {editingInvoiceId && (
+              <button 
+                onClick={cancelEditMode} 
+                className="saas-btn saas-btn-danger"
+                style={{ flexShrink: 0, padding: '6px 12px', fontSize: '13px' }}
+              >
+                ❌ Cancel
+              </button>
+            )}
+          </div>
+
+          <div style={{ marginBottom: '16px' }}>
+            <div className="saas-tab-container hide-scrollbar" style={{ display: 'flex', flexWrap: 'nowrap', overflowX: 'auto', marginBottom: activeTab === 'retail' ? '12px' : '0px', width: '100%' }}>
+              <button onClick={() => { 
+                setActiveTab('retail'); 
+                setSelectedCustomerId(''); 
+                setCustomerSearchTerm(''); 
+                loadProductsAndSettings();
+                loadBatches();
+              }} className={`saas-tab ${activeTab === 'retail' ? 'active' : ''}`} style={{ flex: 1, minWidth: '120px', textAlign: 'center' }}>
+                {currentT.retail}
+              </button>
+              
+              <button onClick={() => { 
+                setActiveTab('wholesale');
+                if (!selectedCustomerId) {
+                  const walkInCust = customers.find(c => c.name.toLowerCase() === 'walk-in' || c.name.toLowerCase() === 'walk in');
+                  if (walkInCust) setSelectedCustomerId(walkInCust.id.toString());
+                }
+                loadProductsAndSettings();
+                loadBatches();
+              }} className={`saas-tab ${activeTab === 'wholesale' ? 'active' : ''}`} style={{ flex: 1, minWidth: '120px', textAlign: 'center' }}>
+                {currentT.wholesale}
+              </button>
+            </div>
+
+            {activeTab === 'retail' && (
+              <div className="saas-tab-container hide-scrollbar" style={{ flexWrap: 'nowrap', overflowX: 'auto', marginBottom: '0px', background: '#f1f5f9', border: 'none', boxShadow: 'none' }}>
                 <button 
-                  onClick={cancelEditMode} 
-                  className="saas-btn saas-btn-danger"
-                  style={{ flexShrink: 0, padding: '6px 12px', fontSize: '13px' }}
+                  onClick={() => setRetailSubTab('active')} 
+                  onDragOver={(e) => e.preventDefault()} 
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    const pid = Number(e.dataTransfer.getData('product_id'));
+                    if (pid) toggleProductActiveStatus(pid, 'active');
+                  }}
+                  className={`saas-tab ${retailSubTab === 'active' ? 'active' : ''}`}
+                  style={{ minWidth: 'max-content' }}
                 >
-                  ❌ Cancel
-                </button>
-              )}
-            </div>
-
-            <div style={{ marginBottom: '16px' }}>
-              <div className="saas-tab-container hide-scrollbar" style={{ display: 'flex', flexWrap: 'nowrap', overflowX: 'auto', marginBottom: activeTab === 'retail' ? '12px' : '0px', width: '100%' }}>
-                <button onClick={() => { 
-                  setActiveTab('retail'); 
-                  setSelectedCustomerId(''); 
-                  setCustomerSearchTerm(''); 
-                  loadProductsAndSettings();
-                  loadBatches();
-                }} className={`saas-tab ${activeTab === 'retail' ? 'active' : ''}`} style={{ flex: 1, minWidth: '120px', textAlign: 'center' }}>
-                  {currentT.retail}
+                  Active ({products.filter(p => parseFloat(String(p.weight)) < 50 && !hiddenRetailIds.includes(p.id)).length})
                 </button>
                 
-                <button onClick={() => { 
-                  setActiveTab('wholesale');
-                  if (!selectedCustomerId) {
-                    const walkInCust = customers.find(c => c.name.toLowerCase() === 'walk-in' || c.name.toLowerCase() === 'walk in');
-                    if (walkInCust) setSelectedCustomerId(walkInCust.id.toString());
-                  }
-                  loadProductsAndSettings();
-                  loadBatches();
-                }} className={`saas-tab ${activeTab === 'wholesale' ? 'active' : ''}`} style={{ flex: 1, minWidth: '120px', textAlign: 'center' }}>
-                  {currentT.wholesale}
+                <button 
+                  onClick={() => setRetailSubTab('inactive')} 
+                  onDragOver={(e) => e.preventDefault()} 
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    const pid = Number(e.dataTransfer.getData('product_id'));
+                    if (pid) toggleProductActiveStatus(pid, 'inactive');
+                  }}
+                  className={`saas-tab ${retailSubTab === 'inactive' ? 'active' : ''}`}
+                  style={retailSubTab === 'inactive' ? { background: '#ef4444', color: '#fff', minWidth: 'max-content' } : { minWidth: 'max-content' }}
+                >
+                  Non-Active ({products.filter(p => parseFloat(String(p.weight)) < 50 && hiddenRetailIds.includes(p.id)).length})
                 </button>
               </div>
+            )}
+          </div>
 
-              {activeTab === 'retail' && (
-                <div className="saas-tab-container hide-scrollbar" style={{ flexWrap: 'nowrap', overflowX: 'auto', marginBottom: '0px', background: '#f1f5f9', border: 'none', boxShadow: 'none' }}>
-                  <button 
-                    onClick={() => setRetailSubTab('active')} 
-                    onDragOver={(e) => e.preventDefault()} 
-                    onDrop={(e) => {
-                      e.preventDefault();
-                      const pid = Number(e.dataTransfer.getData('product_id'));
-                      if (pid) toggleProductActiveStatus(pid, 'active');
-                    }}
-                    className={`saas-tab ${retailSubTab === 'active' ? 'active' : ''}`}
-                    style={{ minWidth: 'max-content' }}
-                  >
-                    Active ({products.filter(p => parseFloat(String(p.weight)) < 50 && !hiddenRetailIds.includes(p.id)).length})
-                  </button>
-                  
-                  <button 
-                    onClick={() => setRetailSubTab('inactive')} 
-                    onDragOver={(e) => e.preventDefault()} 
-                    onDrop={(e) => {
-                      e.preventDefault();
-                      const pid = Number(e.dataTransfer.getData('product_id'));
-                      if (pid) toggleProductActiveStatus(pid, 'inactive');
-                    }}
-                    className={`saas-tab ${retailSubTab === 'inactive' ? 'active' : ''}`}
-                    style={retailSubTab === 'inactive' ? { background: '#ef4444', color: '#fff', minWidth: 'max-content' } : { minWidth: 'max-content' }}
-                  >
-                    Non-Active ({products.filter(p => parseFloat(String(p.weight)) < 50 && hiddenRetailIds.includes(p.id)).length})
-                  </button>
-                </div>
-              )}
-            </div>
-
-            {/* 🟢 SEARCH AND CATEGORY TABS MOVED INSIDE STICKY HEADER */}
-            {/* 🔥 FIX: Added minWidth: 0 to lock the flex wrapper to the physical screen width */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', width: '100%', minWidth: 0 }}>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px', alignItems: 'flex-start', width: '100%' }}>
-                
-                {/* PRODUCT SEARCH */}
-                <div style={{ flex: 1, minWidth: '240px', position: 'relative' }}>
-                  <span style={{ position: 'absolute', left: '14px', top: '50%', transform: 'translateY(-50%)', color: '#94a3b8', fontSize: '16px', zIndex: 2 }}>🔍</span>
-                  <input 
-                    type="text" 
-                    placeholder={currentT.searchPlaceholder.replace('🔍 ', '').replace('🔍', '').trim()} 
-                    value={searchQuery} 
-                    onChange={(e) => setSearchQuery(e.target.value)} 
-                    className="saas-input"
-                    style={{ paddingLeft: '38px', paddingRight: searchQuery ? '38px' : '14px', width: '100%', fontSize: isDeviceMobile ? '15px' : undefined }} 
-                  />
-                  {searchQuery && (
-                    <button
-                      onClick={() => setSearchQuery('')}
-                      style={{ position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer', fontSize: '16px', zIndex: 2, padding: '4px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-                      title="Clear search"
-                    >✕</button>
-                  )}
-                </div>
-                
-                {/* CUSTOMER SEARCH */}
-                {activeTab === 'wholesale' && (
-                  <div style={{ flex: 1, minWidth: '300px', position: 'relative' }}>
-                    {!selectedCustomer ? (
-                      <div style={{ position: 'relative' }}>
-                        
-                        {isCustomerModalOpen && (
-                          <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, zIndex: 99 }} onMouseDown={() => setIsCustomerModalOpen(false)}></div>
-                        )}
-                        
-                        <span style={{ position: 'absolute', left: '14px', top: '50%', transform: 'translateY(-50%)', color: '#94a3b8', fontSize: '16px', zIndex: isCustomerModalOpen ? 101 : 2 }}>🔍</span>
-                        <input 
-                          type="text"
-                          placeholder={currentT.selectCustomer.replace('🔍 ', '').replace('🔍', '').trim()}
-                          value={customerSearchTerm}
-                          onChange={e => setCustomerSearchTerm(e.target.value)}
-                          onFocus={() => setIsCustomerModalOpen(true)}
-                          className="saas-input"
-                          style={{ paddingLeft: '38px', width: '100%', position: 'relative', zIndex: isCustomerModalOpen ? 100 : 1, borderColor: isCustomerModalOpen ? '#b58a3d' : undefined, fontSize: isDeviceMobile ? '15px' : undefined }}
-                        />
-
-                        {/* Inline Dropdown Menu */}
-                        {isCustomerModalOpen && (
-                          <div style={{ position: 'absolute', top: 'calc(100% + 6px)', left: 0, right: 0, backgroundColor: '#ffffff', borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: '0 10px 30px rgba(0,0,0,0.15)', zIndex: 101, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-                            <div className="hide-scrollbar" style={{ maxHeight: '350px', overflowY: 'auto', padding: '0', display: 'flex', flexDirection: 'column', backgroundColor: '#ffffff' }}>
-                              
-                              <button onMouseDown={(e) => { e.preventDefault(); setIsCreateCustomerModalOpen(true); setIsCustomerModalOpen(false); }} className="saas-btn" style={{ width: 'calc(100% - 16px)', margin: '8px', padding: '10px', backgroundColor: '#f8fafc', color: '#0f172a', border: '1px dashed #cbd5e1', borderRadius: '8px', cursor: 'pointer', fontWeight: 'normal', fontSize: '14px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', flexShrink: 0 }}>
-                                <span style={{ fontSize: '16px' }}>+</span> Add New Customer
-                              </button>
-                              
-                              {filteredCustomers.length === 0 ? (
-                                <div style={{ textAlign: 'center', padding: '20px', color: '#94a3b8', fontSize: '14px' }}>No customers found</div>
-                              ) : (
-                                filteredCustomers.map(c => (
-                                <div 
-                                  key={c.id} 
-                                  onMouseDown={(e) => { e.preventDefault(); setSelectedCustomerId(c.id.toString()); setCustomerSearchTerm(''); setIsCustomerModalOpen(false); }} 
-                                  style={{ padding: '12px 16px', cursor: 'pointer', transition: 'background 0.2s', borderBottom: '1px solid #f1f5f9', backgroundColor: '#ffffff', display: 'flex', flexDirection: 'column', gap: '4px' }}
-                                >
-                                  <div style={{ fontWeight: '500', fontSize: '15px', color: '#0f172a' }}>{c.name}</div>
-                                  <div style={{ fontSize: '14px', color: '#64748b', display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
-                                    {c.phone && <span>📞 {c.phone}</span>}
-                                    {c.location && <span>📍 {c.location}</span>}
-                                    {c.type && <span>🏷️ {c.type}</span>}
-                                  </div>
-                                </div>
-                              ))
-                              )}
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    ) : (
-                      <div className="saas-input" style={{ backgroundColor: '#fefcf3', borderColor: '#eadeca', color: '#4a3b1b', position: 'relative', display: 'flex', alignItems: 'center', paddingRight: '36px' }}>
-                        <button onClick={() => { setSelectedCustomerId(''); setCustomerSearchTerm(''); }} style={{ position: 'absolute', top: '50%', right: '8px', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#ef4444' }}>
-                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
-                        </button>
-                        
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', alignItems: 'center', width: '100%', gap: '10px' }}>
-                          {/* 1. NAME (Left Aligned) */}
-                          <div style={{ fontWeight: '500', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: '6px', overflow: 'hidden' }}>
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#8a7650" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
-                            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{selectedCustomer.name}</span>
-                          </div>
-                          
-                          {/* 2. PHONE (Center Aligned) */}
-                          <div style={{ color: '#8a7650', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px', whiteSpace: 'nowrap', fontSize: '13px' }}>
-                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"></path></svg>
-                            <span>{selectedCustomer.phone || '-'}</span>
-                          </div>
-
-                          {/* 3. LOCATION (Right Aligned) */}
-                          <div style={{ color: '#8a7650', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '4px', whiteSpace: 'nowrap', overflow: 'hidden', fontSize: '13px' }}>
-                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path><circle cx="12" cy="10" r="3"></circle></svg>
-                            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{selectedCustomer.location || '-'}</span>
-                          </div>
-                        </div>
-                      </div>
-                    )}
-                  </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', width: '100%', minWidth: 0 }}>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px', alignItems: 'flex-start', width: '100%' }}>
+              
+              {/* PRODUCT SEARCH */}
+              <div style={{ flex: 1, minWidth: '240px', position: 'relative' }}>
+                <span style={{ position: 'absolute', left: '14px', top: '50%', transform: 'translateY(-50%)', color: '#94a3b8', fontSize: '16px', zIndex: 2 }}>🔍</span>
+                <input 
+                  type="text" 
+                  placeholder={currentT.searchPlaceholder.replace('🔍 ', '').replace('🔍', '').trim()} 
+                  value={searchQuery} 
+                  onChange={(e) => setSearchQuery(e.target.value)} 
+                  className="saas-input"
+                  style={{ paddingLeft: '38px', paddingRight: searchQuery ? '38px' : '14px', width: '100%', fontSize: isDeviceMobile ? '15px' : undefined }} 
+                />
+                {searchQuery && (
+                  <button
+                    onClick={() => setSearchQuery('')}
+                    style={{ position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer', fontSize: '16px', zIndex: 2, padding: '4px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                    title="Clear search"
+                  >✕</button>
                 )}
               </div>
+              
+              {/* CUSTOMER SEARCH */}
+              {activeTab === 'wholesale' && (
+                <div style={{ flex: 1, minWidth: '300px', position: 'relative' }}>
+                  {!selectedCustomer ? (
+                    <div style={{ position: 'relative' }}>
+                      
+                      {isCustomerModalOpen && (
+                        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, zIndex: 99 }} onMouseDown={() => setIsCustomerModalOpen(false)}></div>
+                      )}
+                      
+                      <span style={{ position: 'absolute', left: '14px', top: '50%', transform: 'translateY(-50%)', color: '#94a3b8', fontSize: '16px', zIndex: isCustomerModalOpen ? 101 : 2 }}>🔍</span>
+                      <input 
+                        type="text"
+                        placeholder={currentT.selectCustomer.replace('🔍 ', '').replace('🔍', '').trim()}
+                        value={customerSearchTerm}
+                        onChange={e => setCustomerSearchTerm(e.target.value)}
+                        onFocus={() => setIsCustomerModalOpen(true)}
+                        className="saas-input"
+                        style={{ paddingLeft: '38px', width: '100%', position: 'relative', zIndex: isCustomerModalOpen ? 100 : 1, borderColor: isCustomerModalOpen ? '#b58a3d' : undefined, fontSize: isDeviceMobile ? '15px' : undefined }}
+                      />
 
-              {/* SCROLLABLE CATEGORY TABS WITH MIX & IMPORT BUTTONS APPENDED */}
-              {activeTab !== 'retail' && (
-                // 🔥 FIX: Added maxWidth: '100%' and paddingBottom to smoothly allow scroll without clipping drop shadows
-                <div className="saas-tab-container hide-scrollbar" style={{ display: 'flex', flexWrap: 'nowrap', overflowX: 'auto', width: '100%', maxWidth: '100%', minWidth: 0, border: 'none', boxShadow: 'none', padding: '0 4px 8px 4px', background: 'transparent', gap: '8px', margin: 0 }}>
-                  
-                  {/* 🔥 ADDED DIRECT HORIZONTAL SORTING */}
-                  <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-                    <SortableContext items={riceCategories} strategy={horizontalListSortingStrategy}>
-                      {riceCategories.map(cat => (
-                        <SortableHorizontalTab 
-                          key={cat} 
-                          cat={cat} 
-                          isActive={activeCategory === cat} 
-                          lang={lang} 
-                          onClick={() => setActiveCategory(cat)} 
-                        />
-                      ))}
-                    </SortableContext>
-                  </DndContext>
+                      {/* Inline Dropdown Menu */}
+                      {isCustomerModalOpen && (
+                        <div style={{ position: 'absolute', top: 'calc(100% + 6px)', left: 0, right: 0, backgroundColor: '#ffffff', borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: '0 10px 30px rgba(0,0,0,0.15)', zIndex: 101, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+                          <div className="hide-scrollbar" style={{ maxHeight: '350px', overflowY: 'auto', padding: '0', display: 'flex', flexDirection: 'column', backgroundColor: '#ffffff' }}>
+                            
+                            <button onMouseDown={(e) => { e.preventDefault(); setIsCreateCustomerModalOpen(true); setIsCustomerModalOpen(false); }} className="saas-btn" style={{ width: 'calc(100% - 16px)', margin: '8px', padding: '10px', backgroundColor: '#f8fafc', color: '#0f172a', border: '1px dashed #cbd5e1', borderRadius: '8px', cursor: 'pointer', fontWeight: 'normal', fontSize: '14px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', flexShrink: 0 }}>
+                              <span style={{ fontSize: '16px' }}>+</span> Add New Customer
+                            </button>
+                            
+                            {filteredCustomers.length === 0 ? (
+                                <div style={{ textAlign: 'center', padding: '20px', color: '#94a3b8', fontSize: '14px' }}>No customers found</div>
+                              ) : (
+                                <div style={{ padding: '8px', display: 'flex', flexDirection: 'column', gap: '8px', backgroundColor: '#f8fafc' }}>
+                                  {filteredCustomers.map(c => (
+                                    <div 
+                                      key={c.id} 
+                                      onMouseDown={(e) => { e.preventDefault(); setSelectedCustomerId(c.id.toString()); setCustomerSearchTerm(''); setIsCustomerModalOpen(false); }} 
+                                      style={{ padding: '12px 16px', cursor: 'pointer', transition: 'box-shadow 0.2s', border: '1px solid #cbd5e1', borderRadius: '8px', backgroundColor: '#ffffff', display: 'flex', flexDirection: 'column', gap: '6px' }}
+                                      onMouseOver={(e) => e.currentTarget.style.boxShadow = '0 4px 10px rgba(0,0,0,0.05)'}
+                                      onMouseOut={(e) => e.currentTarget.style.boxShadow = 'none'}
+                                    >
+                                      <div style={{ fontWeight: 'bold', fontSize: '15px', color: '#0f172a' }}>{c.name}</div>
+                                      <div style={{ fontSize: '13px', color: '#64748b' }}>Location: <span style={{ color: '#334155' }}>{c.location || '-'}</span></div>
+                                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                        <div style={{ fontSize: '13px', color: '#64748b' }}>Phone Number: <span style={{ color: '#334155' }}>{c.phone || '-'}</span></div>
+                                        <button
+                                          onMouseDown={(e) => {
+                                            e.preventDefault();
+                                            e.stopPropagation();
+                                            setSelectedCustomerId(c.id.toString());
+                                            setCartCustomerEditForm({
+                                              name: c.name || '',
+                                              phone: c.phone || '',
+                                              location: c.location || '',
+                                              google_map: (c as any).google_map || ''
+                                            });
+                                            setIsCartCustomerEditOpen(true);
+                                            setIsCustomerModalOpen(false);
+                                          }}
+                                          style={{
+                                            display: 'flex', alignItems: 'center', gap: '6px', padding: '4px 10px', fontSize: '13px',
+                                            backgroundColor: '#ffffff', border: '1px solid #cbd5e1', borderRadius: '6px', color: '#475569',
+                                            cursor: 'pointer', fontWeight: 'bold', transition: 'background 0.2s'
+                                          }}
+                                          onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#f1f5f9'}
+                                          onMouseOut={(e) => e.currentTarget.style.backgroundColor = '#ffffff'}
+                                        >
+                                          Edit <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
+                                        </button>
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="saas-input" style={{ backgroundColor: '#fefcf3', borderColor: '#eadeca', color: '#4a3b1b', position: 'relative', display: 'flex', alignItems: 'center', paddingRight: '36px' }}>
+                      <button onClick={() => { setSelectedCustomerId(''); setCustomerSearchTerm(''); }} style={{ position: 'absolute', top: '50%', right: '8px', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#ef4444' }}>
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                      </button>
+                      
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', alignItems: 'center', width: '100%', gap: '10px' }}>
+                        {/* 1. NAME (Left Aligned) */}
+                        <div style={{ fontWeight: '500', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: '6px', overflow: 'hidden' }}>
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#8a7650" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
+                          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{selectedCustomer.name}</span>
+                        </div>
+                        
+                        {/* 2. PHONE (Center Aligned) */}
+                        <div style={{ color: '#8a7650', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px', whiteSpace: 'nowrap', fontSize: '13px' }}>
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"></path></svg>
+                          <span>{selectedCustomer.phone || '-'}</span>
+                        </div>
 
-                  {/* ⚙️ NEW: SETTINGS BUTTON FOR CATEGORY ORDER */}
-                  <button 
-                    onClick={() => setIsCategorySettingsOpen(true)} 
-                    className="saas-tab" 
-                    style={{ padding: '8px 16px', fontSize: '14px', minWidth: 'max-content', borderRadius: '20px', border: '1px solid #cbd5e1', background: '#ffffff', color: '#64748b', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 1px 2px 0 rgba(0, 0, 0, 0.05)', cursor: 'pointer' }}
-                    title="Manage Categories"
-                  >
-                    ⚙️
-                  </button>
-                  
-                  {/* 🟢 NEW APPENDED INLINE TOOLS */}
-                  <button 
-                    onClick={() => setActiveFullScreen('import')}
-                    className="saas-tab"
-                    style={{ padding: '8px 16px', fontSize: '14px', borderRadius: '20px', minWidth: 'max-content', border: '1px dashed #3b82f6', background: '#eff6ff', color: '#1d4ed8', fontWeight: 'bold', boxShadow: '0 1px 2px 0 rgba(0, 0, 0, 0.05)', cursor: 'pointer' }}
-                  >
-                    📦 Import Stock
-                  </button>
-                  <button 
-                    onClick={() => setActiveFullScreen('mix')}
-                    className="saas-tab"
-                    style={{ padding: '8px 16px', fontSize: '14px', borderRadius: '20px', minWidth: 'max-content', border: '1px dashed #8b5cf6', background: '#f5f3ff', color: '#6d28d9', fontWeight: 'bold', boxShadow: '0 1px 2px 0 rgba(0, 0, 0, 0.05)', cursor: 'pointer' }}
-                  >
-                    🥣 Mix Rice
-                  </button>
+                        {/* 3. LOCATION (Right Aligned) */}
+                        <div style={{ color: '#8a7650', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '4px', whiteSpace: 'nowrap', overflow: 'hidden', fontSize: '13px' }}>
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path><circle cx="12" cy="10" r="3"></circle></svg>
+                          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{selectedCustomer.location || '-'}</span>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
-          </div>
-          {/* 🟢 END STICKY HEADER WRAPPER */}
 
+            {/* SCROLLABLE CATEGORY TABS WITH MIX & IMPORT BUTTONS APPENDED */}
+            {activeTab !== 'retail' && (
+              <div className="saas-tab-container hide-scrollbar" style={{ display: 'flex', flexWrap: 'nowrap', overflowX: 'auto', width: '100%', maxWidth: '100%', minWidth: 0, border: 'none', boxShadow: 'none', padding: '0 4px 8px 4px', background: 'transparent', gap: '8px', margin: 0 }}>
+                
+                {/* 🔥 ADDED DIRECT HORIZONTAL SORTING */}
+                <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+                  <SortableContext items={riceCategories} strategy={horizontalListSortingStrategy}>
+                    {riceCategories.map(cat => (
+                      <SortableHorizontalTab 
+                        key={cat} 
+                        cat={cat} 
+                        isActive={activeCategory === cat} 
+                        lang={lang} 
+                        onClick={() => setActiveCategory(cat)} 
+                      />
+                    ))}
+                  </SortableContext>
+                </DndContext>
+
+                {/* ⚙️ NEW: SETTINGS BUTTON FOR CATEGORY ORDER */}
+                <button 
+                  onClick={() => setIsCategorySettingsOpen(true)} 
+                  className="saas-tab" 
+                  style={{ padding: '8px 16px', fontSize: '14px', minWidth: 'max-content', borderRadius: '20px', border: '1px solid #cbd5e1', background: '#ffffff', color: '#64748b', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 1px 2px 0 rgba(0, 0, 0, 0.05)', cursor: 'pointer' }}
+                  title="Manage Categories"
+                >
+                  ⚙️
+                </button>
+                
+                {/* 🟢 NEW APPENDED INLINE TOOLS */}
+                <button 
+                  onClick={() => setActiveFullScreen('import')}
+                  className="saas-tab"
+                  style={{ padding: '8px 16px', fontSize: '14px', borderRadius: '20px', minWidth: 'max-content', border: '1px dashed #3b82f6', background: '#eff6ff', color: '#1d4ed8', fontWeight: 'bold', boxShadow: '0 1px 2px 0 rgba(0, 0, 0, 0.05)', cursor: 'pointer' }}
+                >
+                  📦 Import Stock
+                </button>
+                <button 
+                  onClick={() => setActiveFullScreen('mix')}
+                  className="saas-tab"
+                  style={{ padding: '8px 16px', fontSize: '14px', borderRadius: '20px', minWidth: 'max-content', border: '1px dashed #8b5cf6', background: '#f5f3ff', color: '#6d28d9', fontWeight: 'bold', boxShadow: '0 1px 2px 0 rgba(0, 0, 0, 0.05)', cursor: 'pointer' }}
+                >
+                  🥣 Mix Rice
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+        {/* 🟢 END FROZEN HEADER WRAPPER */}
+
+        {/* 🟢 SCROLLABLE PRODUCTS AREA */}
+        <div className="hide-scrollbar" style={{ flex: 1, overflowY: 'auto', WebkitOverflowScrolling: 'touch', paddingLeft: isDeviceMobile ? '16px' : '24px', paddingRight: isDeviceMobile ? '16px' : '24px', paddingTop: '16px', paddingBottom: isDeviceMobile ? '140px' : '24px' }}>
           <div>
             {filteredProducts.length === 0 ? (
               <EmptyState 
@@ -3603,12 +3628,10 @@ export default function POSPage() {
       {activeFullScreen === 'import' && (
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: '#f8fafc', zIndex: 99999, overflowY: 'auto' }}>
           <div style={{ padding: isDeviceMobile ? '16px' : '32px', width: '100%', maxWidth: '800px', margin: '0 auto', minHeight: '100dvh', display: 'flex', flexDirection: 'column' }}>
-            <div className="header-container" style={{ justifyContent: 'space-between', marginBottom: '24px', flexShrink: 0, width: 'auto' }}>
-              <div className="header-left">
-                <h1 className="saas-page-title" style={{ margin: 0 }}>📦 Import Stock</h1>
-              </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', marginBottom: '24px', paddingLeft: isDeviceMobile ? '54px' : '0' }}>
+              <h1 className="saas-page-title" style={{ margin: 0, fontSize: isDeviceMobile ? '20px' : '24px' }}>📦 Import Stock</h1>
               {isDeviceMobile ? (
-                <button onClick={() => setActiveFullScreen('none')} style={{ background: 'none', border: 'none', color: '#ef4444', fontSize: '24px', padding: '4px', cursor: 'pointer' }}>
+                <button onClick={() => setActiveFullScreen('none')} style={{ background: 'none', border: 'none', color: '#ef4444', fontSize: '28px', padding: 0, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                   ❌
                 </button>
               ) : (
@@ -3718,12 +3741,10 @@ export default function POSPage() {
       {activeFullScreen === 'mix' && (
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: '#f8fafc', zIndex: 99999, overflowY: 'auto', paddingBottom: '100px' }}>
           <div style={{ padding: isDeviceMobile ? '16px' : '32px', width: '100%', maxWidth: '1400px', margin: '0 auto', minHeight: '100dvh', display: 'flex', flexDirection: 'column' }}>
-            <div className="header-container" style={{ justifyContent: 'space-between', marginBottom: '24px', flexShrink: 0, width: 'auto' }}>
-              <div className="header-left">
-                <h1 className="saas-page-title" style={{ margin: 0 }}>🥣 Mix Rice Calculator</h1>
-              </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', marginBottom: '24px', paddingLeft: isDeviceMobile ? '54px' : '0' }}>
+              <h1 className="saas-page-title" style={{ margin: 0, fontSize: isDeviceMobile ? '20px' : '24px' }}>🥣 Mix Rice Calculator</h1>
               {isDeviceMobile ? (
-                <button onClick={() => setActiveFullScreen('none')} style={{ background: 'none', border: 'none', color: '#ef4444', fontSize: '24px', padding: '4px', cursor: 'pointer' }}>
+                <button onClick={() => setActiveFullScreen('none')} style={{ background: 'none', border: 'none', color: '#ef4444', fontSize: '28px', padding: 0, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                   ❌
                 </button>
               ) : (
