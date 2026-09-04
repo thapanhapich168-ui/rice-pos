@@ -537,10 +537,11 @@ export default function POSPage() {
             setCart(rebuiltCart);
 
             const cName = saleRows[0].customer_name;
-            if (cName && cName !== 'Walk-in') {
-              const { data: custData } = await supabase.from('customers').select('id').eq('name', cName).single();
-              if (custData) {
-                setSelectedCustomerId(custData.id.toString());
+            if (cName && cName !== 'Walk-in' && cName !== 'Walk in') {
+              setCartCustomerNameOverride(cName); // Instantly show original name in UI
+              const { data: custData } = await supabase.from('customers').select('id').eq('name', cName).limit(1);
+              if (custData && custData.length > 0) {
+                setSelectedCustomerId(custData[0].id.toString());
               }
             }
           }
@@ -582,11 +583,12 @@ export default function POSPage() {
   }, [selectedCustomerId, customers])
 
   useEffect(() => {
-    if (activeTab === 'wholesale' && !selectedCustomerId && customers.length > 0) {
+    // 🔥 Prevent auto-assigning Walk-in if we are currently loading an Edit session
+    if (activeTab === 'wholesale' && !selectedCustomerId && customers.length > 0 && !editingInvoiceId) {
       const walkInCust = customers.find(c => c.name.toLowerCase() === 'walk-in' || c.name.toLowerCase() === 'walk in');
       if (walkInCust) setSelectedCustomerId(walkInCust.id.toString());
     }
-  }, [activeTab, customers]) 
+  }, [activeTab, customers, editingInvoiceId])
 
   useEffect(() => {
     const handleVisibilityAndResize = () => {
@@ -2188,50 +2190,152 @@ export default function POSPage() {
                     {!selectedCustomer ? (
                       <div style={{ position: 'relative' }}>
                         
-                        {isCustomerModalOpen && (
-                          <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, zIndex: 99 }} onMouseDown={() => setIsCustomerModalOpen(false)}></div>
-                        )}
-                        
-                        <span style={{ position: 'absolute', left: '14px', top: '50%', transform: 'translateY(-50%)', color: '#94a3b8', fontSize: '16px', zIndex: isCustomerModalOpen ? 101 : 2 }}>🔍</span>
-                        <input 
-                          type="text"
-                          placeholder={currentT.selectCustomer.replace('🔍 ', '').replace('🔍', '').trim()}
-                          value={customerSearchTerm}
-                          onChange={e => setCustomerSearchTerm(e.target.value)}
-                          onFocus={() => setIsCustomerModalOpen(true)}
-                          className="saas-input"
-                          style={{ paddingLeft: '38px', width: '100%', position: 'relative', zIndex: isCustomerModalOpen ? 100 : 1, borderColor: isCustomerModalOpen ? '#b58a3d' : undefined, fontSize: isDeviceMobile ? '15px' : undefined }}
-                        />
+                        {/* 💻 DESKTOP: INLINE SEARCH INPUT */}
+                        {!isDeviceMobile && (
+                          <>
+                            {isCustomerModalOpen && (
+                              <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, zIndex: 99 }} onMouseDown={() => setIsCustomerModalOpen(false)}></div>
+                            )}
+                            
+                            <span style={{ position: 'absolute', left: '14px', top: '50%', transform: 'translateY(-50%)', color: '#94a3b8', fontSize: '16px', zIndex: isCustomerModalOpen ? 101 : 2 }}>🔍</span>
+                            <input 
+                              type="text"
+                              placeholder={currentT.selectCustomer.replace('🔍 ', '').replace('🔍', '').trim()}
+                              value={customerSearchTerm}
+                              onChange={e => setCustomerSearchTerm(e.target.value)}
+                              onFocus={() => setIsCustomerModalOpen(true)}
+                              className="saas-input"
+                              style={{ paddingLeft: '38px', width: '100%', position: 'relative', zIndex: isCustomerModalOpen ? 100 : 1, borderColor: isCustomerModalOpen ? '#3b82f6' : undefined, fontSize: '14px' }}
+                            />
 
-                        {/* Inline Dropdown Menu */}
-                        {isCustomerModalOpen && (
-                          <div style={{ position: 'absolute', top: 'calc(100% + 6px)', left: 0, right: 0, backgroundColor: '#ffffff', borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: '0 10px 30px rgba(0,0,0,0.15)', zIndex: 101, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-                            <div className="hide-scrollbar" style={{ maxHeight: '350px', overflowY: 'auto', padding: '0', display: 'flex', flexDirection: 'column', backgroundColor: '#ffffff' }}>
-                              
-                              <button onMouseDown={(e) => { e.preventDefault(); setIsCreateCustomerModalOpen(true); setIsCustomerModalOpen(false); }} className="saas-btn" style={{ width: 'calc(100% - 16px)', margin: '8px', padding: '10px', backgroundColor: '#f8fafc', color: '#0f172a', border: '1px dashed #cbd5e1', borderRadius: '8px', cursor: 'pointer', fontWeight: 'normal', fontSize: '14px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', flexShrink: 0 }}>
-                                <span style={{ fontSize: '16px' }}>+</span> Add New Customer
-                              </button>
-                              
-                              {filteredCustomers.length === 0 ? (
-                                <div style={{ textAlign: 'center', padding: '20px', color: '#94a3b8', fontSize: '14px' }}>No customers found</div>
-                              ) : (
-                                filteredCustomers.map(c => (
+                            {/* 💻 DESKTOP: INLINE DROPDOWN TRAY (Fillout Card Style) */}
+                            {isCustomerModalOpen && (
+                              <div style={{ position: 'absolute', top: 'calc(100% + 6px)', left: 0, right: 0, backgroundColor: '#ffffff', borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: '0 10px 30px rgba(0,0,0,0.15)', zIndex: 101, overflow: 'hidden' }}>
+                                <div className="hide-scrollbar" style={{ maxHeight: '350px', overflowY: 'auto', padding: '12px', backgroundColor: '#ffffff' }}>
+                                  
+                                  <button onClick={(e) => { e.preventDefault(); setIsCreateCustomerModalOpen(true); setIsCustomerModalOpen(false); }} className="saas-btn" style={{ width: '100%', padding: '10px', backgroundColor: '#ffffff', color: '#0f172a', border: '1px dashed #cbd5e1', borderRadius: '8px', cursor: 'pointer', fontWeight: 500, fontSize: '14px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', marginBottom: '12px' }}>
+                                    <span style={{ fontSize: '16px' }}>+</span> Add New Customer
+                                  </button>
+                                  
+                                  {filteredCustomers.length === 0 ? (
+                                    <div style={{ textAlign: 'center', padding: '20px', color: '#94a3b8', fontSize: '14px' }}>No customers found</div>
+                                  ) : (
+                                    <div style={{ border: '1px solid #e2e8f0', borderRadius: '8px', overflow: 'hidden' }}>
+                                      {filteredCustomers.map((c, index) => (
+                                        <div 
+                                          key={c.id} 
+                                          onClick={(e) => { e.preventDefault(); setSelectedCustomerId(c.id.toString()); setCustomerSearchTerm(''); setIsCustomerModalOpen(false); }} 
+                                          style={{ padding: '12px 16px', cursor: 'pointer', backgroundColor: '#ffffff', borderBottom: index === filteredCustomers.length - 1 ? 'none' : '1px solid #e2e8f0' }}
+                                        >
+                                          <div style={{ fontWeight: 500, fontSize: '14px', color: '#0f172a', marginBottom: '8px' }}>{c.name}</div>
+                                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
+                                            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                                              <div style={{ fontSize: '13px', color: '#64748b' }}>Location: {c.location || '-'}</div>
+                                              <div style={{ fontSize: '13px', color: '#64748b' }}>Phone Number: {c.phone || '-'}</div>
+                                            </div>
+                                            <button
+                                              onClick={(e) => {
+                                                e.preventDefault(); e.stopPropagation();
+                                                setSelectedCustomerId(c.id.toString());
+                                                setCartCustomerEditForm({ name: c.name || '', phone: c.phone || '', location: c.location || '', google_map: (c as any).google_map || '' });
+                                                setIsCartCustomerEditOpen(true); setIsCustomerModalOpen(false);
+                                              }}
+                                              style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '4px 10px', fontSize: '13px', backgroundColor: '#ffffff', border: '1px solid #cbd5e1', borderRadius: '6px', color: '#475569', cursor: 'pointer', fontWeight: 500 }}
+                                            >
+                                              Edit <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
+                                            </button>
+                                          </div>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            )}
+                          </>
+                        )}
+
+                        {/* 📱 MOBILE: MODAL TRIGGER BUTTON */}
+                        {isDeviceMobile && (
+                          <>
+                            <div 
+                              onClick={() => setIsCustomerModalOpen(true)}
+                              className="saas-input"
+                              style={{ width: '100%', cursor: 'pointer', display: 'flex', alignItems: 'center', backgroundColor: '#ffffff', color: '#94a3b8', fontSize: '14px', paddingLeft: '14px', height: '42px' }}
+                            >
+                              <span style={{ marginRight: '10px', fontSize: '16px' }}>🔍</span>
+                              {currentT.selectCustomer.replace('🔍 ', '').replace('🔍', '').trim()}
+                            </div>
+
+                            {/* 📱 MOBILE: TOP-ANCHORED SEARCH MODAL (Fillout Style) */}
+                            {isCustomerModalOpen && typeof document !== 'undefined' && createPortal(
+                              <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(15, 23, 42, 0.4)', zIndex: 100000, display: 'flex', justifyContent: 'center', alignItems: 'flex-start', padding: 'max(16px, env(safe-area-inset-top, 16px)) 16px 16px 16px' }} onMouseDown={() => { setIsCustomerModalOpen(false); setCustomerSearchTerm(''); }}>
                                 <div 
-                                  key={c.id} 
-                                  onMouseDown={(e) => { e.preventDefault(); setSelectedCustomerId(c.id.toString()); setCustomerSearchTerm(''); setIsCustomerModalOpen(false); }} 
-                                  style={{ padding: '12px 16px', cursor: 'pointer', transition: 'background 0.2s', borderBottom: '1px solid #f1f5f9', backgroundColor: '#ffffff', display: 'flex', flexDirection: 'column', gap: '4px' }}
+                                  onMouseDown={(e) => e.stopPropagation()}
+                                  style={{ backgroundColor: '#f8fafc', borderRadius: '12px', width: '100%', maxWidth: '500px', maxHeight: '100%', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1)', display: 'flex', flexDirection: 'column', overflow: 'hidden', animation: 'posPopupSlideDown 0.2s ease-out' }}
                                 >
-                                  <div style={{ fontWeight: '500', fontSize: '15px', color: '#0f172a' }}>{c.name}</div>
-                                  <div style={{ fontSize: '14px', color: '#64748b', display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
-                                    {c.phone && <span>📞 {c.phone}</span>}
-                                    {c.location && <span>📍 {c.location}</span>}
-                                    {c.type && <span>🏷️ {c.type}</span>}
+                                  {/* Search Header */}
+                                  <div style={{ display: 'flex', alignItems: 'center', padding: '12px 16px', borderBottom: '1px solid #e2e8f0', gap: '8px', backgroundColor: '#ffffff', flexShrink: 0 }}>
+                                    <div style={{ position: 'relative', flex: 1 }}>
+                                      <span style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: '#94a3b8', fontSize: '16px' }}>🔍</span>
+                                      <input 
+                                        autoFocus
+                                        type="text"
+                                        placeholder="Search for option..."
+                                        value={customerSearchTerm}
+                                        onChange={e => setCustomerSearchTerm(e.target.value)}
+                                        style={{ width: '100%', padding: '10px 12px 10px 36px', fontSize: '14px', border: '1px solid #3b82f6', borderRadius: '6px', outline: 'none', color: '#0f172a', boxSizing: 'border-box' }}
+                                      />
+                                    </div>
+                                    <button onClick={(e) => { e.preventDefault(); setIsCustomerModalOpen(false); setCustomerSearchTerm(''); }} style={{ background: 'none', border: 'none', color: '#94a3b8', fontSize: '24px', cursor: 'pointer', padding: '0 4px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                      ✕
+                                    </button>
+                                  </div>
+                                  
+                                  <div className="hide-scrollbar" style={{ flex: 1, overflowY: 'auto', padding: '16px', backgroundColor: '#f8fafc' }}>
+                                    <button onClick={(e) => { e.preventDefault(); setIsCreateCustomerModalOpen(true); setIsCustomerModalOpen(false); }} className="saas-btn" style={{ width: '100%', padding: '12px', backgroundColor: '#ffffff', color: '#0f172a', border: '1px dashed #cbd5e1', borderRadius: '8px', cursor: 'pointer', fontWeight: 500, fontSize: '14px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', marginBottom: '16px' }}>
+                                      <span style={{ fontSize: '16px' }}>+</span> Add New Customer
+                                    </button>
+
+                                    {filteredCustomers.length === 0 ? (
+                                      <div style={{ textAlign: 'center', padding: '16px', color: '#94a3b8', fontSize: '14px' }}>No customers found</div>
+                                    ) : (
+                                      <div style={{ border: '1px solid #e2e8f0', borderRadius: '8px', overflow: 'hidden' }}>
+                                        {filteredCustomers.map((c, index) => (
+                                          <div 
+                                            key={c.id} 
+                                            onClick={(e) => { e.preventDefault(); setSelectedCustomerId(c.id.toString()); setCustomerSearchTerm(''); setIsCustomerModalOpen(false); }} 
+                                            style={{ padding: '12px 16px', cursor: 'pointer', backgroundColor: '#ffffff', borderBottom: index === filteredCustomers.length - 1 ? 'none' : '1px solid #e2e8f0' }}
+                                          >
+                                            <div style={{ fontWeight: 500, fontSize: '14px', color: '#0f172a', marginBottom: '8px' }}>{c.name}</div>
+                                            
+                                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
+                                              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                                                <div style={{ fontSize: '13px', color: '#64748b' }}>Location: {c.location || '-'}</div>
+                                                <div style={{ fontSize: '13px', color: '#64748b' }}>Phone Number: {c.phone || '-'}</div>
+                                              </div>
+                                              <button
+                                                onClick={(e) => {
+                                                  e.preventDefault(); e.stopPropagation();
+                                                  setSelectedCustomerId(c.id.toString());
+                                                  setCartCustomerEditForm({ name: c.name || '', phone: c.phone || '', location: c.location || '', google_map: (c as any).google_map || '' });
+                                                  setIsCartCustomerEditOpen(true); setIsCustomerModalOpen(false);
+                                                }}
+                                                style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '4px 10px', fontSize: '13px', backgroundColor: '#ffffff', border: '1px solid #cbd5e1', borderRadius: '6px', color: '#475569', cursor: 'pointer', fontWeight: 500 }}
+                                              >
+                                                Edit <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
+                                              </button>
+                                            </div>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    )}
                                   </div>
                                 </div>
-                              ))
-                              )}
-                            </div>
-                          </div>
+                              </div>,
+                              document.body
+                            )}
+                          </>
                         )}
                       </div>
                     ) : (
