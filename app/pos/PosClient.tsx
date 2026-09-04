@@ -2215,20 +2215,47 @@ export default function POSPage() {
                               {filteredCustomers.length === 0 ? (
                                 <div style={{ textAlign: 'center', padding: '20px', color: '#94a3b8', fontSize: '14px' }}>No customers found</div>
                               ) : (
-                                filteredCustomers.map(c => (
-                                <div 
-                                  key={c.id} 
-                                  onMouseDown={(e) => { e.preventDefault(); setSelectedCustomerId(c.id.toString()); setCustomerSearchTerm(''); setIsCustomerModalOpen(false); }} 
-                                  style={{ padding: '12px 16px', cursor: 'pointer', transition: 'background 0.2s', borderBottom: '1px solid #f1f5f9', backgroundColor: '#ffffff', display: 'flex', flexDirection: 'column', gap: '4px' }}
-                                >
-                                  <div style={{ fontWeight: '500', fontSize: '15px', color: '#0f172a' }}>{c.name}</div>
-                                  <div style={{ fontSize: '14px', color: '#64748b', display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
-                                    {c.phone && <span>📞 {c.phone}</span>}
-                                    {c.location && <span>📍 {c.location}</span>}
-                                    {c.type && <span>🏷️ {c.type}</span>}
-                                  </div>
+                                <div style={{ padding: '8px', display: 'flex', flexDirection: 'column', gap: '8px', backgroundColor: '#f8fafc' }}>
+                                  {filteredCustomers.map(c => (
+                                    <div 
+                                      key={c.id} 
+                                      onMouseDown={(e) => { e.preventDefault(); setSelectedCustomerId(c.id.toString()); setCustomerSearchTerm(''); setIsCustomerModalOpen(false); }} 
+                                      style={{ padding: '12px 16px', cursor: 'pointer', transition: 'box-shadow 0.2s', border: '1px solid #cbd5e1', borderRadius: '8px', backgroundColor: '#ffffff', display: 'flex', flexDirection: 'column', gap: '6px' }}
+                                      onMouseOver={(e) => e.currentTarget.style.boxShadow = '0 4px 10px rgba(0,0,0,0.05)'}
+                                      onMouseOut={(e) => e.currentTarget.style.boxShadow = 'none'}
+                                    >
+                                      <div style={{ fontWeight: 'bold', fontSize: '15px', color: '#0f172a' }}>{c.name}</div>
+                                      <div style={{ fontSize: '13px', color: '#64748b' }}>Location: <span style={{ color: '#334155' }}>{c.location || '-'}</span></div>
+                                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                        <div style={{ fontSize: '13px', color: '#64748b' }}>Phone Number: <span style={{ color: '#334155' }}>{c.phone || '-'}</span></div>
+                                        <button
+                                          onMouseDown={(e) => {
+                                            e.preventDefault();
+                                            e.stopPropagation();
+                                            setSelectedCustomerId(c.id.toString());
+                                            setCartCustomerEditForm({
+                                              name: c.name || '',
+                                              phone: c.phone || '',
+                                              location: c.location || '',
+                                              google_map: (c as any).google_map || ''
+                                            });
+                                            setIsCartCustomerEditOpen(true);
+                                            setIsCustomerModalOpen(false);
+                                          }}
+                                          style={{
+                                            display: 'flex', alignItems: 'center', gap: '6px', padding: '4px 10px', fontSize: '13px',
+                                            backgroundColor: '#ffffff', border: '1px solid #cbd5e1', borderRadius: '6px', color: '#475569',
+                                            cursor: 'pointer', fontWeight: 'bold', transition: 'background 0.2s'
+                                          }}
+                                          onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#f1f5f9'}
+                                          onMouseOut={(e) => e.currentTarget.style.backgroundColor = '#ffffff'}
+                                        >
+                                          Edit <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
+                                        </button>
+                                      </div>
+                                    </div>
+                                  ))}
                                 </div>
-                              ))
                               )}
                             </div>
                           </div>
@@ -3603,7 +3630,7 @@ export default function POSPage() {
       {activeFullScreen === 'import' && (
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: '#f8fafc', zIndex: 99999, overflowY: 'auto' }}>
           <div style={{ padding: isDeviceMobile ? '16px' : '32px', width: '100%', maxWidth: '800px', margin: '0 auto', minHeight: '100dvh', display: 'flex', flexDirection: 'column' }}>
-            <div className="header-container" style={{ justifyContent: 'space-between', marginBottom: '24px', flexShrink: 0, width: 'auto' }}>
+            <div className="header-container" style={{ justifyContent: 'space-between', marginBottom: '24px', flexShrink: 0, width: 'auto', marginTop: isDeviceMobile ? '16px' : '0' }}>
               <div className="header-left">
                 <h1 className="saas-page-title" style={{ margin: 0 }}>📦 Import Stock</h1>
               </div>
@@ -3673,11 +3700,11 @@ export default function POSPage() {
                 <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap' }}>
                   <div style={{ flex: 1, minWidth: '150px' }}>
                     <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '6px' }}>Quantity Imported</label>
-                    <input type="number" className="saas-input" value={importForm.qty} onChange={e => setImportForm({...importForm, qty: e.target.value})} />
+                    <input type="number" placeholder="0" className="saas-input" value={importForm.qty} onChange={e => setImportForm({...importForm, qty: e.target.value})} />
                   </div>
                   <div style={{ flex: 1, minWidth: '150px' }}>
                     <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '6px' }}>Unit Cost (៛)</label>
-                    <CurrencyInput value={importForm.unit_cost} onChange={(v:any) => setImportForm({...importForm, unit_cost: v})} className="saas-input" />
+                    <CurrencyInput placeholder="0" value={importForm.unit_cost} onChange={(v:any) => setImportForm({...importForm, unit_cost: v})} className="saas-input" />
                   </div>
                 </div>
 
@@ -3691,7 +3718,7 @@ export default function POSPage() {
                   <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap' }}>
                     <div style={{ flex: 2, minWidth: '150px' }}>
                       <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '6px' }}>Amount Paying Now (៛)</label>
-                      <CurrencyInput value={importForm.paid_amount} onChange={(v:any) => setImportForm({...importForm, paid_amount: v})} className="saas-input" />
+                      <CurrencyInput placeholder="0" value={importForm.paid_amount} onChange={(v:any) => setImportForm({...importForm, paid_amount: v})} className="saas-input" />
                     </div>
                     <div style={{ flex: 1, minWidth: '120px' }}>
                       <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '6px' }}>Payment Method</label>
@@ -3718,7 +3745,7 @@ export default function POSPage() {
       {activeFullScreen === 'mix' && (
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: '#f8fafc', zIndex: 99999, overflowY: 'auto', paddingBottom: '100px' }}>
           <div style={{ padding: isDeviceMobile ? '16px' : '32px', width: '100%', maxWidth: '1400px', margin: '0 auto', minHeight: '100dvh', display: 'flex', flexDirection: 'column' }}>
-            <div className="header-container" style={{ justifyContent: 'space-between', marginBottom: '24px', flexShrink: 0, width: 'auto' }}>
+            <div className="header-container" style={{ justifyContent: 'space-between', marginBottom: '24px', flexShrink: 0, width: 'auto', marginTop: isDeviceMobile ? '16px' : '0' }}>
               <div className="header-left">
                 <h1 className="saas-page-title" style={{ margin: 0 }}>🥣 Mix Rice Calculator</h1>
               </div>
@@ -3953,11 +3980,11 @@ export default function POSPage() {
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
                 <div>
                   <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', margin: '0 0 6px 0' }}>Selling Price (៛)</label>
-                  <CurrencyInput value={newItem.price} onChange={(v:any) => setNewItem({...newItem, price: v})} className="saas-input" style={{width:'100%'}}/>
+                  <CurrencyInput placeholder="0" value={newItem.price === 0 ? '' : newItem.price} onChange={(v:any) => setNewItem({...newItem, price: v})} className="saas-input" style={{width:'100%'}}/>
                 </div>
                 <div>
                   <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', margin: '0 0 6px 0' }}>Cost Price (៛)</label>
-                  <CurrencyInput value={newItem.cost_price} onChange={(v:any) => setNewItem({...newItem, cost_price: v})} className="saas-input" style={{width:'100%'}}/>
+                  <CurrencyInput placeholder="0" value={newItem.cost_price === 0 ? '' : newItem.cost_price} onChange={(v:any) => setNewItem({...newItem, cost_price: v})} className="saas-input" style={{width:'100%'}}/>
                 </div>
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '8px' }}>
