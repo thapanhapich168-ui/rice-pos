@@ -136,11 +136,24 @@ export default function ReportControlPage() {
         const owner = parseOwner(ret.owner);
         if (owner === 'mom') return; // 🚫 Completely exclude Mom
 
+        const customName = ret.custom_rice_type || ret.rice_type || '';
+        // 🔥 FIX: Ignore deposits here so Gross Sales stays accurate
+        if (customName.includes('កក់')) return;
+
         const qty = Number(ret.qty) || 0
         const price = Number(ret.price_per_bag) || 0
         const cogs = Number(ret.cogs_price) || 0
-        const sales = qty * price
-        const profit = (price - cogs) * qty
+        
+        // 🔥 FIX: Prevent floating-point decimal leaks
+        let sales = Math.round(qty * price);
+        let profit = Math.round((price - cogs) * qty);
+
+        // 🔥 FIX: Subtract refunds and discounts instead of adding them
+        const isNegativeItem = customName.includes('ដូរ') || customName.includes('បញ្ចុះតម្លៃ');
+        if (isNegativeItem) {
+           sales = -Math.abs(sales);
+           profit = -Math.abs(profit);
+        }
 
         totalSales += sales
         totalProfit += profit
@@ -232,12 +245,21 @@ export default function ReportControlPage() {
     let totalProfit = 0, pichProfit = 0, jingProfit = 0, bothProfit = 0, momProfit = 0
 
     filtered.forEach((sale: any) => {
+      const customName = sale.custom_rice_type || sale.rice_type || '';
+      if (customName.includes('កក់')) return;
+
       const qty = Number(sale.qty || 0)
       const price = Number(sale.price_per_bag || 0)
       const cogs = Number(sale.cogs_price || 0)
       
-      const revenue = qty * price
-      const profit = (price - cogs) * qty
+      let revenue = Math.round(qty * price);
+      let profit = Math.round((price - cogs) * qty);
+      
+      const isNegativeItem = customName.includes('ដូរ') || customName.includes('បញ្ចុះតម្លៃ');
+      if (isNegativeItem) {
+          revenue = -Math.abs(revenue);
+          profit = -Math.abs(profit);
+      }
       
       const owner = parseOwner(sale.owner)
 
@@ -319,13 +341,23 @@ export default function ReportControlPage() {
     
     filtered.forEach((sale: any) => {
       const name = sale.custom_rice_type || sale.rice_type || 'Unknown'
+      if (name.includes('កក់')) return;
+
       const qty = Number(sale.qty || 0)
       const price = Number(sale.price_per_bag || 0)
       const cogs = Number(sale.cogs_price || 0)
-      const profit = (price - cogs) * qty
+      
+      let profit = Math.round((price - cogs) * qty);
+      let finalQty = qty;
+
+      const isNegativeItem = name.includes('ដូរ') || name.includes('បញ្ចុះតម្លៃ');
+      if (isNegativeItem) {
+          profit = -Math.abs(profit);
+          finalQty = -Math.abs(finalQty);
+      }
 
       if (!map[name]) map[name] = { name, qty: 0, profit: 0 }
-      map[name].qty += qty
+      map[name].qty += finalQty
       map[name].profit += profit
     })
 
@@ -354,14 +386,26 @@ export default function ReportControlPage() {
     const dailySales = new Array(31).fill(0)
     const dailyProfit = new Array(31).fill(0)
     dataSet.filter((s: any) => isTargetMonth(s.created_at) && parseOwner(s.owner) !== 'mom').forEach((sale: any) => {
+      const customName = sale.custom_rice_type || sale.rice_type || '';
+      if (customName.includes('កក់')) return;
+
       const dayIdx = getDayOfMonth(sale.created_at) - 1
       const qty = Number(sale.qty || 0)
       const price = Number(sale.price_per_bag || 0)
       const cogs = Number(sale.cogs_price || 0)
       
+      let revenue = Math.round(qty * price);
+      let profit = Math.round((price - cogs) * qty);
+
+      const isNegativeItem = customName.includes('ដូរ') || customName.includes('បញ្ចុះតម្លៃ');
+      if (isNegativeItem) {
+          revenue = -Math.abs(revenue);
+          profit = -Math.abs(profit);
+      }
+      
       if (dayIdx >= 0 && dayIdx < 31) {
-        dailySales[dayIdx] += (qty * price)
-        dailyProfit[dayIdx] += ((price - cogs) * qty)
+        dailySales[dayIdx] += revenue
+        dailyProfit[dayIdx] += profit
       }
     })
     return { dailySales, dailyProfit }
