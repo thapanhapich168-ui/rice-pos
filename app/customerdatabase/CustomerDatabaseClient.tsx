@@ -32,6 +32,7 @@ export default function CustomerDatabasePage() {
   // --- CORE STATE ---
   const [customers, setCustomers] = useState<Customer[]>([])
   const [isLoading, setIsLoading] = useState(true)
+  const [isProcessing, setIsProcessing] = useState(false) // 🔥 ADDED LOCK STATE
   const [searchQuery, setSearchQuery] = useState('')
   const debouncedSearch = useDebounce(searchQuery, 300) 
   const [edits, setEdits] = useState<Record<string, Partial<Customer>>>({})
@@ -129,6 +130,7 @@ export default function CustomerDatabasePage() {
   const handleDelete = async () => {
     if (!confirm(`Are you sure you want to archive ${selectedToDelete.size} customer(s)?`)) return
     
+    setIsProcessing(true);
     const { error } = await supabase
       .from('customers')
       .update({ is_archived: true })
@@ -142,12 +144,14 @@ export default function CustomerDatabasePage() {
     } else {
       showToast('error', 'Deletion Failed', error.message);
     }
+    setIsProcessing(false);
   }
 
   async function handleAddCustomer(e: React.FormEvent) {
     e.preventDefault()
-    if (!newCustomer.name.trim()) return
+    if (!newCustomer.name.trim() || isProcessing) return
 
+    setIsProcessing(true);
     const { error } = await supabase.from('customers').insert([{
       name: newCustomer.name, owner: newCustomer.owner, type: newCustomer.type, 
       phone: newCustomer.phone, location: newCustomer.location, google_map: newCustomer.google_map,
@@ -162,6 +166,7 @@ export default function CustomerDatabasePage() {
     } else {
       showToast('error', 'Error', error.message);
     }
+    setIsProcessing(false);
   }
 
   const handleSort = (key: keyof Customer) => {
@@ -621,13 +626,24 @@ export default function CustomerDatabasePage() {
             <div style={{ marginTop: '16px', display: 'flex', justifyContent: 'space-between', gap: '12px' }}>
                <button onClick={async () => {
                   if (!confirm('Are you sure you want to delete this customer?')) return;
+                  setIsProcessing(true);
                   await supabase.from('customers').update({ is_archived: true }).eq('id', mobileEditCustomer.id).eq('branch_id', activeBranchId);
                   loadCustomers(); setMobileEditCustomer(null); showToast('success', 'Deleted', 'Customer safely removed.');
-               }} className="saas-btn" style={{ background: '#fee2e2', color: '#dc2626', padding: '10px 14px' }}>🗑️ Delete</button>
+                  setIsProcessing(false);
+               }} disabled={isProcessing} className="saas-btn" style={{ background: '#fee2e2', color: '#dc2626', padding: '10px 14px', opacity: isProcessing ? 0.5 : 1 }}>
+                 {isProcessing ? '⏳...' : '🗑️ Delete'}
+               </button>
                
                <div style={{ display: 'flex', gap: '8px' }}>
-                 <button onClick={() => { setMobileEditCustomer(null); setEdits(prev => { const n = { ...prev }; delete n[String(mobileEditCustomer.id)]; return n; }); }} className="saas-btn saas-btn-secondary">Cancel</button>
-                 <button onClick={async () => { const success = await handleSaveRecord(String(mobileEditCustomer.id)); if (success) setMobileEditCustomer(null); }} className="saas-btn saas-btn-primary">Save</button>
+                 <button onClick={() => { setMobileEditCustomer(null); setEdits(prev => { const n = { ...prev }; delete n[String(mobileEditCustomer.id)]; return n; }); }} disabled={isProcessing} className="saas-btn saas-btn-secondary">Cancel</button>
+                 <button onClick={async () => { 
+                    setIsProcessing(true);
+                    const success = await handleSaveRecord(String(mobileEditCustomer.id)); 
+                    if (success) setMobileEditCustomer(null); 
+                    setIsProcessing(false);
+                 }} disabled={isProcessing} className="saas-btn saas-btn-primary">
+                   {isProcessing ? 'Saving...' : 'Save'}
+                 </button>
                </div>
             </div>
           </div>
@@ -682,8 +698,10 @@ export default function CustomerDatabasePage() {
           </div>
 
           <div style={{ marginTop: '24px', display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
-            <button type="button" onClick={() => setShowAddModal(false)} className="saas-btn saas-btn-secondary">Cancel</button>
-            <button type="submit" className="saas-btn saas-btn-primary">Save Customer</button>
+            <button type="button" onClick={() => setShowAddModal(false)} disabled={isProcessing} className="saas-btn saas-btn-secondary">Cancel</button>
+            <button type="submit" disabled={isProcessing} className="saas-btn saas-btn-primary">
+              {isProcessing ? 'Saving...' : 'Save Customer'}
+            </button>
           </div>
         </form>
       </Modal>

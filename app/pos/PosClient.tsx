@@ -804,26 +804,28 @@ export default function POSPage() {
       const product = products.find(p => String(p.id) === String(importForm.product_id));
       if (!product) throw new Error("Product ID mismatch");
 
-      const { error: importErr } = await supabase.from('imports').insert([{
-        supplier_id: Number(importForm.supplier_id), product_id: Number(importForm.product_id), product_name: product.name,
-        qty: qty, unit_cost: unitCost, total_cost: totalCost, paid_amount: paidAmount, status: paidAmount >= totalCost ? 'Paid' : 'Pending', branch_id: activeBranchId
-      }]);
-      if (importErr) throw importErr;
+      // Calculate explicitly for the payload
+      let amtUsd = 0, amtRiel = paidAmount;
+      if (importForm.payment_method.includes('$')) { amtUsd = paidAmount; amtRiel = paidAmount * EXCHANGE_RATE; }
 
-      if (totalCost - paidAmount > 0) {
-        const supplier = suppliers.find(s => String(s.id) === String(importForm.supplier_id));
-        await supabase.from('suppliers').update({ total_owed_riel: Number(supplier?.total_owed_riel || 0) + (totalCost - paidAmount) }).eq('id', supplier?.id);
-        await supabase.from('accounts_payable').insert([{ supplier_name: supplierName, amount_riel: totalCost - paidAmount, amount_usd: 0, notes: `Stock Import: ${qty} bags`, status: 'Unpaid', branch_id: activeBranchId }]);
-      }
-      
-      await supabase.from('products').update({ stock: Number(product.stock || 0) + qty, cost_price: unitCost }).eq('id', product.id);
-      await supabase.from('inventory_batches').insert([{ product_id: Number(importForm.product_id), product_name: product.name, cost_price: unitCost, remaining_qty: qty, branch_id: activeBranchId }]);
+      const payload = {
+        branch_id: activeBranchId,
+        supplier_id: Number(importForm.supplier_id),
+        supplier_name: supplierName,
+        product_id: Number(importForm.product_id),
+        product_name: product.name,
+        qty: qty,
+        unit_cost: unitCost,
+        total_cost: totalCost,
+        paid_amount: paidAmount,
+        payment_method: importForm.payment_method,
+        status: paidAmount >= totalCost ? 'Paid' : 'Pending',
+        amt_usd: amtUsd,
+        amt_riel: amtRiel
+      };
 
-      if (paidAmount > 0) {
-        let amtUsd = 0, amtRiel = paidAmount;
-        if (importForm.payment_method.includes('$')) { amtUsd = paidAmount; amtRiel = paidAmount * EXCHANGE_RATE; }
-        await supabase.from('expenses').insert([{ expense_date: new Date().toISOString().split('T')[0], spender: 'Both', payment_method: importForm.payment_method, remarks: `Stock Import: ${supplierName}`, amount_usd: Math.abs(amtUsd), amount_riel: Math.abs(amtRiel), description: 'BUSINESS', branch_id: activeBranchId }]);
-      }
+      const { error: rpcError } = await supabase.rpc('process_stock_import', { p_payload: payload });
+      if (rpcError) throw rpcError;
 
       setImportForm({ supplier_id: '', product_id: '', qty: '', unit_cost: '', paid_amount: '', payment_method: 'Cash ៛' });
       showToast('success', 'Stock Received', `${qty} bags added to inventory.`);
@@ -879,51 +881,53 @@ export default function POSPage() {
     if (!bagId || qtyToDeductBag <= 0) return showToast('error', 'Missing Bag', 'Please select a packaging bag and enter the quantity.');
     setIsProcessing(true);
     try {
-      const processDeduction = async (prodId: number, qty: number, specificBatchId: number | null) => {
-        if (qty <= 0) return;
-        await supabase.rpc('adjust_product_stock', { p_product_id: prodId, p_quantity: -qty });
-        if (specificBatchId) await supabase.rpc('adjust_batch_stock', { p_batch_id: specificBatchId, p_quantity: -qty });
-        else {
-          const { data: batches } = await supabase.from('inventory_batches').select('*').eq('product_id', prodId).eq('branch_id', activeBranchId).gt('remaining_qty', 0).order('id', { ascending: true }); 
-          let leftToDeduct = qty;
-          if (batches) { for (const b of batches) { if (leftToDeduct <= 0) break; const take = Math.min(b.remaining_qty, leftToDeduct); await supabase.rpc('adjust_batch_stock', { p_batch_id: b.id, p_quantity: -take }); leftToDeduct -= take; } }
-        }
-      };
-
-      if (rice1 && qtyToDeduct1 > 0) await processDeduction(rice1.id, qtyToDeduct1, rice1BatchId);
-      if (rice2 && qtyToDeduct2 > 0) await processDeduction(rice2.id, qtyToDeduct2, rice2BatchId);
-      if (showThirdRice && rice3 && qtyToDeduct3 > 0) await processDeduction(rice3.id, qtyToDeduct3, rice3BatchId);
-      if (bagProd && qtyToDeductBag > 0) await processDeduction(bagProd.id, qtyToDeductBag, null);
-
-      let finalTargetId = targetProductId, finalTargetName = targetProd?.name || ''; 
       if (syncMode === 'new') {
-        const payload = { name: newMixName, price: Number(newMixPrice) || 0, cost_price: Math.round(finalCogs), weight: newMixType === 'wholesale' ? 50 : newMixType === 'half' ? 25 : 1, stock: finalYield, branch_id: activeBranchId }
-        const { data: newProd, error } = await supabase.from('products').insert([payload]).select().single();
-        if (error) throw error; finalTargetId = newProd.id.toString(); finalTargetName = newMixName; 
-      } else if (targetProd) {
-        await supabase.rpc('adjust_product_stock', { p_product_id: targetProd.id, p_quantity: finalYield });
-        await supabase.from('products').update({ cost_price: Math.round(finalCogs) }).eq('id', targetProd.id);
-        finalTargetId = targetProd.id.toString(); finalTargetName = targetProd.name; 
+        const { data: existingProd } = await supabase.from('products').select('id').ilike('name', newMixName.trim()).eq('branch_id', activeBranchId).eq('is_archived', false).maybeSingle();
+        if (existingProd) { showToast('error', 'Duplicate Name', 'Product name exists.'); setIsProcessing(false); return; }
       }
 
       const recipeString = `Recipe: ${qtyToDeduct1}x ${rice1.name} + ${qtyToDeduct2}x ${rice2.name}${showThirdRice && rice3 ? ` + ${qtyToDeduct3}x ${rice3.name}` : ''}`;
-      const { data: generatedBatch, error: batchErr } = await supabase.from('inventory_batches').insert([{ product_id: Number(finalTargetId), product_name: finalTargetName, cost_price: Math.round(finalCogs), remaining_qty: finalYield, branch_id: activeBranchId, notes: recipeString }]).select().single();
-      if (batchErr) throw batchErr;
+      const ingredientsPayload = [];
+      if (rice1 && qtyToDeduct1 > 0) ingredientsPayload.push({ id: rice1.id, qty: qtyToDeduct1, batchId: rice1BatchId });
+      if (rice2 && qtyToDeduct2 > 0) ingredientsPayload.push({ id: rice2.id, qty: qtyToDeduct2, batchId: rice2BatchId });
+      if (showThirdRice && rice3 && qtyToDeduct3 > 0) ingredientsPayload.push({ id: rice3.id, qty: qtyToDeduct3, batchId: rice3BatchId });
 
-      const usedIngredients: any[] = [];
-      if (rice1 && qtyToDeduct1 > 0) usedIngredients.push({ id: rice1.id, qty: qtyToDeduct1, batchId: rice1BatchId });
-      if (rice2 && qtyToDeduct2 > 0) usedIngredients.push({ id: rice2.id, qty: qtyToDeduct2, batchId: rice2BatchId });
-      if (showThirdRice && rice3 && qtyToDeduct3 > 0) usedIngredients.push({ id: rice3.id, qty: qtyToDeduct3, batchId: rice3BatchId });
+      const mixPayload: any = {
+          branch_id: activeBranchId,
+          sync_mode: syncMode,
+          yield_kg: finalYield,
+          final_cogs: finalCogs,
+          recipe_string: recipeString,
+          ingredients: ingredientsPayload,
+          bag: bagProd && qtyToDeductBag > 0 ? { id: bagProd.id, qty: qtyToDeductBag } : null
+      };
 
+      if (syncMode === 'new') {
+          mixPayload.new_product = {
+              name: newMixName,
+              price: Number(String(newMixPrice).replace(/,/g, '')) || 0,
+              cost_price: Math.round(finalCogs),
+              weight: newMixType === 'wholesale' ? 50 : newMixType === 'half' ? 25 : 1
+          };
+      } else {
+          mixPayload.target_product = { id: targetProd?.id, name: targetProd?.name };
+      }
+
+      const { data: rpcData, error: rpcError } = await supabase.rpc('execute_rice_mix', { p_payload: mixPayload });
+      if (rpcError) throw rpcError;
+
+      const yieldStr = `${finalYield.toLocaleString('en-US', { maximumFractionDigits: 2 })} ${outputUnit}`;
       const newRecord: MixHistory = {
         id: Date.now().toString(), time: new Date().toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }),
         rice1Name: rice1.name, rice1Ratio: qtyToDeduct1, rice2Name: rice2.name, rice2Ratio: qtyToDeduct2, rice3Name: showThirdRice && rice3 ? rice3.name : undefined, rice3Ratio: showThirdRice ? qtyToDeduct3 : undefined,
-        mixedCogs: finalCogs, yieldStr: `${finalYield.toLocaleString('en-US', { maximumFractionDigits: 2 })} ${outputUnit}`, bagUsed: bagProd ? bagProd.name : undefined, bagQty: bagProd ? qtyToDeductBag : undefined, branch_id: activeBranchId,
-        targetProductId: Number(finalTargetId), targetBatchId: generatedBatch.id, yieldKg: finalYield, ingredients: usedIngredients, bagId: bagProd ? bagProd.id : undefined,
+        mixedCogs: finalCogs, yieldStr: yieldStr, bagUsed: bagProd ? bagProd.name : undefined, bagQty: bagProd ? qtyToDeductBag : undefined, branch_id: activeBranchId,
+        targetProductId: rpcData.targetProductId, targetBatchId: rpcData.targetBatchId, yieldKg: finalYield, ingredients: rpcData.usedIngredients, bagId: bagProd ? bagProd.id : undefined,
       }
+      
       const updatedGlobalHistory = [newRecord, ...globalHistory].slice(0, 100); 
-      setGlobalHistory(updatedGlobalHistory); setMixHistory(updatedGlobalHistory.filter(h => h.branch_id === activeBranchId || !h.branch_id));
-      await supabase.from('app_settings').upsert({ setting_key: 'calculator_history', setting_value: updatedGlobalHistory }, { onConflict: 'setting_key' })
+      setGlobalHistory(updatedGlobalHistory); setMixHistory(updatedGlobalHistory);
+      const branchKey = activeBranchId === 0 ? 'calculator_history' : `calculator_history_${activeBranchId}`;
+      await supabase.from('app_settings').upsert({ setting_key: branchKey, setting_value: updatedGlobalHistory }, { onConflict: 'setting_key' })
 
       showToast('success', 'Sync Successful', 'Inventory synced and stored in batch!');
       handleResetMix(); setActiveFullScreen('none'); loadProductsAndSettings(); loadBatches();
@@ -3599,8 +3603,10 @@ export default function POSPage() {
       {activeFullScreen === 'import' && (
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: '#f8fafc', zIndex: 99999, overflowY: 'auto' }}>
           <div style={{ padding: isDeviceMobile ? '16px' : '32px', width: '100%', maxWidth: '800px', margin: '0 auto', minHeight: '100dvh', display: 'flex', flexDirection: 'column' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px', flexShrink: 0 }}>
-              <h1 className="saas-page-title" style={{ margin: 0 }}>📦 Import Stock</h1>
+            <div className="header-container" style={{ justifyContent: 'space-between', marginBottom: '24px', flexShrink: 0, width: 'auto' }}>
+              <div className="header-left">
+                <h1 className="saas-page-title" style={{ margin: 0 }}>📦 Import Stock</h1>
+              </div>
               {isDeviceMobile ? (
                 <button onClick={() => setActiveFullScreen('none')} style={{ background: 'none', border: 'none', color: '#ef4444', fontSize: '24px', padding: '4px', cursor: 'pointer' }}>
                   ❌
@@ -3712,8 +3718,10 @@ export default function POSPage() {
       {activeFullScreen === 'mix' && (
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: '#f8fafc', zIndex: 99999, overflowY: 'auto', paddingBottom: '100px' }}>
           <div style={{ padding: isDeviceMobile ? '16px' : '32px', width: '100%', maxWidth: '1400px', margin: '0 auto', minHeight: '100dvh', display: 'flex', flexDirection: 'column' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px', flexShrink: 0 }}>
-              <h1 className="saas-page-title" style={{ margin: 0 }}>🥣 Mix Rice Calculator</h1>
+            <div className="header-container" style={{ justifyContent: 'space-between', marginBottom: '24px', flexShrink: 0, width: 'auto' }}>
+              <div className="header-left">
+                <h1 className="saas-page-title" style={{ margin: 0 }}>🥣 Mix Rice Calculator</h1>
+              </div>
               {isDeviceMobile ? (
                 <button onClick={() => setActiveFullScreen('none')} style={{ background: 'none', border: 'none', color: '#ef4444', fontSize: '24px', padding: '4px', cursor: 'pointer' }}>
                   ❌

@@ -66,22 +66,22 @@ export default function DashboardPage() {
       }
 
       // 🔥 PHASE 4 PAYLOAD OPTIMIZATION: Narrowed columns slash RAM usage by 80%
+      // 🛡️ FINANCIAL FIX: Removed date limits from ledger tables so calculateAssets() computes accurate LIFETIME Cash, QR, and Net Worth. 
       const [
         {data: salesData}, {data: sumData}, {data: retData}, {data: expData}, 
         {data: staffData}, {data: prodData}, {data: apData}, {data: cogsData}, 
         {data: batchData}, {data: invPayData}
       ] = await Promise.all([
-        buildQNarrow('sales', 'id, created_at, qty, price_per_bag, cogs_price, owner, custom_rice_type, rice_type, invoice_id').gte('created_at', firstDayOfLastMonth).eq('is_voided', false),
+        buildQNarrow('sales', 'id, created_at, qty, price_per_bag, cogs_price, owner, custom_rice_type, rice_type, invoice_id').eq('is_voided', false),
         buildQNarrow('invoice_summaries', 'invoice_id, owner, balance_due').eq('is_done', false),
-        buildQNarrow('retail_sales', 'id, created_at, qty, price_per_bag, cogs_price, owner, custom_rice_type, rice_type, transaction_id, payment_method, total_sales').gte('created_at', firstDayOfLastMonth).eq('is_voided', false),
-        buildQNarrow('expenses', 'id, created_at, amount_riel, amount_usd, payment_method, spender, description, remarks').gte('created_at', firstDayOfLastMonth),
+        buildQNarrow('retail_sales', 'id, created_at, qty, price_per_bag, cogs_price, owner, custom_rice_type, rice_type, transaction_id, payment_method, total_sales').eq('is_voided', false),
+        buildQNarrow('expenses', 'id, created_at, amount_riel, amount_usd, payment_method, spender, description, remarks'),
         buildQ('staff'),
         buildQNarrow('products', 'id, name, stock, cost_price, weight, linked_wholesale_id').order('id'),
         buildQNarrow('accounts_payable', 'id, amount_riel, amount_usd, status').eq('status', 'Unpaid'),
         buildQNarrow('cogs_settlements', 'payment_method, paid_amount_riel, paid_amount_usd, owner_name'),
         buildQNarrow('inventory_batches', 'id, product_id, remaining_qty, cost_price, created_at').gt('remaining_qty', 0),
-        // 🛡️ PERFORMANCE FIX: Re-applied the date limit using 'payment_date' instead of 'created_at' to prevent infinite memory growth
-        buildQNarrow('invoice_payments', 'invoice_id, payment_method, amount_paid_riel, amount_paid_usd, recorded_by, payment_date').gte('payment_date', firstDayOfLastMonth).eq('is_voided', false) 
+        buildQNarrow('invoice_payments', 'invoice_id, payment_method, amount_paid_riel, amount_paid_usd, recorded_by, payment_date').eq('is_voided', false) 
       ]);
 
       setWholesaleSales(salesData || []); 
@@ -181,10 +181,11 @@ export default function DashboardPage() {
       const price = Number(sale.price_per_bag || 0); 
       const cogs = Number(sale.cogs_price || 0);
       
-      const revenue = qty * price; 
-      const profit = (price - cogs) * qty;
+      // 🔥 MATH FIX: Wrap in Math.round to prevent floating-point decimal leaks over thousands of rows
+      const revenue = Math.round(qty * price); 
+      const profit = Math.round((price - cogs) * qty);
       
-      const owner = parseOwner(sale.owner); 
+      const owner = parseOwner(sale.owner);
 
       if (owner === 'mom') { momSales += revenue; momProfit += profit } 
       else {
@@ -741,8 +742,9 @@ export default function DashboardPage() {
       const cogs = Number(sale.cogs_price || 0);
       
       if (dayIdx >= 0 && dayIdx < 31) {
-        dailySales[dayIdx] += (qty * price);
-        dailyProfit[dayIdx] += ((price - cogs) * qty);
+        // 🔥 MATH FIX: Wrap in Math.round to prevent floating-point decimal leaks
+        dailySales[dayIdx] += Math.round(qty * price);
+        dailyProfit[dayIdx] += Math.round((price - cogs) * qty);
       }
     })
     return { dailySales, dailyProfit }

@@ -77,10 +77,8 @@ export default function BizDatabase() {
   const [timeFilter, setTimeFilter] = useState<TimeFilter>('Today')
   const [isLoading, setIsLoading] = useState(true)
 
-  // --- SELECTION & EDITING STATE ---
+  // --- SELECTION STATE ---
   const [selectedToDelete, setSelectedToDelete] = useState<Set<string>>(new Set())
-  const [editingCell, setEditingCell] = useState<{id: string, col: string} | null>(null)
-  const [edits, setEdits] = useState<Record<string, Partial<UnifiedTransaction>>>({})
   
   // --- PREFERENCES ---
   const [columnWidths, setColumnWidths] = useState<Record<string, number>>(DEFAULT_WIDTHS)
@@ -103,9 +101,12 @@ export default function BizDatabase() {
 
   // --- LIFECYCLE ---
   useEffect(() => { 
-    fetchData(false)
     fetchSettings()
-  }, [activeBranchId]) // 🔥 RE-RUNS ON BRANCH SWITCH
+  }, [activeBranchId])
+
+  useEffect(() => { 
+    fetchData(false)
+  }, [activeBranchId, timeFilter]) // 🔥 INFINITE FETCH FIX: Refetches instantly when date changes
 
   useFocusRefresh(() => fetchData(true));
 
@@ -126,7 +127,6 @@ export default function BizDatabase() {
       
       if (expCols?.setting_value) {
         let cols = expCols.setting_value;
-        // Auto-migration: if the user had the old single 'amount' column saved, split it into two
         if (cols.includes('amount')) {
           cols = cols.flatMap((c: string) => c === 'amount' ? ['amount_riel', 'amount_usd'] : c);
         }
@@ -138,25 +138,33 @@ export default function BizDatabase() {
   async function fetchData(isSilent = false) {
     if (!isSilent) setIsLoading(true)
     
-    // 🔥 ALL FETCHES SECURELY FILTERED BY BRANCH
-    const { data: summaryData } = await supabase.from('invoice_summaries').select('*').eq('branch_id', activeBranchId)
-    const { data: dailyData } = await supabase.from('sales').select('*').eq('branch_id', activeBranchId)
-    
-    let retailData: any[] = []
-    try {
-      const { data, error } = await supabase.from('retail_sales').select('*').eq('branch_id', activeBranchId)
-      if (data && !error) retailData = data;
-    } catch (e) {
-      console.warn("Retail table not found", e)
+    let queryStart = null;
+    const now = new Date();
+    if (timeFilter === 'Today') {
+      queryStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
+    } else if (timeFilter === 'This Week') {
+      const dayOfWeek = now.getDay(); 
+      const diff = now.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1);
+      queryStart = new Date(now.getFullYear(), now.getMonth(), diff, 0, 0, 0, 0).toISOString();
+    } else if (timeFilter === 'This Month') {
+      queryStart = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0).toISOString();
     }
 
-    let allExpenses: any[] = []
-    try {
-      const { data, error } = await supabase.from('expenses').select('*').eq('branch_id', activeBranchId)
-      if (data && !error) allExpenses = data;
-    } catch (e) {
-      console.warn("Expenses table not found", e)
+    // 🔥 INFINITE FETCH FIX: Only download records that match our actual time filter!
+    const fetchTable = async (table: string) => {
+      let q = supabase.from(table).select('*').eq('branch_id', activeBranchId);
+      if (queryStart) q = q.gte('created_at', queryStart);
+      const { data, error } = await q;
+      if (error) console.warn(`${table} fetch error`, error);
+      return data || [];
     }
+
+    const [summaryData, dailyData, retailData, allExpenses] = await Promise.all([
+      fetchTable('invoice_summaries'),
+      fetchTable('sales'),
+      fetchTable('retail_sales'),
+      fetchTable('expenses')
+    ]);
 
     const unified: UnifiedTransaction[] = []
     const invoiceDict: Record<string, any> = {};
@@ -269,116 +277,80 @@ export default function BizDatabase() {
     setIsLoading(false)
   }
 
-  // --- RAW BULK DELETE WITH CASCADING FOREIGN KEY SAFETY ---
+  // --- RAW BULK DELETE (100% ATOMIC & SECURE) ---
   const handleDelete = async () => {
     if (!confirm(`🚨 Are you sure you want to PERMANENTLY DELETE ${selectedToDelete.size} records?\n\nThis will completely erase the transaction and physically return the items to your inventory stock.`)) return;
     
-    setTransactions(prev => prev.filter(t => !selectedToDelete.has(t.id)));
+    setIsLoading(true);
 
-    const sumIds: any[] = [];
-    const dailyIds: any[] = [];
-    const retIds: any[] = [];
-    const expenseIds: any[] = []; 
+    const payload = {
+      branch_id: activeBranchId,
+      summary_ids: [] as number[],
+      sales_ids: [] as number[],
+      retail_ids: [] as number[],
+      expense_ids: [] as number[],
+      invoice_ids: [] as string[],
+      restorations: [] as { product_id: number, qty: number, cogs_price: number, rice_type: string }[]
+    };
 
-    const itemsToRestore: UnifiedTransaction[] = [];
     const invoiceIdsToCascade = new Set<string>(); 
-    const summaryIdsToCascade = new Set<string>(); 
 
+    // Step 1: Map selected items into payload buckets
     transactions.forEach(t => {
       if (selectedToDelete.has(t.id)) {
         if (t.source === 'Wholesale Invoice Summary') {
-          sumIds.push(t.raw_db_id);
+          payload.summary_ids.push(Number(t.raw_db_id));
           if (t.invoice_id) invoiceIdsToCascade.add(t.invoice_id);
         }
-        else if (t.source === 'Walk-in Wholesale') {
-          dailyIds.push(t.raw_db_id);
-          itemsToRestore.push(t);
-          if (t.invoice_id) summaryIdsToCascade.add(t.invoice_id);
-        }
-        else if (t.source === 'Non-Walk-in Wholesale') {
-          dailyIds.push(t.raw_db_id);
-          itemsToRestore.push(t);
+        else if (t.source === 'Walk-in Wholesale' || t.source === 'Non-Walk-in Wholesale') {
+          payload.sales_ids.push(Number(t.raw_db_id));
+          payload.restorations.push({ product_id: Number(t.product_id), qty: Number(t.qty) || 0, cogs_price: Number(t.cogs_price) || 0, rice_type: t.rice_type });
+          if (t.invoice_id) invoiceIdsToCascade.add(t.invoice_id);
         }
         else if (t.source === 'Retails only') {
-          retIds.push(t.raw_db_id);
-          itemsToRestore.push(t);
+          payload.retail_ids.push(Number(t.raw_db_id));
+          payload.restorations.push({ product_id: Number(t.product_id), qty: Number(t.qty) || 0, cogs_price: Number(t.cogs_price) || 0, rice_type: t.rice_type });
         }
         else if (t.source === 'Biz Expense' || t.source === 'Personal Expense' || t.source === 'Staff Debt') {
-          expenseIds.push(t.raw_db_id);
+          payload.expense_ids.push(Number(t.raw_db_id));
         }
       }
     });
 
+    // Step 2: Grab orphaned children if a master invoice was selected
     if (invoiceIdsToCascade.size > 0) {
-      const children = transactions.filter(t => (t.source === 'Non-Walk-in Wholesale' || t.source === 'Walk-in Wholesale') && t.invoice_id && invoiceIdsToCascade.has(t.invoice_id) && !selectedToDelete.has(t.id));
+      payload.invoice_ids = Array.from(invoiceIdsToCascade);
+      
+      const children = transactions.filter(t => 
+        (t.source === 'Non-Walk-in Wholesale' || t.source === 'Walk-in Wholesale') && 
+        t.invoice_id && 
+        invoiceIdsToCascade.has(t.invoice_id) && 
+        !selectedToDelete.has(t.id)
+      );
+      
       children.forEach(c => {
-        dailyIds.push(c.raw_db_id);
-        itemsToRestore.push(c);
+        payload.sales_ids.push(Number(c.raw_db_id));
+        payload.restorations.push({ product_id: Number(c.product_id), qty: Number(c.qty) || 0, cogs_price: Number(c.cogs_price) || 0, rice_type: c.rice_type });
       });
     }
 
+    // Step 3: Strip non-inventory items from the restoration queue (Delivery fees, empty bags)
+    payload.restorations = payload.restorations.filter(r => {
+       const isSpecial = (r.rice_type || '').includes('បានប្រើ') || (r.rice_type || '').includes('សេវាដឹក');
+       return r.qty !== 0 && !isSpecial && r.product_id;
+    });
+
+    // Step 4: Hand it off securely to Postgres
     try {
-      for (const item of itemsToRestore) {
-        const qty = Number(item.qty) || 0;
-        const isSpecial = (item.rice_type || '').includes('បានប្រើ') || (item.rice_type || '').includes('សេវាដឹក');
-        
-        if (qty !== 0 && !isSpecial && item.product_id) {
-          // 🔥 BRANCH FILTER ON PRODUCT
-          const { data: prod } = await supabase.from('products').select('stock').eq('id', item.product_id).eq('branch_id', activeBranchId).single();
-          if (prod) {
-            await supabase.from('products').update({ stock: Number(prod.stock) + qty }).eq('id', item.product_id).eq('branch_id', activeBranchId);
-          }
+      const { error } = await supabase.rpc('bulk_delete_transactions', { p_payload: payload });
+      if (error) throw error;
 
-          // 🔥 RESTORE BATCH FIFO: Push the physical bags back into the most recent active batch
-          const { data: batches } = await supabase.from('inventory_batches')
-            .select('*')
-            .eq('product_id', item.product_id)
-            .eq('branch_id', activeBranchId)
-            .order('id', { ascending: false }) // Grab the most recently opened batch
-            .limit(1);
-          
-          if (batches && batches.length > 0) {
-            // Because POS uses adjust_batch_stock with -qty, we pass positive qty to restore it!
-            await supabase.rpc('adjust_batch_stock', { 
-               p_batch_id: batches[0].id, 
-               p_quantity: qty 
-            });
-          } else {
-            // Failsafe: If no batch exists at all, create a restoration batch
-            await supabase.from('inventory_batches').insert([{
-               product_id: item.product_id,
-               branch_id: activeBranchId,
-               cost_price: item.cogs_price,
-               remaining_qty: qty,
-               notes: 'Restored from deleted transaction'
-            }]);
-          }
-        }
-      }
-
-      const allInvoicesToDelete = new Set([...Array.from(invoiceIdsToCascade), ...Array.from(summaryIdsToCascade)]);
-      
-      // 🔥 ALL DELETIONS LOCKED TO BRANCH ID
-      if (allInvoicesToDelete.size > 0) {
-        await supabase.from('invoice_payments').delete().in('invoice_id', Array.from(allInvoicesToDelete)).eq('branch_id', activeBranchId);
-      }
-
-      if (dailyIds.length > 0) await supabase.from('sales').delete().in('id', dailyIds).eq('branch_id', activeBranchId);
-      if (retIds.length > 0) await supabase.from('retail_sales').delete().in('id', retIds).eq('branch_id', activeBranchId);
-      
-      if (expenseIds.length > 0) await supabase.from('expenses').delete().in('id', expenseIds).eq('branch_id', activeBranchId);
-      
-      if (sumIds.length > 0) await supabase.from('invoice_summaries').delete().in('id', sumIds).eq('branch_id', activeBranchId);
-      if (summaryIdsToCascade.size > 0) {
-        await supabase.from('invoice_summaries').delete().in('invoice_id', Array.from(summaryIdsToCascade)).eq('branch_id', activeBranchId);
-      }
-      
       setSelectedToDelete(new Set());
       showToast('success', 'Deleted Successfully', 'Records and inventory restored.');
       fetchData(true);
     } catch (e: any) {
       showToast('error', 'Deletion Failed', e.message);
-      fetchData(true);
+      setIsLoading(false);
     }
   }
 
@@ -394,110 +366,6 @@ export default function BizDatabase() {
     } else {
       setSelectedToDelete(new Set(processedTransactions.map(t => t.id)));
     }
-  }
-
-  // --- SAVE EDIT LOGIC ---
-  const handleSaveRecord = async (id: string) => {
-    if (!edits[id]) {
-      setEditingCell(null);
-      return;
-    }
-
-    const payload = { ...edits[id] } as any;
-    const baseTx = transactions.find(t => t.id === id);
-    if (!baseTx) return;
-
-    let targetTable = '';
-    const dbPayload: any = {};
-
-    if (payload.created_at !== undefined) dbPayload.created_at = payload.created_at;
-    if (payload.invoice_id !== undefined) dbPayload.invoice_id = payload.invoice_id;
-    if (payload.transaction_id !== undefined) dbPayload.transaction_id = payload.transaction_id;
-
-    const newQty = payload.qty !== undefined ? Number(payload.qty) : Number(baseTx.qty || 0);
-    const newPrice = payload.price_per_bag !== undefined ? Number(payload.price_per_bag) : Number(baseTx.price_per_bag || 0);
-    const newCogs = payload.cogs_price !== undefined ? Number(payload.cogs_price) : Number(baseTx.cogs_price || 0);
-
-    if (baseTx.source === 'Wholesale Invoice Summary') {
-      targetTable = 'invoice_summaries';
-      if (payload.customer_name !== undefined) dbPayload.customer_name = payload.customer_name;
-      if (payload.owner !== undefined) dbPayload.owner = payload.owner;
-      if (payload.rice_types !== undefined) dbPayload.rice_types = payload.rice_types;
-      if (payload.total_sales !== undefined) dbPayload.total_sales = payload.total_sales;
-      if (payload.total_cogs !== undefined) dbPayload.total_cogs = payload.total_cogs;
-      if (payload.total_profit !== undefined) dbPayload.total_profit = payload.total_profit;
-    } 
-    else if (baseTx.source === 'Walk-in Wholesale' || baseTx.source === 'Non-Walk-in Wholesale') {
-      targetTable = 'sales';
-      if (payload.rice_type !== undefined) dbPayload.custom_rice_type = payload.rice_type; 
-      
-      dbPayload.qty = newQty;
-      dbPayload.price_per_bag = newPrice;
-      dbPayload.cogs_price = newCogs;
-      dbPayload.total_sales = newQty * newPrice;
-      dbPayload.total_cogs = newQty * newCogs;
-      dbPayload.total_profit = (newPrice - newCogs) * newQty;
-    }
-    else if (baseTx.source === 'Retails only') {
-      targetTable = 'retail_sales';
-      if (payload.rice_type !== undefined) dbPayload.custom_rice_type = payload.rice_type; 
-      
-      dbPayload.qty = newQty;
-      dbPayload.price_per_bag = newPrice;
-      dbPayload.cogs_price = newCogs;
-      dbPayload.total_sales = newQty * newPrice;
-      dbPayload.total_cogs = newQty * newCogs;
-      dbPayload.total_profit = (newPrice - newCogs) * newQty;
-    }
-    else if (baseTx.source === 'Biz Expense' || baseTx.source === 'Personal Expense' || baseTx.source === 'Staff Debt') {
-      targetTable = 'expenses';
-      if (payload.description !== undefined) dbPayload.remarks = payload.description; // UI Description saves to DB remarks
-      if (payload.category !== undefined) dbPayload.category = payload.category; 
-      if (payload.owner !== undefined) dbPayload.spender = payload.owner; 
-      if (payload.status !== undefined) dbPayload.payment_method = payload.status; 
-      if (payload.amount_riel !== undefined) dbPayload.amount_riel = payload.amount_riel;
-      if (payload.amount_usd !== undefined) dbPayload.amount_usd = payload.amount_usd;
-    }
-
-    if (Object.keys(dbPayload).length > 0) {
-      // 🔥 UPDATE LOCKED TO BRANCH ID
-      const { error } = await supabase.from(targetTable).update(dbPayload).eq('id', baseTx.raw_db_id).eq('branch_id', activeBranchId);
-      if (error) {
-        showToast('error', 'Save Failed', error.message);
-        return;
-      }
-    }
-
-    setEdits(prev => { const n = { ...prev }; delete n[id]; return n });
-    setEditingCell(null);
-    showToast('success', 'Saved', 'Record updated successfully.');
-    fetchData(true); 
-  }
-
-  // --- TIME FILTER LOGIC ---
-  const isWithinTimeFilter = (dateString: string) => {
-    if (timeFilter === 'All Time') return true;
-    
-    const d = new Date(dateString);
-    const now = new Date();
-    
-    if (timeFilter === 'Today') {
-      return d.getDate() === now.getDate() && d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
-    }
-    
-    if (timeFilter === 'This Month') {
-      return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
-    }
-    
-    if (timeFilter === 'This Week') {
-      const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-      const dayOfWeek = today.getDay(); 
-      const diff = today.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1);
-      const startOfWeek = new Date(today.setDate(diff));
-      return d >= startOfWeek;
-    }
-    
-    return true;
   }
 
   // --- HEADER SORT LOGIC ---
@@ -585,7 +453,6 @@ export default function BizDatabase() {
   const processedTransactions = transactions
     .filter(t => {
       if (t.source !== activeTab) return false;
-      if (!isWithinTimeFilter(t.created_at)) return false;
 
       if (debouncedSearch) {
         const query = debouncedSearch.toLowerCase()
@@ -657,25 +524,25 @@ export default function BizDatabase() {
         
         {/* TOP ROW: TABS */}
         <div className="saas-tab-container" style={{ border: 'none', padding: 0, boxShadow: 'none', borderBottom: '1px solid #e2e8f0', borderRadius: 0, paddingBottom: '12px', marginBottom: '16px' }}>
-          <button className={`saas-tab ${activeTab === 'Wholesale Invoice Summary' ? 'active' : ''}`} onClick={() => {setActiveTab('Wholesale Invoice Summary'); setSortConfig(null); setEditingCell(null); setSelectedToDelete(new Set());}}>
+          <button className={`saas-tab ${activeTab === 'Wholesale Invoice Summary' ? 'active' : ''}`} onClick={() => {setActiveTab('Wholesale Invoice Summary'); setSortConfig(null); setSelectedToDelete(new Set());}}>
             🌾 Wholesale Invoice Summary
           </button>
-          <button className={`saas-tab ${activeTab === 'Walk-in Wholesale' ? 'active' : ''}`} onClick={() => {setActiveTab('Walk-in Wholesale'); setSortConfig(null); setEditingCell(null); setSelectedToDelete(new Set());}}>
+          <button className={`saas-tab ${activeTab === 'Walk-in Wholesale' ? 'active' : ''}`} onClick={() => {setActiveTab('Walk-in Wholesale'); setSortConfig(null); setSelectedToDelete(new Set());}}>
             🚶 Walk-in Wholesale
           </button>
-          <button className={`saas-tab ${activeTab === 'Non-Walk-in Wholesale' ? 'active' : ''}`} onClick={() => {setActiveTab('Non-Walk-in Wholesale'); setSortConfig(null); setEditingCell(null); setSelectedToDelete(new Set());}}>
+          <button className={`saas-tab ${activeTab === 'Non-Walk-in Wholesale' ? 'active' : ''}`} onClick={() => {setActiveTab('Non-Walk-in Wholesale'); setSortConfig(null); setSelectedToDelete(new Set());}}>
             🚚 Non-Walk-in Wholesale
           </button>
-          <button className={`saas-tab ${activeTab === 'Retails only' ? 'active' : ''}`} onClick={() => {setActiveTab('Retails only'); setSortConfig(null); setEditingCell(null); setSelectedToDelete(new Set());}}>
+          <button className={`saas-tab ${activeTab === 'Retails only' ? 'active' : ''}`} onClick={() => {setActiveTab('Retails only'); setSortConfig(null); setSelectedToDelete(new Set());}}>
             🛍️ Retails only
           </button>
-          <button className={`saas-tab ${activeTab === 'Biz Expense' ? 'active' : ''}`} onClick={() => {setActiveTab('Biz Expense'); setSortConfig(null); setEditingCell(null); setSelectedToDelete(new Set());}}>
+          <button className={`saas-tab ${activeTab === 'Biz Expense' ? 'active' : ''}`} onClick={() => {setActiveTab('Biz Expense'); setSortConfig(null); setSelectedToDelete(new Set());}}>
             📉 Biz Expense
           </button>
-          <button className={`saas-tab ${activeTab === 'Personal Expense' ? 'active' : ''}`} onClick={() => {setActiveTab('Personal Expense'); setSortConfig(null); setEditingCell(null); setSelectedToDelete(new Set());}}>
+          <button className={`saas-tab ${activeTab === 'Personal Expense' ? 'active' : ''}`} onClick={() => {setActiveTab('Personal Expense'); setSortConfig(null); setSelectedToDelete(new Set());}}>
             🍕 Personal Expense
           </button>
-          <button className={`saas-tab ${activeTab === 'Staff Debt' ? 'active' : ''}`} onClick={() => {setActiveTab('Staff Debt'); setSortConfig(null); setEditingCell(null); setSelectedToDelete(new Set());}}>
+          <button className={`saas-tab ${activeTab === 'Staff Debt' ? 'active' : ''}`} onClick={() => {setActiveTab('Staff Debt'); setSortConfig(null); setSelectedToDelete(new Set());}}>
             💸 Staff Debt
           </button>
         </div>
@@ -768,10 +635,9 @@ export default function BizDatabase() {
               ) : (
                 processedTransactions.map(t => {
                   const isRowSelected = selectedToDelete.has(t.id);
-                  const isRowEditing = edits[t.id] ? true : false;
                   
                   return (
-                    <tr key={t.id} className={`saas-tr ${isRowSelected ? 'selected' : ''} ${isRowEditing ? 'editing' : ''}`}>
+                    <tr key={t.id} className={`saas-tr ${isRowSelected ? 'selected' : ''}`}>
                       <td className="saas-td" style={{ textAlign: 'center', borderRight: '1px solid #f1f5f9', padding: '14px 12px' }}>
                         <input 
                           type="checkbox" 
@@ -782,94 +648,37 @@ export default function BizDatabase() {
                       </td>
 
                       {activeColumns.map(col => {
-                        const isEditing = editingCell?.id === t.id && editingCell?.col === col;
-                        const val = edits[t.id]?.[col] ?? t[col] ?? '';
-
-                        const isParentFieldOnChild = (t.source === 'Walk-in Wholesale' || t.source === 'Non-Walk-in Wholesale') && ['customer_name', 'owner'].includes(col);
-                        // 🔥 INVENTORY LOCK: Lock physical movement fields to prevent stock leaks. Price adjustments are still allowed!
-const isUneditable = ['created_at', 'invoice_id', 'transaction_id', 'qty', 'cogs_price', 'rice_type'].includes(col) || isParentFieldOnChild;
+                        const val = t[col] ?? '';
 
                         return (
                           <td 
                             key={col} 
-                            className={`saas-td ${isEditing ? 'cell-editing' : ''}`}
+                            className="saas-td"
                             style={{ padding: 0, borderRight: '1px solid #f1f5f9', position: 'relative' }}
-                            onClick={() => { if (!isUneditable) setEditingCell({ id: t.id, col: col }) }}
                           >
-                            {isEditing ? (
-                              ['price_per_bag', 'cogs_price', 'total_sales', 'total_cogs', 'total_profit', 'amount_riel', 'amount_usd'].includes(col) ? (
-                                <CurrencyInput 
-                                  autoFocus 
-                                  value={val} 
-                                  onChange={(v: any) => setEdits(prev => ({ ...prev, [t.id]: { ...(prev[t.id] || {}), [col]: v } }))} 
-                                  onEnter={() => handleSaveRecord(t.id)}
-                                />
-                              ) : col === 'created_at' ? (
-                                <input 
-                                  autoFocus
-                                  type="datetime-local"
-                                  className="cell-input"
-                                  value={toLocalDatetimeString(val)}
-                                  onChange={(e) => {
-                                    const dateObj = new Date(e.target.value);
-                                    if (!isNaN(dateObj.getTime())) {
-                                      setEdits(prev => ({ ...prev, [t.id]: { ...(prev[t.id] || {}), [col]: dateObj.toISOString() } }));
-                                    }
-                                  }}
-                                  onBlur={() => handleSaveRecord(t.id)}
-                                  onKeyDown={(e) => { 
-                                    if (e.key === 'Enter') { e.currentTarget.blur(); handleSaveRecord(t.id); } 
-                                    if (e.key === 'Escape') { 
-                                      setEdits(prev => { const n = { ...prev }; delete n[t.id]; return n }); 
-                                      setEditingCell(null); 
-                                    } 
-                                  }}
-                                />
-                              ) : (
-                                <input 
-                                  autoFocus 
-                                  type={col === 'qty' ? 'number' : 'text'} 
-                                  className="cell-input no-spinners" 
-                                  value={val} 
-                                  onChange={(e) => {
-                                    const newVal = e.target.type === 'number' ? (e.target.value === '' ? '' : Number(e.target.value)) : e.target.value;
-                                    setEdits(prev => ({ ...prev, [t.id]: { ...(prev[t.id] || {}), [col]: newVal } }))
-                                  }} 
-                                  onBlur={() => handleSaveRecord(t.id)} 
-                                  onKeyDown={(e) => { 
-                                    if (e.key === 'Enter') { e.currentTarget.blur(); handleSaveRecord(t.id); } 
-                                    if (e.key === 'Escape') { 
-                                      setEdits(prev => { const n = { ...prev }; delete n[t.id]; return n }); 
-                                      setEditingCell(null); 
-                                    } 
-                                  }} 
-                                />
-                              )
-                            ) : (
-                              <div className="cell-display" style={{ cursor: isUneditable ? 'default' : 'text' }}>
-                                {['invoice_id', 'transaction_id', 'customer_name', 'rice_types', 'rice_type', 'description'].includes(col) && (
-                                  <span style={{ fontWeight: ['invoice_id', 'transaction_id'].includes(col) ? 'bold' : 'normal', color: ['invoice_id', 'transaction_id'].includes(col) ? '#1e293b' : 'inherit' }}>
-                                    {val || '-'}
-                                  </span>
-                                )}
-                                
-                                {col === 'owner' && <span className="badge-owner">{val || '-'}</span>}
-                                {col === 'category' && <span className="badge-category">{val || '-'}</span>}
-                                {col === 'status' && <span className="badge-status">{val || '-'}</span>}
-                                
-                                {col === 'created_at' && formatDate(t.created_at)}
-                                {col === 'qty' && formatNumber(val || 0)}
+                            <div className="cell-display" style={{ cursor: 'default' }}>
+                              {['invoice_id', 'transaction_id', 'customer_name', 'rice_types', 'rice_type', 'description'].includes(col) && (
+                                <span style={{ fontWeight: ['invoice_id', 'transaction_id'].includes(col) ? 'bold' : 'normal', color: ['invoice_id', 'transaction_id'].includes(col) ? '#1e293b' : 'inherit' }}>
+                                  {val || '-'}
+                                </span>
+                              )}
+                              
+                              {col === 'owner' && <span className="badge-owner">{val || '-'}</span>}
+                              {col === 'category' && <span className="badge-category">{val || '-'}</span>}
+                              {col === 'status' && <span className="badge-status">{val || '-'}</span>}
+                              
+                              {col === 'created_at' && formatDate(t.created_at)}
+                              {col === 'qty' && formatNumber(val || 0)}
 
-                                {['price_per_bag', 'cogs_price', 'total_sales', 'total_cogs', 'total_profit', 'amount_riel', 'amount_usd'].includes(col) && (
-                                  <span style={{ 
-                                    fontWeight: 'bold', 
-                                    color: (col === 'total_profit' && val < 0) || col === 'total_cogs' || col === 'cogs_price' || col === 'amount_riel' || col === 'amount_usd' ? '#ef4444' : '#10b981' 
-                                  }}>
-                                    {col === 'amount_usd' ? formatUSD(val || 0) : formatRiel(val || 0)}
-                                  </span>
-                                )}
-                              </div>
-                            )}
+                              {['price_per_bag', 'cogs_price', 'total_sales', 'total_cogs', 'total_profit', 'amount_riel', 'amount_usd'].includes(col) && (
+                                <span style={{ 
+                                  fontWeight: 'bold', 
+                                  color: (col === 'total_profit' && val < 0) || col === 'total_cogs' || col === 'cogs_price' || col === 'amount_riel' || col === 'amount_usd' ? '#ef4444' : '#10b981' 
+                                }}>
+                                  {col === 'amount_usd' ? formatUSD(val || 0) : formatRiel(val || 0)}
+                                </span>
+                              )}
+                            </div>
                           </td>
                         )
                       })}
