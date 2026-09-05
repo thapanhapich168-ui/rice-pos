@@ -3708,24 +3708,25 @@ export default function POSPage() {
       {activeFullScreen === 'import' && (
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: '#f8fafc', zIndex: 99999, overflowY: 'auto' }}>
           
-          {/* 🔥 FIX: Added safe-area-inset padding to respect the iPhone Notch */}
-          <div style={{ padding: isDeviceMobile ? 'max(16px, env(safe-area-inset-top, 16px)) 16px 16px 16px' : '32px', width: '100%', maxWidth: '800px', margin: '0 auto', minHeight: '100dvh', display: 'flex', flexDirection: 'column' }}>
+          {/* 🔥 FIX: Aligned padding-top to 20px to perfectly match main sticky header's Burger Icon axis */}
+          <div style={{ padding: isDeviceMobile ? 'max(20px, env(safe-area-inset-top, 20px)) 16px 16px 16px' : '32px', width: '100%', maxWidth: '800px', margin: '0 auto', minHeight: '100dvh', display: 'flex', flexDirection: 'column' }}>
             
-            {/* 🔥 FIX: Uses your exact header-container class to natively dodge the burger icon! */}
-            <div className="header-container" style={{ margin: '0 0 24px 0', padding: 0 }}>
-              <div className="header-left">
-                <h1 className="saas-page-title" style={{ margin: 0, fontSize: isDeviceMobile ? '18px' : '24px', color: '#4a3b1b' }}>
-                  📦 Import Stock
+            {/* 🔥 FIX: Forced flex vertical centering on all internal elements */}
+            <div className="header-container" style={{ margin: '0 0 24px 0', padding: 0, display: 'flex', alignItems: 'center' }}>
+              <div className="header-left" style={{ display: 'flex', alignItems: 'center' }}>
+                <h1 className="saas-page-title" style={{ margin: 0, fontSize: isDeviceMobile ? '18px' : '24px', color: '#4a3b1b', display: 'flex', alignItems: 'center', gap: '8px', lineHeight: 1 }}>
+                  <span style={{ display: 'flex', alignItems: 'center' }}>📦</span>
+                  <span style={{ display: 'flex', alignItems: 'center' }}>Import Stock</span>
                 </h1>
               </div>
-              <div className="header-actions">
+              <div className="header-actions" style={{ display: 'flex', alignItems: 'center', marginLeft: isDeviceMobile ? '12px' : 'auto' }}>
                 {isDeviceMobile ? (
-                  <button onClick={() => setActiveFullScreen('none')} style={{ background: 'none', border: 'none', color: '#dc2626', fontSize: '26px', padding: 0, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold' }}>
+                  <button onClick={() => setActiveFullScreen('none')} style={{ background: 'none', border: 'none', color: '#dc2626', fontSize: '24px', padding: 0, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', lineHeight: 1 }}>
                     ❌
                   </button>
                 ) : (
-                  <button onClick={() => setActiveFullScreen('none')} className="saas-btn saas-btn-danger" style={{ padding: '8px 16px', fontWeight: 'bold', color: '#ffffff' }}>
-                    ❌ Discard & Return
+                  <button onClick={() => setActiveFullScreen('none')} className="saas-btn saas-btn-danger" style={{ padding: '8px 16px', fontWeight: 'bold', color: '#ffffff', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <span>❌</span> Discard & Return
                   </button>
                 )}
               </div>
@@ -3831,24 +3832,25 @@ export default function POSPage() {
       {activeFullScreen === 'mix' && (
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: '#f8fafc', zIndex: 99999, overflowY: 'auto', paddingBottom: '100px' }}>
           
-          {/* 🔥 FIX: Added safe-area-inset padding to respect the iPhone Notch */}
-          <div style={{ padding: isDeviceMobile ? 'max(16px, env(safe-area-inset-top, 16px)) 16px 16px 16px' : '32px', width: '100%', maxWidth: '1400px', margin: '0 auto', minHeight: '100dvh', display: 'flex', flexDirection: 'column' }}>
+          {/* 🔥 FIX: Aligned padding-top to 20px to perfectly match main sticky header's Burger Icon axis */}
+          <div style={{ padding: isDeviceMobile ? 'max(20px, env(safe-area-inset-top, 20px)) 16px 16px 16px' : '32px', width: '100%', maxWidth: '1400px', margin: '0 auto', minHeight: '100dvh', display: 'flex', flexDirection: 'column' }}>
             
-            {/* 🔥 FIX: Uses your exact header-container class to natively dodge the burger icon! */}
-            <div className="header-container" style={{ margin: '0 0 24px 0', padding: 0 }}>
-              <div className="header-left">
-                <h1 className="saas-page-title" style={{ margin: 0, fontSize: isDeviceMobile ? '18px' : '24px', color: '#4a3b1b' }}>
-                  🥣 Mix Rice Calculator
+            {/* 🔥 FIX: Forced flex vertical centering on all internal elements */}
+            <div className="header-container" style={{ margin: '0 0 24px 0', padding: 0, display: 'flex', alignItems: 'center' }}>
+              <div className="header-left" style={{ display: 'flex', alignItems: 'center' }}>
+                <h1 className="saas-page-title" style={{ margin: 0, fontSize: isDeviceMobile ? '18px' : '24px', color: '#4a3b1b', display: 'flex', alignItems: 'center', gap: '8px', lineHeight: 1 }}>
+                  <span style={{ display: 'flex', alignItems: 'center' }}>🥣</span>
+                  <span style={{ display: 'flex', alignItems: 'center' }}>Mix Rice Calculator</span>
                 </h1>
               </div>
-              <div className="header-actions">
+              <div className="header-actions" style={{ display: 'flex', alignItems: 'center', marginLeft: isDeviceMobile ? '12px' : 'auto' }}>
                 {isDeviceMobile ? (
-                  <button onClick={() => setActiveFullScreen('none')} style={{ background: 'none', border: 'none', color: '#dc2626', fontSize: '26px', padding: 0, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold' }}>
+                  <button onClick={() => setActiveFullScreen('none')} style={{ background: 'none', border: 'none', color: '#dc2626', fontSize: '24px', padding: 0, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', lineHeight: 1 }}>
                     ❌
                   </button>
                 ) : (
-                  <button onClick={() => setActiveFullScreen('none')} className="saas-btn saas-btn-danger" style={{ padding: '8px 16px', fontWeight: 'bold', color: '#ffffff' }}>
-                    ❌ Discard & Return
+                  <button onClick={() => setActiveFullScreen('none')} className="saas-btn saas-btn-danger" style={{ padding: '8px 16px', fontWeight: 'bold', color: '#ffffff', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <span>❌</span> Discard & Return
                   </button>
                 )}
               </div>
