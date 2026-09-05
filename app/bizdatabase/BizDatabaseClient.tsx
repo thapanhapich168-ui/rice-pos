@@ -172,6 +172,10 @@ export default function BizDatabase() {
     if (summaryData) {
       summaryData.forEach(s => {
         if (s.invoice_id) invoiceDict[s.invoice_id] = s;
+        
+        // 🔥 FIX: Hide Voided Summaries (using delivery_status based on your schema)
+        if (s.delivery_status === 'Voided') return;
+
         const custName = s.customer_name || 'Walk-in';
         const isWalkIn = ['walk-in', 'walk in'].includes(custName.trim().toLowerCase());
 
@@ -195,11 +199,15 @@ export default function BizDatabase() {
 
     if (dailyData) {
       dailyData.forEach(d => {
+        const parentInvoice = invoiceDict[d.invoice_id] || {};
+        
+        // 🔥 FIX: Hide Voided Wholesale Sales AND check parent invoice
+        if (d.is_voided === true || parentInvoice.delivery_status === 'Voided') return;
+
         const qty = Number(d.qty || 0);
         const price = Number(d.price_per_bag || 0);
         const cogs = Number(d.cogs_price || 0);
         
-        const parentInvoice = invoiceDict[d.invoice_id] || {};
         const custName = d.customer_name || parentInvoice.customer_name || 'Walk-in';
         const ownerName = d.owner || parentInvoice.owner || '-';
 
@@ -227,6 +235,9 @@ export default function BizDatabase() {
 
     if (retailData) {
       retailData.forEach(r => {
+        // 🔥 FIX: Hide Voided Retail Sales
+        if (r.is_voided === true) return;
+
         const qty = Number(r.qty || 0);
         const price = Number(r.price_per_bag || 0);
         const cogs = Number(r.cogs_price || 0);
