@@ -1740,7 +1740,8 @@ export default function POSPage() {
          amount_paid_usd: split.amount_usd, 
          amount_paid_riel: split.amount_riel, 
          payment_method: split.method,
-         recorded_by: finalOwner || 'System'
+         recorded_by: finalOwner || 'System',
+         customer_name: finalCustomerName // 🔥 Added Customer Name here
       }));
 
       const customerUpdatePayload = (!isSimpleCustomer && selectedCustomerId) ? {
@@ -3706,18 +3707,18 @@ export default function POSPage() {
 {/* 🟢 FULL SCREEN TAKEOVER: IMPORT STOCK */}
       {activeFullScreen === 'import' && (
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: '#f8fafc', zIndex: 99999, overflowY: 'auto' }}>
-          <div style={{ padding: isDeviceMobile ? '16px' : '32px', width: '100%', maxWidth: '800px', margin: '0 auto', minHeight: '100dvh', display: 'flex', flexDirection: 'column' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', marginBottom: '24px', position: 'relative', minHeight: '40px' }}>
-              {/* Invisible spacer to balance the flexbox against the absolute title */}
-              <div style={{ width: isDeviceMobile ? '50px' : '0' }}></div>
+          <div style={{ padding: isDeviceMobile ? 'max(16px, env(safe-area-inset-top, 20px)) 16px 16px 16px' : '32px', width: '100%', maxWidth: '800px', margin: '0 auto', minHeight: '100dvh', display: 'flex', flexDirection: 'column' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', marginBottom: '24px', height: '44px', minHeight: '44px' }}>
               
-              <h1 className="saas-page-title" style={{ margin: 0, fontSize: isDeviceMobile ? '18px' : '24px', position: 'absolute', left: '50%', transform: 'translateX(-50%)', whiteSpace: 'nowrap', zIndex: 1 }}>
-                📦 Import Stock
+              {/* Title strictly locked to height to prevent Emoji baseline physics from shifting it */}
+              <h1 className="saas-page-title" style={{ margin: 0, fontSize: isDeviceMobile ? '20px' : '24px', color: '#4a3b1b', display: 'flex', alignItems: 'center', gap: '8px', paddingLeft: isDeviceMobile ? '54px' : '0', height: '44px' }}>
+                <span style={{ display: 'inline-flex', alignItems: 'center', height: '44px' }}>📦</span>
+                <span style={{ display: 'inline-flex', alignItems: 'center', height: '44px' }}>Import Stock</span>
               </h1>
               
-              <div style={{ position: 'relative', zIndex: 2 }}>
+              <div style={{ display: 'flex', alignItems: 'center', height: '44px' }}>
                 {isDeviceMobile ? (
-                  <button onClick={() => setActiveFullScreen('none')} style={{ background: 'none', border: 'none', color: '#ef4444', fontSize: '24px', padding: 0, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <button onClick={() => setActiveFullScreen('none')} style={{ background: 'none', border: 'none', color: '#ef4444', fontSize: '26px', padding: '0 4px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', height: '44px' }}>
                     ❌
                   </button>
                 ) : (
@@ -3827,18 +3828,18 @@ export default function POSPage() {
       {/* 🟢 FULL SCREEN TAKEOVER: MIX RICE */}
       {activeFullScreen === 'mix' && (
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: '#f8fafc', zIndex: 99999, overflowY: 'auto', paddingBottom: '100px' }}>
-          <div style={{ padding: isDeviceMobile ? '16px' : '32px', width: '100%', maxWidth: '1400px', margin: '0 auto', minHeight: '100dvh', display: 'flex', flexDirection: 'column' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', marginBottom: '24px', position: 'relative', minHeight: '40px' }}>
-              {/* Invisible spacer to balance the flexbox against the absolute title */}
-              <div style={{ width: isDeviceMobile ? '50px' : '0' }}></div>
+          <div style={{ padding: isDeviceMobile ? 'max(16px, env(safe-area-inset-top, 20px)) 16px 16px 16px' : '32px', width: '100%', maxWidth: '1400px', margin: '0 auto', minHeight: '100dvh', display: 'flex', flexDirection: 'column' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', marginBottom: '24px', height: '44px', minHeight: '44px' }}>
               
-              <h1 className="saas-page-title" style={{ margin: 0, fontSize: isDeviceMobile ? '18px' : '24px', position: 'absolute', left: '50%', transform: 'translateX(-50%)', whiteSpace: 'nowrap', zIndex: 1 }}>
-                🥣 Mix Rice Calculator
+              {/* Title strictly locked to height to prevent Emoji baseline physics from shifting it */}
+              <h1 className="saas-page-title" style={{ margin: 0, fontSize: isDeviceMobile ? '20px' : '24px', color: '#4a3b1b', display: 'flex', alignItems: 'center', gap: '8px', paddingLeft: isDeviceMobile ? '54px' : '0', height: '44px' }}>
+                <span style={{ display: 'inline-flex', alignItems: 'center', height: '44px' }}>🥣</span>
+                <span style={{ display: 'inline-flex', alignItems: 'center', height: '44px' }}>Mix Rice Calculator</span>
               </h1>
               
-              <div style={{ position: 'relative', zIndex: 2 }}>
+              <div style={{ display: 'flex', alignItems: 'center', height: '44px' }}>
                 {isDeviceMobile ? (
-                  <button onClick={() => setActiveFullScreen('none')} style={{ background: 'none', border: 'none', color: '#ef4444', fontSize: '24px', padding: 0, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <button onClick={() => setActiveFullScreen('none')} style={{ background: 'none', border: 'none', color: '#ef4444', fontSize: '26px', padding: '0 4px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', height: '44px' }}>
                     ❌
                   </button>
                 ) : (
