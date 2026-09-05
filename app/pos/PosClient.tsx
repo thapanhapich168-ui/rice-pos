@@ -3712,21 +3712,20 @@ export default function POSPage() {
           <div style={{ padding: isDeviceMobile ? 'max(20px, env(safe-area-inset-top, 20px)) 16px 16px 16px' : '32px', width: '100%', maxWidth: '800px', margin: '0 auto', minHeight: '100dvh', display: 'flex', flexDirection: 'column' }}>
             
             {/* 🔥 FIX: Forced flex vertical centering on all internal elements */}
-            <div className="header-container" style={{ margin: '0 0 24px 0', padding: 0, display: 'flex', alignItems: 'center' }}>
-              <div className="header-left" style={{ display: 'flex', alignItems: 'center' }}>
-                <h1 className="saas-page-title" style={{ margin: 0, fontSize: isDeviceMobile ? '18px' : '24px', color: '#4a3b1b', display: 'flex', alignItems: 'center', gap: '8px', lineHeight: 1 }}>
-                  <span style={{ display: 'flex', alignItems: 'center' }}>📦</span>
-                  <span style={{ display: 'flex', alignItems: 'center' }}>Import Stock</span>
+            <div className="header-container" style={{ margin: '0 0 24px 0', padding: 0, display: 'flex', alignItems: 'center', width: '100%' }}>
+              <div className="header-left" style={{ display: 'flex', alignItems: 'center', flex: 1, minWidth: 0 }}>
+                <h1 className="saas-page-title" style={{ margin: 0, fontSize: isDeviceMobile ? '18px' : '24px', color: '#4a3b1b', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  Import Stock
                 </h1>
               </div>
-              <div className="header-actions" style={{ display: 'flex', alignItems: 'center', marginLeft: isDeviceMobile ? '12px' : 'auto' }}>
+              <div className="header-actions" style={{ display: 'flex', alignItems: 'center', marginLeft: 'auto', flexShrink: 0 }}>
                 {isDeviceMobile ? (
-                  <button onClick={() => setActiveFullScreen('none')} style={{ background: 'none', border: 'none', color: '#dc2626', fontSize: '24px', padding: 0, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', lineHeight: 1 }}>
+                  <button onClick={() => setActiveFullScreen('none')} style={{ background: 'none', border: 'none', color: '#dc2626', fontSize: '22px', padding: '4px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                     ❌
                   </button>
                 ) : (
-                  <button onClick={() => setActiveFullScreen('none')} className="saas-btn saas-btn-danger" style={{ padding: '8px 16px', fontWeight: 'bold', color: '#ffffff', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    <span>❌</span> Discard & Return
+                  <button onClick={() => setActiveFullScreen('none')} className="saas-btn saas-btn-danger" style={{ padding: '8px 16px', fontWeight: 'bold', color: '#ffffff' }}>
+                    ❌ Discard & Return
                   </button>
                 )}
               </div>
@@ -3836,21 +3835,20 @@ export default function POSPage() {
           <div style={{ padding: isDeviceMobile ? 'max(20px, env(safe-area-inset-top, 20px)) 16px 16px 16px' : '32px', width: '100%', maxWidth: '1400px', margin: '0 auto', minHeight: '100dvh', display: 'flex', flexDirection: 'column' }}>
             
             {/* 🔥 FIX: Forced flex vertical centering on all internal elements */}
-            <div className="header-container" style={{ margin: '0 0 24px 0', padding: 0, display: 'flex', alignItems: 'center' }}>
-              <div className="header-left" style={{ display: 'flex', alignItems: 'center' }}>
-                <h1 className="saas-page-title" style={{ margin: 0, fontSize: isDeviceMobile ? '18px' : '24px', color: '#4a3b1b', display: 'flex', alignItems: 'center', gap: '8px', lineHeight: 1 }}>
-                  <span style={{ display: 'flex', alignItems: 'center' }}>🥣</span>
-                  <span style={{ display: 'flex', alignItems: 'center' }}>Mix Rice Calculator</span>
+            <div className="header-container" style={{ margin: '0 0 24px 0', padding: 0, display: 'flex', alignItems: 'center', width: '100%' }}>
+              <div className="header-left" style={{ display: 'flex', alignItems: 'center', flex: 1, minWidth: 0 }}>
+                <h1 className="saas-page-title" style={{ margin: 0, fontSize: isDeviceMobile ? '18px' : '24px', color: '#4a3b1b', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  Mix Rice Calculator
                 </h1>
               </div>
-              <div className="header-actions" style={{ display: 'flex', alignItems: 'center', marginLeft: isDeviceMobile ? '12px' : 'auto' }}>
+              <div className="header-actions" style={{ display: 'flex', alignItems: 'center', marginLeft: 'auto', flexShrink: 0 }}>
                 {isDeviceMobile ? (
-                  <button onClick={() => setActiveFullScreen('none')} style={{ background: 'none', border: 'none', color: '#dc2626', fontSize: '24px', padding: 0, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', lineHeight: 1 }}>
+                  <button onClick={() => setActiveFullScreen('none')} style={{ background: 'none', border: 'none', color: '#dc2626', fontSize: '22px', padding: '4px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                     ❌
                   </button>
                 ) : (
-                  <button onClick={() => setActiveFullScreen('none')} className="saas-btn saas-btn-danger" style={{ padding: '8px 16px', fontWeight: 'bold', color: '#ffffff', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    <span>❌</span> Discard & Return
+                  <button onClick={() => setActiveFullScreen('none')} className="saas-btn saas-btn-danger" style={{ padding: '8px 16px', fontWeight: 'bold', color: '#ffffff' }}>
+                    ❌ Discard & Return
                   </button>
                 )}
               </div>
