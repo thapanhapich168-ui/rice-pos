@@ -3707,15 +3707,20 @@ export default function POSPage() {
 {/* 🟢 FULL SCREEN TAKEOVER: IMPORT STOCK */}
       {activeFullScreen === 'import' && (
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: '#f8fafc', zIndex: 99999, overflowY: 'auto' }}>
-          <div style={{ padding: isDeviceMobile ? 'max(16px, env(safe-area-inset-top, 20px)) 16px 16px 16px' : '32px', width: '100%', maxWidth: '800px', margin: '0 auto', minHeight: '100dvh', display: 'flex', flexDirection: 'column' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', marginBottom: '24px' }}>
-              <h1 className="saas-page-title" style={{ margin: 0, fontSize: isDeviceMobile ? '18px' : '24px', color: '#4a3b1b', display: 'flex', alignItems: 'center', gap: '8px', paddingLeft: isDeviceMobile ? '54px' : '0' }}>
-                📦 Import Stock
-              </h1>
-              
-              <div style={{ display: 'flex', alignItems: 'center' }}>
+          
+          {/* 🔥 FIX: Added safe-area-inset padding to respect the iPhone Notch */}
+          <div style={{ padding: isDeviceMobile ? 'max(16px, env(safe-area-inset-top, 16px)) 16px 16px 16px' : '32px', width: '100%', maxWidth: '800px', margin: '0 auto', minHeight: '100dvh', display: 'flex', flexDirection: 'column' }}>
+            
+            {/* 🔥 FIX: Uses your exact header-container class to natively dodge the burger icon! */}
+            <div className="header-container" style={{ margin: '0 0 24px 0', padding: 0 }}>
+              <div className="header-left">
+                <h1 className="saas-page-title" style={{ margin: 0, fontSize: isDeviceMobile ? '18px' : '24px', color: '#4a3b1b' }}>
+                  📦 Import Stock
+                </h1>
+              </div>
+              <div className="header-actions">
                 {isDeviceMobile ? (
-                  <button onClick={() => setActiveFullScreen('none')} style={{ background: 'none', border: 'none', color: '#dc2626', fontSize: '22px', padding: '0 4px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <button onClick={() => setActiveFullScreen('none')} style={{ background: 'none', border: 'none', color: '#dc2626', fontSize: '26px', padding: 0, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold' }}>
                     ❌
                   </button>
                 ) : (
@@ -3825,15 +3830,20 @@ export default function POSPage() {
       {/* 🟢 FULL SCREEN TAKEOVER: MIX RICE */}
       {activeFullScreen === 'mix' && (
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: '#f8fafc', zIndex: 99999, overflowY: 'auto', paddingBottom: '100px' }}>
-          <div style={{ padding: isDeviceMobile ? 'max(16px, env(safe-area-inset-top, 20px)) 16px 16px 16px' : '32px', width: '100%', maxWidth: '1400px', margin: '0 auto', minHeight: '100dvh', display: 'flex', flexDirection: 'column' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', marginBottom: '24px' }}>
-              <h1 className="saas-page-title" style={{ margin: 0, fontSize: isDeviceMobile ? '18px' : '24px', color: '#4a3b1b', display: 'flex', alignItems: 'center', gap: '8px', paddingLeft: isDeviceMobile ? '54px' : '0' }}>
-                🥣 Mix Rice Calculator
-              </h1>
-              
-              <div style={{ display: 'flex', alignItems: 'center' }}>
+          
+          {/* 🔥 FIX: Added safe-area-inset padding to respect the iPhone Notch */}
+          <div style={{ padding: isDeviceMobile ? 'max(16px, env(safe-area-inset-top, 16px)) 16px 16px 16px' : '32px', width: '100%', maxWidth: '1400px', margin: '0 auto', minHeight: '100dvh', display: 'flex', flexDirection: 'column' }}>
+            
+            {/* 🔥 FIX: Uses your exact header-container class to natively dodge the burger icon! */}
+            <div className="header-container" style={{ margin: '0 0 24px 0', padding: 0 }}>
+              <div className="header-left">
+                <h1 className="saas-page-title" style={{ margin: 0, fontSize: isDeviceMobile ? '18px' : '24px', color: '#4a3b1b' }}>
+                  🥣 Mix Rice Calculator
+                </h1>
+              </div>
+              <div className="header-actions">
                 {isDeviceMobile ? (
-                  <button onClick={() => setActiveFullScreen('none')} style={{ background: 'none', border: 'none', color: '#dc2626', fontSize: '22px', padding: '0 4px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <button onClick={() => setActiveFullScreen('none')} style={{ background: 'none', border: 'none', color: '#dc2626', fontSize: '26px', padding: 0, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold' }}>
                     ❌
                   </button>
                 ) : (
