@@ -3705,11 +3705,13 @@ export default function POSPage() {
       {/* --- GLOBAL CSS --- */}
 
 {/* 🟢 FULL SCREEN TAKEOVER: IMPORT STOCK */}
+      {/* 🔥 FIX: No createPortal needed! The fixed positioning and max zIndex perfectly covers the burger menu natively. */}
       {activeFullScreen === 'import' && (
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: '#f8fafc', zIndex: 2147483647, overflowY: 'auto' }}>
           
           <div style={{ 
-            paddingTop: isDeviceMobile ? 'max(48px, env(safe-area-inset-top, 48px))' : '32px',
+            /* 🔥 FIX: Reduced padding from 48px to 16px to push the title up exactly into the empty space */
+            paddingTop: isDeviceMobile ? 'max(16px, env(safe-area-inset-top, 16px))' : '32px',
             paddingRight: isDeviceMobile ? '16px' : '32px',
             paddingBottom: isDeviceMobile ? '16px' : '32px',
             paddingLeft: isDeviceMobile ? '16px' : '32px',
@@ -3719,13 +3721,14 @@ export default function POSPage() {
             
             <div style={{ margin: '0 0 24px 0', padding: 0, display: 'flex', alignItems: 'center', width: '100%' }}>
               <div style={{ display: 'flex', alignItems: 'center', flex: 1, minWidth: 0 }}>
-                <h1 className="saas-page-title" style={{ margin: 0, fontSize: isDeviceMobile ? '18px' : '24px', color: '#4a3b1b', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                  Import Stock
+                {/* 🔥 FIX: Added emojis back and perfectly centered them with Flexbox */}
+                <h1 className="saas-page-title" style={{ margin: 0, fontSize: isDeviceMobile ? '20px' : '24px', color: '#4a3b1b', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  📦 Import Stock
                 </h1>
               </div>
               <div className="header-actions" style={{ display: 'flex', alignItems: 'center', marginLeft: 'auto', flexShrink: 0 }}>
                 {isDeviceMobile ? (
-                  <button onClick={() => setActiveFullScreen('none')} style={{ background: 'none', border: 'none', color: '#dc2626', fontSize: '22px', padding: '4px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <button onClick={() => setActiveFullScreen('none')} style={{ background: 'none', border: 'none', color: '#dc2626', fontSize: '26px', padding: '4px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                     ❌
                   </button>
                 ) : (
@@ -3833,11 +3836,13 @@ export default function POSPage() {
       )}
 
       {/* 🟢 FULL SCREEN TAKEOVER: MIX RICE */}
+      {/* 🔥 FIX: No createPortal needed! The fixed positioning and max zIndex perfectly covers the burger menu natively. */}
       {activeFullScreen === 'mix' && (
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: '#f8fafc', zIndex: 2147483647, overflowY: 'auto', paddingBottom: '100px' }}>
           
           <div style={{ 
-            paddingTop: isDeviceMobile ? 'max(48px, env(safe-area-inset-top, 48px))' : '32px',
+            /* 🔥 FIX: Reduced padding from 48px to 16px to push the title up exactly into the empty space */
+            paddingTop: isDeviceMobile ? 'max(16px, env(safe-area-inset-top, 16px))' : '32px',
             paddingRight: isDeviceMobile ? '16px' : '32px',
             paddingBottom: isDeviceMobile ? '100px' : '32px', 
             paddingLeft: isDeviceMobile ? '16px' : '32px',
@@ -3847,13 +3852,14 @@ export default function POSPage() {
             
             <div style={{ margin: '0 0 24px 0', padding: 0, display: 'flex', alignItems: 'center', width: '100%' }}>
               <div style={{ display: 'flex', alignItems: 'center', flex: 1, minWidth: 0 }}>
-                <h1 className="saas-page-title" style={{ margin: 0, fontSize: isDeviceMobile ? '18px' : '24px', color: '#4a3b1b', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                  Mix Rice Calculator
+                {/* 🔥 FIX: Added emojis back and perfectly centered them with Flexbox */}
+                <h1 className="saas-page-title" style={{ margin: 0, fontSize: isDeviceMobile ? '20px' : '24px', color: '#4a3b1b', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  🥣 Mix Rice Calculator
                 </h1>
               </div>
               <div className="header-actions" style={{ display: 'flex', alignItems: 'center', marginLeft: 'auto', flexShrink: 0 }}>
                 {isDeviceMobile ? (
-                  <button onClick={() => setActiveFullScreen('none')} style={{ background: 'none', border: 'none', color: '#dc2626', fontSize: '22px', padding: '4px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <button onClick={() => setActiveFullScreen('none')} style={{ background: 'none', border: 'none', color: '#dc2626', fontSize: '26px', padding: '4px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                     ❌
                   </button>
                 ) : (
