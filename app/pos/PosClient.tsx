@@ -3832,7 +3832,7 @@ export default function POSPage() {
         </div>
       )}
 
-      {/* 🟢 FULL SCREEN TAKEOVER: MIX RICE */}
+      {/* 🟢 FULL SREEN TAKEOVER: MIX RICE */}
       {activeFullScreen === 'mix' && (
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: '#f8fafc', zIndex: 2147483647, overflowY: 'auto', paddingBottom: '100px' }}>
           
