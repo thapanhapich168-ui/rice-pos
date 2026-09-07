@@ -3,6 +3,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { generateAndSendCogsReport } from '@/lib/cogsReportSender';
 
+// 🔥 Keep these Vercel configs from the old file so your PDF generation doesn't timeout!
+export const runtime = 'nodejs';
+export const maxDuration = 30; 
+
 export async function POST(request: NextRequest) {
   try {
     const { fromDate, toDate, ownerTab, downloadOnly, records } = await request.json();
