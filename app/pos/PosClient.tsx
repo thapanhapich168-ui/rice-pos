@@ -1740,7 +1740,8 @@ export default function POSPage() {
          amount_paid_usd: split.amount_usd, 
          amount_paid_riel: split.amount_riel, 
          payment_method: split.method,
-         recorded_by: finalOwner || 'System'
+         recorded_by: finalOwner || 'System',
+         customer_name: finalCustomerName // 🔥 Added Customer Name here
       }));
 
       const customerUpdatePayload = (!isSimpleCustomer && selectedCustomerId) ? {
@@ -3704,20 +3705,30 @@ export default function POSPage() {
       {/* --- GLOBAL CSS --- */}
 
 {/* 🟢 FULL SCREEN TAKEOVER: IMPORT STOCK */}
-      {activeFullScreen === 'import' && (
-        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: '#f8fafc', zIndex: 99999, overflowY: 'auto' }}>
-          <div style={{ padding: isDeviceMobile ? '16px' : '32px', width: '100%', maxWidth: '800px', margin: '0 auto', minHeight: '100dvh', display: 'flex', flexDirection: 'column' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', marginBottom: '24px', position: 'relative', minHeight: '40px' }}>
-              {/* Invisible spacer to balance the flexbox against the absolute title */}
-              <div style={{ width: isDeviceMobile ? '50px' : '0' }}></div>
-              
-              <h1 className="saas-page-title" style={{ margin: 0, fontSize: isDeviceMobile ? '18px' : '24px', position: 'absolute', left: '50%', transform: 'translateX(-50%)', whiteSpace: 'nowrap', zIndex: 1 }}>
-                📦 Import Stock
-              </h1>
-              
-              <div style={{ position: 'relative', zIndex: 2 }}>
+      {/* 🔥 FIX: Added typeof document !== 'undefined' for Next.js SSR safety */}
+      {isPosMounted && activeFullScreen === 'import' && typeof document !== 'undefined' && createPortal(
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: '#f8fafc', zIndex: 2147483647, overflowY: 'auto' }}>
+          
+          <div style={{ 
+            /* 🔥 FIX: Changed 48px to 16px. Because the burger icon is covered by the portal, we can move the title perfectly to the top left! */
+            paddingTop: isDeviceMobile ? 'max(16px, env(safe-area-inset-top, 16px))' : '32px',
+            paddingRight: isDeviceMobile ? '16px' : '32px',
+            paddingBottom: isDeviceMobile ? '16px' : '32px',
+            paddingLeft: isDeviceMobile ? '16px' : '32px',
+            boxSizing: 'border-box',
+            width: '100%', maxWidth: '800px', margin: '0 auto', minHeight: '100dvh', display: 'flex', flexDirection: 'column' 
+          }}>
+            
+            <div style={{ margin: '0 0 24px 0', padding: 0, display: 'flex', alignItems: 'center', width: '100%' }}>
+              <div style={{ display: 'flex', alignItems: 'center', flex: 1, minWidth: 0 }}>
+                {/* 🔥 FIX: Restored Emojis and perfect alignment */}
+                <h1 className="saas-page-title" style={{ margin: 0, fontSize: isDeviceMobile ? '20px' : '24px', color: '#4a3b1b', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  📦 Import Stock
+                </h1>
+              </div>
+              <div className="header-actions" style={{ display: 'flex', alignItems: 'center', marginLeft: 'auto', flexShrink: 0 }}>
                 {isDeviceMobile ? (
-                  <button onClick={() => setActiveFullScreen('none')} style={{ background: 'none', border: 'none', color: '#ef4444', fontSize: '24px', padding: 0, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <button onClick={() => setActiveFullScreen('none')} style={{ background: 'none', border: 'none', color: '#dc2626', fontSize: '26px', padding: '4px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                     ❌
                   </button>
                 ) : (
@@ -3821,24 +3832,35 @@ export default function POSPage() {
               </div>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* 🟢 FULL SCREEN TAKEOVER: MIX RICE */}
-      {activeFullScreen === 'mix' && (
-        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: '#f8fafc', zIndex: 99999, overflowY: 'auto', paddingBottom: '100px' }}>
-          <div style={{ padding: isDeviceMobile ? '16px' : '32px', width: '100%', maxWidth: '1400px', margin: '0 auto', minHeight: '100dvh', display: 'flex', flexDirection: 'column' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', marginBottom: '24px', position: 'relative', minHeight: '40px' }}>
-              {/* Invisible spacer to balance the flexbox against the absolute title */}
-              <div style={{ width: isDeviceMobile ? '50px' : '0' }}></div>
-              
-              <h1 className="saas-page-title" style={{ margin: 0, fontSize: isDeviceMobile ? '18px' : '24px', position: 'absolute', left: '50%', transform: 'translateX(-50%)', whiteSpace: 'nowrap', zIndex: 1 }}>
-                🥣 Mix Rice Calculator
-              </h1>
-              
-              <div style={{ position: 'relative', zIndex: 2 }}>
+      {/* 🔥 FIX: Added typeof document !== 'undefined' for Next.js SSR safety */}
+      {isPosMounted && activeFullScreen === 'mix' && typeof document !== 'undefined' && createPortal(
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: '#f8fafc', zIndex: 2147483647, overflowY: 'auto', paddingBottom: '100px' }}>
+          
+          <div style={{ 
+            /* 🔥 FIX: Changed 48px to 16px. Because the burger icon is covered by the portal, we can move the title perfectly to the top left! */
+            paddingTop: isDeviceMobile ? 'max(16px, env(safe-area-inset-top, 16px))' : '32px',
+            paddingRight: isDeviceMobile ? '16px' : '32px',
+            paddingBottom: isDeviceMobile ? '100px' : '32px', 
+            paddingLeft: isDeviceMobile ? '16px' : '32px',
+            boxSizing: 'border-box',
+            width: '100%', maxWidth: '1400px', margin: '0 auto', minHeight: '100dvh', display: 'flex', flexDirection: 'column' 
+          }}>
+            
+            <div style={{ margin: '0 0 24px 0', padding: 0, display: 'flex', alignItems: 'center', width: '100%' }}>
+              <div style={{ display: 'flex', alignItems: 'center', flex: 1, minWidth: 0 }}>
+                {/* 🔥 FIX: Restored Emojis and perfect alignment */}
+                <h1 className="saas-page-title" style={{ margin: 0, fontSize: isDeviceMobile ? '20px' : '24px', color: '#4a3b1b', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  🥣 Mix Rice Calculator
+                </h1>
+              </div>
+              <div className="header-actions" style={{ display: 'flex', alignItems: 'center', marginLeft: 'auto', flexShrink: 0 }}>
                 {isDeviceMobile ? (
-                  <button onClick={() => setActiveFullScreen('none')} style={{ background: 'none', border: 'none', color: '#ef4444', fontSize: '24px', padding: 0, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <button onClick={() => setActiveFullScreen('none')} style={{ background: 'none', border: 'none', color: '#dc2626', fontSize: '26px', padding: '4px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                     ❌
                   </button>
                 ) : (
@@ -4014,7 +4036,8 @@ export default function POSPage() {
               </div>
             )}
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* ⚙️ CATEGORY REORDER MODAL */}
