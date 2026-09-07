@@ -3705,11 +3705,12 @@ export default function POSPage() {
       {/* --- GLOBAL CSS --- */}
 
 {/* 🟢 FULL SCREEN TAKEOVER: IMPORT STOCK */}
-      {/* 🔥 FIX: Removed createPortal to allow the global burger menu to show, and added paddingLeft to the title to align it perfectly with the POS title! */}
-      {activeFullScreen === 'import' && (
-        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: '#f8fafc', zIndex: 100, overflowY: 'auto' }}>
+      {/* 🔥 FIX: Added typeof document !== 'undefined' for Next.js SSR safety */}
+      {isPosMounted && activeFullScreen === 'import' && typeof document !== 'undefined' && createPortal(
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: '#f8fafc', zIndex: 2147483647, overflowY: 'auto' }}>
           
           <div style={{ 
+            /* 🔥 FIX: Changed 48px to 16px. Because the burger icon is covered by the portal, we can move the title perfectly to the top left! */
             paddingTop: isDeviceMobile ? 'max(16px, env(safe-area-inset-top, 16px))' : '32px',
             paddingRight: isDeviceMobile ? '16px' : '32px',
             paddingBottom: isDeviceMobile ? '16px' : '32px',
@@ -3719,8 +3720,8 @@ export default function POSPage() {
           }}>
             
             <div style={{ margin: '0 0 24px 0', padding: 0, display: 'flex', alignItems: 'center', width: '100%' }}>
-              {/* 🔥 FIX: Added paddingLeft here to push the title exactly past the visible burger icon! */}
-              <div style={{ display: 'flex', alignItems: 'center', flex: 1, minWidth: 0, paddingLeft: isDeviceMobile ? '54px' : '52px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', flex: 1, minWidth: 0 }}>
+                {/* 🔥 FIX: Restored Emojis and perfect alignment */}
                 <h1 className="saas-page-title" style={{ margin: 0, fontSize: isDeviceMobile ? '20px' : '24px', color: '#4a3b1b', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', display: 'flex', alignItems: 'center', gap: '8px' }}>
                   📦 Import Stock
                 </h1>
@@ -3823,6 +3824,7 @@ export default function POSPage() {
                     </div>
                   </div>
                 </div>
+
                 <div style={{ display: 'flex', gap: '12px', marginTop: '10px' }}>
                   <button onClick={() => handleProcessImport(true)} disabled={isProcessing} className="saas-btn" style={{ flex: 1, padding: '14px', background: '#f59e0b', color: '#fff', fontSize: '15px' }}>⏳ Save as Pending/Partial</button>
                   <button onClick={() => handleProcessImport(false)} disabled={isProcessing} className="saas-btn saas-btn-primary" style={{ flex: 1, padding: '14px', fontSize: '15px' }}>✅ Paid Full & Import</button>
@@ -3830,15 +3832,17 @@ export default function POSPage() {
               </div>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* 🟢 FULL SCREEN TAKEOVER: MIX RICE */}
-      {/* 🔥 FIX: Removed createPortal to allow the global burger menu to show, and added paddingLeft to the title to align it perfectly with the POS title! */}
-      {activeFullScreen === 'mix' && (
-        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: '#f8fafc', zIndex: 100, overflowY: 'auto', paddingBottom: '100px' }}>
+      {/* 🔥 FIX: Added typeof document !== 'undefined' for Next.js SSR safety */}
+      {isPosMounted && activeFullScreen === 'mix' && typeof document !== 'undefined' && createPortal(
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: '#f8fafc', zIndex: 2147483647, overflowY: 'auto', paddingBottom: '100px' }}>
           
           <div style={{ 
+            /* 🔥 FIX: Changed 48px to 16px. Because the burger icon is covered by the portal, we can move the title perfectly to the top left! */
             paddingTop: isDeviceMobile ? 'max(16px, env(safe-area-inset-top, 16px))' : '32px',
             paddingRight: isDeviceMobile ? '16px' : '32px',
             paddingBottom: isDeviceMobile ? '100px' : '32px', 
@@ -3848,8 +3852,8 @@ export default function POSPage() {
           }}>
             
             <div style={{ margin: '0 0 24px 0', padding: 0, display: 'flex', alignItems: 'center', width: '100%' }}>
-              {/* 🔥 FIX: Added paddingLeft here to push the title exactly past the visible burger icon! */}
-              <div style={{ display: 'flex', alignItems: 'center', flex: 1, minWidth: 0, paddingLeft: isDeviceMobile ? '54px' : '52px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', flex: 1, minWidth: 0 }}>
+                {/* 🔥 FIX: Restored Emojis and perfect alignment */}
                 <h1 className="saas-page-title" style={{ margin: 0, fontSize: isDeviceMobile ? '20px' : '24px', color: '#4a3b1b', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', display: 'flex', alignItems: 'center', gap: '8px' }}>
                   🥣 Mix Rice Calculator
                 </h1>
@@ -4032,7 +4036,8 @@ export default function POSPage() {
               </div>
             )}
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* ⚙️ CATEGORY REORDER MODAL */}
