@@ -3706,14 +3706,19 @@ export default function POSPage() {
 
 {/* 🟢 FULL SCREEN TAKEOVER: IMPORT STOCK */}
       {activeFullScreen === 'import' && (
-        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: '#f8fafc', zIndex: 99999, overflowY: 'auto' }}>
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: '#f8fafc', zIndex: 2147483647, overflowY: 'auto' }}>
           
-          {/* 🔥 FIX: Aligned padding-top to 20px to perfectly match main sticky header's Burger Icon axis */}
-          <div style={{ padding: isDeviceMobile ? 'max(20px, env(safe-area-inset-top, 20px)) 16px 16px 16px' : '32px', width: '100%', maxWidth: '800px', margin: '0 auto', minHeight: '100dvh', display: 'flex', flexDirection: 'column' }}>
+          <div style={{ 
+            paddingTop: isDeviceMobile ? 'max(48px, env(safe-area-inset-top, 48px))' : '32px',
+            paddingRight: isDeviceMobile ? '16px' : '32px',
+            paddingBottom: isDeviceMobile ? '16px' : '32px',
+            paddingLeft: isDeviceMobile ? '16px' : '32px',
+            boxSizing: 'border-box',
+            width: '100%', maxWidth: '800px', margin: '0 auto', minHeight: '100dvh', display: 'flex', flexDirection: 'column' 
+          }}>
             
-            {/* 🔥 FIX: Forced flex vertical centering on all internal elements */}
-            <div className="header-container" style={{ margin: '0 0 24px 0', padding: 0, display: 'flex', alignItems: 'center', width: '100%' }}>
-              <div className="header-left" style={{ display: 'flex', alignItems: 'center', flex: 1, minWidth: 0 }}>
+            <div style={{ margin: '0 0 24px 0', padding: 0, display: 'flex', alignItems: 'center', width: '100%' }}>
+              <div style={{ display: 'flex', alignItems: 'center', flex: 1, minWidth: 0 }}>
                 <h1 className="saas-page-title" style={{ margin: 0, fontSize: isDeviceMobile ? '18px' : '24px', color: '#4a3b1b', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                   Import Stock
                 </h1>
@@ -3829,14 +3834,19 @@ export default function POSPage() {
 
       {/* 🟢 FULL SCREEN TAKEOVER: MIX RICE */}
       {activeFullScreen === 'mix' && (
-        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: '#f8fafc', zIndex: 99999, overflowY: 'auto', paddingBottom: '100px' }}>
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: '#f8fafc', zIndex: 2147483647, overflowY: 'auto', paddingBottom: '100px' }}>
           
-          {/* 🔥 FIX: Aligned padding-top to 20px to perfectly match main sticky header's Burger Icon axis */}
-          <div style={{ padding: isDeviceMobile ? 'max(20px, env(safe-area-inset-top, 20px)) 16px 16px 16px' : '32px', width: '100%', maxWidth: '1400px', margin: '0 auto', minHeight: '100dvh', display: 'flex', flexDirection: 'column' }}>
+          <div style={{ 
+            paddingTop: isDeviceMobile ? 'max(48px, env(safe-area-inset-top, 48px))' : '32px',
+            paddingRight: isDeviceMobile ? '16px' : '32px',
+            paddingBottom: isDeviceMobile ? '100px' : '32px', 
+            paddingLeft: isDeviceMobile ? '16px' : '32px',
+            boxSizing: 'border-box',
+            width: '100%', maxWidth: '1400px', margin: '0 auto', minHeight: '100dvh', display: 'flex', flexDirection: 'column' 
+          }}>
             
-            {/* 🔥 FIX: Forced flex vertical centering on all internal elements */}
-            <div className="header-container" style={{ margin: '0 0 24px 0', padding: 0, display: 'flex', alignItems: 'center', width: '100%' }}>
-              <div className="header-left" style={{ display: 'flex', alignItems: 'center', flex: 1, minWidth: 0 }}>
+            <div style={{ margin: '0 0 24px 0', padding: 0, display: 'flex', alignItems: 'center', width: '100%' }}>
+              <div style={{ display: 'flex', alignItems: 'center', flex: 1, minWidth: 0 }}>
                 <h1 className="saas-page-title" style={{ margin: 0, fontSize: isDeviceMobile ? '18px' : '24px', color: '#4a3b1b', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                   Mix Rice Calculator
                 </h1>
