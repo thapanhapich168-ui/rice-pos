@@ -1075,35 +1075,40 @@ export default function POSPage() {
     let newCart = [...cart];
     const existingIndex = newCart.findIndex((item) => item.product_id === selectedMobileProduct.id && !item.isSpecial);
     
+    let insertIndex = newCart.length;
+
     if (existingIndex !== -1) {
       newCart[existingIndex] = { 
         ...newCart[existingIndex], custom_name: mobileName, custom_price_riel: finalPrice, quantity: (Number(newCart[existingIndex].quantity) || 0) + finalQty,
         selected_batch_id: mobileBatchId
       };
+      insertIndex = existingIndex + 1; // 🔥 Targets slot directly below this rice
     } else {
       newCart.push({ 
         ...selectedMobileProduct, product_id: selectedMobileProduct.id, id: Math.random(), custom_name: mobileName, custom_price_riel: finalPrice, 
         cost_price: Number(selectedMobileProduct.cost_price || 0), quantity: finalQty, isSpecial: false, 
         selected_batch_id: mobileBatchId, sortOrder: 0 
       });
+      insertIndex = newCart.length;
     }
 
-    // 🔥 NEW: Automatically inject the Replacement Bag into the cart with custom quantity!
+    // 🔥 Spliced directly below the rice item so they always stay together
     if (mobileBagId) {
       const bagProd = products.find(p => p.id === mobileBagId);
       if (bagProd) {
-        const bagQtyNum = Number(mobileBagQty) || 1;
-        newCart.push({
+        // 🔥 FIX: Strictly check for an empty string so '0' doesn't accidentally get converted to '1'
+        const bagQtyNum = mobileBagQty === '' ? 1 : Number(mobileBagQty);
+        newCart.splice(insertIndex, 0, {
           ...bagProd,
           product_id: bagProd.id,
           id: Math.random(),
           custom_name: mobileBagCoveredByDepot ? `ប្តូរបាវ ${bagProd.name} (Covered by Depot)` : `ប្តូរបាវ ${bagProd.name}`,
           custom_price_riel: mobileBagCoveredByDepot ? 0 : Number(bagProd.price || 0),
           cost_price: Number(bagProd.cost_price || 0),
-          quantity: bagQtyNum, // Deducts the exact quantity entered!
+          quantity: bagQtyNum,
           isSpecial: true,
           bypass_stock: false, 
-          sortOrder: 3
+          sortOrder: 0 // 🔥 Gives same priority so stable sort keeps it right under the rice!
         });
       }
     }
@@ -1940,7 +1945,20 @@ export default function POSPage() {
   const handleNativePrint = () => { window.print(); }
 
   const currentT = t[lang] || t['en'];
-  const sortedCart = [...cart].sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0));
+  // 🔥 Keeps Bags paired with their Rice, while keeping Returns at top and Discounts at bottom
+  const sortedCart = [...cart].sort((a, b) => {
+    const getPriority = (item: CartItem) => {
+      const name = item.custom_name || item.name || '';
+      if (name.includes('ដូរ')) return -2;
+      if (name.includes('បានប្រើ')) return -1;
+      if (name.includes('បញ្ចុះតម្លៃ') || name.includes('កក់')) return 999;
+      return 0; // Regular rice and bags stay in their exact paired sequence
+    };
+    const pA = getPriority(a);
+    const pB = getPriority(b);
+    if (pA !== pB) return pA - pB;
+    return (a.sortOrder || 0) - (b.sortOrder || 0);
+  });
 
   const orderedProducts = [...products].sort((a, b) => {
     const idxA = productOrder.indexOf(a.id);
@@ -1982,6 +2000,13 @@ export default function POSPage() {
       }
     }
     return true;
+  });
+
+  // 🔥 SORT BY COGS: Highest cost rice at top, lowest at bottom
+  filteredProducts.sort((a, b) => {
+    const cogsA = Number(activeBatches[a.id]?.[0]?.cost_price || a.cost_price || 0);
+    const cogsB = Number(activeBatches[b.id]?.[0]?.cost_price || b.cost_price || 0);
+    return cogsB - cogsA;
   });
 
   if (activeCategory === '🔥 Hot' && activeTab === 'wholesale') {
@@ -2470,7 +2495,97 @@ export default function POSPage() {
                 title={currentT.noProducts} 
                 message="Try adjusting your search or filters." 
               />
+            ) : isDeviceMobile ? (
+              /* 📱 MOBILE: COMPACT HORIZONTAL NUMBERED LIST (Saves Massive Space) */
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                {filteredProducts.map((p, index) => (
+                  <div
+                    key={p.id}
+                    onClick={() => handleProductClick(p)}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      padding: '10px 12px',
+                      backgroundColor: '#ffffff',
+                      borderRadius: '8px',
+                      border: '1px solid #e2e8f0',
+                      cursor: 'pointer',
+                      transition: 'background-color 0.1s'
+                    }}
+                    onMouseDown={e => { e.currentTarget.style.backgroundColor = '#f8fafc'; }}
+                    onMouseUp={e => { e.currentTarget.style.backgroundColor = '#ffffff'; }}
+                  >
+                   {/* 1. Left Column: Row Number & Rice Name */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0, flex: 1 }}>
+                      <span style={{
+                        minWidth: '24px',
+                        height: '24px',
+                        borderRadius: '6px',
+                        backgroundColor: '#f1f5f9',
+                        color: '#64748b',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        fontSize: '12px',
+                        fontWeight: 'bold',
+                        flexShrink: 0
+                      }}>
+                        {index + 1}
+                      </span>
+                      <span style={{
+                        fontSize: '15px',
+                        color: '#1e293b',
+                        fontWeight: 'normal',
+                        whiteSpace: 'nowrap',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis'
+                      }}>
+                        {p.name}
+                      </span>
+                    </div>
+
+                    {/* 2. Middle Column: COGS / Price */}
+                    <div style={{ fontSize: '14px', color: '#b58a3d', fontWeight: 'bold', flexShrink: 0, padding: '0 8px', textAlign: 'right' }}>
+                      {formatRielSymbol(
+                        activeTab === 'retail'
+                          ? (p.price || 0)
+                          : (activeBatches[p.id]?.[0]?.cost_price || p.cost_price || 0)
+                      )}
+                    </div>
+
+                    {/* 3. Right Column: Stock & Return Button */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
+                      <div style={{ fontSize: '12px', color: Number(p.stock) < (activeTab === 'retail' ? 15 : 5) ? '#dc2626' : '#10b981', fontWeight: 'bold' }}>
+                        📦 {p.stock}{activeTab === 'retail' ? ' kg' : ''}
+                      </div>
+
+                      {activeTab === 'wholesale' && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setExchangeModal({ isOpen: true, product: p, consumedKg: '' });
+                          }}
+                          style={{
+                            background: '#fef2f2',
+                            color: '#ef4444',
+                            border: '1px solid #fecaca',
+                            borderRadius: '6px',
+                            padding: '4px 8px',
+                            fontSize: '13px',
+                            cursor: 'pointer'
+                          }}
+                          title="Exchange / Return"
+                        >
+                          🔄
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
             ) : (
+              /* 💻 LAPTOP: ORIGINAL UNTOUCHED CARD GRID */
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: '16px' }}>
                 {filteredProducts.map((p) => (
                   <div 
@@ -2486,7 +2601,7 @@ export default function POSPage() {
                     onMouseUp={e => e.currentTarget.style.transform = 'scale(1)'}
                   >
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                      <div style={{ fontSize: isDeviceMobile ? '15px' : '14px', color: '#334155', marginBottom: '8px', fontWeight: 'normal' }}>{p.name}</div>
+                      <div style={{ fontSize: '14px', color: '#334155', marginBottom: '8px', fontWeight: 'normal' }}>{p.name}</div>
                     </div>
 
                     <div style={{ borderTop: '1px dashed #f1f5f9', paddingTop: '8px', marginTop: 'auto', position: 'relative', minHeight: activeTab === 'wholesale' ? '35px' : 'auto' }}>
@@ -3715,7 +3830,7 @@ export default function POSPage() {
                       <span style={{ fontSize: '13px', color: '#475569', fontWeight: '500', minWidth: '60px' }}>Quantity:</span>
                       <div style={{ flex: 1 }}>
                         <CurrencyInput
-                          value={mobileBagQty}
+                          value={mobileBagQty === 0 ? '0' : mobileBagQty} // 🔥 FIX: Forces '0' to display correctly
                           onChange={(v: any) => setMobileBagQty(v)}
                           onFocus={() => { if (mobileBagQty === 1) setMobileBagQty(''); }}
                           className="saas-input"
@@ -4421,8 +4536,11 @@ export default function POSPage() {
           font-variant-numeric: tabular-nums lining-nums;
         }
         
-        body {
+        html, body {
           font-variant-numeric: tabular-nums lining-nums;
+          /* 🔥 FIX: Stops the iPhone Safari "Rubber Band" bounce effect */
+          overscroll-behavior: none;
+          background-color: #ffffff;
         }
 
         @keyframes posPopupSlideDown {
