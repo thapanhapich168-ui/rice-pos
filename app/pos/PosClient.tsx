@@ -353,6 +353,13 @@ export default function POSPage() {
   const [mobilePrice, setMobilePrice] = useState<number | ''>('')
   const [mobileQty, setMobileQty] = useState<number | ''>('')
   const [mobileName, setMobileName] = useState<string>('')
+  // 🔥 NEW: States for the Mobile Batch Popup Modal
+  const [mobileBatchId, setMobileBatchId] = useState<number | null>(null)
+  const [isMobileBatchModalOpen, setIsMobileBatchModalOpen] = useState(false)
+  const [mobileBagId, setMobileBagId] = useState<number | null>(null) // 🔥 NEW: Track bag exchange
+  const [mobileBagQty, setMobileBagQty] = useState<number | ''>(1) // 🔥 NEW: Track bag quantity defaulting to 1
+  const [isMobileBagModalOpen, setIsMobileBagModalOpen] = useState(false) // 🔥 NEW: Bag popup state
+  const [mobileBagCoveredByDepot, setMobileBagCoveredByDepot] = useState(false) // 🔥 NEW: Track if depot pays for it
   const mobileQtyRef = useRef<any>(null)
 
   const [exchangeModal, setExchangeModal] = useState<{ isOpen: boolean, product: Product | null, consumedKg: string | number }>({
@@ -1004,11 +1011,16 @@ export default function POSPage() {
       setMobileName(product.name);
       setMobilePrice(activeTab === 'wholesale' ? 0 : Number(product.price));
       setMobileQty(defaultQty);
+      setMobileBatchId(null);
+      setMobileBagId(null); // 🔥 NEW: Reset bag selection
+      setMobileBagCoveredByDepot(false); // 🔥 NEW: Reset depot coverage
+      setIsMobileBatchModalOpen(false); // 🔥 FIX: Ensure the modal is closed when opening a new item
+      setIsMobileBagModalOpen(false); // 🔥 NEW: Reset bag modal
       setTimeout(() => {
         mobileQtyRef.current?.focus();
       }, 50);
     } else {
-      addToCartDirect(product, defaultQty);
+      addToCartDirect(product, defaultQty); // Desktop remains instant 1-click
     }
   }
 
@@ -1025,42 +1037,78 @@ export default function POSPage() {
     }
   }
 
-  function handleAddMobileProductToCart() {
+  function handleAddMobileProductToCart(forceAdd: boolean | any = false) {
+    const isForced = forceAdd === true;
     if (!selectedMobileProduct) return;
     // 🛡️ RELIABILITY FIX: Fallback to exact DOM input values if React state batching lags behind rapid user tapping
     const rawQtyStr = String(mobileQty).replace(/,/g, '');
     const finalQty = parseFloat(rawQtyStr) || 0;
     const finalPrice = typeof mobilePrice === 'number' ? mobilePrice : (parseFloat(String(mobilePrice).replace(/,/g, '')) || 0);
     
-    // 🛑 REQUIRE QUANTITY
-    if (finalQty <= 0 || mobileQty === '') {
-      showToast('error', 'Missing Quantity', 'Please enter a quantity greater than 0.');
-      return;
+    // 🧠 POPUP ALERT: QUICK CONFIRM FOR 1 QTY (To prevent accidental taps)
+    const defaultPrice = activeTab === 'wholesale' ? 0 : Number(selectedMobileProduct.price || 0);
+    if (!isForced && finalQty === 1 && finalPrice === defaultPrice) {
+      if (!window.confirm(`🛒 Add Confirmation\n\nYou are adding 1x [${mobileName}] for ${formatRiel(finalPrice)}.\n\nClick [OK] to confirm, or [Cancel] to change the amount.`)) return;
     }
 
-    // 🛑 REQUIRE PRICE
-    if (finalPrice <= 0 || mobilePrice === '') {
-      showToast('error', 'Missing Price', 'Please enter the selling price before adding to cart.');
-      return;
+    // 🛑 POPUP ALERT: MISSING QUANTITY
+    if (!isForced && (finalQty <= 0 || mobileQty === '')) {
+      if (!window.confirm('🛑 Missing Quantity\n\nPlease enter a quantity greater than 0.\n\nClick [OK] to add to cart anyway, or [Cancel] to recheck.')) return;
     }
 
-    // 🧠 SMART GUARD: Hard limit to prevent typing Price into the Qty field
-    if (finalQty > 10000) {
-      showToast('error', 'Hold on! 🛑', `Quantity (${finalQty.toLocaleString()}) cannot exceed 10,000. Did you accidentally type the price in the quantity field?`);
-      return;
+    // 🛑 POPUP ALERT: MISSING PRICE
+    if (!isForced && (finalPrice <= 0 || mobilePrice === '')) {
+      if (!window.confirm('🛑 Missing Price\n\nPlease enter the selling price before adding to cart.\n\nClick [OK] to add to cart anyway, or [Cancel] to recheck.')) return;
     }
 
-    const existing = cart.find((item) => item.product_id === selectedMobileProduct.id && !item.isSpecial);
-    if (existing) {
-      setCart(cart.map((item) => item.product_id === selectedMobileProduct.id && !item.isSpecial ? { 
-        ...item, custom_name: mobileName, custom_price_riel: finalPrice, quantity: (Number(item.quantity) || 0) + finalQty 
-      } : item));
+    // 🧠 POPUP ALERT: HIGH QUANTITY TYPO GUARD
+    if (!isForced && finalQty > 10000) {
+      if (!window.confirm(`🛑 High Quantity Warning\n\nQuantity (${finalQty.toLocaleString()}) is unusually high. Did you type the price into the quantity field by mistake?\n\nClick [OK] to add anyway, or [Cancel] to recheck.`)) return;
+    }
+
+    // 🧠 POPUP ALERT: SELLING BELOW COST MARGIN
+    const costPrice = Number(selectedMobileProduct.cost_price || 0);
+    if (!isForced && finalPrice < costPrice) {
+      if (!window.confirm(`📉 Price Below Cost\n\nYou are selling this for ${formatRiel(finalPrice)}, but the cost is ${formatRiel(costPrice)}.\n\nClick [OK] to sell below cost anyway, or [Cancel] to recheck.`)) return;
+    }
+
+    let newCart = [...cart];
+    const existingIndex = newCart.findIndex((item) => item.product_id === selectedMobileProduct.id && !item.isSpecial);
+    
+    if (existingIndex !== -1) {
+      newCart[existingIndex] = { 
+        ...newCart[existingIndex], custom_name: mobileName, custom_price_riel: finalPrice, quantity: (Number(newCart[existingIndex].quantity) || 0) + finalQty,
+        selected_batch_id: mobileBatchId
+      };
     } else {
-      setCart([...cart, { 
+      newCart.push({ 
         ...selectedMobileProduct, product_id: selectedMobileProduct.id, id: Math.random(), custom_name: mobileName, custom_price_riel: finalPrice, 
-        cost_price: Number(selectedMobileProduct.cost_price || 0), quantity: finalQty, isSpecial: false, selected_batch_id: null, sortOrder: 0
-      }]);
+        cost_price: Number(selectedMobileProduct.cost_price || 0), quantity: finalQty, isSpecial: false, 
+        selected_batch_id: mobileBatchId, sortOrder: 0 
+      });
     }
+
+    // 🔥 NEW: Automatically inject the Replacement Bag into the cart with custom quantity!
+    if (mobileBagId) {
+      const bagProd = products.find(p => p.id === mobileBagId);
+      if (bagProd) {
+        const bagQtyNum = Number(mobileBagQty) || 1;
+        newCart.push({
+          ...bagProd,
+          product_id: bagProd.id,
+          id: Math.random(),
+          custom_name: mobileBagCoveredByDepot ? `ប្តូរបាវ ${bagProd.name} (Covered by Depot)` : `ប្តូរបាវ ${bagProd.name}`,
+          custom_price_riel: mobileBagCoveredByDepot ? 0 : Number(bagProd.price || 0),
+          cost_price: Number(bagProd.cost_price || 0),
+          quantity: bagQtyNum, // Deducts the exact quantity entered!
+          isSpecial: true,
+          bypass_stock: false, 
+          sortOrder: 3
+        });
+      }
+    }
+
+    setCart(newCart);
     setSelectedMobileProduct(null);
   }
 
@@ -1349,32 +1397,35 @@ export default function POSPage() {
 
       if (!isSpecial) {
         if (qty <= 0 || item.quantity === '') {
-          showToast('error', 'Missing Quantity', `Please enter a valid quantity for [${item.custom_name}].`);
-          return;
+          if (!window.confirm(`🛑 Missing Quantity\n\nPlease enter a valid quantity for [${item.custom_name}].\n\nClick [OK] to checkout anyway, or [Cancel] to recheck.`)) return;
         }
         if (price <= 0 || item.custom_price_riel === '') {
-          showToast('error', 'Missing Price', `You forgot to enter the price for [${item.custom_name}].`);
-          return;
+          if (!window.confirm(`🛑 Missing Price\n\nYou forgot to enter the price for [${item.custom_name}].\n\nClick [OK] to checkout anyway, or [Cancel] to recheck.`)) return;
         }
         if (qty > 10000) {
-          showToast('error', 'Hold on! 🛑', `Item [${item.custom_name}] has a quantity of ${qty.toLocaleString()}. Quantity cannot exceed 10,000.`);
-          return;
+          if (!window.confirm(`🛑 Quantity Warning\n\nItem [${item.custom_name}] has a quantity of ${qty.toLocaleString()}.\n\nDid you type the price into the quantity field?\n\nClick [OK] to checkout anyway, or [Cancel] to recheck.`)) return;
+        }
+        
+        // 🧠 SMART GUARD: Prevent Selling Below Cost Price at Checkout
+        const costPrice = Number(item.cost_price || 0);
+        if (price < costPrice) {
+          if (!window.confirm(`📉 Price Too Low\n\nItem [${item.custom_name}] is priced at ${formatRiel(price)}, which is below its cost price of ${formatRiel(costPrice)}.\n\nClick [OK] to complete checkout anyway, or [Cancel] to recheck.`)) return;
         }
       }
     }
 
-    if (!isCartValid) {
-      showToast('error', 'Invalid Cart', 'Please ensure all items have a valid quantity and price.');
+    // We can safely remove the old isCartValid check since the interactive loop above catches everything!
+    if (cart.length === 0) {
+      window.alert("Your cart is empty!");
       return;
     }
 
     if (activeTab === 'wholesale' && !selectedCustomerId) {
-      showToast('error', 'Customer Required', lang === 'kh' ? 'សូមជ្រើសរើសអតិថិជនសម្រាប់ដុំ!' : 'Please select a customer for wholesale');
-      return;
+      if (!window.confirm(`🛑 Customer Required\n\n${lang === 'kh' ? 'សូមជ្រើសរើសអតិថិជនសម្រាប់ដុំ!' : 'Please select a customer for wholesale'}\n\nClick [OK] to checkout anyway, or [Cancel] to recheck.`)) return;
     }
+    
     if (showPaymentSelector && liveTotalReceivedInRiel < totalRiel && !editingInvoiceId) {
-      showToast('error', 'Invalid Payment', 'Amount received must be equal to or greater than the total due.');
-      return;
+      if (!window.confirm('🛑 Invalid Payment\n\nAmount received is less than the total due. This will be recorded as Debt.\n\nClick [OK] to proceed with partial/no payment, or [Cancel] to recheck.')) return;
     }
 
     const simulatedStockUpdates: Record<number, number> = {};
@@ -2163,10 +2214,12 @@ export default function POSPage() {
             {/* 🟢 SEARCH AND CATEGORY TABS MOVED INSIDE STICKY HEADER */}
             {/* 🔥 FIX: Added minWidth: 0 to lock the flex wrapper to the physical screen width */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', width: '100%', minWidth: 0 }}>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px', alignItems: 'flex-start', width: '100%' }}>
+              
+              {/* 🔥 NEW: Side-by-side search bars by removing wrap and dropping minWidth to 0 */}
+              <div style={{ display: 'flex', flexWrap: 'nowrap', gap: '8px', alignItems: 'flex-start', width: '100%' }}>
                 
                 {/* PRODUCT SEARCH */}
-                <div style={{ flex: 1, minWidth: '240px', position: 'relative' }}>
+                <div style={{ flex: 1, minWidth: 0, position: 'relative' }}>
                   <span style={{ position: 'absolute', left: '14px', top: '50%', transform: 'translateY(-50%)', color: '#94a3b8', fontSize: '16px', zIndex: 2 }}>🔍</span>
                   <input 
                     type="text" 
@@ -2174,7 +2227,7 @@ export default function POSPage() {
                     value={searchQuery} 
                     onChange={(e) => setSearchQuery(e.target.value)} 
                     className="saas-input"
-                    style={{ paddingLeft: '38px', paddingRight: searchQuery ? '38px' : '14px', width: '100%', fontSize: isDeviceMobile ? '15px' : undefined }} 
+                    style={{ paddingLeft: '38px', paddingRight: searchQuery ? '38px' : '14px', width: '100%', fontSize: isDeviceMobile ? '15px' : '14px', height: '42px', boxSizing: 'border-box' }} 
                   />
                   {searchQuery && (
                     <button
@@ -2187,7 +2240,7 @@ export default function POSPage() {
                 
                 {/* CUSTOMER SEARCH */}
                 {activeTab === 'wholesale' && (
-                  <div style={{ flex: 1, minWidth: '300px', position: 'relative' }}>
+                  <div style={{ flex: 1, minWidth: 0, position: 'relative' }}>
                     {!selectedCustomer ? (
                       <div style={{ position: 'relative' }}>
                         
@@ -2206,7 +2259,7 @@ export default function POSPage() {
                               onChange={e => setCustomerSearchTerm(e.target.value)}
                               onFocus={() => setIsCustomerModalOpen(true)}
                               className="saas-input"
-                              style={{ paddingLeft: '38px', width: '100%', position: 'relative', zIndex: isCustomerModalOpen ? 100 : 1, borderColor: isCustomerModalOpen ? '#3b82f6' : undefined, fontSize: '14px' }}
+                              style={{ paddingLeft: '38px', width: '100%', position: 'relative', zIndex: isCustomerModalOpen ? 100 : 1, borderColor: isCustomerModalOpen ? '#3b82f6' : undefined, fontSize: isDeviceMobile ? '15px' : '14px', height: '42px', boxSizing: 'border-box' }}
                             />
 
                             {/* 💻 DESKTOP: INLINE DROPDOWN TRAY (Fillout Card Style) */}
@@ -2256,16 +2309,16 @@ export default function POSPage() {
                           </>
                         )}
 
-                        {/* 📱 MOBILE: MODAL TRIGGER BUTTON */}
+                       {/* 📱 MOBILE: MODAL TRIGGER BUTTON */}
                         {isDeviceMobile && (
                           <>
                             <div 
                               onClick={() => setIsCustomerModalOpen(true)}
                               className="saas-input"
-                              style={{ width: '100%', cursor: 'pointer', display: 'flex', alignItems: 'center', backgroundColor: '#ffffff', color: '#94a3b8', fontSize: '14px', paddingLeft: '14px', height: '42px' }}
+                              style={{ width: '100%', cursor: 'pointer', display: 'flex', alignItems: 'center', backgroundColor: '#ffffff', color: '#94a3b8', fontSize: '15px', paddingLeft: '14px', height: '42px', boxSizing: 'border-box' }}
                             >
-                              <span style={{ marginRight: '10px', fontSize: '16px' }}>🔍</span>
-                              {currentT.selectCustomer.replace('🔍 ', '').replace('🔍', '').trim()}
+                              <span style={{ marginRight: '6px', fontSize: '16px' }}>🔍</span>
+                              <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Search customers...</span>
                             </div>
 
                             {/* 📱 MOBILE: TOP-ANCHORED SEARCH MODAL (Fillout Style) */}
@@ -2340,30 +2393,19 @@ export default function POSPage() {
                         )}
                       </div>
                     ) : (
-                      <div className="saas-input" style={{ backgroundColor: '#fefcf3', borderColor: '#eadeca', color: '#4a3b1b', position: 'relative', display: 'flex', alignItems: 'center', paddingRight: '36px' }}>
+                      <div className="saas-input" style={{ backgroundColor: '#fefcf3', borderColor: '#eadeca', color: '#4a3b1b', position: 'relative', display: 'flex', alignItems: 'center', paddingRight: '36px', height: '42px', boxSizing: 'border-box' }}>
                         <button onClick={() => { setSelectedCustomerId(''); setCustomerSearchTerm(''); }} style={{ position: 'absolute', top: '50%', right: '8px', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#ef4444' }}>
                           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
                         </button>
                         
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', alignItems: 'center', width: '100%', gap: '10px' }}>
-                          {/* 1. NAME (Left Aligned) */}
-                          <div style={{ fontWeight: '500', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: '6px', overflow: 'hidden' }}>
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#8a7650" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
+                        {/* 🔥 NEW: Clean, truncated single-line view so it fits easily side-by-side with product search */}
+                        <div style={{ display: 'flex', alignItems: 'center', width: '100%', minWidth: 0 }}>
+                          <div style={{ fontWeight: 'normal', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', display: 'flex', alignItems: 'center', gap: '6px', fontSize: isDeviceMobile ? '15px' : '14px' }}>
+                            <span style={{ fontSize: isDeviceMobile ? '15px' : '14px' }}>👤</span>
                             <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{selectedCustomer.name}</span>
                           </div>
-                          
-                          {/* 2. PHONE (Center Aligned) */}
-                          <div style={{ color: '#8a7650', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px', whiteSpace: 'nowrap', fontSize: '13px' }}>
-                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"></path></svg>
-                            <span>{selectedCustomer.phone || '-'}</span>
-                          </div>
-
-                          {/* 3. LOCATION (Right Aligned) */}
-                          <div style={{ color: '#8a7650', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '4px', whiteSpace: 'nowrap', overflow: 'hidden', fontSize: '13px' }}>
-                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path><circle cx="12" cy="10" r="3"></circle></svg>
-                            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{selectedCustomer.location || '-'}</span>
-                          </div>
                         </div>
+
                       </div>
                     )}
                   </div>
@@ -2664,8 +2706,8 @@ export default function POSPage() {
           
           <button 
             onClick={initiateCheckout} 
-            disabled={!isCartValid || !hasValidPayment || isProcessing} 
-            className={`saas-btn ${(!isCartValid || !hasValidPayment || isProcessing) ? 'saas-btn-secondary' : 'saas-btn-primary'}`}
+            disabled={cart.length === 0 || isProcessing} 
+            className={`saas-btn ${(cart.length === 0 || isProcessing) ? 'saas-btn-secondary' : 'saas-btn-primary'}`}
             style={{ width: '100%', padding: '16px', fontSize: '16px' }}
           >
             {isProcessing ? 'Processing...' : currentT.checkout}
@@ -2682,193 +2724,218 @@ export default function POSPage() {
       )}
 
       {isMobileCartOpen && (
-        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.4)', zIndex: 9999, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}>
-          <div style={{ flex: 1 }} onClick={() => setIsMobileCartOpen(false)}></div>
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(15, 23, 42, 0.4)', zIndex: 9999, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', backdropFilter: 'blur(2px)' }}>
           
-          <div style={{ width: '100%', maxHeight: '85dvh', backgroundColor: '#ffffff', borderTopLeftRadius: '20px', borderTopRightRadius: '20px', display: 'flex', flexDirection: 'column', position: 'relative', boxShadow: '0 -10px 25px rgba(0,0,0,0.1)' }}>
-            <div style={{ width: '100%', display: 'flex', justifyContent: 'center', paddingTop: '12px', paddingBottom: '8px', flexShrink: 0 }}>
-              <div style={{ width: '40px', height: '5px', backgroundColor: '#cbd5e1', borderRadius: '10px' }}></div>
-            </div>
-
-            <div style={{ paddingRight: '20px', paddingBottom: '12px', paddingLeft: '20px', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
-              <h3 style={{ margin: 0, color: '#334155', fontSize: '16px' }}>{currentT.cartTitle} ({cart.length})</h3>
-              <button onClick={() => setIsMobileCartOpen(false)} style={{ background: '#f1f5f9', border: 'none', fontSize: '14px', width: '28px', height: '28px', borderRadius: '50%', color: '#475569' }}>✕</button>
-            </div>
+          {/* 🔥 INVISIBLE TOP AREA: Exactly calculated to dodge the main header and burger icon */}
+          <div style={{ height: 'calc(max(20px, env(safe-area-inset-top, 20px)) + 65px)', flexShrink: 0, width: '100%' }} onClick={() => setIsMobileCartOpen(false)}></div>
+          
+          {/* 🔥 BOTTOM SHEET CART CONTAINER */}
+          <div style={{ 
+            flex: 1, 
+            width: '100%', 
+            backgroundColor: '#ffffff', 
+            borderTopLeftRadius: '24px', 
+            borderTopRightRadius: '24px', 
+            display: 'flex', 
+            flexDirection: 'column', 
+            position: 'relative', 
+            boxShadow: '0 -10px 25px rgba(0,0,0,0.1)', 
+            animation: 'posPopupSlideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1)' 
+          }}>
             
-            <div style={{ flex: 1, overflowY: 'auto', minHeight: 0, paddingTop: '16px', paddingRight: '20px', paddingBottom: '20px', paddingLeft: '20px' }}>
-              {activeTab === 'wholesale' && selectedCustomerId && (
-                <div 
-                  onClick={() => {
-                    setCartCustomerEditForm({
-                      name: cartCustomerNameOverride || selectedCustomer?.name || '',
-                      phone: cartCustomerPhoneOverride || selectedCustomer?.phone || '',
-                      location: cartCustomerLocationOverride || selectedCustomer?.location || '',
-                      google_map: cartCustomerMapOverride || (selectedCustomer as any)?.google_map || ''
-                    });
-                    setIsCartCustomerEditOpen(true);
-                  }}
-                  style={{ background: '#f8fafc', padding: '12px 14px', borderRadius: '8px', border: '1px solid #e2e8f0', marginBottom: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer' }}
-                  onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#f1f5f9'}
-                  onMouseOut={(e) => e.currentTarget.style.backgroundColor = '#f8fafc'}
-                >
-                  <div style={{ fontSize: '15px', color: '#0f172a', fontWeight: 'normal' }}>{cartCustomerNameOverride || selectedCustomer?.name}</div>
-                  <span style={{ fontSize: '16px', color: '#3b82f6' }}>✏️</span>
-                </div>
-              )}
-
-              {sortedCart.map((item) => {
-                const isReturn = item.custom_name.includes('ដូរ');
-                const isCharge = item.custom_name.includes('បានប្រើ');
-                const isSpecial = isReturn || isCharge || item.isSpecial;
-
-                return (
-                  <div key={item.id} style={{ backgroundColor: isReturn ? '#fef2f2' : isCharge ? '#fffbeb' : '#ffffff', borderRadius: '10px', padding: '10px 12px', marginBottom: '8px', border: `1px solid ${isReturn ? '#fecaca' : isCharge ? '#fde68a' : '#e2e8f0'}`, position: 'relative' }}>
-                    <button onClick={() => removeFromCart(item.id)} style={{ position: 'absolute', top: '8px', right: '8px', background: '#fee2e2', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: '11px', width: '22px', height: '22px', borderRadius: '50%', zIndex: 5, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>✕</button>
-                    
-                    <div style={{ display: 'flex', alignItems: 'center', marginBottom: '6px', paddingRight: '28px', minWidth: 0 }}>
-                      <input 
-                        type="text" 
-                        value={item.custom_name} 
-                        onChange={(e) => updateCartItem(item.id, 'custom_name', e.target.value)}
-                        placeholder="Item Name"
-                        disabled={isSpecial}
-                        style={{ 
-                          fontSize: '14px', color: isReturn ? '#dc2626' : isCharge ? '#b45309' : '#334155', fontWeight: 'normal',
-                          flex: 1, minWidth: 0, border: 'none', background: 'transparent', outline: 'none', padding: 0
-                        }} 
-                      />
-                      
-                      {!isSpecial && activeTab === 'wholesale' && (
-                        <div style={{ position: 'relative', marginLeft: '8px' }}>
-                          {/* Transparent Backdrop to close on outside click */}
-                          {openBatchMenuId === item.id && (
-                            <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, zIndex: 99 }} onMouseDown={(e) => { e.preventDefault(); setOpenBatchMenuId(null); }}></div>
-                          )}
-                          
-                          {/* Trigger Button */}
-                          <div 
-                            onClick={(e) => { e.preventDefault(); setOpenBatchMenuId(openBatchMenuId === item.id ? null : item.id); }}
-                            className="saas-input"
-                            style={{ padding: '6px 10px', background: '#f8fafc', border: '1px solid #cbd5e1', borderRadius: '6px', fontSize: '12px', color: '#b58a3d', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px', maxWidth: '140px' }}
-                          >
-                            <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', fontWeight: 'normal' }}>
-                              {item.selected_batch_id 
-                                ? (() => {
-                                    const b = activeBatches[item.product_id]?.find(x => x.id === item.selected_batch_id);
-                                    return b ? `${formatRiel(b.cost_price)} (${b.remaining_qty})` : '▼ Auto FIFO';
-                                  })()
-                                : '▼ Auto FIFO'}
-                            </span>
-                            <span style={{ fontSize: '10px', color: '#94a3b8', flexShrink: 0 }}>{openBatchMenuId === item.id ? '▲' : '▼'}</span>
-                          </div>
-
-                          {/* Custom Dropdown Menu Tray */}
-                          {openBatchMenuId === item.id && (
-                            <div style={{ position: 'absolute', top: 'calc(100% + 6px)', right: 0, zIndex: 100, backgroundColor: '#ffffff', border: '1px solid #cbd5e1', borderRadius: '8px', boxShadow: '0 10px 30px rgba(0,0,0,0.15)', minWidth: '240px', maxWidth: '280px', overflow: 'hidden' }}>
-                              <div 
-                                onMouseDown={(e) => { e.preventDefault(); updateCartItem(item.id, 'selected_batch_id', null); setOpenBatchMenuId(null); }}
-                                style={{ padding: '12px 14px', fontSize: '13px', cursor: 'pointer', borderBottom: '1px solid #f1f5f9', backgroundColor: !item.selected_batch_id ? '#f8fafc' : '#ffffff', color: '#0f172a', fontWeight: 'normal' }}
-                              >
-                                ▼ Auto FIFO (Default)
-                              </div>
-                              <div className="hide-scrollbar" style={{ maxHeight: '220px', overflowY: 'auto' }}>
-                                {activeBatches[item.product_id]?.map((b: any) => {
-                                  const remaining = b.remaining_qty || 0;
-                                  const isSelected = item.selected_batch_id === b.id;
-                                  return (
-                                    <div 
-                                      key={b.id}
-                                      onMouseDown={(e) => { e.preventDefault(); updateCartItem(item.id, 'selected_batch_id', b.id); setOpenBatchMenuId(null); }}
-                                      style={{ padding: '12px 14px', cursor: 'pointer', borderBottom: '1px solid #f1f5f9', backgroundColor: isSelected ? '#f8fafc' : '#ffffff', transition: 'background-color 0.1s' }}
-                                    >
-                                      <div style={{ fontSize: '14px', fontWeight: 'bold', color: '#b58a3d', marginBottom: b.notes ? '4px' : '0' }}>
-                                        {formatRiel(b.cost_price)} <span style={{ color: '#64748b', fontWeight: 'normal', fontSize: '12px' }}>({remaining} left)</span>
-                                      </div>
-                                      {b.notes && <div style={{ fontSize: '12px', color: '#475569', lineHeight: 1.4 }}>{b.notes}</div>}
-                                    </div>
-                                  );
-                                })}
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </div>
-
-                    <div style={{ display: 'flex', gap: activeTab === 'retail' ? '6px' : '8px', alignItems: 'center' }}>
-                      {/* 1. Quantity Input */}
-                      <div style={{ width: activeTab === 'retail' ? '65px' : '75px' }}>
-                        <CurrencyInput 
-                          value={item.quantity === 0 ? '0' : item.quantity} 
-                          onChange={(v: any) => updateCartItem(item.id, 'quantity', v)} 
-                          onFocus={() => updateCartItem(item.id, 'quantity', '')} 
-                          className="saas-input" 
-                          style={{ textAlign: 'center', padding: '6px' }}
-                          disabled={isSpecial}
-                        />
-                      </div>
-                      
-                      <span style={{ fontSize: '12px', color: '#94a3b8' }}>×</span>
-                      
-                      {/* 2. Unit Price Input */}
-                      <div style={{ flex: 1 }}>
-                        <CurrencyInput 
-                          value={item.custom_price_riel === 0 ? '0' : item.custom_price_riel} 
-                          onChange={(v: any) => updateCartItem(item.id, 'custom_price_riel', v)} 
-                          onFocus={() => updateCartItem(item.id, 'custom_price_riel', '')} 
-                          className="saas-input" 
-                          style={{ textAlign: activeTab === 'retail' ? 'center' : 'right', padding: '6px' }} 
-                        />
-                      </div>
-                      
-                      {/* 3. Editable Subtotal (ONLY SHOWS ON RETAIL TAB) */}
-                      {activeTab === 'retail' && (
-                        <>
-                          <span style={{ fontSize: '12px', color: '#94a3b8' }}>=</span>
-                          <div style={{ flex: 1 }}>
-                            <CurrencyInput 
-                              value={Math.round((Number(item.quantity) || 0) * (Number(item.custom_price_riel) || 0))} 
-                              onChange={(newTotal: any) => {
-                                // When typing a new Total, auto-adjust the Unit Price
-                                const qty = Number(item.quantity) || 1;
-                                const newUnitPrice = Math.round(Number(newTotal) / qty);
-                                updateCartItem(item.id, 'custom_price_riel', newUnitPrice);
-                              }} 
-                              className="saas-input" 
-                              style={{ textAlign: 'right', padding: '6px', fontWeight: 'bold', color: '#0f172a', backgroundColor: '#f8fafc' }} 
-                            />
-                          </div>
-                        </>
-                      )}
-                    </div>
-                  </div>
-                )
-              })}
+            {/* iOS Style Drag Handle Pill */}
+            <div style={{ width: '100%', display: 'flex', justifyContent: 'center', paddingTop: '12px', paddingBottom: '4px', flexShrink: 0 }}>
+              <div style={{ width: '40px', height: '4px', backgroundColor: '#cbd5e1', borderRadius: '10px' }}></div>
             </div>
-            
-            <div style={{ padding: '12px 20px calc(24px + env(safe-area-inset-bottom, 12px)) 20px', borderTop: '1px solid #e2e8f0', backgroundColor: '#f8fafc', boxShadow: '0 -4px 10px rgba(0,0,0,0.05)', flexShrink: 0 }}>
-              {renderCartAdjustmentsToolbar()}
 
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
-                <span style={{ fontSize: '14px', color: '#475569' }}>{currentT.totalKhmer}</span>
-                <span style={{ fontWeight: 'bold', color: totalRiel < 0 ? '#ef4444' : '#b58a3d', fontSize: '20px' }}>{formatRielFromNative(totalRiel)}</span>
+            {/* Cart Header */}
+            <div style={{ padding: '8px 20px 16px 20px', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
+              <div style={{ margin: 0, color: '#0f172a', fontSize: '16px', fontWeight: 'normal', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                🛒 {currentT.cartTitle.replace('🛒 ', '').trim()} ({cart.length})
               </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '12px' }}>
-                <span style={{ fontSize: '12px', color: '#94a3b8' }}>{currentT.totalUsd}</span>
-                <span style={{ color: '#64748b', fontSize: '13px' }}>{formatUSD(totalUSD)}</span>
-              </div>
-              
-              {renderPaymentSection(true)}
-
               <button 
-                onClick={initiateCheckout} 
-                disabled={!isCartValid || !hasValidPayment || isProcessing} 
-                className={`saas-btn ${(!isCartValid || !hasValidPayment || isProcessing) ? 'saas-btn-secondary' : 'saas-btn-primary'}`}
-                style={{ width: '100%', padding: '16px', fontSize: '16px' }}
+                onClick={() => setIsMobileCartOpen(false)} 
+                style={{ background: '#f8fafc', border: '1px solid #e2e8f0', fontSize: '14px', width: '32px', height: '32px', borderRadius: '50%', color: '#64748b', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
               >
-                {isProcessing ? 'Processing...' : currentT.checkout}
+                ✕
               </button>
             </div>
+            
+          <div style={{ flex: 1, overflowY: 'auto', minHeight: 0, paddingTop: '16px', paddingRight: '20px', paddingBottom: '20px', paddingLeft: '20px' }}>
+            {activeTab === 'wholesale' && selectedCustomerId && (
+              <div 
+                onClick={() => {
+                  setCartCustomerEditForm({
+                    name: cartCustomerNameOverride || selectedCustomer?.name || '',
+                    phone: cartCustomerPhoneOverride || selectedCustomer?.phone || '',
+                    location: cartCustomerLocationOverride || selectedCustomer?.location || '',
+                    google_map: cartCustomerMapOverride || (selectedCustomer as any)?.google_map || ''
+                  });
+                  setIsCartCustomerEditOpen(true);
+                }}
+                style={{ background: '#f8fafc', padding: '12px 14px', borderRadius: '8px', border: '1px solid #e2e8f0', marginBottom: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer' }}
+                onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#f1f5f9'}
+                onMouseOut={(e) => e.currentTarget.style.backgroundColor = '#f8fafc'}
+              >
+                <div style={{ fontSize: '15px', color: '#0f172a', fontWeight: 'normal' }}>{cartCustomerNameOverride || selectedCustomer?.name}</div>
+                <span style={{ fontSize: '16px', color: '#3b82f6' }}>✏️</span>
+              </div>
+            )}
+
+            {sortedCart.map((item) => {
+              const isReturn = item.custom_name.includes('ដូរ');
+              const isCharge = item.custom_name.includes('បានប្រើ');
+              const isSpecial = isReturn || isCharge || item.isSpecial;
+
+              return (
+                <div key={item.id} style={{ backgroundColor: isReturn ? '#fef2f2' : isCharge ? '#fffbeb' : '#ffffff', borderRadius: '10px', padding: '10px 12px', marginBottom: '8px', border: `1px solid ${isReturn ? '#fecaca' : isCharge ? '#fde68a' : '#e2e8f0'}`, position: 'relative' }}>
+                  <button onClick={() => removeFromCart(item.id)} style={{ position: 'absolute', top: '8px', right: '8px', background: '#fee2e2', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: '11px', width: '22px', height: '22px', borderRadius: '50%', zIndex: 5, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>✕</button>
+                  
+                  <div style={{ display: 'flex', alignItems: 'center', marginBottom: '6px', paddingRight: '28px', minWidth: 0 }}>
+                    <input 
+                      type="text" 
+                      value={item.custom_name} 
+                      onChange={(e) => updateCartItem(item.id, 'custom_name', e.target.value)}
+                      placeholder="Item Name"
+                      disabled={isSpecial}
+                      style={{ 
+                        fontSize: '14px', color: isReturn ? '#dc2626' : isCharge ? '#b45309' : '#334155', fontWeight: 'normal',
+                        flex: 1, minWidth: 0, border: 'none', background: 'transparent', outline: 'none', padding: 0
+                      }} 
+                    />
+                    
+                    {!isSpecial && activeTab === 'wholesale' && (
+                      <div style={{ position: 'relative', marginLeft: '8px' }}>
+                        {/* Transparent Backdrop to close on outside click */}
+                        {openBatchMenuId === item.id && (
+                          <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, zIndex: 99 }} onMouseDown={(e) => { e.preventDefault(); setOpenBatchMenuId(null); }}></div>
+                        )}
+                        
+                        {/* Trigger Button */}
+                        <div 
+                          onClick={(e) => { e.preventDefault(); setOpenBatchMenuId(openBatchMenuId === item.id ? null : item.id); }}
+                          className="saas-input"
+                          style={{ padding: '6px 10px', background: '#f8fafc', border: '1px solid #cbd5e1', borderRadius: '6px', fontSize: '12px', color: '#b58a3d', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px', maxWidth: '140px' }}
+                        >
+                          <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', fontWeight: 'normal' }}>
+                            {item.selected_batch_id 
+                              ? (() => {
+                                  const b = activeBatches[item.product_id]?.find(x => x.id === item.selected_batch_id);
+                                  return b ? `${formatRiel(b.cost_price)} (${b.remaining_qty})` : '▼ Auto FIFO';
+                                })()
+                              : '▼ Auto FIFO'}
+                          </span>
+                          <span style={{ fontSize: '10px', color: '#94a3b8', flexShrink: 0 }}>{openBatchMenuId === item.id ? '▲' : '▼'}</span>
+                        </div>
+
+                        {/* Custom Dropdown Menu Tray */}
+                        {openBatchMenuId === item.id && (
+                          <div style={{ position: 'absolute', top: 'calc(100% + 6px)', right: 0, zIndex: 100, backgroundColor: '#ffffff', border: '1px solid #cbd5e1', borderRadius: '8px', boxShadow: '0 10px 30px rgba(0,0,0,0.15)', minWidth: '240px', maxWidth: '280px', overflow: 'hidden' }}>
+                            <div 
+                              onMouseDown={(e) => { e.preventDefault(); updateCartItem(item.id, 'selected_batch_id', null); setOpenBatchMenuId(null); }}
+                              style={{ padding: '12px 14px', fontSize: '13px', cursor: 'pointer', borderBottom: '1px solid #f1f5f9', backgroundColor: !item.selected_batch_id ? '#f8fafc' : '#ffffff', color: '#0f172a', fontWeight: 'normal' }}
+                            >
+                              ▼ Auto FIFO (Default)
+                            </div>
+                            <div className="hide-scrollbar" style={{ maxHeight: '220px', overflowY: 'auto' }}>
+                              {activeBatches[item.product_id]?.map((b: any) => {
+                                const remaining = b.remaining_qty || 0;
+                                const isSelected = item.selected_batch_id === b.id;
+                                return (
+                                  <div 
+                                    key={b.id}
+                                    onMouseDown={(e) => { e.preventDefault(); updateCartItem(item.id, 'selected_batch_id', b.id); setOpenBatchMenuId(null); }}
+                                    style={{ padding: '12px 14px', cursor: 'pointer', borderBottom: '1px solid #f1f5f9', backgroundColor: isSelected ? '#f8fafc' : '#ffffff', transition: 'background-color 0.1s' }}
+                                  >
+                                    <div style={{ fontSize: '14px', fontWeight: 'bold', color: '#b58a3d', marginBottom: b.notes ? '4px' : '0' }}>
+                                      {formatRiel(b.cost_price)} <span style={{ color: '#64748b', fontWeight: 'normal', fontSize: '12px' }}>({remaining} left)</span>
+                                    </div>
+                                    {b.notes && <div style={{ fontSize: '12px', color: '#475569', lineHeight: 1.4 }}>{b.notes}</div>}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                  
+                  <div style={{ display: 'flex', gap: activeTab === 'retail' ? '6px' : '8px', alignItems: 'center' }}>
+                    {/* 1. Quantity Input */}
+                    <div style={{ width: activeTab === 'retail' ? '65px' : '75px' }}>
+                      <CurrencyInput 
+                        value={item.quantity === 0 ? '0' : item.quantity} 
+                        onChange={(v: any) => updateCartItem(item.id, 'quantity', v)} 
+                        onFocus={() => updateCartItem(item.id, 'quantity', '')} 
+                        className="saas-input" 
+                        style={{ textAlign: 'center', padding: '6px' }}
+                        disabled={isSpecial}
+                      />
+                    </div>
+                    
+                    <span style={{ fontSize: '12px', color: '#94a3b8' }}>×</span>
+                    
+                    {/* 2. Unit Price Input */}
+                    <div style={{ flex: 1 }}>
+                      <CurrencyInput 
+                        value={item.custom_price_riel === 0 ? '0' : item.custom_price_riel} 
+                        onChange={(v: any) => updateCartItem(item.id, 'custom_price_riel', v)} 
+                        onFocus={() => updateCartItem(item.id, 'custom_price_riel', '')} 
+                        className="saas-input" 
+                        style={{ textAlign: activeTab === 'retail' ? 'center' : 'right', padding: '6px' }} 
+                      />
+                    </div>
+                    
+                    {/* 3. Editable Subtotal (ONLY SHOWS ON RETAIL TAB) */}
+                    {activeTab === 'retail' && (
+                      <>
+                        <span style={{ fontSize: '12px', color: '#94a3b8' }}>=</span>
+                        <div style={{ flex: 1 }}>
+                          <CurrencyInput 
+                            value={Math.round((Number(item.quantity) || 0) * (Number(item.custom_price_riel) || 0))} 
+                            onChange={(newTotal: any) => {
+                              // When typing a new Total, auto-adjust the Unit Price
+                              const qty = Number(item.quantity) || 1;
+                              const newUnitPrice = Math.round(Number(newTotal) / qty);
+                              updateCartItem(item.id, 'custom_price_riel', newUnitPrice);
+                            }} 
+                            className="saas-input" 
+                            style={{ textAlign: 'right', padding: '6px', fontWeight: 'bold', color: '#0f172a', backgroundColor: '#f8fafc' }} 
+                          />
+                        </div>
+                      </>
+                    )}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+          
+          <div style={{ padding: '12px 20px calc(24px + env(safe-area-inset-bottom, 12px)) 20px', borderTop: '1px solid #e2e8f0', backgroundColor: '#f8fafc', boxShadow: '0 -4px 10px rgba(0,0,0,0.05)', flexShrink: 0 }}>
+            {renderCartAdjustmentsToolbar()}
+
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+              <span style={{ fontSize: '14px', color: '#475569' }}>{currentT.totalKhmer}</span>
+              <span style={{ fontWeight: 'bold', color: totalRiel < 0 ? '#ef4444' : '#b58a3d', fontSize: '20px' }}>{formatRielFromNative(totalRiel)}</span>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '12px' }}>
+              <span style={{ fontSize: '12px', color: '#94a3b8' }}>{currentT.totalUsd}</span>
+              <span style={{ color: '#64748b', fontSize: '13px' }}>{formatUSD(totalUSD)}</span>
+            </div>
+            
+            {renderPaymentSection(true)}
+
+            <button 
+              onClick={initiateCheckout} 
+              disabled={cart.length === 0 || isProcessing} 
+              className={`saas-btn ${(cart.length === 0 || isProcessing) ? 'saas-btn-secondary' : 'saas-btn-primary'}`}
+              style={{ width: '100%', padding: '16px', fontSize: '16px' }}
+            >
+              {isProcessing ? 'Processing...' : currentT.checkout}
+            </button>
+          </div>
+          {/* 🔥 FIX: Missing closing tag for the Bottom Sheet Container */}
           </div>
         </div>
       )}
@@ -3387,21 +3454,123 @@ export default function POSPage() {
             </div>
 
             <div style={{ marginBottom: '14px' }}>
-              <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', fontWeight: 'normal', marginBottom: '6px' }}>
-                Product Identifier
-              </label>
-              <input 
-                type="text" 
-                value={mobileName} 
-                onChange={(e) => setMobileName(e.target.value)} 
-                className="saas-input" 
-                style={{ 
-                  width: '100%', 
-                  boxSizing: 'border-box', 
-                  fontWeight: 'normal',
-                  fontSize: '16px' 
-                }}
-              />
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: '6px' }}>
+                <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', fontWeight: 'normal', margin: 0 }}>
+                  Product Identifier
+                </label>
+                {/* 🔥 Show "Batch" label above the icon if batches are present */}
+                {activeTab === 'wholesale' && activeBatches[selectedMobileProduct?.id]?.length > 0 && (
+                  <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', fontWeight: 'bold', margin: 0, color: '#b58a3d' }}>
+                    Batch
+                  </label>
+                )}
+              </div>
+              
+              <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                {/* 🔥 FIX: Flex: 1 and minWidth: 0 prevents the input from getting crushed! */}
+                <input 
+                  type="text" 
+                  value={mobileName} 
+                  onChange={(e) => setMobileName(e.target.value)} 
+                  className="saas-input" 
+                  style={{ 
+                    flex: 1, 
+                    minWidth: 0, 
+                    boxSizing: 'border-box', 
+                    fontWeight: 'normal',
+                    fontSize: '16px',
+                    height: '42px'
+                  }}
+                />
+
+                {/* 🔥 JUST THE DROPDOWN ICON BUTTON */}
+                {activeTab === 'wholesale' && activeBatches[selectedMobileProduct?.id]?.length > 0 && (
+                  <>
+                    <button 
+                      onClick={(e) => { e.preventDefault(); setIsMobileBatchModalOpen(true); }}
+                      className="saas-btn"
+                      style={{ 
+                        width: '42px', 
+                        height: '42px', 
+                        padding: 0, 
+                        background: mobileBatchId ? '#fefcf3' : '#f8fafc', 
+                        border: `1px solid ${mobileBatchId ? '#b58a3d' : '#cbd5e1'}`, 
+                        borderRadius: '8px', 
+                        display: 'flex', 
+                        alignItems: 'center', 
+                        justifyContent: 'center', 
+                        flexShrink: 0,
+                        boxSizing: 'border-box'
+                      }}
+                    >
+                      <span style={{ color: mobileBatchId ? '#b58a3d' : '#64748b', fontSize: '14px', fontWeight: mobileBatchId ? 'bold' : 'normal' }}>▼</span>
+                    </button>
+
+                    {/* 🔥 THE POPUP MODAL (Appears from TOP, bypasses global CSS centering) */}
+                    {isMobileBatchModalOpen && (
+                      <div 
+                        onMouseDown={() => setIsMobileBatchModalOpen(false)}
+                        style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(15, 23, 42, 0.6)', zIndex: 2147483647, display: 'flex', alignItems: 'flex-start', justifyContent: 'center', paddingTop: 'max(80px, env(safe-area-inset-top, 80px))', paddingLeft: '16px', paddingRight: '16px', paddingBottom: '16px', backdropFilter: 'blur(2px)' }}
+                      >
+                        <div 
+                          onMouseDown={(e) => e.stopPropagation()}
+                          style={{ background: '#ffffff', borderRadius: '16px', width: '100%', maxWidth: '400px', padding: '20px', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.25)', animation: 'posPopupSlideDown 0.2s ease-out', display: 'flex', flexDirection: 'column', maxHeight: '75vh' }}
+                        >
+                          
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexShrink: 0 }}>
+                            {/* 🔥 Changed h3 to div to bypass global centering CSS rule */}
+                            <div style={{ margin: 0, fontSize: '18px', fontWeight: 'bold', color: '#0f172a', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                              📦 Select Batch
+                            </div>
+                            <button onClick={(e) => { e.preventDefault(); setIsMobileBatchModalOpen(false); }} style={{ background: '#f1f5f9', border: 'none', borderRadius: '50%', width: '32px', height: '32px', fontSize: '14px', color: '#475569', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>✕</button>
+                          </div>
+
+                          <div className="hide-scrollbar" style={{ overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '8px', flex: 1 }}>
+                            
+                            {/* Auto FIFO Option */}
+                            <div 
+                              onClick={() => { setMobileBatchId(null); setIsMobileBatchModalOpen(false); }}
+                              style={{ padding: '14px', borderRadius: '8px', border: !mobileBatchId ? '2px solid #3b82f6' : '1px solid #e2e8f0', backgroundColor: !mobileBatchId ? '#eff6ff' : '#ffffff', cursor: 'pointer', transition: 'all 0.1s' }}
+                            >
+                              <div style={{ fontSize: '14px', fontWeight: 'bold', color: '#1e293b' }}>▼ Auto FIFO (Default)</div>
+                            </div>
+
+                            {/* List of Batches Matching the Cart Design EXACTLY */}
+                            {activeBatches[selectedMobileProduct.id]?.map((b: any) => {
+                              const remaining = b.remaining_qty || 0;
+                              const isSelected = mobileBatchId === b.id;
+                              
+                              // Formatting date cleanly
+                              const formattedDate = new Date(b.created_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+                              
+                              return (
+                                <div 
+                                  key={b.id}
+                                  onClick={() => { setMobileBatchId(b.id); setIsMobileBatchModalOpen(false); }}
+                                  style={{ padding: '14px', borderRadius: '8px', border: isSelected ? '2px solid #b58a3d' : '1px solid #e2e8f0', backgroundColor: isSelected ? '#f8fafc' : '#ffffff', cursor: 'pointer', transition: 'background-color 0.1s' }}
+                                >
+                                  {/* EXACT MATCH TO YOUR SCREENSHOT: Price + Gray Stock text side by side */}
+                                  {/* Added Date formatting appended after the stock */}
+                                  <div style={{ fontSize: '14px', fontWeight: 'bold', color: '#b58a3d', marginBottom: b.notes ? '4px' : '0' }}>
+                                    {formatRiel(b.cost_price)} <span style={{ color: '#64748b', fontWeight: 'normal', fontSize: '12px' }}>({remaining} left) • {formattedDate}</span>
+                                  </div>
+                                  
+                                  {/* EXACT MATCH TO YOUR SCREENSHOT: Plain text for the recipe/notes */}
+                                  {b.notes && (
+                                    <div style={{ fontSize: '13px', color: '#475569', lineHeight: 1.5, marginTop: '4px' }}>
+                                      {b.notes}
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
             </div>
 
             <div style={{ display: 'flex', gap: '12px', marginBottom: '18px' }}>
@@ -3453,8 +3622,128 @@ export default function POSPage() {
               </div>
             </div>
 
+            {/* 🔥 NEW UI: Bag Selection Row */}
+            {activeTab === 'wholesale' && (
+              <div style={{ marginBottom: '18px', padding: '12px', backgroundColor: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                <label className="saas-card-title" style={{ display: 'block', fontSize: '12px', fontWeight: '600', marginBottom: '8px', color: '#334155' }}>
+                  Changing bag?
+                </label>
+                
+                {/* 🔘 Custom Select Button Trigger */}
+                <button 
+                  onClick={(e) => { e.preventDefault(); setIsMobileBagModalOpen(true); }}
+                  className="saas-input"
+                  style={{ 
+                    width: '100%', 
+                    textAlign: 'left', 
+                    display: 'flex', 
+                    justifyContent: 'space-between', 
+                    alignItems: 'center', 
+                    backgroundColor: mobileBagId ? '#fefcf3' : '#ffffff', 
+                    borderColor: mobileBagId ? '#b58a3d' : '#cbd5e1',
+                    height: '42px',
+                    cursor: 'pointer',
+                    marginBottom: mobileBagId ? '10px' : '0'
+                  }}
+                >
+                  <span style={{ color: mobileBagId ? '#8a7650' : '#475569', fontWeight: mobileBagId ? 'bold' : 'normal', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    {mobileBagId ? (() => {
+                      const b = products.find(p => p.id === mobileBagId);
+                      return b ? `🛍️ ${b.name} (${formatRiel(b.price || 0)} ៛)` : '▼ Select Bag';
+                    })() : '-- No Bag Change --'}
+                  </span>
+                  <div style={{ display: 'flex', alignItems: 'center' }}>
+                    {mobileBagId && (
+                      <span 
+                        onClick={(e) => { e.stopPropagation(); e.preventDefault(); setMobileBagId(null); }}
+                        style={{ color: '#ef4444', fontSize: '16px', padding: '0 8px', marginRight: '4px' }}
+                      >✕</span>
+                    )}
+                    <span style={{ fontSize: '10px', color: '#94a3b8' }}>{isMobileBagModalOpen ? '▲' : '▼'}</span>
+                  </div>
+                </button>
+
+                {/* 🔥 BAG SELECTION POPUP MODAL */}
+                {isMobileBagModalOpen && (
+                  <div 
+                    onMouseDown={() => setIsMobileBagModalOpen(false)}
+                    style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(15, 23, 42, 0.6)', zIndex: 2147483647, display: 'flex', alignItems: 'flex-start', justifyContent: 'center', paddingTop: 'max(80px, env(safe-area-inset-top, 80px))', paddingLeft: '16px', paddingRight: '16px', paddingBottom: '16px', backdropFilter: 'blur(2px)' }}
+                  >
+                    <div 
+                      onMouseDown={(e) => e.stopPropagation()}
+                      style={{ background: '#ffffff', borderRadius: '16px', width: '100%', maxWidth: '400px', padding: '20px', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.25)', animation: 'posPopupSlideDown 0.2s ease-out', display: 'flex', flexDirection: 'column', maxHeight: '75vh' }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexShrink: 0 }}>
+                        <div style={{ margin: 0, fontSize: '18px', fontWeight: 'bold', color: '#0f172a', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          🛍️ Select Bag
+                        </div>
+                        <button onClick={(e) => { e.preventDefault(); setIsMobileBagModalOpen(false); }} style={{ background: '#f1f5f9', border: 'none', borderRadius: '50%', width: '32px', height: '32px', fontSize: '14px', color: '#475569', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>✕</button>
+                      </div>
+
+                      <div className="hide-scrollbar" style={{ overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '8px', flex: 1 }}>
+                        <div 
+                          onClick={() => { setMobileBagId(null); setIsMobileBagModalOpen(false); }}
+                          style={{ padding: '14px', borderRadius: '8px', border: !mobileBagId ? '2px solid #3b82f6' : '1px solid #e2e8f0', backgroundColor: !mobileBagId ? '#eff6ff' : '#ffffff', cursor: 'pointer', transition: 'all 0.1s' }}
+                        >
+                          <div style={{ fontSize: '14px', fontWeight: 'bold', color: '#1e293b' }}>-- No Bag Change --</div>
+                        </div>
+
+                        {products.filter(p => p.name?.includes('បាវ')).map((bag: any) => {
+                          const isSelected = mobileBagId === bag.id;
+                          return (
+                            <div 
+                              key={bag.id}
+                              onClick={() => { setMobileBagId(bag.id); setIsMobileBagModalOpen(false); }}
+                              style={{ padding: '14px', borderRadius: '8px', border: isSelected ? '2px solid #b58a3d' : '1px solid #e2e8f0', backgroundColor: isSelected ? '#f8fafc' : '#ffffff', cursor: 'pointer', transition: 'background-color 0.1s' }}
+                            >
+                              <div style={{ fontSize: '14px', fontWeight: 'bold', color: isSelected ? '#b58a3d' : '#1e293b', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                <span>{bag.name}</span>
+                                <span>{formatRiel(bag.price || 0)} ៛</span>
+                              </div>
+                              <div style={{ fontSize: '12px', color: '#64748b', marginTop: '4px' }}>Stock: {bag.stock} left</div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {mobileBagId && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '10px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span style={{ fontSize: '13px', color: '#475569', fontWeight: '500', minWidth: '60px' }}>Quantity:</span>
+                      <div style={{ flex: 1 }}>
+                        <CurrencyInput
+                          value={mobileBagQty}
+                          onChange={(v: any) => setMobileBagQty(v)}
+                          onFocus={() => { if (mobileBagQty === 1) setMobileBagQty(''); }}
+                          className="saas-input"
+                          style={{ textAlign: 'center', height: '36px', padding: '4px' }}
+                        />
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', paddingLeft: '2px' }}>
+                      <input
+                        type="checkbox"
+                        id="mobileCoveredByDepot"
+                        checked={mobileBagCoveredByDepot}
+                        onChange={(e) => setMobileBagCoveredByDepot(e.target.checked)}
+                        style={{ width: '16px', height: '16px', cursor: 'pointer', accentColor: '#3b82f6' }}
+                      />
+                      <label htmlFor="mobileCoveredByDepot" style={{ fontSize: '13px', color: '#475569', fontWeight: '500', cursor: 'pointer' }}>
+                        Free for Customer (Covered by Depot)
+                      </label>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
               <button 
+                type="button"
                 onClick={() => setSelectedMobileProduct(null)} 
                 className="saas-btn saas-btn-secondary"
                 style={{ fontWeight: 'normal' }}
@@ -3462,7 +3751,7 @@ export default function POSPage() {
                 {currentT.cancel}
               </button>
               <button 
-                onClick={handleAddMobileProductToCart} 
+                type="submit"
                 className="saas-btn saas-btn-primary"
                 style={{ fontWeight: 'normal' }}
               >
@@ -4139,6 +4428,12 @@ export default function POSPage() {
         @keyframes posPopupSlideDown {
           from { opacity: 0; transform: translateY(-12px); }
           to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* 🔥 NEW: Smooth Full-Screen Slide Up Animation */
+        @keyframes posPopupSlideUp {
+          from { transform: translateY(100%); }
+          to { transform: translateY(0); }
         }
 
         /* 🟢 100% SURGICAL MODAL BACKDROP CENTERING */
