@@ -2689,33 +2689,27 @@ export default function POSPage() {
       )}
 
       {isMobileCartOpen && (
-        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: '#ffffff', zIndex: 2147483647, display: 'flex', flexDirection: 'column', animation: 'posPopupSlideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1)' }}>
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: '#ffffff', zIndex: 45, display: 'flex', flexDirection: 'column', animation: 'posPopupSlideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1)' }}>
           
-          {/* 🔥 FULL SCREEN HEADER ALIGNED WITH LIGHTER ORIGINAL FONT */}
-          <div style={{ 
-            paddingTop: 'max(16px, env(safe-area-inset-top, 16px))', 
-            paddingBottom: '16px', 
-            backgroundColor: '#ffffff', 
-            borderBottom: '1px solid #e2e8f0', 
-            flexShrink: 0,
-            width: '100%'
-          }}>
-            <div style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              marginLeft: '70px', /* Matches 16px page padding + 54px burger icon offset */
-              marginRight: '20px'
-            }}>
-              <div style={{ margin: 0, color: '#0f172a', fontSize: '18px', fontWeight: 'normal', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                {currentT.cartTitle} ({cart.length})
+          {/* 🔥 USES EXACT GLOBAL CSS CLASSES TO ALIGN PERFECTLY WITH BURGER MENU */}
+          <div className="pos-sticky-header" style={{ backgroundColor: '#ffffff', borderBottom: '1px solid #e2e8f0', boxShadow: 'none', paddingBottom: '12px' }}>
+            <div className="header-container" style={{ marginBottom: 0, paddingRight: '20px' }}>
+              
+              <div className="header-left" style={{ flex: 1, minWidth: 0, marginRight: '12px' }}>
+                <div style={{ margin: 0, color: '#0f172a', fontSize: '16px', fontWeight: '500', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  {currentT.cartTitle} ({cart.length})
+                </div>
               </div>
-              <button 
-                onClick={() => setIsMobileCartOpen(false)} 
-                style={{ background: '#fef2f2', border: '1px solid #fecaca', fontSize: '18px', width: '36px', height: '36px', borderRadius: '8px', color: '#dc2626', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flexShrink: 0 }}
-              >
-                ✕
-              </button>
+              
+              <div className="header-actions" style={{ display: 'flex', alignItems: 'center', marginLeft: 'auto', flexShrink: 0 }}>
+                <button 
+                  onClick={() => setIsMobileCartOpen(false)} 
+                  style={{ background: '#fef2f2', border: '1px solid #fecaca', fontSize: '18px', width: '36px', height: '36px', borderRadius: '8px', color: '#dc2626', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
+                >
+                  ✕
+                </button>
+              </div>
+
             </div>
           </div>
             
