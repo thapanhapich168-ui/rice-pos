@@ -356,10 +356,11 @@ export default function POSPage() {
   // 🔥 NEW: States for the Mobile Batch Popup Modal
   const [mobileBatchId, setMobileBatchId] = useState<number | null>(null)
   const [isMobileBatchModalOpen, setIsMobileBatchModalOpen] = useState(false)
-  const [mobileBagId, setMobileBagId] = useState<number | null>(null) // 🔥 NEW: Track bag exchange
-  const [mobileBagQty, setMobileBagQty] = useState<number | ''>(1) // 🔥 NEW: Track bag quantity defaulting to 1
-  const [isMobileBagModalOpen, setIsMobileBagModalOpen] = useState(false) // 🔥 NEW: Bag popup state
-  const [mobileBagCoveredByDepot, setMobileBagCoveredByDepot] = useState(false) // 🔥 NEW: Track if depot pays for it
+  const [mobileBagId, setMobileBagId] = useState<number | null>(null) 
+  const [mobileBagQty, setMobileBagQty] = useState<number | ''>(1) 
+  const [mobileBagPrice, setMobileBagPrice] = useState<number | ''>('') // 🔥 NEW: Track dynamic bag price
+  const [isMobileBagModalOpen, setIsMobileBagModalOpen] = useState(false) 
+  const [mobileBagCoveredByDepot, setMobileBagCoveredByDepot] = useState(false) 
   const mobileQtyRef = useRef<any>(null)
 
   const [exchangeModal, setExchangeModal] = useState<{ isOpen: boolean, product: Product | null, consumedKg: string | number }>({
@@ -514,13 +515,14 @@ export default function POSPage() {
           
           const { data: saleRows } = await supabase.from('sales').select('*').eq('invoice_id', editId);
           if (saleRows && saleRows.length > 0) {
-            const rebuiltCart = saleRows.map((row: any) => {
+            const rebuiltCart = saleRows.map((row: any, index: number) => { // 🔥 ADDED INDEX
               const isSpecialRow = (row.custom_rice_type || row.rice_type).includes('ដូរ') || (row.custom_rice_type || row.rice_type).includes('បានប្រើ') || (row.custom_rice_type || row.rice_type).includes('បញ្ចុះតម្លៃ') || (row.custom_rice_type || row.rice_type).includes('កក់') || (row.custom_rice_type || row.rice_type).includes('ថ្លៃបាវ') || (row.custom_rice_type || row.rice_type).includes('បាវ');
-              let sortOrder = 0;
-              if ((row.custom_rice_type || row.rice_type).includes('ដូរ')) sortOrder = 1;
-              if ((row.custom_rice_type || row.rice_type).includes('បានប្រើ')) sortOrder = 2;
-              if ((row.custom_rice_type || row.rice_type).includes('ថ្លៃបាវ') || (row.custom_rice_type || row.rice_type).includes('បាវ')) sortOrder = 3;
-              if ((row.custom_rice_type || row.rice_type).includes('បញ្ចុះតម្លៃ') || (row.custom_rice_type || row.rice_type).includes('កក់')) sortOrder = 99;
+              
+              // 🔥 Chronological sorting to rebuild old invoices perfectly paired
+              let sortOrder = Date.now() + index; 
+              if ((row.custom_rice_type || row.rice_type).includes('ដូរ')) sortOrder = -9999999999999 + index; 
+              if ((row.custom_rice_type || row.rice_type).includes('បានប្រើ')) sortOrder = -9999999999990 + index;
+              if ((row.custom_rice_type || row.rice_type).includes('បញ្ចុះតម្លៃ') || (row.custom_rice_type || row.rice_type).includes('កក់')) sortOrder = 9999999999999 + index; 
 
               return {
                 id: row.id,
@@ -1012,10 +1014,12 @@ export default function POSPage() {
       setMobilePrice(activeTab === 'wholesale' ? 0 : Number(product.price));
       setMobileQty(defaultQty);
       setMobileBatchId(null);
-      setMobileBagId(null); // 🔥 NEW: Reset bag selection
-      setMobileBagCoveredByDepot(false); // 🔥 NEW: Reset depot coverage
-      setIsMobileBatchModalOpen(false); // 🔥 FIX: Ensure the modal is closed when opening a new item
-      setIsMobileBagModalOpen(false); // 🔥 NEW: Reset bag modal
+      setMobileBagId(null); 
+      setMobileBagQty(1); // 🔥 FIX: Safely hard-reset Bag Qty to 1
+      setMobileBagPrice(''); // 🔥 FIX: Wipe old Bag Price memory
+      setMobileBagCoveredByDepot(false); 
+      setIsMobileBatchModalOpen(false); 
+      setIsMobileBagModalOpen(false); 
       setTimeout(() => {
         mobileQtyRef.current?.focus();
       }, 50);
@@ -1032,7 +1036,7 @@ export default function POSPage() {
     } else {
       setCart([...cart, { 
         ...product, product_id: product.id, id: Math.random(), quantity: qtyToAdd, custom_name: product.name, custom_price_riel: priceInRiel,
-        cost_price: Number(product.cost_price || 0), isSpecial: false, selected_batch_id: null, sortOrder: 0
+        cost_price: Number(product.cost_price || 0), isSpecial: false, selected_batch_id: null, sortOrder: Date.now() // 🔥 ERF FIX: Chronological Anchor
       }])
     }
   }
@@ -1040,33 +1044,27 @@ export default function POSPage() {
   function handleAddMobileProductToCart(forceAdd: boolean | any = false) {
     const isForced = forceAdd === true;
     if (!selectedMobileProduct) return;
-    // 🛡️ RELIABILITY FIX: Fallback to exact DOM input values if React state batching lags behind rapid user tapping
     const rawQtyStr = String(mobileQty).replace(/,/g, '');
     const finalQty = parseFloat(rawQtyStr) || 0;
     const finalPrice = typeof mobilePrice === 'number' ? mobilePrice : (parseFloat(String(mobilePrice).replace(/,/g, '')) || 0);
     
-    // 🧠 POPUP ALERT: QUICK CONFIRM FOR 1 QTY (To prevent accidental taps)
     const defaultPrice = activeTab === 'wholesale' ? 0 : Number(selectedMobileProduct.price || 0);
     if (!isForced && finalQty === 1 && finalPrice === defaultPrice) {
       if (!window.confirm(`🛒 Add Confirmation\n\nYou are adding 1x [${mobileName}] for ${formatRiel(finalPrice)}.\n\nClick [OK] to confirm, or [Cancel] to change the amount.`)) return;
     }
 
-    // 🛑 POPUP ALERT: MISSING QUANTITY
     if (!isForced && (finalQty <= 0 || mobileQty === '')) {
       if (!window.confirm('🛑 Missing Quantity\n\nPlease enter a quantity greater than 0.\n\nClick [OK] to add to cart anyway, or [Cancel] to recheck.')) return;
     }
 
-    // 🛑 POPUP ALERT: MISSING PRICE
     if (!isForced && (finalPrice <= 0 || mobilePrice === '')) {
       if (!window.confirm('🛑 Missing Price\n\nPlease enter the selling price before adding to cart.\n\nClick [OK] to add to cart anyway, or [Cancel] to recheck.')) return;
     }
 
-    // 🧠 POPUP ALERT: HIGH QUANTITY TYPO GUARD
     if (!isForced && finalQty > 10000) {
-      if (!window.confirm(`🛑 High Quantity Warning\n\nQuantity (${finalQty.toLocaleString()}) is unusually high. Did you type the price into the quantity field by mistake?\n\nClick [OK] to add anyway, or [Cancel] to recheck.`)) return;
+      if (!window.confirm(`🛑 High Quantity Warning\n\nQuantity (${finalQty.toLocaleString()}) is unusually high.\n\nClick [OK] to add anyway, or [Cancel] to recheck.`)) return;
     }
 
-    // 🧠 POPUP ALERT: SELLING BELOW COST MARGIN
     const costPrice = Number(selectedMobileProduct.cost_price || 0);
     if (!isForced && finalPrice < costPrice) {
       if (!window.confirm(`📉 Price Below Cost\n\nYou are selling this for ${formatRiel(finalPrice)}, but the cost is ${formatRiel(costPrice)}.\n\nClick [OK] to sell below cost anyway, or [Cancel] to recheck.`)) return;
@@ -1076,45 +1074,48 @@ export default function POSPage() {
     const existingIndex = newCart.findIndex((item) => item.product_id === selectedMobileProduct.id && !item.isSpecial);
     
     let insertIndex = newCart.length;
+    let baseSortOrder = Date.now(); // 🔥 ERF FIX: Establish exact timestamp for grouping
 
-    if (existingIndex !== -1) {
+    if (existingIndex !== -1) { 
       newCart[existingIndex] = { 
         ...newCart[existingIndex], custom_name: mobileName, custom_price_riel: finalPrice, quantity: (Number(newCart[existingIndex].quantity) || 0) + finalQty,
         selected_batch_id: mobileBatchId
       };
-      insertIndex = existingIndex + 1; // 🔥 Targets slot directly below this rice
+      baseSortOrder = newCart[existingIndex].sortOrder || Date.now(); // Inherit parent timestamp
+      insertIndex = existingIndex + 1; 
     } else {
       newCart.push({ 
         ...selectedMobileProduct, product_id: selectedMobileProduct.id, id: Math.random(), custom_name: mobileName, custom_price_riel: finalPrice, 
         cost_price: Number(selectedMobileProduct.cost_price || 0), quantity: finalQty, isSpecial: false, 
-        selected_batch_id: mobileBatchId, sortOrder: 0 
+        selected_batch_id: mobileBatchId, sortOrder: baseSortOrder 
       });
       insertIndex = newCart.length;
     }
 
-    // 🔥 Spliced directly below the rice item so they always stay together
     if (mobileBagId) {
       const bagProd = products.find(p => p.id === mobileBagId);
       if (bagProd) {
-        // 🔥 FIX: Strictly check for an empty string so '0' doesn't accidentally get converted to '1'
         const bagQtyNum = mobileBagQty === '' ? 1 : Number(mobileBagQty);
+        const finalBagPrice = mobileBagCoveredByDepot ? 0 : Number(mobileBagPrice || 0); // 🔥 PULLS CUSTOM TYPED PRICE
+        
         newCart.splice(insertIndex, 0, {
           ...bagProd,
           product_id: bagProd.id,
           id: Math.random(),
           custom_name: mobileBagCoveredByDepot ? `ប្តូរបាវ ${bagProd.name} (Covered by Depot)` : `ប្តូរបាវ ${bagProd.name}`,
-          custom_price_riel: mobileBagCoveredByDepot ? 0 : Number(bagProd.price || 0),
+          custom_price_riel: finalBagPrice, // 🔥 INJECTS CUSTOM PRICE
           cost_price: Number(bagProd.cost_price || 0),
           quantity: bagQtyNum,
           isSpecial: true,
           bypass_stock: false, 
-          sortOrder: 0 // 🔥 Gives same priority so stable sort keeps it right under the rice!
+          sortOrder: baseSortOrder + 1 
         });
       }
     }
 
     setCart(newCart);
     setSelectedMobileProduct(null);
+    setMobileBagId(null);
   }
 
   function handleAddCartAdjustment() {
@@ -1160,7 +1161,7 @@ export default function POSPage() {
       stock: 0,
       isSpecial: true,
       bypass_stock: true, 
-      sortOrder: adjustmentModal.type === 'bag' ? 3 : 99
+      sortOrder: adjustmentModal.type === 'bag' ? Date.now() + 1 : 9999999999999 // 🔥 Drop discounts & deposits strictly to bottom
     };
 
     setCart([...cart, newAdjustmentItem]);
@@ -1220,7 +1221,7 @@ export default function POSPage() {
       if (consumedKg === 0) {
         newItems.push({
           ...prod, product_id: prod.id, id: Math.random(), custom_name: `ដូរ ${prod.name}`, custom_price_riel: prod.price,
-          cost_price: Number(prod.cost_price || 0), quantity: 1, isSpecial: true, isReturnFullBag: true, bypass_stock: false, sortOrder: 1
+          cost_price: Number(prod.cost_price || 0), quantity: 1, isSpecial: true, isReturnFullBag: true, bypass_stock: false, sortOrder: -9999999999999 // 🔥 Force Returns absolutely to the top
         });
       } else {
         const returnedKg = 50 - consumedKg;
@@ -1239,7 +1240,7 @@ export default function POSPage() {
           bypass_stock: true, 
           add_loose_kg: returnedKg, 
           loose_retail_id: linkedRetail?.id, 
-          sortOrder: 1
+          sortOrder: -9999999999999 // 🔥 Force Returns absolutely to the top
         });
 
         newItems.push({
@@ -1252,7 +1253,7 @@ export default function POSPage() {
           quantity: consumedKg, 
           isSpecial: true, 
           bypass_stock: true, 
-          sortOrder: 2
+          sortOrder: -9999999999990 // 🔥 Pin directly below the return
         });
       }
 
@@ -3808,7 +3809,11 @@ export default function POSPage() {
                           return (
                             <div 
                               key={bag.id}
-                              onClick={() => { setMobileBagId(bag.id); setIsMobileBagModalOpen(false); }}
+                              onClick={() => { 
+                                setMobileBagId(bag.id); 
+                                setMobileBagPrice(Number(bag.price || 0)); // 🔥 AUTO-FILLS DEFAULT BAG PRICE
+                                setIsMobileBagModalOpen(false); 
+                              }}
                               style={{ padding: '14px', borderRadius: '8px', border: isSelected ? '2px solid #b58a3d' : '1px solid #e2e8f0', backgroundColor: isSelected ? '#f8fafc' : '#ffffff', cursor: 'pointer', transition: 'background-color 0.1s' }}
                             >
                               <div style={{ fontSize: '14px', fontWeight: 'bold', color: isSelected ? '#b58a3d' : '#1e293b', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -3824,17 +3829,29 @@ export default function POSPage() {
                   </div>
                 )}
 
+                {/* 🔥 SPLIT SIDE-BY-SIDE QTY & PRICE INPUTS */}
                 {mobileBagId && (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '10px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <span style={{ fontSize: '13px', color: '#475569', fontWeight: '500', minWidth: '60px' }}>Quantity:</span>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginTop: '12px' }}>
+                    <div style={{ display: 'flex', gap: '12px' }}>
                       <div style={{ flex: 1 }}>
+                        <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', fontWeight: 'normal', marginBottom: '6px' }}>Bag Qty</label>
                         <CurrencyInput
-                          value={mobileBagQty === 0 ? '0' : mobileBagQty} // 🔥 FIX: Forces '0' to display correctly
+                          value={mobileBagQty === 0 ? '0' : mobileBagQty}
                           onChange={(v: any) => setMobileBagQty(v)}
                           onFocus={() => { if (mobileBagQty === 1) setMobileBagQty(''); }}
                           className="saas-input"
-                          style={{ textAlign: 'center', height: '36px', padding: '4px' }}
+                          style={{ textAlign: 'center', height: '38px', fontWeight: 'normal', fontSize: '16px' }}
+                        />
+                      </div>
+                      <div style={{ flex: 1 }}>
+                        <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', fontWeight: 'normal', marginBottom: '6px', color: mobileBagCoveredByDepot ? '#94a3b8' : '#b58a3d' }}>Bag Price (៛)</label>
+                        <CurrencyInput
+                          value={mobileBagCoveredByDepot ? '0' : (mobileBagPrice === 0 ? '0' : mobileBagPrice)} // 🔥 FIX: Forces string '0' to ensure it renders when disabled!
+                          onChange={(v: any) => setMobileBagPrice(v)}
+                          onFocus={() => { if (mobileBagPrice === 0) setMobileBagPrice(''); }}
+                          disabled={mobileBagCoveredByDepot}
+                          className="saas-input"
+                          style={{ textAlign: 'center', height: '38px', backgroundColor: mobileBagCoveredByDepot ? '#f1f5f9' : '#ffffff', color: mobileBagCoveredByDepot ? '#94a3b8' : '#b58a3d', fontWeight: 'normal', fontSize: '16px' }}
                         />
                       </div>
                     </div>
@@ -4538,9 +4555,25 @@ export default function POSPage() {
         
         html, body {
           font-variant-numeric: tabular-nums lining-nums;
-          /* 🔥 FIX: Stops the iPhone Safari "Rubber Band" bounce effect */
-          overscroll-behavior: none;
           background-color: #ffffff;
+          
+          /* 💣 THE FINAL BOSS FIX: iOS Safari Nuclear Option */
+          /* 1. Physically pin the foundation layer to the device screen */
+          position: fixed !important;
+          top: 0;
+          left: 0;
+          right: 0;
+          bottom: 0;
+          width: 100vw;
+          height: 100dvh;
+          overflow: hidden !important;
+          overscroll-behavior: none !important;
+        }
+
+        /* 🛡️ SCROLL CHAINING SHIELD */
+        /* 2. Forbid the inner product lists from transferring their bounce up to the body */
+        * {
+          overscroll-behavior-y: none !important;
         }
 
         @keyframes posPopupSlideDown {
