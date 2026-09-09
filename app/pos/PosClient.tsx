@@ -1039,20 +1039,23 @@ export default function POSPage() {
     
     // 🛑 REQUIRE QUANTITY
     if (finalQty <= 0 || mobileQty === '') {
-      showToast('error', 'Missing Quantity', 'Please enter a quantity greater than 0.');
-      return;
+      if (!window.confirm('🛑 Missing Quantity\n\nPlease enter a quantity greater than 0.\n\nClick [OK] to add to cart anyway, or [Cancel] to recheck.')) return;
     }
 
     // 🛑 REQUIRE PRICE
     if (finalPrice <= 0 || mobilePrice === '') {
-      showToast('error', 'Missing Price', 'Please enter the selling price before adding to cart.');
-      return;
+      if (!window.confirm('🛑 Missing Price\n\nPlease enter the selling price before adding to cart.\n\nClick [OK] to add to cart anyway, or [Cancel] to recheck.')) return;
     }
 
     // 🧠 SMART GUARD: Hard limit to prevent typing Price into the Qty field
     if (finalQty > 10000) {
-      showToast('error', 'Hold on! 🛑', `Quantity (${finalQty.toLocaleString()}) cannot exceed 10,000. Did you accidentally type the price in the quantity field?`);
-      return;
+      if (!window.confirm(`🛑 Quantity Warning\n\nQuantity (${finalQty.toLocaleString()}) is unusually high. Did you accidentally type the price in the quantity field?\n\nClick [OK] to add anyway, or [Cancel] to recheck.`)) return;
+    }
+
+    // 🧠 SMART GUARD: Prevent Selling Below Cost Price (Typo prevention)
+    const costPrice = Number(selectedMobileProduct.cost_price || 0);
+    if (finalPrice < costPrice) {
+      if (!window.confirm(`📉 Price Too Low\n\nYou are trying to sell ${mobileName} for ${formatRiel(finalPrice)}, but the cost price is ${formatRiel(costPrice)}.\n\nClick [OK] to sell below cost anyway, or [Cancel] to recheck.`)) return;
     }
 
     const existing = cart.find((item) => item.product_id === selectedMobileProduct.id && !item.isSpecial);
@@ -1356,32 +1359,35 @@ export default function POSPage() {
 
       if (!isSpecial) {
         if (qty <= 0 || item.quantity === '') {
-          showToast('error', 'Missing Quantity', `Please enter a valid quantity for [${item.custom_name}].`);
-          return;
+          if (!window.confirm(`🛑 Missing Quantity\n\nPlease enter a valid quantity for [${item.custom_name}].\n\nClick [OK] to checkout anyway, or [Cancel] to recheck.`)) return;
         }
         if (price <= 0 || item.custom_price_riel === '') {
-          showToast('error', 'Missing Price', `You forgot to enter the price for [${item.custom_name}].`);
-          return;
+          if (!window.confirm(`🛑 Missing Price\n\nYou forgot to enter the price for [${item.custom_name}].\n\nClick [OK] to checkout anyway, or [Cancel] to recheck.`)) return;
         }
         if (qty > 10000) {
-          showToast('error', 'Hold on! 🛑', `Item [${item.custom_name}] has a quantity of ${qty.toLocaleString()}. Quantity cannot exceed 10,000.`);
-          return;
+          if (!window.confirm(`🛑 Quantity Warning\n\nItem [${item.custom_name}] has a quantity of ${qty.toLocaleString()}.\n\nDid you type the price into the quantity field?\n\nClick [OK] to checkout anyway, or [Cancel] to recheck.`)) return;
+        }
+        
+        // 🧠 SMART GUARD: Prevent Selling Below Cost Price at Checkout
+        const costPrice = Number(item.cost_price || 0);
+        if (price < costPrice) {
+          if (!window.confirm(`📉 Price Too Low\n\nItem [${item.custom_name}] is priced at ${formatRiel(price)}, which is below its cost price of ${formatRiel(costPrice)}.\n\nClick [OK] to complete checkout anyway, or [Cancel] to recheck.`)) return;
         }
       }
     }
 
-    if (!isCartValid) {
-      showToast('error', 'Invalid Cart', 'Please ensure all items have a valid quantity and price.');
+    // We can safely remove the old isCartValid check since the interactive loop above catches everything!
+    if (cart.length === 0) {
+      window.alert("Your cart is empty!");
       return;
     }
 
     if (activeTab === 'wholesale' && !selectedCustomerId) {
-      showToast('error', 'Customer Required', lang === 'kh' ? 'សូមជ្រើសរើសអតិថិជនសម្រាប់ដុំ!' : 'Please select a customer for wholesale');
-      return;
+      if (!window.confirm(`🛑 Customer Required\n\n${lang === 'kh' ? 'សូមជ្រើសរើសអតិថិជនសម្រាប់ដុំ!' : 'Please select a customer for wholesale'}\n\nClick [OK] to checkout anyway, or [Cancel] to recheck.`)) return;
     }
+    
     if (showPaymentSelector && liveTotalReceivedInRiel < totalRiel && !editingInvoiceId) {
-      showToast('error', 'Invalid Payment', 'Amount received must be equal to or greater than the total due.');
-      return;
+      if (!window.confirm('🛑 Invalid Payment\n\nAmount received is less than the total due. This will be recorded as Debt.\n\nClick [OK] to proceed with partial/no payment, or [Cancel] to recheck.')) return;
     }
 
     const simulatedStockUpdates: Record<number, number> = {};
@@ -2671,8 +2677,8 @@ export default function POSPage() {
           
           <button 
             onClick={initiateCheckout} 
-            disabled={!isCartValid || !hasValidPayment || isProcessing} 
-            className={`saas-btn ${(!isCartValid || !hasValidPayment || isProcessing) ? 'saas-btn-secondary' : 'saas-btn-primary'}`}
+            disabled={cart.length === 0 || isProcessing} 
+            className={`saas-btn ${(cart.length === 0 || isProcessing) ? 'saas-btn-secondary' : 'saas-btn-primary'}`}
             style={{ width: '100%', padding: '16px', fontSize: '16px' }}
           >
             {isProcessing ? 'Processing...' : currentT.checkout}
@@ -2893,8 +2899,8 @@ export default function POSPage() {
 
             <button 
               onClick={initiateCheckout} 
-              disabled={!isCartValid || !hasValidPayment || isProcessing} 
-              className={`saas-btn ${(!isCartValid || !hasValidPayment || isProcessing) ? 'saas-btn-secondary' : 'saas-btn-primary'}`}
+              disabled={cart.length === 0 || isProcessing} 
+              className={`saas-btn ${(cart.length === 0 || isProcessing) ? 'saas-btn-secondary' : 'saas-btn-primary'}`}
               style={{ width: '100%', padding: '16px', fontSize: '16px' }}
             >
               {isProcessing ? 'Processing...' : currentT.checkout}
