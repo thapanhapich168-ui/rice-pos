@@ -2689,29 +2689,42 @@ export default function POSPage() {
       )}
 
       {isMobileCartOpen && (
-        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: '#ffffff', zIndex: 45, display: 'flex', flexDirection: 'column', animation: 'posPopupSlideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1)' }}>
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(15, 23, 42, 0.4)', zIndex: 9999, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', backdropFilter: 'blur(2px)' }}>
           
-          {/* 🔥 USES EXACT GLOBAL CSS CLASSES TO ALIGN PERFECTLY WITH BURGER MENU */}
-          <div className="pos-sticky-header" style={{ backgroundColor: '#ffffff', borderBottom: '1px solid #e2e8f0', boxShadow: 'none', paddingBottom: '12px' }}>
-            <div className="header-container" style={{ marginBottom: 0, paddingRight: '20px' }}>
-              
-              <div className="header-left" style={{ flex: 1, minWidth: 0, marginRight: '12px' }}>
-                <div style={{ margin: 0, color: '#0f172a', fontSize: '16px', fontWeight: '500', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  {currentT.cartTitle} ({cart.length})
-                </div>
-              </div>
-              
-              <div className="header-actions" style={{ display: 'flex', alignItems: 'center', marginLeft: 'auto', flexShrink: 0 }}>
-                <button 
-                  onClick={() => setIsMobileCartOpen(false)} 
-                  style={{ background: '#fef2f2', border: '1px solid #fecaca', fontSize: '18px', width: '36px', height: '36px', borderRadius: '8px', color: '#dc2626', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
-                >
-                  ✕
-                </button>
-              </div>
-
+          {/* 🔥 INVISIBLE TOP AREA: Exactly calculated to dodge the main header and burger icon */}
+          <div style={{ height: 'calc(max(20px, env(safe-area-inset-top, 20px)) + 65px)', flexShrink: 0, width: '100%' }} onClick={() => setIsMobileCartOpen(false)}></div>
+          
+          {/* 🔥 BOTTOM SHEET CART CONTAINER */}
+          <div style={{ 
+            flex: 1, 
+            width: '100%', 
+            backgroundColor: '#ffffff', 
+            borderTopLeftRadius: '24px', 
+            borderTopRightRadius: '24px', 
+            display: 'flex', 
+            flexDirection: 'column', 
+            position: 'relative', 
+            boxShadow: '0 -10px 25px rgba(0,0,0,0.1)', 
+            animation: 'posPopupSlideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1)' 
+          }}>
+            
+            {/* iOS Style Drag Handle Pill */}
+            <div style={{ width: '100%', display: 'flex', justifyContent: 'center', paddingTop: '12px', paddingBottom: '4px', flexShrink: 0 }}>
+              <div style={{ width: '40px', height: '4px', backgroundColor: '#cbd5e1', borderRadius: '10px' }}></div>
             </div>
-          </div>
+
+            {/* Cart Header */}
+            <div style={{ padding: '8px 20px 16px 20px', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
+              <div style={{ margin: 0, color: '#0f172a', fontSize: '16px', fontWeight: 'normal', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                🛒 {currentT.cartTitle.replace('🛒 ', '').trim()} ({cart.length})
+              </div>
+              <button 
+                onClick={() => setIsMobileCartOpen(false)} 
+                style={{ background: '#f8fafc', border: '1px solid #e2e8f0', fontSize: '14px', width: '32px', height: '32px', borderRadius: '50%', color: '#64748b', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
+              >
+                ✕
+              </button>
+            </div>
             
           <div style={{ flex: 1, overflowY: 'auto', minHeight: 0, paddingTop: '16px', paddingRight: '20px', paddingBottom: '20px', paddingLeft: '20px' }}>
             {activeTab === 'wholesale' && selectedCustomerId && (
@@ -2886,6 +2899,8 @@ export default function POSPage() {
             >
               {isProcessing ? 'Processing...' : currentT.checkout}
             </button>
+          </div>
+          {/* 🔥 FIX: Missing closing tag for the Bottom Sheet Container */}
           </div>
         </div>
       )}
