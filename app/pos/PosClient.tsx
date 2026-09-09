@@ -2691,32 +2691,37 @@ export default function POSPage() {
       {isMobileCartOpen && (
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: '#ffffff', zIndex: 9999, display: 'flex', flexDirection: 'column', animation: 'posPopupSlideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1)' }}>
           
-          {/* 🔥 FULL SCREEN HEADER (Includes Safe Area Top Padding for iPhone Notch) */}
+          {/* 🔥 FULL SCREEN HEADER PERFECTLY ALIGNED WITH MAIN PAGE TITLE */}
           <div style={{ 
-            paddingTop: 'max(16px, env(safe-area-inset-top, 16px))', 
-            paddingRight: '20px', 
+            paddingTop: 'max(20px, env(safe-area-inset-top, 20px))', 
             paddingBottom: '16px', 
-            paddingLeft: '20px', 
+            backgroundColor: '#f8fafc', 
             borderBottom: '1px solid #e2e8f0', 
-            display: 'flex', 
-            justifyContent: 'space-between', 
-            alignItems: 'center', 
+            boxShadow: '0 4px 10px -2px rgba(248, 250, 252, 1)',
             flexShrink: 0,
-            backgroundColor: '#ffffff'
+            width: '100%'
           }}>
-            {/* 🔥 FIX: Changed h3 to div to bypass global modal centering CSS! */}
-            <div style={{ margin: 0, color: '#0f172a', fontSize: '20px', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '8px' }}>
-              {currentT.cartTitle} ({cart.length})
+            <div style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              marginLeft: '70px', /* Matches 16px page padding + 54px burger icon offset */
+              marginRight: '16px',
+              minHeight: '44px'
+            }}>
+              <h1 className="saas-page-title" style={{ margin: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                {currentT.cartTitle} ({cart.length})
+              </h1>
+              <button 
+                onClick={() => setIsMobileCartOpen(false)} 
+                style={{ background: '#fef2f2', border: '1px solid #fecaca', fontSize: '18px', width: '36px', height: '36px', borderRadius: '8px', color: '#dc2626', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flexShrink: 0 }}
+              >
+                ✕
+              </button>
             </div>
-            <button 
-              onClick={() => setIsMobileCartOpen(false)} 
-              style={{ background: '#fef2f2', border: '1px solid #fecaca', fontSize: '18px', width: '36px', height: '36px', borderRadius: '8px', color: '#dc2626', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
-            >
-              ✕
-            </button>
           </div>
             
-          <div style={{ flex: 1, overflowY: 'auto', minHeight: 0, paddingTop: '16px', paddingRight: '20px', paddingBottom: '20px', paddingLeft: '20px' }}>
+          <div style={{ flex: 1, overflowY: 'auto', minHeight: 0, paddingTop: '16px', paddingRight: '16px', paddingBottom: '20px', paddingLeft: '16px' }}>
             {activeTab === 'wholesale' && selectedCustomerId && (
               <div 
                 onClick={() => {
