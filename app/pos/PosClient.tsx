@@ -356,6 +356,10 @@ export default function POSPage() {
   // 🔥 NEW: States for the Mobile Batch Popup Modal
   const [mobileBatchId, setMobileBatchId] = useState<number | null>(null)
   const [isMobileBatchModalOpen, setIsMobileBatchModalOpen] = useState(false)
+  const [mobileBagId, setMobileBagId] = useState<number | null>(null) // 🔥 NEW: Track bag exchange
+  const [mobileBagQty, setMobileBagQty] = useState<number | ''>(1) // 🔥 NEW: Track bag quantity defaulting to 1
+  const [isMobileBagModalOpen, setIsMobileBagModalOpen] = useState(false) // 🔥 NEW: Bag popup state
+  const [mobileBagCoveredByDepot, setMobileBagCoveredByDepot] = useState(false) // 🔥 NEW: Track if depot pays for it
   const mobileQtyRef = useRef<any>(null)
 
   const [exchangeModal, setExchangeModal] = useState<{ isOpen: boolean, product: Product | null, consumedKg: string | number }>({
@@ -1008,7 +1012,10 @@ export default function POSPage() {
       setMobilePrice(activeTab === 'wholesale' ? 0 : Number(product.price));
       setMobileQty(defaultQty);
       setMobileBatchId(null);
+      setMobileBagId(null); // 🔥 NEW: Reset bag selection
+      setMobileBagCoveredByDepot(false); // 🔥 NEW: Reset depot coverage
       setIsMobileBatchModalOpen(false); // 🔥 FIX: Ensure the modal is closed when opening a new item
+      setIsMobileBagModalOpen(false); // 🔥 NEW: Reset bag modal
       setTimeout(() => {
         mobileQtyRef.current?.focus();
       }, 50);
@@ -1030,47 +1037,78 @@ export default function POSPage() {
     }
   }
 
-  function handleAddMobileProductToCart() {
+  function handleAddMobileProductToCart(forceAdd: boolean | any = false) {
+    const isForced = forceAdd === true;
     if (!selectedMobileProduct) return;
     // 🛡️ RELIABILITY FIX: Fallback to exact DOM input values if React state batching lags behind rapid user tapping
     const rawQtyStr = String(mobileQty).replace(/,/g, '');
     const finalQty = parseFloat(rawQtyStr) || 0;
     const finalPrice = typeof mobilePrice === 'number' ? mobilePrice : (parseFloat(String(mobilePrice).replace(/,/g, '')) || 0);
     
-    // 🛑 REQUIRE QUANTITY
-    if (finalQty <= 0 || mobileQty === '') {
+    // 🧠 POPUP ALERT: QUICK CONFIRM FOR 1 QTY (To prevent accidental taps)
+    const defaultPrice = activeTab === 'wholesale' ? 0 : Number(selectedMobileProduct.price || 0);
+    if (!isForced && finalQty === 1 && finalPrice === defaultPrice) {
+      if (!window.confirm(`🛒 Add Confirmation\n\nYou are adding 1x [${mobileName}] for ${formatRiel(finalPrice)}.\n\nClick [OK] to confirm, or [Cancel] to change the amount.`)) return;
+    }
+
+    // 🛑 POPUP ALERT: MISSING QUANTITY
+    if (!isForced && (finalQty <= 0 || mobileQty === '')) {
       if (!window.confirm('🛑 Missing Quantity\n\nPlease enter a quantity greater than 0.\n\nClick [OK] to add to cart anyway, or [Cancel] to recheck.')) return;
     }
 
-    // 🛑 REQUIRE PRICE
-    if (finalPrice <= 0 || mobilePrice === '') {
+    // 🛑 POPUP ALERT: MISSING PRICE
+    if (!isForced && (finalPrice <= 0 || mobilePrice === '')) {
       if (!window.confirm('🛑 Missing Price\n\nPlease enter the selling price before adding to cart.\n\nClick [OK] to add to cart anyway, or [Cancel] to recheck.')) return;
     }
 
-    // 🧠 SMART GUARD: Hard limit to prevent typing Price into the Qty field
-    if (finalQty > 10000) {
-      if (!window.confirm(`🛑 Quantity Warning\n\nQuantity (${finalQty.toLocaleString()}) is unusually high. Did you accidentally type the price in the quantity field?\n\nClick [OK] to add anyway, or [Cancel] to recheck.`)) return;
+    // 🧠 POPUP ALERT: HIGH QUANTITY TYPO GUARD
+    if (!isForced && finalQty > 10000) {
+      if (!window.confirm(`🛑 High Quantity Warning\n\nQuantity (${finalQty.toLocaleString()}) is unusually high. Did you type the price into the quantity field by mistake?\n\nClick [OK] to add anyway, or [Cancel] to recheck.`)) return;
     }
 
-    // 🧠 SMART GUARD: Prevent Selling Below Cost Price (Typo prevention)
+    // 🧠 POPUP ALERT: SELLING BELOW COST MARGIN
     const costPrice = Number(selectedMobileProduct.cost_price || 0);
-    if (finalPrice < costPrice) {
-      if (!window.confirm(`📉 Price Too Low\n\nYou are trying to sell ${mobileName} for ${formatRiel(finalPrice)}, but the cost price is ${formatRiel(costPrice)}.\n\nClick [OK] to sell below cost anyway, or [Cancel] to recheck.`)) return;
+    if (!isForced && finalPrice < costPrice) {
+      if (!window.confirm(`📉 Price Below Cost\n\nYou are selling this for ${formatRiel(finalPrice)}, but the cost is ${formatRiel(costPrice)}.\n\nClick [OK] to sell below cost anyway, or [Cancel] to recheck.`)) return;
     }
 
-    const existing = cart.find((item) => item.product_id === selectedMobileProduct.id && !item.isSpecial);
-    if (existing) {
-      setCart(cart.map((item) => item.product_id === selectedMobileProduct.id && !item.isSpecial ? { 
-        ...item, custom_name: mobileName, custom_price_riel: finalPrice, quantity: (Number(item.quantity) || 0) + finalQty,
-        selected_batch_id: mobileBatchId // 🔥 FIX: Attaches the batch chosen on mobile
-      } : item));
+    let newCart = [...cart];
+    const existingIndex = newCart.findIndex((item) => item.product_id === selectedMobileProduct.id && !item.isSpecial);
+    
+    if (existingIndex !== -1) {
+      newCart[existingIndex] = { 
+        ...newCart[existingIndex], custom_name: mobileName, custom_price_riel: finalPrice, quantity: (Number(newCart[existingIndex].quantity) || 0) + finalQty,
+        selected_batch_id: mobileBatchId
+      };
     } else {
-      setCart([...cart, { 
+      newCart.push({ 
         ...selectedMobileProduct, product_id: selectedMobileProduct.id, id: Math.random(), custom_name: mobileName, custom_price_riel: finalPrice, 
         cost_price: Number(selectedMobileProduct.cost_price || 0), quantity: finalQty, isSpecial: false, 
-        selected_batch_id: mobileBatchId, sortOrder: 0 // 🔥 FIX: Attaches the batch chosen on mobile
-      }]);
+        selected_batch_id: mobileBatchId, sortOrder: 0 
+      });
     }
+
+    // 🔥 NEW: Automatically inject the Replacement Bag into the cart with custom quantity!
+    if (mobileBagId) {
+      const bagProd = products.find(p => p.id === mobileBagId);
+      if (bagProd) {
+        const bagQtyNum = Number(mobileBagQty) || 1;
+        newCart.push({
+          ...bagProd,
+          product_id: bagProd.id,
+          id: Math.random(),
+          custom_name: mobileBagCoveredByDepot ? `ប្តូរបាវ ${bagProd.name} (Covered by Depot)` : `ប្តូរបាវ ${bagProd.name}`,
+          custom_price_riel: mobileBagCoveredByDepot ? 0 : Number(bagProd.price || 0),
+          cost_price: Number(bagProd.cost_price || 0),
+          quantity: bagQtyNum, // Deducts the exact quantity entered!
+          isSpecial: true,
+          bypass_stock: false, 
+          sortOrder: 3
+        });
+      }
+    }
+
+    setCart(newCart);
     setSelectedMobileProduct(null);
   }
 
@@ -2176,10 +2214,12 @@ export default function POSPage() {
             {/* 🟢 SEARCH AND CATEGORY TABS MOVED INSIDE STICKY HEADER */}
             {/* 🔥 FIX: Added minWidth: 0 to lock the flex wrapper to the physical screen width */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', width: '100%', minWidth: 0 }}>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px', alignItems: 'flex-start', width: '100%' }}>
+              
+              {/* 🔥 NEW: Side-by-side search bars by removing wrap and dropping minWidth to 0 */}
+              <div style={{ display: 'flex', flexWrap: 'nowrap', gap: '8px', alignItems: 'flex-start', width: '100%' }}>
                 
                 {/* PRODUCT SEARCH */}
-                <div style={{ flex: 1, minWidth: '240px', position: 'relative' }}>
+                <div style={{ flex: 1, minWidth: 0, position: 'relative' }}>
                   <span style={{ position: 'absolute', left: '14px', top: '50%', transform: 'translateY(-50%)', color: '#94a3b8', fontSize: '16px', zIndex: 2 }}>🔍</span>
                   <input 
                     type="text" 
@@ -2187,7 +2227,7 @@ export default function POSPage() {
                     value={searchQuery} 
                     onChange={(e) => setSearchQuery(e.target.value)} 
                     className="saas-input"
-                    style={{ paddingLeft: '38px', paddingRight: searchQuery ? '38px' : '14px', width: '100%', fontSize: isDeviceMobile ? '15px' : undefined }} 
+                    style={{ paddingLeft: '38px', paddingRight: searchQuery ? '38px' : '14px', width: '100%', fontSize: isDeviceMobile ? '15px' : '14px', height: '42px', boxSizing: 'border-box' }} 
                   />
                   {searchQuery && (
                     <button
@@ -2200,7 +2240,7 @@ export default function POSPage() {
                 
                 {/* CUSTOMER SEARCH */}
                 {activeTab === 'wholesale' && (
-                  <div style={{ flex: 1, minWidth: '300px', position: 'relative' }}>
+                  <div style={{ flex: 1, minWidth: 0, position: 'relative' }}>
                     {!selectedCustomer ? (
                       <div style={{ position: 'relative' }}>
                         
@@ -2219,7 +2259,7 @@ export default function POSPage() {
                               onChange={e => setCustomerSearchTerm(e.target.value)}
                               onFocus={() => setIsCustomerModalOpen(true)}
                               className="saas-input"
-                              style={{ paddingLeft: '38px', width: '100%', position: 'relative', zIndex: isCustomerModalOpen ? 100 : 1, borderColor: isCustomerModalOpen ? '#3b82f6' : undefined, fontSize: '14px' }}
+                              style={{ paddingLeft: '38px', width: '100%', position: 'relative', zIndex: isCustomerModalOpen ? 100 : 1, borderColor: isCustomerModalOpen ? '#3b82f6' : undefined, fontSize: isDeviceMobile ? '15px' : '14px', height: '42px', boxSizing: 'border-box' }}
                             />
 
                             {/* 💻 DESKTOP: INLINE DROPDOWN TRAY (Fillout Card Style) */}
@@ -2269,16 +2309,16 @@ export default function POSPage() {
                           </>
                         )}
 
-                        {/* 📱 MOBILE: MODAL TRIGGER BUTTON */}
+                       {/* 📱 MOBILE: MODAL TRIGGER BUTTON */}
                         {isDeviceMobile && (
                           <>
                             <div 
                               onClick={() => setIsCustomerModalOpen(true)}
                               className="saas-input"
-                              style={{ width: '100%', cursor: 'pointer', display: 'flex', alignItems: 'center', backgroundColor: '#ffffff', color: '#94a3b8', fontSize: '14px', paddingLeft: '14px', height: '42px' }}
+                              style={{ width: '100%', cursor: 'pointer', display: 'flex', alignItems: 'center', backgroundColor: '#ffffff', color: '#94a3b8', fontSize: '15px', paddingLeft: '14px', height: '42px', boxSizing: 'border-box' }}
                             >
-                              <span style={{ marginRight: '10px', fontSize: '16px' }}>🔍</span>
-                              {currentT.selectCustomer.replace('🔍 ', '').replace('🔍', '').trim()}
+                              <span style={{ marginRight: '6px', fontSize: '16px' }}>🔍</span>
+                              <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Search customers...</span>
                             </div>
 
                             {/* 📱 MOBILE: TOP-ANCHORED SEARCH MODAL (Fillout Style) */}
@@ -2353,30 +2393,19 @@ export default function POSPage() {
                         )}
                       </div>
                     ) : (
-                      <div className="saas-input" style={{ backgroundColor: '#fefcf3', borderColor: '#eadeca', color: '#4a3b1b', position: 'relative', display: 'flex', alignItems: 'center', paddingRight: '36px' }}>
+                      <div className="saas-input" style={{ backgroundColor: '#fefcf3', borderColor: '#eadeca', color: '#4a3b1b', position: 'relative', display: 'flex', alignItems: 'center', paddingRight: '36px', height: '42px', boxSizing: 'border-box' }}>
                         <button onClick={() => { setSelectedCustomerId(''); setCustomerSearchTerm(''); }} style={{ position: 'absolute', top: '50%', right: '8px', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#ef4444' }}>
                           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
                         </button>
                         
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', alignItems: 'center', width: '100%', gap: '10px' }}>
-                          {/* 1. NAME (Left Aligned) */}
-                          <div style={{ fontWeight: '500', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: '6px', overflow: 'hidden' }}>
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#8a7650" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
+                        {/* 🔥 NEW: Clean, truncated single-line view so it fits easily side-by-side with product search */}
+                        <div style={{ display: 'flex', alignItems: 'center', width: '100%', minWidth: 0 }}>
+                          <div style={{ fontWeight: 'normal', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', display: 'flex', alignItems: 'center', gap: '6px', fontSize: isDeviceMobile ? '15px' : '14px' }}>
+                            <span style={{ fontSize: isDeviceMobile ? '15px' : '14px' }}>👤</span>
                             <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{selectedCustomer.name}</span>
                           </div>
-                          
-                          {/* 2. PHONE (Center Aligned) */}
-                          <div style={{ color: '#8a7650', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px', whiteSpace: 'nowrap', fontSize: '13px' }}>
-                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"></path></svg>
-                            <span>{selectedCustomer.phone || '-'}</span>
-                          </div>
-
-                          {/* 3. LOCATION (Right Aligned) */}
-                          <div style={{ color: '#8a7650', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '4px', whiteSpace: 'nowrap', overflow: 'hidden', fontSize: '13px' }}>
-                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path><circle cx="12" cy="10" r="3"></circle></svg>
-                            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{selectedCustomer.location || '-'}</span>
-                          </div>
                         </div>
+
                       </div>
                     )}
                   </div>
@@ -3593,8 +3622,128 @@ export default function POSPage() {
               </div>
             </div>
 
+            {/* 🔥 NEW UI: Bag Selection Row */}
+            {activeTab === 'wholesale' && (
+              <div style={{ marginBottom: '18px', padding: '12px', backgroundColor: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                <label className="saas-card-title" style={{ display: 'block', fontSize: '12px', fontWeight: '600', marginBottom: '8px', color: '#334155' }}>
+                  Changing bag?
+                </label>
+                
+                {/* 🔘 Custom Select Button Trigger */}
+                <button 
+                  onClick={(e) => { e.preventDefault(); setIsMobileBagModalOpen(true); }}
+                  className="saas-input"
+                  style={{ 
+                    width: '100%', 
+                    textAlign: 'left', 
+                    display: 'flex', 
+                    justifyContent: 'space-between', 
+                    alignItems: 'center', 
+                    backgroundColor: mobileBagId ? '#fefcf3' : '#ffffff', 
+                    borderColor: mobileBagId ? '#b58a3d' : '#cbd5e1',
+                    height: '42px',
+                    cursor: 'pointer',
+                    marginBottom: mobileBagId ? '10px' : '0'
+                  }}
+                >
+                  <span style={{ color: mobileBagId ? '#8a7650' : '#475569', fontWeight: mobileBagId ? 'bold' : 'normal', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    {mobileBagId ? (() => {
+                      const b = products.find(p => p.id === mobileBagId);
+                      return b ? `🛍️ ${b.name} (${formatRiel(b.price || 0)} ៛)` : '▼ Select Bag';
+                    })() : '-- No Bag Change --'}
+                  </span>
+                  <div style={{ display: 'flex', alignItems: 'center' }}>
+                    {mobileBagId && (
+                      <span 
+                        onClick={(e) => { e.stopPropagation(); e.preventDefault(); setMobileBagId(null); }}
+                        style={{ color: '#ef4444', fontSize: '16px', padding: '0 8px', marginRight: '4px' }}
+                      >✕</span>
+                    )}
+                    <span style={{ fontSize: '10px', color: '#94a3b8' }}>{isMobileBagModalOpen ? '▲' : '▼'}</span>
+                  </div>
+                </button>
+
+                {/* 🔥 BAG SELECTION POPUP MODAL */}
+                {isMobileBagModalOpen && (
+                  <div 
+                    onMouseDown={() => setIsMobileBagModalOpen(false)}
+                    style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(15, 23, 42, 0.6)', zIndex: 2147483647, display: 'flex', alignItems: 'flex-start', justifyContent: 'center', paddingTop: 'max(80px, env(safe-area-inset-top, 80px))', paddingLeft: '16px', paddingRight: '16px', paddingBottom: '16px', backdropFilter: 'blur(2px)' }}
+                  >
+                    <div 
+                      onMouseDown={(e) => e.stopPropagation()}
+                      style={{ background: '#ffffff', borderRadius: '16px', width: '100%', maxWidth: '400px', padding: '20px', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.25)', animation: 'posPopupSlideDown 0.2s ease-out', display: 'flex', flexDirection: 'column', maxHeight: '75vh' }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexShrink: 0 }}>
+                        <div style={{ margin: 0, fontSize: '18px', fontWeight: 'bold', color: '#0f172a', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          🛍️ Select Bag
+                        </div>
+                        <button onClick={(e) => { e.preventDefault(); setIsMobileBagModalOpen(false); }} style={{ background: '#f1f5f9', border: 'none', borderRadius: '50%', width: '32px', height: '32px', fontSize: '14px', color: '#475569', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>✕</button>
+                      </div>
+
+                      <div className="hide-scrollbar" style={{ overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '8px', flex: 1 }}>
+                        <div 
+                          onClick={() => { setMobileBagId(null); setIsMobileBagModalOpen(false); }}
+                          style={{ padding: '14px', borderRadius: '8px', border: !mobileBagId ? '2px solid #3b82f6' : '1px solid #e2e8f0', backgroundColor: !mobileBagId ? '#eff6ff' : '#ffffff', cursor: 'pointer', transition: 'all 0.1s' }}
+                        >
+                          <div style={{ fontSize: '14px', fontWeight: 'bold', color: '#1e293b' }}>-- No Bag Change --</div>
+                        </div>
+
+                        {products.filter(p => p.name?.includes('បាវ')).map((bag: any) => {
+                          const isSelected = mobileBagId === bag.id;
+                          return (
+                            <div 
+                              key={bag.id}
+                              onClick={() => { setMobileBagId(bag.id); setIsMobileBagModalOpen(false); }}
+                              style={{ padding: '14px', borderRadius: '8px', border: isSelected ? '2px solid #b58a3d' : '1px solid #e2e8f0', backgroundColor: isSelected ? '#f8fafc' : '#ffffff', cursor: 'pointer', transition: 'background-color 0.1s' }}
+                            >
+                              <div style={{ fontSize: '14px', fontWeight: 'bold', color: isSelected ? '#b58a3d' : '#1e293b', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                <span>{bag.name}</span>
+                                <span>{formatRiel(bag.price || 0)} ៛</span>
+                              </div>
+                              <div style={{ fontSize: '12px', color: '#64748b', marginTop: '4px' }}>Stock: {bag.stock} left</div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {mobileBagId && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '10px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span style={{ fontSize: '13px', color: '#475569', fontWeight: '500', minWidth: '60px' }}>Quantity:</span>
+                      <div style={{ flex: 1 }}>
+                        <CurrencyInput
+                          value={mobileBagQty}
+                          onChange={(v: any) => setMobileBagQty(v)}
+                          onFocus={() => { if (mobileBagQty === 1) setMobileBagQty(''); }}
+                          className="saas-input"
+                          style={{ textAlign: 'center', height: '36px', padding: '4px' }}
+                        />
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', paddingLeft: '2px' }}>
+                      <input
+                        type="checkbox"
+                        id="mobileCoveredByDepot"
+                        checked={mobileBagCoveredByDepot}
+                        onChange={(e) => setMobileBagCoveredByDepot(e.target.checked)}
+                        style={{ width: '16px', height: '16px', cursor: 'pointer', accentColor: '#3b82f6' }}
+                      />
+                      <label htmlFor="mobileCoveredByDepot" style={{ fontSize: '13px', color: '#475569', fontWeight: '500', cursor: 'pointer' }}>
+                        Free for Customer (Covered by Depot)
+                      </label>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
               <button 
+                type="button"
                 onClick={() => setSelectedMobileProduct(null)} 
                 className="saas-btn saas-btn-secondary"
                 style={{ fontWeight: 'normal' }}
@@ -3602,7 +3751,7 @@ export default function POSPage() {
                 {currentT.cancel}
               </button>
               <button 
-                onClick={handleAddMobileProductToCart} 
+                type="submit"
                 className="saas-btn saas-btn-primary"
                 style={{ fontWeight: 'normal' }}
               >
