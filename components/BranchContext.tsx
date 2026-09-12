@@ -27,45 +27,69 @@ export function BranchProvider({ children }: { children: ReactNode }) {
   const { role, loadingRole } = useUserRole();
 
   useEffect(() => {
-    async function fetchBranchesAndProfile() {
-      // 1. Get all available branches
-      const { data: branchData } = await supabase.from('branches').select('*').order('id', { ascending: true });
-      if (branchData) setBranches(branchData);
+    async function loadBranchData() {
+      // 1. Fetch user session and profile data
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
 
-      // 2. Get the current user's profile to see if they are locked to a branch
-      const { data: { user } } = await supabase.auth.getUser();
-      if (user) {
-        const { data: profile } = await supabase.from('profiles').select('branch_id, role').eq('id', user.id).single();
-        
-        if (profile && profile.branch_id) {
-            // If they have a saved branch in their profile, default to it
-            setActiveBranchId(Number(profile.branch_id));
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('branch_id, role') // 🔥 Ensure you are fetching the role!
+        .eq('id', session.user.id)
+        .single();
+
+      // 2. Fetch all available branches
+      const { data: allBranches } = await supabase.from('branches').select('*');
+      if (allBranches) setBranches(allBranches);
+
+      if (profile) {
+        // 🔥 THE ROLE BARRIER
+        const isAdmin = profile.role === 'admin' || profile.role === 'owner'; // Adjust to match your exact DB role names
+
+        if (isAdmin) {
+          // 👑 ADMIN: Allow localStorage override to roam between branches
+          const locallySavedBranch = localStorage.getItem('pos_active_branch_id');
+          if (locallySavedBranch) {
+            setActiveBranchId(Number(locallySavedBranch));
+          } else {
+            setActiveBranchId(profile.branch_id);
+            localStorage.setItem('pos_active_branch_id', String(profile.branch_id));
+          }
         } else {
-            // Fallback to local storage so Admins stay on the branch they last viewed
-            const savedBranch = localStorage.getItem('active_branch_id');
-            if (savedBranch) setActiveBranchId(Number(savedBranch));
+          // 🔒 REGULAR STAFF: Strictly lock to their database branch
+          setActiveBranchId(profile.branch_id);
+          
+          // Safety wipe: Clear any lingering admin overrides off this device
+          localStorage.removeItem('pos_active_branch_id'); 
         }
       }
-      setIsLoadingBranches(false);
     }
 
-    fetchBranchesAndProfile();
+    loadBranchData();
   }, []);
 
-  // Whenever the active branch changes, save it to local storage so it persists on refresh
-  const handleSetBranch = (id: number) => {
-    setActiveBranchId(id);
-    localStorage.setItem('active_branch_id', id.toString());
-    // Dispatch a custom event so pages know they need to re-fetch their data!
-    window.dispatchEvent(new Event('branch_changed'));
+  // 🔥 THE FIX: Whenever the admin selects a new branch from the dropdown, save it to memory!
+  const handleSetBranch = (newBranchId: number) => {
+    setActiveBranchId(newBranchId);
+    localStorage.setItem('pos_active_branch_id', String(newBranchId));
+    
+    // Fire the custom event so other components know to refetch their data
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new Event('branch_changed'));
+    }
   };
 
   return (
-    <BranchContext.Provider value={{ branches, activeBranchId, setActiveBranchId: handleSetBranch, isLoadingBranches }}>
+    <BranchContext.Provider value={{ 
+      activeBranchId, 
+      branches, 
+      setActiveBranchId: handleSetBranch,
+      isLoadingBranches // 🔥 FIX 1: Added this to satisfy the TypeScript interface
+    }}>
       {children}
     </BranchContext.Provider>
   );
-}
+} // 🔥 FIX 2: Added this closing bracket for the BranchProvider function!
 
 // Hook to use the branch context anywhere in the app
 export const useBranch = () => {
