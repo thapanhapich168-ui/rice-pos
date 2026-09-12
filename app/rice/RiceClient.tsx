@@ -988,17 +988,16 @@ export default function RiceControl() {
 const addProduct = async () => {
     if (!newItem.name) return showToast('error', 'Missing Data', 'Name is required');
 
-    // 🔥 AUTO-APPEND SUPPLIER NAME FOR NEW IMPORTS
+    // 🔥 AUTO-APPEND SUPPLIER NAME WITH A SPACE (NO HYPHEN)
     let finalProductName = newItem.name.trim();
     if (activeView === 'import' && importForm.supplier_id) {
        const sup = suppliers.find(s => String(s.id) === String(importForm.supplier_id));
-       // Ensure we don't accidentally double-append if the admin manually typed it
        if (sup && !finalProductName.includes(sup.name)) {
-           finalProductName = `${finalProductName} - ${sup.name}`;
+           finalProductName = `${finalProductName} ${sup.name}`; // 🔥 FIX: Just a space!
        }
     }
 
-    // ✅ FIX: Prevent Duplicate Product Names using the merged name
+    // ✅ FIX: Prevent Duplicate Product Names using the final merged name
     const isDuplicate = products.some(p => p.name.toLowerCase().trim() === finalProductName.toLowerCase().trim());
     if (isDuplicate) {
       return showToast('error', 'Duplicate Name', `A product named "${finalProductName}" already exists!`);
@@ -1862,7 +1861,23 @@ const addProduct = async () => {
                       onKeyDown={e => e.key === 'Escape' && setIsProductDropdownOpen(false)} 
                     />
                     <div className="dropdown-results-tray">
-                      {products.filter(p => p.weight >= 50 && p.name.toLowerCase().includes(productSearch.toLowerCase())).map(p => (
+                      {products.filter(p => {
+                        // 1. Must be wholesale
+                        if (p.weight < 50) return false;
+                        
+                        // 2. Must match user's text search (if typing)
+                        if (productSearch && !p.name.toLowerCase().includes(productSearch.toLowerCase())) return false;
+                        
+                        // 🔥 3. SMART FILTER: If a supplier is selected, ONLY show their rice!
+                        if (importForm.supplier_id) {
+                          const activeSupplier = suppliers.find(s => String(s.id) === String(importForm.supplier_id));
+                          if (activeSupplier && !p.name.toLowerCase().includes(activeSupplier.name.toLowerCase())) {
+                            return false; // Hide this rice because it belongs to a different supplier
+                          }
+                        }
+                        
+                        return true;
+                      }).map(p => (
                         <div key={p.id} className="dropdown-row" onMouseDown={(e) => { e.stopPropagation(); setImportForm({...importForm, product_id: String(p.id)}); setIsProductDropdownOpen(false); }}>
                           <span style={{ fontWeight: 'normal', color: '#334155' }}>{p.name}</span>
                           <span style={{ fontSize: '11px', color: '#64748b', marginLeft: '8px' }}>({p.weight}kg)</span>
@@ -2740,9 +2755,9 @@ const addProduct = async () => {
                     className="saas-input" 
                     style={{ width: '100%', paddingRight: '120px' }} 
                   />
-                  {/* 🔥 Visual Ghost Text to show the admin what is happening */}
+                  {/* 🔥 Visual Ghost Text without hyphen */}
                   <span style={{ position: 'absolute', right: '12px', color: '#94a3b8', fontSize: '14px', pointerEvents: 'none', fontWeight: 'bold' }}>
-                    - {supName}
+                    {supName}
                   </span>
                 </div>
               );
