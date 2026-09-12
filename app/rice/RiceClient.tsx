@@ -988,16 +988,26 @@ export default function RiceControl() {
 const addProduct = async () => {
     if (!newItem.name) return showToast('error', 'Missing Data', 'Name is required');
 
-    // ✅ FIX: Prevent Duplicate Product Names
-    const isDuplicate = products.some(p => p.name.toLowerCase().trim() === newItem.name.toLowerCase().trim());
+    // 🔥 AUTO-APPEND SUPPLIER NAME FOR NEW IMPORTS
+    let finalProductName = newItem.name.trim();
+    if (activeView === 'import' && importForm.supplier_id) {
+       const sup = suppliers.find(s => String(s.id) === String(importForm.supplier_id));
+       // Ensure we don't accidentally double-append if the admin manually typed it
+       if (sup && !finalProductName.includes(sup.name)) {
+           finalProductName = `${finalProductName} - ${sup.name}`;
+       }
+    }
+
+    // ✅ FIX: Prevent Duplicate Product Names using the merged name
+    const isDuplicate = products.some(p => p.name.toLowerCase().trim() === finalProductName.toLowerCase().trim());
     if (isDuplicate) {
-      return showToast('error', 'Duplicate Name', 'A product with this exact name already exists!');
+      return showToast('error', 'Duplicate Name', `A product named "${finalProductName}" already exists!`);
     }
 
     setIsProcessing(true);
     try {
       const payload = {
-        name: newItem.name,
+        name: finalProductName, // 🔥 Passes the merged auto-name to the database
         price: Number(newItem.price) || 0,
         cost_price: Number(newItem.cost_price) || 0,
         weight: Number(newItem.weight) || 50,
@@ -2718,7 +2728,27 @@ const addProduct = async () => {
         <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
           <div>
             <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', margin: '0 0 6px 0' }}>Product Name</label>
-            <input autoFocus placeholder="" value={newItem.name} onChange={e => setNewItem({...newItem, name: e.target.value})} className="saas-input" />
+            {activeView === 'import' && importForm.supplier_id ? (() => {
+              const supName = suppliers.find(s => String(s.id) === String(importForm.supplier_id))?.name || '';
+              return (
+                <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+                  <input 
+                    autoFocus 
+                    placeholder="e.g. Malis" 
+                    value={newItem.name} 
+                    onChange={e => setNewItem({...newItem, name: e.target.value})} 
+                    className="saas-input" 
+                    style={{ width: '100%', paddingRight: '120px' }} 
+                  />
+                  {/* 🔥 Visual Ghost Text to show the admin what is happening */}
+                  <span style={{ position: 'absolute', right: '12px', color: '#94a3b8', fontSize: '14px', pointerEvents: 'none', fontWeight: 'bold' }}>
+                    - {supName}
+                  </span>
+                </div>
+              );
+            })() : (
+              <input autoFocus placeholder="" value={newItem.name} onChange={e => setNewItem({...newItem, name: e.target.value})} className="saas-input" style={{width:'100%'}}/>
+            )}
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
             <div>
