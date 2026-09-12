@@ -17,17 +17,36 @@ export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false)
 
   useEffect(() => {
-    supabase.auth.onAuthStateChange((event, session) => {
+    // 1. Initial check: Unblock the screen immediately if there is no session (e.g., Incognito Mode)
+    const checkInitialSession = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        setCheckingAuth(false);
+      }
+    };
+    checkInitialSession();
+
+    // 2. The Listener: Handle background logins and auto-redirects
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (session) {
         // 🔥 FIX: Stop the auto-redirect if we are trying to reset a password!
         if (window.location.pathname === '/update-password') {
+          setCheckingAuth(false); // Unblock the screen but stay on the page
           return; 
         }
         
         router.push('/pos');
+      } else {
+        // If the user logs out or the session dies, ensure the login form is visible
+        setCheckingAuth(false);
       }
-    })
-  }, [])
+    });
+
+    // Cleanup the listener when the component unmounts
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, [router])
 
   async function handleLogin(e: React.FormEvent) {
     e.preventDefault()
