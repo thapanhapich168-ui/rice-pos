@@ -352,25 +352,21 @@ export default function RiceControl() {
     }
     init();
 
-    // Re-fetch data seamlessly if a branch event is fired
-    const handleBranchChange = () => init();
-    window.addEventListener('branch_changed', handleBranchChange);
-
     // 🛡️ INTEGRATION FIX: Listen to POS sales in real-time so the Inventory screen is never stale
-    const invProductsChannel = supabase.channel('inv-products-update')
+    // 🔥 UNIQUE CHANNELS: Append activeBranchId so websocket doesn't choke during branch switch
+    const invProductsChannel = supabase.channel(`inv-products-update-${activeBranchId}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'products' }, () => fetchProducts())
       .subscribe();
 
-    const invBatchesChannel = supabase.channel('inv-batches-update')
+    const invBatchesChannel = supabase.channel(`inv-batches-update-${activeBranchId}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'inventory_batches' }, () => fetchBatches())
       .subscribe();
 
     return () => {
-      window.removeEventListener('branch_changed', handleBranchChange);
       supabase.removeChannel(invProductsChannel);
       supabase.removeChannel(invBatchesChannel);
     }
-  }, [activeBranchId]) // 🔥 CRITICAL: RE-RUNS ON BRANCH SWITCH
+  }, [activeBranchId]) // 🔥 CRITICAL: RE-RUNS ON BRANCH SWITCH (Handles branch change completely on its own)
 
   const handleManualPull = async (retailId: number, wholesaleId: number) => {
     const wholesaleProduct = products.find(p => p.id === wholesaleId);
@@ -999,30 +995,36 @@ const addProduct = async () => {
     }
 
     setIsProcessing(true);
-    const payload = {
-      name: newItem.name,
-      price: Number(newItem.price) || 0,
-      cost_price: Number(newItem.cost_price) || 0,
-      weight: Number(newItem.weight) || 50,
-      stock: Number(newItem.stock) || 0,
-      min_stock_level: Number(newItem.min_stock_level) || 10,
-      mtd_kg_used: 0,
-      mtd_bags_used: 0,
-      branch_id: activeBranchId // 🔥 STAMPED
-    }
-    const { data, error } = await supabase.from('products').insert([payload]).select()
-    
-    if (!error && data && data.length > 0) {
-      setIsAddModalOpen(false)
-      setNewItem({ name: '', price: '0' as any, cost_price: '0' as any, weight: 50 as any, stock: '0' as any, min_stock_level: 10 as any })
+    try {
+      const payload = {
+        name: newItem.name,
+        price: Number(newItem.price) || 0,
+        cost_price: Number(newItem.cost_price) || 0,
+        weight: Number(newItem.weight) || 50,
+        stock: Number(newItem.stock) || 0,
+        min_stock_level: Number(newItem.min_stock_level) || 10,
+        mtd_kg_used: 0,
+        mtd_bags_used: 0,
+        branch_id: activeBranchId // 🔥 STAMPED
+      }
+      const { data, error } = await supabase.from('products').insert([payload]).select()
       
-      setProducts(prev => [...prev, data[0]]);
-      setImportForm(prev => ({ ...prev, product_id: String(data[0].id) }));
-      setActiveView('import');
-      showToast('success', 'Product Created', 'Ready to receive stock.');
+      if (error) throw error;
 
-    } else if (error) {
-      showToast('error', 'Creation Failed', error.message);
+      if (data && data.length > 0) {
+        setIsAddModalOpen(false)
+        setNewItem({ name: '', price: '0' as any, cost_price: '0' as any, weight: 50 as any, stock: '0' as any, min_stock_level: 10 as any })
+        
+        setProducts(prev => [...prev, data[0]]);
+        setImportForm(prev => ({ ...prev, product_id: String(data[0].id) }));
+        setActiveView('import');
+        showToast('success', 'Product Created', 'Ready to receive stock.');
+      }
+    } catch (err: any) {
+      showToast('error', 'Creation Failed', err.message);
+    } finally {
+      // 🔥 ARCHITECTURE FIX: Unlocks the button no matter what happens!
+      setIsProcessing(false);
     }
   }
 
