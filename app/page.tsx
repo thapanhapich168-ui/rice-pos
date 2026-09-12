@@ -17,15 +17,17 @@ export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false)
 
   useEffect(() => {
-    // Check if user is already logged in
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    supabase.auth.onAuthStateChange((event, session) => {
       if (session) {
-        router.push('/pos') // Send directly to POS, keeping sidebar hidden
-      } else {
-        setCheckingAuth(false)
+        // 🔥 FIX: Stop the auto-redirect if we are trying to reset a password!
+        if (window.location.pathname === '/update-password') {
+          return; 
+        }
+        
+        router.push('/pos');
       }
     })
-  }, [router])
+  }, [])
 
   async function handleLogin(e: React.FormEvent) {
     e.preventDefault()
