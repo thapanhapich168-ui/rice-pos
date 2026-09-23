@@ -353,6 +353,9 @@ export default function ExpenseDashboard() {
   const [dbExpenses, setDbExpenses] = useState<any[]>([])
   const [dbStaffDebt, setDbStaffDebt] = useState<any[]>([])
   
+  // 🚀 NEW: Connect to Live Treasury Wallets
+  const [liveWallets, setLiveWallets] = useState<any[]>([])
+
   const [dbTab, setDbTab] = useState<'personal' | 'business' | 'rice' | 'staff_debt' | 'insight'>('insight')
   const [dbTabOrder, setDbTabOrder] = useState(['insight', 'personal', 'business', 'rice', 'staff_debt'])
   
@@ -401,10 +404,15 @@ export default function ExpenseDashboard() {
     let debtQuery = supabase.from('staff_debt_history').select('*, staff:staff_id(name)').order('created_at', { ascending: false }).limit(2000);
     if (activeBranchId !== 0) debtQuery = debtQuery.eq('branch_id', activeBranchId); 
 
-    const [ {data: exp}, {data: debt} ] = await Promise.all([ expQuery, debtQuery ])
+    // 🚀 NEW: Fetch the live wallets for the dropdowns
+    let walletQuery = supabase.from('wallets').select('*').order('id', { ascending: true });
+    if (activeBranchId !== 0) walletQuery = walletQuery.eq('branch_id', activeBranchId);
+
+    const [ {data: exp}, {data: debt}, {data: wallets} ] = await Promise.all([ expQuery, debtQuery, walletQuery ])
     
     setDbExpenses(exp || []);
     setDbStaffDebt(debt || []);
+    setLiveWallets(wallets || []);
     setIsFetchingDb(false)
   }, [activeBranchId]);
 
@@ -589,9 +597,31 @@ export default function ExpenseDashboard() {
         };
       });
 
-      const { error } = await supabase.from('expenses').insert(payloadArray.reverse()); 
+      // 1. Insert into Expense History
+      const { data: insertedExpenses, error: expError } = await supabase.from('expenses').insert(payloadArray.reverse()).select(); 
+      if (expError) throw expError;
 
-      if (error) throw error;
+      // 2. 🚀 NEW: Deduct the exact amounts from the Treasury Ledger!
+      const ledgerPromises: any[] = [];
+      validExpenses.forEach((exp, idx) => {
+        const matchingId = insertedExpenses?.[idx]?.id || Date.now();
+        exp.payments.forEach(p => {
+          const amt = Number(String(p.amount).replace(/,/g, '')) || 0;
+          if (amt > 0) {
+            ledgerPromises.push(
+              supabase.rpc('record_wallet_transaction', {
+                p_wallet_name: p.method,
+                p_amount: -Math.abs(amt), // Negative because we are SPENDING money
+                p_reference_type: 'EXPENSE',
+                p_reference_id: matchingId.toString(),
+                p_description: exp.remarks,
+                p_branch_id: activeBranchId
+              })
+            );
+          }
+        });
+      });
+      await Promise.all(ledgerPromises);
 
       // 🔔 AUTO-SEND TELEGRAM ALERT
       try {
@@ -1201,7 +1231,7 @@ export default function ExpenseDashboard() {
                           <div key={row.id} className="payment-row" style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
                             <WalletDropdown 
                               value={row.method} 
-                              options={EXPENSE_WALLETS} 
+                              options={liveWallets.length > 0 ? liveWallets.map(w => w.name) : EXPENSE_WALLETS} 
                               onChange={(val: string) => updatePaymentSplit(exp.id, row.id, 'method', val)}
                               style={{ flex: '0 0 140px', height: '42px', margin: 0 }} 
                             />
@@ -1710,7 +1740,7 @@ export default function ExpenseDashboard() {
           <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '8px' }}>Payment Method</label>
           <WalletDropdown 
             value={advanceModal.method} 
-            options={STAFF_DEBT_WALLETS} 
+            options={liveWallets.length > 0 ? liveWallets.map(w => w.name) : STAFF_DEBT_WALLETS} 
             onChange={(val: string) => setAdvanceModal({...advanceModal, method: val})} 
             style={{ width: '100%', height: '42px' }} 
           />
@@ -1886,7 +1916,7 @@ export default function ExpenseDashboard() {
           <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '8px' }}>Payment Received Into</label>
           <WalletDropdown 
             value={settleModal.method} 
-            options={[...STAFF_DEBT_WALLETS, 'Write-off']} 
+            options={[...(liveWallets.length > 0 ? liveWallets.map(w => w.name) : STAFF_DEBT_WALLETS), 'Write-off']} 
             onChange={(val: string) => setSettleModal({...settleModal, method: val})} 
             style={{ width: '100%', height: '42px' }} 
           />
