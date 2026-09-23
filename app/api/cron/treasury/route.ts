@@ -43,7 +43,7 @@ export async function GET(request: Request) {
     msg += `\n🇺🇸 *DOLLAR WALLETS (USD)*\n`;
     if (usdList.length === 0) msg += `- None\n`;
     usdList.forEach((w: any) => {
-      msg += `• ${w.name}: *$${new Intl.NumberFormat('en-US', { minimumFractionDigits: 2 }).format(w.balance)}*\n`;
+      msg += `• ${w.name}: *\$${new Intl.NumberFormat('en-US', { minimumFractionDigits: 2 }).format(w.balance)}*\n`;
     });
 
     // 4. Dispatch to Telegram Thread 88
