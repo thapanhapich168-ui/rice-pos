@@ -4,9 +4,9 @@ import { TELEGRAM_CONFIG } from '@/lib/telegramConfig';
 
 export async function GET(request: Request) {
   try {
-    // 1. Initialize Backend Supabase Connection
+    // 1. Initialize Backend Supabase Connection (Using Service Role Key to bypass RLS)
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-    const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+    const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
     // Hardcode to SMC Branch (Branch 1)
@@ -15,21 +15,19 @@ export async function GET(request: Request) {
     // Automatically pulls Thread 88 from your config
     const targetThreadId = (TELEGRAM_CONFIG as any).treasuryTopics?.[branchId]; 
 
-    // 2. Fetch Live Balances directly from the database
+    // 2. Fetch Live Balances directly from the database (without strict branch filtering to catch all active wallets safely)
     const { data: wallets, error } = await supabase
       .from('wallets')
       .select('*')
-      .eq('branch_id', branchId)
       .order('id', { ascending: true });
 
     if (error) throw error;
-    if (!wallets) throw new Error("No wallets found");
+    if (!wallets || wallets.length === 0) throw new Error("No wallets found");
 
     const khrList = wallets.filter((w: any) => w.currency === 'KHR');
     const usdList = wallets.filter((w: any) => w.currency === 'USD');
 
     // 3. Format the Daily Telegram Message
-    // Setting Timezone to Cambodia explicitly so the server stamps it correctly
     const dateStr = new Date().toLocaleString('en-GB', { timeZone: 'Asia/Phnom_Penh' });
     
     let msg = `🏛️ *DAILY TREASURY CLOSING SNAPSHOT*\n`;
