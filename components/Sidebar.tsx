@@ -30,6 +30,7 @@ const defaultMenuItems: MenuItem[] = [
   { label: '🔐 Master Biz Database', href: '/bizdatabase', adminOnly: false },
   { label: '📲 Report', href: '/report', adminOnly: false },
   { label: '🛠️ Dev Test', href: '/dev-test', adminOnly: true },
+  { label: '🏛️ Treasury', href: '/treasury', adminOnly: true },
   { label: '⚙️ Settings', href: '/settings', adminOnly: true }
 ]
 

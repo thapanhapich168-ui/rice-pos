@@ -10,8 +10,101 @@ import { useToast } from '@/components/ToastProvider'
 import TableSkeleton from '@/components/TableSkeleton'
 import EmptyState from '@/components/EmptyState'
 import { useBranch } from '@/components/BranchContext' 
+import { POS_DELIVERY_WALLETS } from '@/lib/walletConstants'
 
 import { TELEGRAM_CONFIG } from '@/lib/telegramConfig'
+
+function WalletDropdown({ value, options, onChange, style }: any) {
+  const [isOpen, setIsOpen] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+  const [menuStyles, setMenuStyles] = useState<any>({});
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) setIsOpen(false);
+    };
+    // Automatically close the menu if the user scrolls the table or window
+    const handleScroll = () => setIsOpen(false);
+
+    document.addEventListener('mousedown', handleClickOutside);
+    window.addEventListener('scroll', handleScroll, true); 
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      window.removeEventListener('scroll', handleScroll, true);
+    };
+  }, []);
+
+  const handleToggle = () => {
+    if (!isOpen && dropdownRef.current) {
+      // Calculate exact physical position on the screen to avoid table clipping
+      const rect = dropdownRef.current.getBoundingClientRect();
+      setMenuStyles({
+        position: 'fixed',
+        top: rect.bottom + 4,
+        left: rect.left,
+        width: rect.width,
+        zIndex: 999999
+      });
+    }
+    setIsOpen(!isOpen);
+  };
+
+  const getIcon = (val: string) => {
+    if (val.includes('ABA')) return '📱';
+    if (val.includes('Chest')) return '🗄️';
+    if (val.includes('Cash')) return '💵';
+    if (val.includes('Radiant Availability')) return '👩';
+    return '💳';
+  };
+
+  return (
+    <div ref={dropdownRef} style={{ position: 'relative', ...style }}>
+      <div 
+        onClick={handleToggle}
+        style={{ 
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          padding: '0 12px', background: '#fff', border: '1px solid #cbd5e1', 
+          borderRadius: '10px', cursor: 'pointer', height: '100%',
+          fontSize: '13px', fontWeight: 'bold', color: '#334155',
+          boxShadow: 'inset 0 1px 2px rgba(0,0,0,0.02)'
+        }}
+      >
+        <span style={{ display: 'flex', alignItems: 'center', gap: '8px', overflow: 'hidden', whiteSpace: 'nowrap' }}>
+          <span>{getIcon(value)}</span> {value}
+        </span>
+        <span style={{ fontSize: '10px', color: '#94a3b8', transform: isOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s', flexShrink: 0, marginLeft: '4px' }}>▼</span>
+      </div>
+      
+      {isOpen && (
+        <div style={{ 
+          ...menuStyles,
+          background: '#fff', border: '1px solid #e2e8f0', borderRadius: '12px', 
+          boxShadow: '0 10px 25px -5px rgba(0,0,0,0.1), 0 8px 10px -6px rgba(0,0,0,0.1)', overflow: 'hidden',
+          display: 'flex', flexDirection: 'column', padding: '4px'
+        }}>
+          {options.map((opt: string) => (
+            <div 
+              key={opt}
+              onClick={(e) => { e.stopPropagation(); onChange(opt); setIsOpen(false); }}
+              style={{ 
+                padding: '10px 12px', cursor: 'pointer', fontSize: '13px',
+                display: 'flex', alignItems: 'center', gap: '8px',
+                background: value === opt ? '#f8fafc' : '#fff',
+                borderRadius: '8px', color: value === opt ? '#0f172a' : '#475569',
+                fontWeight: value === opt ? 'bold' : 'normal', transition: 'background 0.1s',
+                whiteSpace: 'nowrap'
+              }}
+              onMouseEnter={(e) => (e.currentTarget.style.background = '#f1f5f9')}
+              onMouseLeave={(e) => (e.currentTarget.style.background = value === opt ? '#f8fafc' : '#fff')}
+            >
+              <span>{getIcon(opt)}</span> {opt}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function DeliveryPage() {
   const { showToast } = useToast();
@@ -208,12 +301,12 @@ export default function DeliveryPage() {
   }
 
   const getInlinePaymentState = (invId: string, balanceDue: number) => {
-    return inlinePayments[invId] || [{ id: 1, method: 'Cash ៛', amount: balanceDue }];
+    return inlinePayments[invId] || [{ id: 1, method: POS_DELIVERY_WALLETS[0], amount: balanceDue }];
   }
 
   const updateInlineRow = (invId: string, rowId: number, field: string, value: any, balanceDue: number) => {
     setInlinePayments(prev => {
-      const rows = prev[invId] ? [...prev[invId]] : [{ id: 1, method: 'Cash ៛', amount: balanceDue }];
+      const rows = prev[invId] ? [...prev[invId]] : [{ id: 1, method: POS_DELIVERY_WALLETS[0], amount: balanceDue }];
       const newRows = rows.map(r => r.id === rowId ? { ...r, [field]: value } : r);
       return { ...prev, [invId]: newRows };
     });
@@ -221,14 +314,14 @@ export default function DeliveryPage() {
 
   const addInlineSplit = (invId: string, balanceDue: number) => {
     setInlinePayments(prev => {
-      const rows = prev[invId] ? [...prev[invId]] : [{ id: 1, method: 'Cash ៛', amount: balanceDue }];
-      return { ...prev, [invId]: [...rows, { id: Date.now(), method: 'Cash ៛', amount: '' }] };
+      const rows = prev[invId] ? [...prev[invId]] : [{ id: 1, method: POS_DELIVERY_WALLETS[0], amount: balanceDue }];
+      return { ...prev, [invId]: [...rows, { id: Date.now(), method: POS_DELIVERY_WALLETS[0], amount: '' }] };
     });
   }
 
   const removeInlineSplit = (invId: string, rowId: number, balanceDue: number) => {
     setInlinePayments(prev => {
-      const rows = prev[invId] ? [...prev[invId]] : [{ id: 1, method: 'Cash ៛', amount: balanceDue }];
+      const rows = prev[invId] ? [...prev[invId]] : [{ id: 1, method: POS_DELIVERY_WALLETS[0], amount: balanceDue }];
       return { ...prev, [invId]: rows.filter(r => r.id !== rowId) };
     });
   }
@@ -314,39 +407,39 @@ export default function DeliveryPage() {
       
       setInlinePayments(prev => { const n = {...prev}; delete n[d.invoice_id]; return n; });
 
+      // 🔔 AUTO-SEND TELEGRAM ALERT
       try {
-        let message = `🚚 *Delivery Payment Update*\n`;
-        message += `🏬 *Branch ID:* ${activeBranchId === 1 ? 'SMC' : activeBranchId === 2 ? 'Chukmeas' : activeBranchId}\n`;
-        message += `📅 *Date:* ${new Date().toLocaleDateString('en-GB')}\n`;
-        message += `👤 *Customer name:* ${d.customer_name}\n`;
-        message += `🚚 *Delivery Status:* Delivered\n`;
-        message += `💵 *Paid amount:* ${formatRiel(totalRielEq)}\n`;
-        if (newBalance > 0) {
-          message += `⏳ *Unpaid amount:* ${formatRiel(newBalance)}\n`; 
-        }
-
         const botToken = TELEGRAM_CONFIG.botToken;
         const masterChatId = TELEGRAM_CONFIG.chatId;
-        
-        // 🚦 ROUTE TO DELIVERY TOPICS (19 or 22)
         const targetThreadId = (TELEGRAM_CONFIG as any).deliveryTopics?.[activeBranchId];
 
         if (botToken && masterChatId) {
-          const payload: any = {
-            chat_id: masterChatId,
-            text: message,
-            parse_mode: 'Markdown'
-          };
+          const formatBal = (n: number) => new Intl.NumberFormat('en-US').format(n);
+          
+          let msg = `🚚 *DELIVERY PAYMENT RECEIVED*\n`;
+          msg += `🏬 Branch ID: *${activeBranchId}*\n`;
+          msg += `📅 Date: ${new Date().toLocaleString('en-GB')}\n\n`;
 
-          // Inject the specific topic ID for the active branch!
-          if (targetThreadId) {
-            payload.message_thread_id = targetThreadId;
-          }
+          msg += `👤 *Customer:* ${d.customer_name}\n`;
+          msg += `🧾 *Invoice:* #${d.invoice_id.replace('INV-', '')}\n\n`;
+
+          msg += `📥 *Added To:*\n`;
+          rows.forEach(r => {
+            const amt = Number(String(r.amount).replace(/,/g, '')) || 0;
+            if (amt > 0) {
+              const symbol = r.method.includes('$') ? '$' : '៛';
+              msg += `• Wallet: ${r.method}\n`;
+              msg += `• Amount: +${formatBal(amt)} ${symbol}\n\n`;
+            }
+          });
+
+          msg += `⏳ *Balance Remaining:* *${formatBal(newBalance)} ៛*`;
+
+          const payload: any = { chat_id: masterChatId, text: msg.trim(), parse_mode: 'Markdown' };
+          if (targetThreadId) payload.message_thread_id = targetThreadId;
 
           fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
           }).catch(console.error);
         }
       } catch (teleErr) { console.error("Telegram Error", teleErr); }
@@ -377,6 +470,31 @@ export default function DeliveryPage() {
       const { error: rpcError } = await supabase.rpc('undo_delivery_payment', { p_payload: atomicPayload });
       if (rpcError) throw rpcError;
 
+      // 🔔 AUTO-SEND TELEGRAM ALERT
+      try {
+        const botToken = TELEGRAM_CONFIG.botToken;
+        const masterChatId = TELEGRAM_CONFIG.chatId;
+        const targetThreadId = (TELEGRAM_CONFIG as any).deliveryTopics?.[activeBranchId];
+
+        if (botToken && masterChatId) {
+          let msg = `⚠️ *DELIVERY PAYMENT VOIDED*\n`;
+          msg += `🏬 Branch ID: *${activeBranchId}*\n`;
+          msg += `📅 Date: ${new Date().toLocaleString('en-GB')}\n\n`;
+
+          msg += `👤 *Customer:* ${d.customer_name}\n`;
+          msg += `🧾 *Invoice:* #${d.invoice_id.replace('INV-', '')}\n\n`;
+
+          msg += `🔄 *Action:* Payment Reversed. Funds automatically deducted from wallets and invoice returned to pending.`;
+
+          const payload: any = { chat_id: masterChatId, text: msg, parse_mode: 'Markdown' };
+          if (targetThreadId) payload.message_thread_id = targetThreadId;
+
+          fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+          }).catch(console.error);
+        }
+      } catch (teleErr) { console.error("Telegram Error", teleErr); }
+
       showToast('success', 'Undo Successful', 'Payment reversed and returned to pending.');
       fetchDeliveries();
     } catch (error: any) {
@@ -387,12 +505,12 @@ export default function DeliveryPage() {
   }
 
   const getCreditPaymentState = (uniqueKey: string, totalOwed: number) => {
-    return creditPayments[uniqueKey] || [{ id: 1, method: 'Cash ៛', amount: totalOwed }];
+    return creditPayments[uniqueKey] || [{ id: 1, method: POS_DELIVERY_WALLETS[0], amount: totalOwed }];
   }
 
   const updateCreditRow = (uniqueKey: string, rowId: number, field: string, value: any, totalOwed: number) => {
     setCreditPayments(prev => {
-      const rows = prev[uniqueKey] ? [...prev[uniqueKey]] : [{ id: 1, method: 'Cash ៛', amount: totalOwed }];
+      const rows = prev[uniqueKey] ? [...prev[uniqueKey]] : [{ id: 1, method: POS_DELIVERY_WALLETS[0], amount: totalOwed }];
       const newRows = rows.map(r => r.id === rowId ? { ...r, [field]: value } : r);
       return { ...prev, [uniqueKey]: newRows };
     });
@@ -400,14 +518,14 @@ export default function DeliveryPage() {
 
   const addCreditSplit = (uniqueKey: string, totalOwed: number) => {
     setCreditPayments(prev => {
-      const rows = prev[uniqueKey] ? [...prev[uniqueKey]] : [{ id: 1, method: 'Cash ៛', amount: totalOwed }];
-      return { ...prev, [uniqueKey]: [...rows, { id: Date.now(), method: 'Cash ៛', amount: '' }] };
+      const rows = prev[uniqueKey] ? [...prev[uniqueKey]] : [{ id: 1, method: POS_DELIVERY_WALLETS[0], amount: totalOwed }];
+      return { ...prev, [uniqueKey]: [...rows, { id: Date.now(), method: POS_DELIVERY_WALLETS[0], amount: '' }] };
     });
   }
 
   const removeCreditSplit = (uniqueKey: string, rowId: number, totalOwed: number) => {
     setCreditPayments(prev => {
-      const rows = prev[uniqueKey] ? [...prev[uniqueKey]] : [{ id: 1, method: 'Cash ៛', amount: totalOwed }];
+      const rows = prev[uniqueKey] ? [...prev[uniqueKey]] : [{ id: 1, method: POS_DELIVERY_WALLETS[0], amount: totalOwed }];
       return { ...prev, [uniqueKey]: rows.filter(r => r.id !== rowId) };
     });
   }
@@ -513,6 +631,41 @@ export default function DeliveryPage() {
       // 🚀 ONE SECURE TRIP TO POSTGRES
       const { error: rpcError } = await supabase.rpc('process_delivery_payments', { p_payload: atomicPayload });
       if (rpcError) throw new Error("Transaction Failed: " + rpcError.message);
+
+      // 🔔 AUTO-SEND TELEGRAM ALERT
+      try {
+        const botToken = TELEGRAM_CONFIG.botToken;
+        const masterChatId = TELEGRAM_CONFIG.chatId;
+        const targetThreadId = (TELEGRAM_CONFIG as any).deliveryTopics?.[activeBranchId];
+
+        if (botToken && masterChatId) {
+          const formatBal = (n: number) => new Intl.NumberFormat('en-US').format(n);
+          
+          let msg = `💰 *CREDIT ACCOUNTS SETTLED*\n`;
+          msg += `🏬 Branch ID: *${activeBranchId}*\n`;
+          msg += `📅 Date: ${new Date().toLocaleString('en-GB')}\n\n`;
+
+          msg += `👤 *Account Owner:* ${debtor.name || debtor.owner}\n`;
+          msg += `🧾 *Invoices Cleared:* ${updatedInvoices.length}\n\n`;
+
+          msg += `📥 *Added To:*\n`;
+          rows.forEach(r => {
+            const amt = Number(String(r.amount).replace(/,/g, '')) || 0;
+            if (amt > 0) {
+              const symbol = r.method.includes('$') ? '$' : '៛';
+              msg += `• Wallet: ${r.method}\n`;
+              msg += `• Amount: +${formatBal(amt)} ${symbol}\n\n`;
+            }
+          });
+
+          const payload: any = { chat_id: masterChatId, text: msg.trim(), parse_mode: 'Markdown' };
+          if (targetThreadId) payload.message_thread_id = targetThreadId;
+
+          fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+          }).catch(console.error);
+        }
+      } catch (teleErr) { console.error("Telegram Error", teleErr); }
 
       const uniqueKey = `${debtor.owner}_${debtor.name}`;
       setDeliveries(prev => prev.map(d => {
@@ -835,7 +988,6 @@ export default function DeliveryPage() {
                             backgroundColor: isSticky ? '#ffffff' : 'inherit',
                             boxShadow: isSticky ? '2px 0 5px -2px rgba(0,0,0,0.1)' : 'none',
                             borderRight: isSticky ? '1px solid #e2e8f0' : 'none',
-                            overflow: 'hidden',
                             wordWrap: 'break-word',
                             whiteSpace: 'normal'
                           };
@@ -884,19 +1036,12 @@ export default function DeliveryPage() {
                                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                                    {paymentState.map((row, idx) => (
                                      <div key={row.id} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                       <select 
+                                       <WalletDropdown 
                                           value={row.method} 
-                                          onChange={(e) => updateInlineRow(d.invoice_id, row.id, 'method', e.target.value, balanceDue)} 
-                                          className="saas-input" 
-                                          style={{ flex: 1, padding: '8px', cursor: 'pointer', height: '40px', width: '100%' }}
-                                       >
-                                          <option value="Cash ៛">💵 Cash ៛</option>
-                                          <option value="Cash $">💵 Cash $</option>
-                                          <option value="QR ៛">📱 QR ៛</option>
-                                          <option value="QR $">📱 QR $</option>
-                                          <option value="Mom QR ៛">👩 Mom QR ៛</option>
-                                          <option value="Mom QR $">👩 Mom QR $</option>
-                                       </select>
+                                          options={POS_DELIVERY_WALLETS} 
+                                          onChange={(val: string) => updateInlineRow(d.invoice_id, row.id, 'method', val, balanceDue)} 
+                                          style={{ flex: 1, height: '40px', width: '100%' }} 
+                                        />
                                        {idx === paymentState.length - 1 ? (
                                          <button onClick={() => addInlineSplit(d.invoice_id, balanceDue)} style={{ background: '#e0f2fe', border: 'none', borderRadius: '6px', color: '#0ea5e9', width: '32px', height: '40px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', fontWeight: 'bold', fontSize: '20px', flexShrink: 0 }}>+</button>
                                        ) : (
@@ -1090,19 +1235,12 @@ export default function DeliveryPage() {
                       <div onClick={(e) => e.stopPropagation()} style={{ borderTop: '1px dashed #cbd5e1', paddingTop: '16px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
                         {paymentState.map((row: any, idx: number) => (
                             <div key={row.id} style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                              <select 
+                              <WalletDropdown 
                                 value={row.method} 
-                                onChange={(e) => updateInlineRow(inv.invoice_id, row.id, 'method', e.target.value, invBalance)} 
-                                className="saas-input" 
-                                style={{ flex: 1, padding: '12px', cursor: 'pointer', height: '48px', borderRadius: '12px', border: '1px solid #cbd5e1', background: '#fff' }}
-                              >
-                                <option value="Cash ៛">💵 Cash ៛</option>
-                                <option value="Cash $">💵 Cash $</option>
-                                <option value="QR ៛">📱 QR ៛</option>
-                                <option value="QR $">📱 QR $</option>
-                                <option value="Mom QR ៛">👩 Mom QR ៛</option>
-                                <option value="Mom QR $">👩 Mom QR $</option>
-                              </select>
+                                options={POS_DELIVERY_WALLETS} 
+                                onChange={(val: string) => updateInlineRow(inv.invoice_id, row.id, 'method', val, invBalance)} 
+                                style={{ flex: 1, height: '48px' }} 
+                              />
                               <CurrencyInput 
                                 placeholder={formatRiel(invBalance)} 
                                 value={row.amount} 
@@ -1314,7 +1452,6 @@ export default function DeliveryPage() {
                                 boxShadow: isSticky ? '2px 0 5px -2px rgba(0,0,0,0.05)' : 'none',
                                 borderRight: isSticky ? '1px solid #e2e8f0' : 'none',
                                 borderBottom: '1px solid #f8fafc',
-                                overflow: 'hidden',
                                 wordWrap: 'break-word',
                                 whiteSpace: 'normal',
                                 padding: '12px 16px'
@@ -1361,19 +1498,12 @@ export default function DeliveryPage() {
                                   <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                                     {paymentState.map((row: any, idx: number) => (
                                       <div key={row.id} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                        <select 
-                                          value={row.method}
-                                          onChange={(e) => updateInlineRow(inv.invoice_id, row.id, 'method', e.target.value, invBalance)}
-                                          className="saas-input"
-                                          style={{ flex: 1, padding: '8px 12px', cursor: 'pointer', height: '40px', width: '100%' }}
-                                        >
-                                           <option value="Cash ៛">💵 Cash ៛</option>
-                                           <option value="Cash $">💵 Cash $</option>
-                                           <option value="QR ៛">📱 QR ៛</option>
-                                           <option value="QR $">📱 QR $</option>
-                                           <option value="Mom QR ៛">👩 Mom QR ៛</option>
-                                           <option value="Mom QR $">👩 Mom QR $</option>
-                                        </select>
+                                        <WalletDropdown 
+                                          value={row.method} 
+                                          options={POS_DELIVERY_WALLETS} 
+                                          onChange={(val: string) => updateInlineRow(inv.invoice_id, row.id, 'method', val, invBalance)} 
+                                          style={{ flex: 1, height: '40px', width: '100%' }} 
+                                        />
                                         {idx === paymentState.length - 1 ? (
                                           <button onClick={() => addInlineSplit(inv.invoice_id, invBalance)} style={{ background: '#e0f2fe', border: 'none', borderRadius: '6px', color: '#0ea5e9', width: '32px', height: '40px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', fontWeight: 'bold', fontSize: '20px', flexShrink: 0 }}>+</button>
                                         ) : (
@@ -1548,19 +1678,12 @@ export default function DeliveryPage() {
                      {paymentState.map((row, index) => (
                        <div key={row.id} style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
                          
-                         <select 
+                         <WalletDropdown 
                             value={row.method} 
-                            onChange={(e) => updateInlineRow(d.invoice_id, row.id, 'method', e.target.value, balanceDue)} 
-                            className="saas-input" 
-                            style={{ flex: 1, padding: '12px', cursor: 'pointer', height: '48px', borderRadius: '12px', border: '1px solid #cbd5e1', background: '#fff' }}
-                         >
-                            <option value="Cash ៛">💵 Cash ៛</option>
-                            <option value="Cash $">💵 Cash $</option>
-                            <option value="QR ៛">📱 QR ៛</option>
-                            <option value="QR $">📱 QR $</option>
-                            <option value="Mom QR ៛">👩 Mom QR ៛</option>
-                            <option value="Mom QR $">👩 Mom QR $</option>
-                         </select>
+                            options={POS_DELIVERY_WALLETS} 
+                            onChange={(val: string) => updateInlineRow(d.invoice_id, row.id, 'method', val, balanceDue)} 
+                            style={{ flex: 1, height: '48px' }} 
+                         />
                          
                          <CurrencyInput 
                             placeholder={formatRiel(balanceDue)} 

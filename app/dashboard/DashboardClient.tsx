@@ -10,12 +10,15 @@ import EmptyState from '@/components/EmptyState'
 import { useBranch } from '@/components/BranchContext' 
 import AdminGuard from '@/components/AdminGuard' 
 import { useFocusRefresh } from '@/lib/useFocusRefresh' // 🔥 FIX: Added missing import
+import { useWallets } from '@/lib/useWallets'
+import { WALLET_NAMES } from '@/lib/walletConstants'
 
 const formatUSDEquiv = (vRiel: number) => formatUSD(vRiel / EXCHANGE_RATE);
 
 export default function DashboardPage() {
   const { showToast } = useToast();
   const { branches, activeBranchId } = useBranch(); 
+  const { getBalance, isLoading: isWalletsLoading } = useWallets(activeBranchId || 1);
 
   const [isLoading, setIsLoading] = useState(true)
   const [wholesaleSales, setWholesaleSales] = useState<any[]>([])
@@ -875,42 +878,72 @@ export default function DashboardPage() {
 
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '16px', marginBottom: '16px' }}>
                 
+                {/* GLOBAL VALUATIONS */}
                 <div className="saas-card mint">
-                  <div className="saas-card-title">💵 Total Net Worth</div>
-                  <div style={{ display: 'flex', gap: '16px', alignItems: 'baseline', margin: '12px 0 0 0' }}>
+                  <div className="saas-card-title" style={{ marginBottom: '4px' }}>💵 Total Net Worth</div>
+                  <div style={{ fontSize: '12px', color: '#059669', fontWeight: 'bold', marginBottom: '12px' }}>Business + Personal Assets</div>
+                  <div style={{ display: 'flex', gap: '16px', alignItems: 'baseline' }}>
                     <div style={{ fontSize: '28px', fontWeight: 'bold', color: '#10b981' }}>{formatRiel(assetData.netWorthRiel)}</div>
-                    <div style={{ fontSize: '18px', fontWeight: 'bold', color: '#34d399' }}>{formatUSD(assetData.netWorthUsd)}</div>
+                    <div style={{ fontSize: '28px', fontWeight: 'bold', color: '#34d399' }}>{formatUSD(assetData.netWorthUsd)}</div>
                   </div>
                 </div>
 
                 <div className="saas-card mint">
-                  <div className="saas-card-title">📦 Total Rice Stock Asset</div>
-                  <div style={{ fontSize: '28px', margin: '12px 0 0 0', fontWeight: 'bold', color: '#10b981' }}>{formatRiel(assetData.riceStockValue)}</div>
+                  <div className="saas-card-title" style={{ marginBottom: '4px' }}>📦 Total Rice Stock Asset</div>
+                  <div style={{ fontSize: '12px', color: '#059669', fontWeight: 'bold', marginBottom: '12px' }}>Live Inventory Valuation</div>
+                  <div style={{ fontSize: '28px', fontWeight: 'bold', color: '#10b981' }}>{formatRiel(assetData.riceStockValue)}</div>
                 </div>
 
-                <div className="saas-card">
-                  <div className="saas-card-title">💵 Cash on Hand</div>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginTop: '16px' }}>
-                    <div>
-                      <div style={{ fontSize: '24px', color: '#334155', fontWeight: 'bold' }}>{formatRiel(assetData.liveCashRiel)}</div>
-                    </div>
-                    <div>
-                      <div style={{ fontSize: '24px', color: '#334155', fontWeight: 'bold' }}>{formatUSD(assetData.liveCashUsd)}</div>
-                    </div>
+                {/* LIVE WALLETS FROM SUPABASE */}
+                <div className="saas-card" style={{ background: '#f8fafc', border: '1px solid #e2e8f0' }}>
+                  <div className="saas-card-title" style={{ color: '#475569', marginBottom: '4px' }}>💵 Cash on Hand</div>
+                  <div style={{ fontSize: '12px', color: '#94a3b8', fontWeight: 'bold', marginBottom: '12px' }}>Operations & Chest Cash</div>
+                  <div style={{ display: 'flex', gap: '16px', alignItems: 'baseline' }}>
+                    {isWalletsLoading ? <span style={{color: '#94a3b8'}}>...</span> : (
+                      <>
+                        <div style={{ fontSize: '24px', color: '#334155', fontWeight: 'bold' }}>{formatRiel(getBalance(WALLET_NAMES.CASH_KHR) + getBalance(WALLET_NAMES.CASH_CHEST_KHR))}</div>
+                        <div style={{ fontSize: '24px', color: '#64748b', fontWeight: 'bold' }}>{formatUSD(getBalance(WALLET_NAMES.CASH_USD) + getBalance(WALLET_NAMES.CASH_CHEST_USD))}</div>
+                      </>
+                    )}
                   </div>
                 </div>
 
-                <div className="saas-card">
-                  <div className="saas-card-title">📱 Bank (QR Payments)</div>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginTop: '16px' }}>
-                    <div>
-                      <div style={{ fontSize: '24px', color: '#3b82f6', fontWeight: 'bold' }}>{formatRiel(assetData.liveQrRiel)}</div>
-                    </div>
-                    <div>
-                      <div style={{ fontSize: '24px', color: '#3b82f6', fontWeight: 'bold' }}>{formatUSD(assetData.liveQrUsd)}</div>
-                    </div>
+                <div className="saas-card" style={{ background: '#f8fafc', border: '1px solid #e2e8f0' }}>
+                  <div className="saas-card-title" style={{ color: '#475569', marginBottom: '4px' }}>📱 ABA Radiant</div>
+                  <div style={{ fontSize: '12px', color: '#94a3b8', fontWeight: 'bold', marginBottom: '12px' }}>Primary QR Receiving</div>
+                  <div style={{ display: 'flex', gap: '16px', alignItems: 'baseline' }}>
+                    {isWalletsLoading ? <span style={{color: '#94a3b8'}}>...</span> : (
+                      <>
+                        <div style={{ fontSize: '24px', color: '#3b82f6', fontWeight: 'bold' }}>{formatRiel(getBalance(WALLET_NAMES.ABA_RADIANT_KHR))}</div>
+                        <div style={{ fontSize: '24px', color: '#60a5fa', fontWeight: 'bold' }}>{formatUSD(getBalance(WALLET_NAMES.ABA_RADIANT_USD))}</div>
+                      </>
+                    )}
                   </div>
                 </div>
+
+                <div className="saas-card" style={{ background: '#f0fdf4', border: '1px solid #bbf7d0' }}>
+                  <div className="saas-card-title" style={{ color: '#047857', marginBottom: '4px' }}>👩 Radiant Availability</div>
+                  <div style={{ fontSize: '12px', color: '#34d399', fontWeight: 'bold', marginBottom: '12px' }}>Held for COGS Settlements</div>
+                  <div style={{ display: 'flex', gap: '16px', alignItems: 'baseline' }}>
+                    {isWalletsLoading ? <span style={{color: '#94a3b8'}}>...</span> : (
+                      <div style={{ fontSize: '24px', color: '#059669', fontWeight: 'bold' }}>{formatRiel(getBalance(WALLET_NAMES.RADIANT_AVAILABILITY))}</div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="saas-card" style={{ background: '#f8fafc', border: '1px solid #e2e8f0' }}>
+                  <div className="saas-card-title" style={{ color: '#475569', marginBottom: '4px' }}>🏦 ABA Both</div>
+                  <div style={{ fontSize: '12px', color: '#94a3b8', fontWeight: 'bold', marginBottom: '12px' }}>Operating & Spending Acct</div>
+                  <div style={{ display: 'flex', gap: '16px', alignItems: 'baseline' }}>
+                    {isWalletsLoading ? <span style={{color: '#94a3b8'}}>...</span> : (
+                      <>
+                        <div style={{ fontSize: '24px', color: '#334155', fontWeight: 'bold' }}>{formatRiel(getBalance(WALLET_NAMES.ABA_BOTH_KHR))}</div>
+                        <div style={{ fontSize: '24px', color: '#64748b', fontWeight: 'bold' }}>{formatUSD(getBalance(WALLET_NAMES.ABA_BOTH_USD))}</div>
+                      </>
+                    )}
+                  </div>
+                </div>
+
               </div>
 
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '16px', marginBottom: '32px' }}>

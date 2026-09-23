@@ -30,5 +30,10 @@ export const TELEGRAM_CONFIG = {
   deliveryTopics: {
     1: 19, // SMC Delivery Topic
     2: 22, // Chukmeas Delivery Topic
+  } as Record<number, number>,
+
+  // 🏛️ TREASURY BALANCE TOPICS (Auto-send live balances at 7 PM)
+  treasuryTopics: {
+    1: 88, // SMC Treasury Balance Forum
   } as Record<number, number>
 }

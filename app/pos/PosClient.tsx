@@ -13,11 +13,122 @@ import { useToast } from '@/components/ToastProvider'
 import Modal from '@/components/Modal'
 import EmptyState from '@/components/EmptyState'
 import { useBranch } from '@/components/BranchContext' 
+import { POS_DELIVERY_WALLETS } from '@/lib/walletConstants'
 // 🔥 NEW DND-KIT IMPORTS
 import { DndContext, closestCenter, KeyboardSensor, MouseSensor, TouchSensor, useSensor, useSensors } from '@dnd-kit/core';
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy, horizontalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { TELEGRAM_CONFIG } from '@/lib/telegramConfig'
+
+function WalletDropdown({ value, options, onChange, style }: any) {
+  const [isOpen, setIsOpen] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+  const [menuStyles, setMenuStyles] = useState<any>({});
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) setIsOpen(false);
+    };
+    
+    // FIX: Only close if the user is scrolling the main page, NOT if they are scrolling the menu itself!
+    const handleScroll = (event: Event) => {
+      if (dropdownRef.current && dropdownRef.current.contains(event.target as Node)) return;
+      setIsOpen(false);
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    window.addEventListener('scroll', handleScroll, true); 
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      window.removeEventListener('scroll', handleScroll, true);
+    };
+  }, []);
+
+  const handleToggle = () => {
+    if (!isOpen && dropdownRef.current) {
+      const rect = dropdownRef.current.getBoundingClientRect();
+      const menuHeight = 220; // The max height we set
+      const spaceBelow = window.innerHeight - rect.bottom;
+      
+      // FIX: If the button is at the bottom of the screen, open UPWARDS instead of downwards!
+      if (spaceBelow < menuHeight) {
+        setMenuStyles({
+          position: 'fixed',
+          bottom: window.innerHeight - rect.top + 4,
+          left: rect.left,
+          width: rect.width,
+          zIndex: 999999
+        });
+      } else {
+        setMenuStyles({
+          position: 'fixed',
+          top: rect.bottom + 4,
+          left: rect.left,
+          width: rect.width,
+          zIndex: 999999
+        });
+      }
+    }
+    setIsOpen(!isOpen);
+  };
+
+  const getIcon = (val: string) => {
+    if (val.includes('ABA')) return '📱';
+    if (val.includes('Chest')) return '🗄️';
+    if (val.includes('Cash')) return '💵';
+    if (val.includes('Radiant Availability')) return '👩';
+    return '💳';
+  };
+
+  return (
+    <div ref={dropdownRef} style={{ position: 'relative', ...style }}>
+      <div 
+        onClick={handleToggle}
+        style={{ 
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          padding: '0 12px', background: '#fff', border: '1px solid #cbd5e1', 
+          borderRadius: '8px', cursor: 'pointer', height: '100%',
+          fontSize: '13px', fontWeight: 'bold', color: '#334155',
+          boxShadow: 'inset 0 1px 2px rgba(0,0,0,0.02)'
+        }}
+      >
+        <span style={{ display: 'flex', alignItems: 'center', gap: '8px', overflow: 'hidden', whiteSpace: 'nowrap' }}>
+          <span>{getIcon(value)}</span> {value}
+        </span>
+        <span style={{ fontSize: '10px', color: '#94a3b8', transform: isOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s', flexShrink: 0, marginLeft: '4px' }}>▼</span>
+      </div>
+      
+      {isOpen && (
+        <div className="hide-scrollbar" style={{ 
+          ...menuStyles,
+          background: '#fff', border: '1px solid #e2e8f0', borderRadius: '12px', 
+          boxShadow: '0 10px 25px -5px rgba(0,0,0,0.1), 0 8px 10px -6px rgba(0,0,0,0.1)', 
+          overflowY: 'auto', maxHeight: '220px',
+          display: 'flex', flexDirection: 'column', padding: '4px'
+        }}>
+          {options.map((opt: string) => (
+            <div 
+              key={opt}
+              onClick={(e) => { e.stopPropagation(); onChange(opt); setIsOpen(false); }}
+              style={{ 
+                padding: '10px 12px', cursor: 'pointer', fontSize: '13px',
+                display: 'flex', alignItems: 'center', gap: '8px',
+                background: value === opt ? '#f8fafc' : '#fff',
+                borderRadius: '8px', color: value === opt ? '#0f172a' : '#475569',
+                fontWeight: value === opt ? 'bold' : 'normal', transition: 'background 0.1s',
+                whiteSpace: 'nowrap'
+              }}
+              onMouseEnter={(e) => (e.currentTarget.style.background = '#f1f5f9')}
+              onMouseLeave={(e) => (e.currentTarget.style.background = value === opt ? '#f8fafc' : '#fff')}
+            >
+              <span>{getIcon(opt)}</span> {opt}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 // --- LOCAL TYPES ---
 interface CartItem extends Product {
@@ -380,7 +491,7 @@ export default function POSPage() {
   const [cartCustomerEditForm, setCartCustomerEditForm] = useState({ name: '', phone: '', location: '', google_map: '' })
 
   const [paymentRows, setPaymentRows] = useState<{id: number, method: string, amount: number | '', isAuto?: boolean}[]>([
-    { id: Date.now(), method: 'Cash ៛', amount: '', isAuto: true }
+    { id: Date.now(), method: POS_DELIVERY_WALLETS[0] as string, amount: '', isAuto: true }
   ]);
 
   const [isCreateCustomerModalOpen, setIsCreateCustomerModalOpen] = useState(false)
@@ -551,7 +662,7 @@ export default function POSPage() {
       setCart([]);
       setSelectedCustomerId('');
       setCartCustomerNameOverride('');
-      setPaymentRows([{ id: Date.now(), method: 'Cash ៛', amount: '', isAuto: true }]);
+      setPaymentRows([{ id: Date.now(), method: POS_DELIVERY_WALLETS[0] as string, amount: '', isAuto: true }]);
       setEditingInvoiceId(null);
       setActiveFullScreen('none');
     }
@@ -1538,7 +1649,7 @@ export default function POSPage() {
     setCart([]);
     setSelectedCustomerId('');
     setCartCustomerNameOverride('');
-    setPaymentRows([{ id: Date.now(), method: 'Cash ៛', amount: '', isAuto: true }]);
+    setPaymentRows([{ id: Date.now(), method: POS_DELIVERY_WALLETS[0] as string, amount: '', isAuto: true }]);
     localStorage.removeItem('pos_cart');
     window.history.replaceState({}, document.title, window.location.pathname);
   }
@@ -2014,6 +2125,47 @@ export default function POSPage() {
           }
       }
 
+      // 🔔 AUTO-SEND TELEGRAM ALERT FOR PAYMENTS RECEIVED
+      try {
+        const botToken = TELEGRAM_CONFIG.botToken || process.env.NEXT_PUBLIC_TELEGRAM_BOT_TOKEN;
+        const masterChatId = TELEGRAM_CONFIG.chatId || process.env.NEXT_PUBLIC_TELEGRAM_CHAT_ID;
+        const targetThreadId = (TELEGRAM_CONFIG as any).reportTopics?.[activeBranchId]; // Routing Sales to Financial Reports
+
+        const validPayments = effectiveSplits.filter(s => s.method !== 'Unpaid / Debt');
+
+        if (botToken && masterChatId && validPayments.length > 0) {
+          const { data: liveWallets } = await supabase.from('wallets').select('name, balance').eq('branch_id', activeBranchId);
+          const formatBal = (n: number) => new Intl.NumberFormat('en-US').format(n);
+
+          let msg = `🛍️ *NEW SALE PAYMENT RECEIVED*\n`;
+          msg += `🏬 Branch ID: *${activeBranchId}*\n`;
+          msg += `📅 Date: ${new Date().toLocaleString('en-GB')}\n\n`;
+
+          msg += `👤 *Customer:* ${finalCustomerName}\n`;
+          msg += `🛒 *Order:* ${combinedRiceTypes}\n\n`;
+
+          msg += `📥 *Wallet Impact:*\n`;
+          validPayments.forEach(p => {
+            const amt = p.face_amount;
+            if (amt === 0) return;
+            const symbol = p.method.includes('$') ? '$' : '៛';
+            const wallet = liveWallets?.find((w: any) => w.name === p.method);
+            const prefix = amt > 0 ? '+' : ''; // Negative amounts already have a '-'
+            
+            msg += `• Wallet: ${p.method}\n`;
+            msg += `• Amount: ${prefix}${formatBal(amt)} ${symbol}\n`;
+            if (wallet) msg += `• Balance After: *${formatBal(wallet.balance)} ${symbol}*\n\n`;
+          });
+
+          const tgPayload: any = { chat_id: masterChatId, text: msg.trim(), parse_mode: 'Markdown' };
+          if (targetThreadId) tgPayload.message_thread_id = targetThreadId;
+
+          fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(tgPayload)
+          }).catch(console.error);
+        }
+      } catch (teleErr) { console.error("Telegram Sale Alert Error", teleErr); }
+
       const currentDate = new Date();
       setCompletedSale({
         invoiceNo: activeTxId, 
@@ -2063,7 +2215,7 @@ export default function POSPage() {
       showToast('error', 'System Error', err.message || String(err));
     } finally {
       setIsProcessing(false);
-      setPaymentRows([{ id: Date.now(), method: 'Cash ៛', amount: '', isAuto: true }]);
+      setPaymentRows([{ id: Date.now(), method: POS_DELIVERY_WALLETS[0] as string, amount: '', isAuto: true }]);
     }
   }
 
@@ -2258,29 +2410,22 @@ export default function POSPage() {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1 }}>
             <span style={{ fontSize: '11px', color: '#64748b', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Receive</span>
-            <button onClick={() => setPaymentRows([...paymentRows, { id: Date.now(), method: 'Cash ៛', amount: '', isAuto: false }])} style={{ background: '#e0f2fe', color: '#0284c7', border: 'none', borderRadius: '4px', fontSize: '10px', fontWeight: 'bold', padding: '4px 8px', cursor: 'pointer' }}>+ Split</button>
+            <button onClick={() => setPaymentRows([...paymentRows, { id: Date.now(), method: POS_DELIVERY_WALLETS[0] as string, amount: '', isAuto: false }])} style={{ background: '#e0f2fe', color: '#0284c7', border: 'none', borderRadius: '4px', fontSize: '10px', fontWeight: 'bold', padding: '4px 8px', cursor: 'pointer' }}>+ Split</button>
           </div>
         </div>
         
         {paymentRows.map((row, index) => (
           <div key={row.id} style={{ display: 'flex', gap: '6px', marginBottom: '6px', alignItems: 'center' }}>
-            <select 
+            <WalletDropdown 
               value={row.method} 
-              onChange={e => {
+              options={POS_DELIVERY_WALLETS} 
+              onChange={(val: string) => {
                 const newRows = [...paymentRows];
-                newRows[index].method = e.target.value;
+                newRows[index].method = val;
                 setPaymentRows(newRows);
               }}
-              className="saas-input"
-              style={{ width: '45%', cursor: 'pointer', padding: '8px' }}
-            >
-              <option value="Cash ៛">💵 Cash ៛</option>
-              <option value="Cash $">💵 Cash $</option>
-              <option value="QR ៛">📱 QR ៛</option>
-              <option value="QR $">📱 QR $</option>
-              <option value="Mom QR ៛">👩 Mom QR ៛</option>
-              <option value="Mom QR $">👩 Mom QR $</option>
-            </select>
+              style={{ width: '55%', height: '40px' }} 
+            />
             
             <div style={{ flex: 1 }}>
               <CurrencyInput 
@@ -4582,11 +4727,12 @@ export default function POSPage() {
                     </div>
                     <div style={{ flex: 1, minWidth: '120px' }}>
                       <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '6px' }}>Payment Method</label>
-                      <select value={importForm.payment_method} onChange={e => setImportForm({...importForm, payment_method: e.target.value})} className="saas-input" style={{ cursor: 'pointer' }}>
-                        <option value="Cash ៛">💵 Cash ៛</option>
-                        <option value="Cash $">💵 Cash $</option>
-                        <option value="QR ៛">📱 QR ៛</option>
-                      </select>
+                      <WalletDropdown 
+                        value={importForm.payment_method} 
+                        options={POS_DELIVERY_WALLETS} 
+                        onChange={(val: string) => setImportForm({...importForm, payment_method: val})} 
+                        style={{ width: '100%', height: '42px' }} 
+                      />
                     </div>
                   </div>
                 </div>
