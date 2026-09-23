@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
+import { createPortal } from 'react-dom'
 import { supabase } from '@/lib/supabaseClient'
 import * as htmlToImage from 'html-to-image'
 import { useFocusRefresh } from '@/lib/useFocusRefresh'
@@ -10,7 +11,7 @@ import { CurrencyInput } from '@/components/Inputs'
 import { PaymentRow } from '@/types'
 import TableSkeleton from '@/components/TableSkeleton'
 import EmptyState from '@/components/EmptyState'
-import { useBranch } from '@/components/BranchContext' // 🔥 GLOBAL MEMORY IMPORTED
+import { useBranch } from '@/components/BranchContext' 
 import { COGS_PAYMENT_WALLETS } from '@/lib/walletConstants'
 import { TELEGRAM_CONFIG } from '@/lib/telegramConfig'
 
@@ -21,50 +22,48 @@ function WalletDropdown({ value, options, onChange, style }: any) {
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
+      // Allow clicking inside the menu without closing it
+      if (document.getElementById('wallet-dropdown-portal')?.contains(event.target as Node)) return;
       if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) setIsOpen(false);
     };
-    
     const handleScroll = (event: Event) => {
-      if (dropdownRef.current && dropdownRef.current.contains(event.target as Node)) return;
+      // Allow scrolling inside the portal menu without closing it!
+      if (document.getElementById('wallet-dropdown-portal')?.contains(event.target as Node)) return;
       setIsOpen(false);
     };
 
-    document.addEventListener('mousedown', handleClickOutside);
-    window.addEventListener('scroll', handleScroll, true); 
+    if (isOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+      window.addEventListener('scroll', handleScroll, true); 
+    }
+    
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
       window.removeEventListener('scroll', handleScroll, true);
     };
-  }, []);
+  }, [isOpen]);
 
-  const handleToggle = () => {
+  const handleToggle = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
     if (!isOpen && dropdownRef.current) {
       const rect = dropdownRef.current.getBoundingClientRect();
       const menuHeight = 220; 
       const spaceBelow = window.innerHeight - rect.bottom;
       
-      if (spaceBelow < menuHeight) {
-        setMenuStyles({
-          position: 'fixed',
-          bottom: window.innerHeight - rect.top + 4,
-          left: rect.left,
-          width: rect.width,
-          zIndex: 999999
-        });
-      } else {
-        setMenuStyles({
-          position: 'fixed',
-          top: rect.bottom + 4,
-          left: rect.left,
-          width: rect.width,
-          zIndex: 999999
-        });
-      }
+      setMenuStyles({
+        position: 'fixed',
+        top: spaceBelow < menuHeight ? rect.top - menuHeight - 4 : rect.bottom + 4,
+        left: rect.left,
+        width: rect.width,
+        zIndex: 2147483647 // 🚀 Maximum z-index to break out of mobile modals
+      });
     }
     setIsOpen(!isOpen);
   };
 
   const getIcon = (val: string) => {
+    if (!val) return '💳';
     if (val.includes('ABA')) return '📱';
     if (val.includes('Chest')) return '🗄️';
     if (val.includes('Cash')) return '💵';
@@ -86,38 +85,40 @@ function WalletDropdown({ value, options, onChange, style }: any) {
         }}
       >
         <span style={{ display: 'flex', alignItems: 'center', gap: '8px', overflow: 'hidden', whiteSpace: 'nowrap' }}>
-          <span>{getIcon(value)}</span> {value}
+          <span>{getIcon(value || '')}</span> {value}
         </span>
         <span style={{ fontSize: '10px', color: '#94a3b8', transform: isOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s', flexShrink: 0, marginLeft: '4px' }}>▼</span>
       </div>
       
-      {isOpen && (
-        <div className="hide-scrollbar" style={{ 
+      {isOpen && typeof document !== 'undefined' && createPortal(
+        <div id="wallet-dropdown-portal" style={{ 
           ...menuStyles,
           background: '#fff', border: '1px solid #e2e8f0', borderRadius: '12px', 
-          boxShadow: '0 10px 25px -5px rgba(0,0,0,0.1), 0 8px 10px -6px rgba(0,0,0,0.1)', 
-          overflowY: 'auto', maxHeight: '220px',
+          boxShadow: '0 10px 25px -5px rgba(0,0,0,0.1), 0 8px 10px -6px rgba(0,0,0,0.1)', overflow: 'hidden',
           display: 'flex', flexDirection: 'column', padding: '4px'
         }}>
-          {options.map((opt: string) => (
-            <div 
-              key={opt}
-              onClick={(e) => { e.stopPropagation(); onChange(opt); setIsOpen(false); }}
-              style={{ 
-                padding: '10px 12px', cursor: 'pointer', fontSize: '13px',
-                display: 'flex', alignItems: 'center', gap: '8px',
-                background: value === opt ? '#f8fafc' : '#fff',
-                borderRadius: '8px', color: value === opt ? '#0f172a' : '#475569',
-                fontWeight: value === opt ? 'bold' : 'normal', transition: 'background 0.1s',
-                whiteSpace: 'nowrap'
-              }}
-              onMouseEnter={(e) => (e.currentTarget.style.background = '#f1f5f9')}
-              onMouseLeave={(e) => (e.currentTarget.style.background = value === opt ? '#f8fafc' : '#fff')}
-            >
-              <span>{getIcon(opt)}</span> {opt}
-            </div>
-          ))}
-        </div>
+          <div className="hide-scrollbar" style={{ maxHeight: '210px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '2px' }}>
+            {options.map((opt: string) => (
+              <div 
+                key={opt}
+                onClick={(e) => { e.stopPropagation(); onChange(opt); setIsOpen(false); }}
+                style={{ 
+                  padding: '10px 12px', cursor: 'pointer', fontSize: '13px',
+                  display: 'flex', alignItems: 'center', gap: '8px',
+                  background: value === opt ? '#f8fafc' : '#fff',
+                  borderRadius: '8px', color: value === opt ? '#0f172a' : '#475569',
+                  fontWeight: value === opt ? 'bold' : 'normal', transition: 'background 0.1s',
+                  whiteSpace: 'nowrap'
+                }}
+                onMouseEnter={(e) => (e.currentTarget.style.background = '#f1f5f9')}
+                onMouseLeave={(e) => (e.currentTarget.style.background = value === opt ? '#f8fafc' : '#fff')}
+              >
+                <span>{getIcon(opt)}</span> {opt}
+              </div>
+            ))}
+          </div>
+        </div>,
+        document.body
       )}
     </div>
   );
@@ -136,6 +137,7 @@ export default function CogsReportPage() {
   const [persOweRiel, setPersOweRiel] = useState<number>(0)
   const [persOweUsd, setPersOweUsd] = useState<number>(0)
   const [liveMomLiability, setLiveMomLiability] = useState<number>(0) 
+  const [liveWallets, setLiveWallets] = useState<any[]>([]) // 🚀 NEW LIVE WALLETS LIST
 
   // Navigation States
   const [activeMainTab, setActiveMainTab] = useState<'report' | 'pending' | 'history'>('report')
@@ -159,6 +161,19 @@ export default function CogsReportPage() {
 
   // Inline History States
   const [inlinePayments, setInlinePayments] = useState<Record<string, PaymentRow[]>>({})
+
+  // 🔥 SMART DEFAULT WALLET CALCULATOR
+  const defaultPaymentMethod = useMemo(() => {
+    if (liveWallets.length === 0) return COGS_PAYMENT_WALLETS[0];
+    if (activeOwnerTab === 'mom') {
+      const momW = liveWallets.find(w => w.name.toLowerCase().includes('mom'));
+      if (momW) return momW.name;
+    } else {
+      const radW = liveWallets.find(w => w.name.toLowerCase().includes('radiant avail'));
+      if (radW) return radW.name;
+    }
+    return liveWallets[0].name;
+  }, [liveWallets, activeOwnerTab]);
 
   useEffect(() => {
     const tzoffset = (new Date()).getTimezoneOffset() * 60000;
@@ -237,13 +252,13 @@ export default function CogsReportPage() {
     // when switching branches to prevent Cross-Tenant Ghost Settlements!
     setSelectedDays([]);
     setInlinePayments({});
-    setBulkPaymentRows([{ id: Date.now(), method: COGS_PAYMENT_WALLETS[0], amount: '' }]);
+    setBulkPaymentRows([{ id: Date.now(), method: defaultPaymentMethod, amount: '' }]);
     setBulkModalOpen(false);
 
     if (fromDate && toDate) {
       fetchReportData();
     }
-  }, [fetchReportData, fromDate, toDate]) 
+  }, [fetchReportData, fromDate, toDate, defaultPaymentMethod])
 
   useFocusRefresh(fetchReportData);
 
@@ -643,7 +658,7 @@ export default function CogsReportPage() {
       if (isBulk) {
         setBulkModalOpen(false);
         setSelectedDays([]);
-        setBulkPaymentRows([{ id: Date.now(), method: COGS_PAYMENT_WALLETS[0], amount: '' }]);
+        setBulkPaymentRows([{ id: Date.now(), method: defaultPaymentMethod, amount: '' }]);
       } else {
         setInlinePayments(prev => { const n = {...prev}; delete n[targetDays[0].key]; return n; });
       }
@@ -672,24 +687,24 @@ export default function CogsReportPage() {
   const liveBulkRemaining = bulkTotalDue - liveBulkReceived;
 
   const getInlinePaymentState = (key: string, owed: number) => {
-    return inlinePayments[key] || [{ id: 1, method: COGS_PAYMENT_WALLETS[0], amount: owed }];
+    return inlinePayments[key] || [{ id: 1, method: defaultPaymentMethod, amount: owed }];
   }
   const updateInlineRow = (key: string, rowId: number, field: string, value: any, owed: number) => {
     setInlinePayments(prev => {
-      const rows = prev[key] ? [...prev[key]] : [{ id: 1, method: COGS_PAYMENT_WALLETS[0], amount: owed }];
+      const rows = prev[key] ? [...prev[key]] : [{ id: 1, method: defaultPaymentMethod, amount: owed }];
       const newRows = rows.map(r => r.id === rowId ? { ...r, [field]: value } : r);
       return { ...prev, [key]: newRows };
     });
   }
   const addInlineSplit = (key: string, owed: number) => {
     setInlinePayments(prev => {
-      const rows = prev[key] ? [...prev[key]] : [{ id: 1, method: COGS_PAYMENT_WALLETS[0], amount: owed }];
-      return { ...prev, [key]: [...rows, { id: Date.now(), method: COGS_PAYMENT_WALLETS[0], amount: '' }] };
+      const rows = prev[key] ? [...prev[key]] : [{ id: 1, method: defaultPaymentMethod, amount: owed }];
+      return { ...prev, [key]: [...rows, { id: Date.now(), method: defaultPaymentMethod, amount: '' }] };
     });
   }
   const removeInlineSplit = (key: string, rowId: number, owed: number) => {
     setInlinePayments(prev => {
-      const rows = prev[key] ? [...prev[key]] : [{ id: 1, method: COGS_PAYMENT_WALLETS[0], amount: owed }];
+      const rows = prev[key] ? [...prev[key]] : [{ id: 1, method: defaultPaymentMethod, amount: owed }];
       return { ...prev, [key]: rows.filter(r => r.id !== rowId) };
     });
   }
@@ -1065,7 +1080,7 @@ export default function CogsReportPage() {
                                     <div style={{ display: 'flex', gap: '4px' }}>
                                       <WalletDropdown 
                                         value={row.method} 
-                                        options={COGS_PAYMENT_WALLETS} 
+                                        options={liveWallets.length > 0 ? liveWallets.map(w => w.name) : COGS_PAYMENT_WALLETS} 
                                         onChange={(val: string) => updateInlineRow(d.key, row.id, 'method', val, remaining)} 
                                         style={{ flex: 1, height: '40px' }} 
                                       />
@@ -1134,14 +1149,14 @@ export default function CogsReportPage() {
             <div style={{ marginBottom: '24px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
                 <label style={{ fontSize: '13px', color: '#475569', fontWeight: 'bold' }}>Payment Method(s)</label>
-                <button onClick={() => setBulkPaymentRows([...bulkPaymentRows, { id: Date.now(), method: COGS_PAYMENT_WALLETS[0], amount: '' }])} style={{ background: '#e0f2fe', color: '#0284c7', border: 'none', borderRadius: '4px', fontSize: '12px', padding: '6px 10px', cursor: 'pointer', fontWeight: 'bold' }}>+ Split</button>
+                <button onClick={() => setBulkPaymentRows([...bulkPaymentRows, { id: Date.now(), method: defaultPaymentMethod, amount: '' }])} style={{ background: '#e0f2fe', color: '#0284c7', border: 'none', borderRadius: '4px', fontSize: '12px', padding: '6px 10px', cursor: 'pointer', fontWeight: 'bold' }}>+ Split</button>
               </div>
 
               {bulkPaymentRows.map((row, index) => (
                 <div key={row.id} style={{ display: 'flex', gap: '8px', marginBottom: '12px', alignItems: 'center' }}>
                   <WalletDropdown 
                     value={row.method} 
-                    options={COGS_PAYMENT_WALLETS} 
+                    options={liveWallets.length > 0 ? liveWallets.map(w => w.name) : COGS_PAYMENT_WALLETS} 
                     onChange={(val: string) => {
                       const newRows = [...bulkPaymentRows];
                       newRows[index].method = val;
