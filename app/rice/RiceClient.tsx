@@ -268,6 +268,9 @@ export default function RiceControl() {
   // --- BATCH ENGINE STATES ---
   const [activeBatchesMap, setActiveBatchesMap] = useState<Record<number, InventoryBatch[]>>({})
   const [expandedProductId, setExpandedProductId] = useState<number | null>(null)
+  
+  // 🚀 NEW: LIVE WALLETS LIST
+  const [liveWallets, setLiveWallets] = useState<any[]>([]);
 
   // --- IMPORT FORM STATE ---
   // 🔥 FIX: Set defaults to '0' so they aren't totally blank, preventing the "Missing Data" error!
@@ -704,6 +707,10 @@ export default function RiceControl() {
     // 🔥 FILTERED BY BRANCH
     const { data } = await supabase.from('suppliers').select('*').eq('is_archived', false).eq('branch_id', activeBranchId).order('name', { ascending: true })
     if (data) setSuppliers(data)
+    
+    // 🚀 NEW: Fetch dynamic wallets
+    const { data: wallets } = await supabase.from('wallets').select('*').eq('branch_id', activeBranchId).order('id', { ascending: true })
+    if (wallets) setLiveWallets(wallets)
   }
 
   async function fetchImports() {
@@ -2274,6 +2281,7 @@ export default function RiceControl() {
             suppliers={suppliers} 
             activeBatchesMap={activeBatchesMap} 
             activeBranchId={activeBranchId} 
+            liveWallets={liveWallets} // 🚀 Pass live wallets down!
           />
         </div>
       )}
@@ -2418,7 +2426,7 @@ export default function RiceControl() {
                       <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '6px' }}>Payment Method</label>
                       <WalletDropdown 
                         value={importForm.payment_method} 
-                        options={COGS_PAYMENT_WALLETS} 
+                        options={liveWallets.length > 0 ? liveWallets.map(w => w.name) : COGS_PAYMENT_WALLETS} 
                         onChange={(val: string) => setImportForm({...importForm, payment_method: val})} 
                         style={{ width: '100%', height: '42px' }} 
                       />
@@ -3061,14 +3069,14 @@ export default function RiceControl() {
         <div style={{ marginBottom: '24px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
             <label className="saas-card-title" style={{ margin: 0 }}>Payment Method(s)</label>
-            <button onClick={() => setPendingPaymentRows([...pendingPaymentRows, { id: Date.now(), method: COGS_PAYMENT_WALLETS[0], amount: '' }])} className="saas-btn" style={{ background: '#e0f2fe', color: '#0284c7', padding: '6px 10px', fontSize: '12px' }}>+ Split</button>
+            <button onClick={() => setPendingPaymentRows([...pendingPaymentRows, { id: Date.now(), method: liveWallets.length > 0 ? liveWallets[0].name : COGS_PAYMENT_WALLETS[0], amount: '' }])} className="saas-btn" style={{ background: '#e0f2fe', color: '#0284c7', padding: '6px 10px', fontSize: '12px' }}>+ Split</button>
           </div>
 
           {pendingPaymentRows.map((row, index) => (
             <div key={row.id} style={{ display: 'flex', gap: '8px', marginBottom: '12px', alignItems: 'center' }}>
               <WalletDropdown 
                 value={row.method} 
-                options={COGS_PAYMENT_WALLETS} 
+                options={liveWallets.length > 0 ? liveWallets.map(w => w.name) : COGS_PAYMENT_WALLETS} 
                 onChange={(val: string) => {
                   const newRows = [...pendingPaymentRows];
                   newRows[index].method = val;
@@ -3716,7 +3724,7 @@ export default function RiceControl() {
   );
 }
 // --- RETURN RICE COMPONENT ---
-function ReturnExchangeTab({ products, suppliers, activeBatchesMap, activeBranchId }: { products: Product[], suppliers: any[], activeBatchesMap: Record<number, InventoryBatch[]>, activeBranchId: number }) {
+function ReturnExchangeTab({ products, suppliers, activeBatchesMap, activeBranchId, liveWallets }: { products: Product[], suppliers: any[], activeBatchesMap: Record<number, InventoryBatch[]>, activeBranchId: number, liveWallets?: any[] }) {
   const [returnItems, setReturnItems] = useState<{ id: number, productId: string, batchId: number | null, bags: number | '', looseKg: number | '', unitPrice: number | '' }[]>([
     { id: Date.now(), productId: '', batchId: null, bags: '', looseKg: '', unitPrice: '' }
   ]);
@@ -3727,7 +3735,8 @@ function ReturnExchangeTab({ products, suppliers, activeBatchesMap, activeBranch
   const [supplierSearch, setSupplierSearch] = useState('');
 
   // Dual Currency Refund States
-  const [refundDestination, setRefundDestination] = useState<string>(STOCK_RETURN_DESTINATIONS[0]);
+  const dynamicDestinations = ['Reduction in AP Debt', ...(liveWallets || []).map(w => w.name)];
+  const [refundDestination, setRefundDestination] = useState<string>(dynamicDestinations[0]);
   const [refundKhr, setRefundKhr] = useState<number | ''>('');
   const [refundUsd, setRefundUsd] = useState<number | ''>('');
   const [isProcessing, setIsProcessing] = useState(false);
@@ -4093,7 +4102,7 @@ function ReturnExchangeTab({ products, suppliers, activeBatchesMap, activeBranch
             <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '6px' }}>Destination Vault</label>
             <WalletDropdown 
               value={refundDestination} 
-              options={STOCK_RETURN_DESTINATIONS} 
+              options={dynamicDestinations} 
               onChange={(val: string) => setRefundDestination(val)} 
               style={{ width: '100%', height: '42px', border: '2px solid #10b981', borderRadius: '8px' }} 
             />

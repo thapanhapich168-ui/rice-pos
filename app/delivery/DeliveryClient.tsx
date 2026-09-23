@@ -14,6 +14,8 @@ import { POS_DELIVERY_WALLETS } from '@/lib/walletConstants'
 
 import { TELEGRAM_CONFIG } from '@/lib/telegramConfig'
 
+import { createPortal } from 'react-dom'
+
 function WalletDropdown({ value, options, onChange, style }: any) {
   const [isOpen, setIsOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -21,29 +23,37 @@ function WalletDropdown({ value, options, onChange, style }: any) {
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
+      // Allow clicking inside the menu without closing it
+      if (document.getElementById('wallet-dropdown-portal')?.contains(event.target as Node)) return;
       if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) setIsOpen(false);
     };
-    // Automatically close the menu if the user scrolls the table or window
     const handleScroll = () => setIsOpen(false);
 
-    document.addEventListener('mousedown', handleClickOutside);
-    window.addEventListener('scroll', handleScroll, true); 
+    if (isOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+      window.addEventListener('scroll', handleScroll, true); 
+    }
+    
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
       window.removeEventListener('scroll', handleScroll, true);
     };
-  }, []);
+  }, [isOpen]);
 
-  const handleToggle = () => {
+  const handleToggle = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
     if (!isOpen && dropdownRef.current) {
-      // Calculate exact physical position on the screen to avoid table clipping
       const rect = dropdownRef.current.getBoundingClientRect();
+      const menuHeight = 220; 
+      const spaceBelow = window.innerHeight - rect.bottom;
+      
       setMenuStyles({
         position: 'fixed',
-        top: rect.bottom + 4,
+        top: spaceBelow < menuHeight ? rect.top - menuHeight - 4 : rect.bottom + 4,
         left: rect.left,
         width: rect.width,
-        zIndex: 999999
+        zIndex: 2147483647 // 🚀 Absolute maximum z-index to break out of mobile modals
       });
     }
     setIsOpen(!isOpen);
@@ -75,32 +85,35 @@ function WalletDropdown({ value, options, onChange, style }: any) {
         <span style={{ fontSize: '10px', color: '#94a3b8', transform: isOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s', flexShrink: 0, marginLeft: '4px' }}>▼</span>
       </div>
       
-      {isOpen && (
-        <div style={{ 
+      {isOpen && typeof document !== 'undefined' && createPortal(
+        <div id="wallet-dropdown-portal" style={{ 
           ...menuStyles,
           background: '#fff', border: '1px solid #e2e8f0', borderRadius: '12px', 
           boxShadow: '0 10px 25px -5px rgba(0,0,0,0.1), 0 8px 10px -6px rgba(0,0,0,0.1)', overflow: 'hidden',
           display: 'flex', flexDirection: 'column', padding: '4px'
         }}>
-          {options.map((opt: string) => (
-            <div 
-              key={opt}
-              onClick={(e) => { e.stopPropagation(); onChange(opt); setIsOpen(false); }}
-              style={{ 
-                padding: '10px 12px', cursor: 'pointer', fontSize: '13px',
-                display: 'flex', alignItems: 'center', gap: '8px',
-                background: value === opt ? '#f8fafc' : '#fff',
-                borderRadius: '8px', color: value === opt ? '#0f172a' : '#475569',
-                fontWeight: value === opt ? 'bold' : 'normal', transition: 'background 0.1s',
-                whiteSpace: 'nowrap'
-              }}
-              onMouseEnter={(e) => (e.currentTarget.style.background = '#f1f5f9')}
-              onMouseLeave={(e) => (e.currentTarget.style.background = value === opt ? '#f8fafc' : '#fff')}
-            >
-              <span>{getIcon(opt)}</span> {opt}
-            </div>
-          ))}
-        </div>
+          <div className="hide-scrollbar" style={{ maxHeight: '210px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '2px' }}>
+            {options.map((opt: string) => (
+              <div 
+                key={opt}
+                onClick={(e) => { e.stopPropagation(); onChange(opt); setIsOpen(false); }}
+                style={{ 
+                  padding: '10px 12px', cursor: 'pointer', fontSize: '13px',
+                  display: 'flex', alignItems: 'center', gap: '8px',
+                  background: value === opt ? '#f8fafc' : '#fff',
+                  borderRadius: '8px', color: value === opt ? '#0f172a' : '#475569',
+                  fontWeight: value === opt ? 'bold' : 'normal', transition: 'background 0.1s',
+                  whiteSpace: 'nowrap'
+                }}
+                onMouseEnter={(e) => (e.currentTarget.style.background = '#f1f5f9')}
+                onMouseLeave={(e) => (e.currentTarget.style.background = value === opt ? '#f8fafc' : '#fff')}
+              >
+                <span>{getIcon(opt)}</span> {opt}
+              </div>
+            ))}
+          </div>
+        </div>,
+        document.body
       )}
     </div>
   );
