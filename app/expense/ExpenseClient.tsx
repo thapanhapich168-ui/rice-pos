@@ -314,8 +314,8 @@ export default function ExpenseDashboard() {
   const createNewExpense = (): PendingExpense => ({
     id: Date.now().toString() + Math.random().toString().slice(2, 6),
     remarks: '',
-    spender: 'Pich',
-    payments: [{ id: Date.now(), method: EXPENSE_WALLETS[0] as string, amount: '' }]
+    spender: 'Both',
+    payments: [{ id: Date.now(), method: 'ABA Both ៛', amount: '' }]
   });
 
   const [pendingPersonal, setPendingPersonal] = useState<PendingExpense[]>([])
@@ -498,7 +498,7 @@ export default function ExpenseDashboard() {
   const addPaymentSplit = (expId: string) => {
     setActiveList(getActiveList().map(exp => {
       if (exp.id === expId) {
-        return { ...exp, payments: [{ id: Date.now(), method: EXPENSE_WALLETS[0] as string, amount: '' }, ...exp.payments] }
+        return { ...exp, payments: [{ id: Date.now(), method: 'ABA Both ៛', amount: '' }, ...exp.payments] }
       }
       return exp;
     }));

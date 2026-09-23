@@ -491,7 +491,7 @@ export default function POSPage() {
   const [cartCustomerEditForm, setCartCustomerEditForm] = useState({ name: '', phone: '', location: '', google_map: '' })
 
   const [paymentRows, setPaymentRows] = useState<{id: number, method: string, amount: number | '', isAuto?: boolean}[]>([
-    { id: Date.now(), method: POS_DELIVERY_WALLETS[0] as string, amount: '', isAuto: true }
+    { id: Date.now(), method: 'Cash Chest ៛', amount: '', isAuto: true }
   ]);
 
   const [isCreateCustomerModalOpen, setIsCreateCustomerModalOpen] = useState(false)
@@ -662,7 +662,7 @@ export default function POSPage() {
       setCart([]);
       setSelectedCustomerId('');
       setCartCustomerNameOverride('');
-      setPaymentRows([{ id: Date.now(), method: POS_DELIVERY_WALLETS[0] as string, amount: '', isAuto: true }]);
+      setPaymentRows([{ id: Date.now(), method: 'Cash Chest ៛', amount: '', isAuto: true }]);
       setEditingInvoiceId(null);
       setActiveFullScreen('none');
     }
@@ -1649,7 +1649,7 @@ export default function POSPage() {
     setCart([]);
     setSelectedCustomerId('');
     setCartCustomerNameOverride('');
-    setPaymentRows([{ id: Date.now(), method: POS_DELIVERY_WALLETS[0] as string, amount: '', isAuto: true }]);
+    setPaymentRows([{ id: Date.now(), method: 'Cash Chest ៛', amount: '', isAuto: true }]);
     localStorage.removeItem('pos_cart');
     window.history.replaceState({}, document.title, window.location.pathname);
   }
@@ -2215,7 +2215,7 @@ export default function POSPage() {
       showToast('error', 'System Error', err.message || String(err));
     } finally {
       setIsProcessing(false);
-      setPaymentRows([{ id: Date.now(), method: POS_DELIVERY_WALLETS[0] as string, amount: '', isAuto: true }]);
+      setPaymentRows([{ id: Date.now(), method: 'Cash Chest ៛', amount: '', isAuto: true }]);
     }
   }
 
@@ -2410,7 +2410,7 @@ export default function POSPage() {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1 }}>
             <span style={{ fontSize: '11px', color: '#64748b', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Receive</span>
-            <button onClick={() => setPaymentRows([...paymentRows, { id: Date.now(), method: POS_DELIVERY_WALLETS[0] as string, amount: '', isAuto: false }])} style={{ background: '#e0f2fe', color: '#0284c7', border: 'none', borderRadius: '4px', fontSize: '10px', fontWeight: 'bold', padding: '4px 8px', cursor: 'pointer' }}>+ Split</button>
+            <button onClick={() => setPaymentRows([...paymentRows, { id: Date.now(), method: 'Cash Chest ៛', amount: '', isAuto: false }])} style={{ background: '#e0f2fe', color: '#0284c7', border: 'none', borderRadius: '4px', fontSize: '10px', fontWeight: 'bold', padding: '4px 8px', cursor: 'pointer' }}>+ Split</button>
           </div>
         </div>
         
