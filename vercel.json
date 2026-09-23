@@ -3,6 +3,10 @@
     {
       "path": "/api/cron/telegram",
       "schedule": "0 12 * * *"
+    },
+    {
+      "path": "/api/cron/treasury",
+      "schedule": "0 12 * * *"
     }
   ]
 }
