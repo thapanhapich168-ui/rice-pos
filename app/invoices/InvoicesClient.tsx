@@ -9,6 +9,7 @@ import { useDebounce } from '@/lib/useDebounce'
 import TableSkeleton from '@/components/TableSkeleton'
 import EmptyState from '@/components/EmptyState'
 import { useBranch } from '@/components/BranchContext' // 🔥 GLOBAL MEMORY IMPORTED
+import { TELEGRAM_CONFIG } from '@/lib/telegramConfig'
 
 // --- TYPESCRIPT INTERFACES ---
 interface Invoice {
@@ -316,6 +317,32 @@ export default function InvoiceGallery() {
 
       const { error: rpcError } = await supabase.rpc('void_invoice_atomic', { p_payload: payload });
       if (rpcError) throw new Error(`Database blocked voiding: ${rpcError.message}`);
+
+      // 🔔 AUTO-SEND TELEGRAM ALERT FOR VOIDED INVOICE
+      try {
+        const botToken = TELEGRAM_CONFIG.botToken || process.env.NEXT_PUBLIC_TELEGRAM_BOT_TOKEN;
+        const masterChatId = TELEGRAM_CONFIG.chatId || process.env.NEXT_PUBLIC_TELEGRAM_CHAT_ID;
+        const targetThreadId = (TELEGRAM_CONFIG as any).reportTopics?.[activeBranchId]; // Routing to Financial Reports
+
+        if (botToken && masterChatId) {
+          let msg = `⚠️ *INVOICE VOIDED*\n`;
+          msg += `🏬 Branch ID: *${activeBranchId}*\n`;
+          msg += `📅 Date: ${new Date().toLocaleString('en-GB')}\n\n`;
+
+          msg += `🧾 *Invoice ID:* #${invoiceId.replace('INV-', '').replace('RET-', '')}\n`;
+          if (targetInvoice?.customer_name) {
+            msg += `👤 *Customer:* ${targetInvoice.customer_name}\n`;
+          }
+          msg += `\n🔄 *Action:* Invoice permanently voided. Stock restored and financial ledgers reversed.`;
+
+          const tgPayload: any = { chat_id: masterChatId, text: msg, parse_mode: 'Markdown' };
+          if (targetThreadId) tgPayload.message_thread_id = targetThreadId;
+
+          fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(tgPayload)
+          }).catch(console.error);
+        }
+      } catch (teleErr) { console.error("Telegram Void Alert Error", teleErr); }
 
       showToast('success', 'Void Successful', `Transaction ${invoiceId} was permanently deleted and stock was correctly restored.`);
       setSelectedInvoices(new Set());

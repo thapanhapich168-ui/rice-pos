@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState, useEffect, useRef, useCallback } from 'react'
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { createPortal } from 'react-dom' // 👈 🔥 ADD THIS LINE!
 import { supabase } from '@/lib/supabaseClient'
 import { useFocusRefresh } from '@/lib/useFocusRefresh'
@@ -15,6 +15,116 @@ import EmptyState from '@/components/EmptyState'
 import Modal from '@/components/Modal'
 import { useBranch } from '@/components/BranchContext' // 🔥 GLOBAL MEMORY IMPORTED
 import { TELEGRAM_CONFIG } from '@/lib/telegramConfig'
+import { COGS_PAYMENT_WALLETS, STOCK_RETURN_DESTINATIONS } from '@/lib/walletConstants'
+
+function WalletDropdown({ value, options, onChange, style }: any) {
+  const [isOpen, setIsOpen] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+  const [menuStyles, setMenuStyles] = useState<any>({});
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) setIsOpen(false);
+    };
+    
+    const handleScroll = (event: Event) => {
+      if (dropdownRef.current && dropdownRef.current.contains(event.target as Node)) return;
+      setIsOpen(false);
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    window.addEventListener('scroll', handleScroll, true); 
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      window.removeEventListener('scroll', handleScroll, true);
+    };
+  }, []);
+
+  const handleToggle = () => {
+    if (!isOpen && dropdownRef.current) {
+      const rect = dropdownRef.current.getBoundingClientRect();
+      const menuHeight = 220; 
+      const spaceBelow = window.innerHeight - rect.bottom;
+      
+      if (spaceBelow < menuHeight) {
+        setMenuStyles({
+          position: 'fixed',
+          bottom: window.innerHeight - rect.top + 4,
+          left: rect.left,
+          width: rect.width,
+          zIndex: 999999
+        });
+      } else {
+        setMenuStyles({
+          position: 'fixed',
+          top: rect.bottom + 4,
+          left: rect.left,
+          width: rect.width,
+          zIndex: 999999
+        });
+      }
+    }
+    setIsOpen(!isOpen);
+  };
+
+  const getIcon = (val: string) => {
+    if (val.includes('ABA')) return '📱';
+    if (val.includes('Chest')) return '🗄️';
+    if (val.includes('Cash')) return '💵';
+    if (val.includes('Availability') || val.includes('Mom')) return '👩';
+    if (val.includes('Debt')) return '📉';
+    return '💳';
+  };
+
+  return (
+    <div ref={dropdownRef} style={{ position: 'relative', ...style }}>
+      <div 
+        onClick={handleToggle}
+        style={{ 
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          padding: '0 12px', background: '#fff', border: '1px solid #cbd5e1', 
+          borderRadius: '8px', cursor: 'pointer', height: '100%',
+          fontSize: '13px', fontWeight: 'bold', color: '#334155',
+          boxShadow: 'inset 0 1px 2px rgba(0,0,0,0.02)'
+        }}
+      >
+        <span style={{ display: 'flex', alignItems: 'center', gap: '8px', overflow: 'hidden', whiteSpace: 'nowrap' }}>
+          <span>{getIcon(value)}</span> {value}
+        </span>
+        <span style={{ fontSize: '10px', color: '#94a3b8', transform: isOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s', flexShrink: 0, marginLeft: '4px' }}>▼</span>
+      </div>
+      
+      {isOpen && (
+        <div className="hide-scrollbar" style={{ 
+          ...menuStyles,
+          background: '#fff', border: '1px solid #e2e8f0', borderRadius: '12px', 
+          boxShadow: '0 10px 25px -5px rgba(0,0,0,0.1), 0 8px 10px -6px rgba(0,0,0,0.1)', 
+          overflowY: 'auto', maxHeight: '220px',
+          display: 'flex', flexDirection: 'column', padding: '4px'
+        }}>
+          {options.map((opt: string) => (
+            <div 
+              key={opt}
+              onClick={(e) => { e.stopPropagation(); onChange(opt); setIsOpen(false); }}
+              style={{ 
+                padding: '10px 12px', cursor: 'pointer', fontSize: '13px',
+                display: 'flex', alignItems: 'center', gap: '8px',
+                background: value === opt ? '#f8fafc' : '#fff',
+                borderRadius: '8px', color: value === opt ? '#0f172a' : '#475569',
+                fontWeight: value === opt ? 'bold' : 'normal', transition: 'background 0.1s',
+                whiteSpace: 'nowrap'
+              }}
+              onMouseEnter={(e) => (e.currentTarget.style.background = '#f1f5f9')}
+              onMouseLeave={(e) => (e.currentTarget.style.background = value === opt ? '#f8fafc' : '#fff')}
+            >
+              <span>{getIcon(opt)}</span> {opt}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 // --- DND-KIT IMPORTS ---
 import {
@@ -151,7 +261,7 @@ export default function RiceControl() {
   const [productSearch, setProductSearch] = useState('')
 
   // --- VIEWS & TABS STATE ---
-  const [activeView, setActiveView] = useState<'retail' | 'wholesale' | 'import' | 'pending' | 'suppliers'>('retail')
+  const [activeView, setActiveView] = useState<'retail' | 'wholesale' | 'import' | 'pending' | 'suppliers' | 'returns'>('retail')
   const [activeCategory, setActiveCategory] = useState<string>('All')
   const [categoryOrder, setCategoryOrder] = useState<string[]>(RICE_CATEGORIES)
 
@@ -161,7 +271,7 @@ export default function RiceControl() {
 
   // --- IMPORT FORM STATE ---
   // 🔥 FIX: Set defaults to '0' so they aren't totally blank, preventing the "Missing Data" error!
-  const [importForm, setImportForm] = useState({ supplier_id: '', product_id: '', qty: '0', unit_cost: '0', paid_amount: '0', payment_method: 'Cash ៛' })
+  const [importForm, setImportForm] = useState({ supplier_id: '', product_id: '', qty: '0', unit_cost: '0', paid_amount: '0', payment_method: COGS_PAYMENT_WALLETS[0] as string })
   
   // 🔥 NEW: EDIT IMPORT STATE
   const [editImportModal, setEditImportModal] = useState<{isOpen: boolean, record: any}>({ isOpen: false, record: null });
@@ -172,7 +282,7 @@ export default function RiceControl() {
   const [newSupplier, setNewSupplier] = useState({ name: '', phone: '', location: '' })
   
   const [payPendingModal, setPayPendingModal] = useState<{isOpen: boolean, record: any, totalDue: number}>({ isOpen: false, record: null, totalDue: 0 })
-  const [pendingPaymentRows, setPendingPaymentRows] = useState<PaymentRow[]>([{ id: Date.now(), method: 'Cash ៛', amount: '' }]);
+  const [pendingPaymentRows, setPendingPaymentRows] = useState<PaymentRow[]>([{ id: Date.now(), method: COGS_PAYMENT_WALLETS[0], amount: '' }]);
 
   const [repackModal, setRepackModal] = useState<{ isOpen: boolean, product: Product | null }>({ isOpen: false, product: null });
 
@@ -405,11 +515,11 @@ export default function RiceControl() {
     setIsProductDropdownOpen(false);
     setSupplierSearch('');
     setProductSearch('');
-    setImportForm({ supplier_id: '', product_id: '', qty: '0', unit_cost: '0', paid_amount: '0', payment_method: 'Cash ៛' });
+    setImportForm({ supplier_id: '', product_id: '', qty: '0', unit_cost: '0', paid_amount: '0', payment_method: COGS_PAYMENT_WALLETS[0] as string });
     setIsAddSupplierOpen(false);
     setNewSupplier({ name: '', phone: '', location: '' });
     setPayPendingModal({isOpen: false, record: null, totalDue: 0});
-    setPendingPaymentRows([{ id: Date.now(), method: 'Cash ៛', amount: '' }]);
+    setPendingPaymentRows([{ id: Date.now(), method: COGS_PAYMENT_WALLETS[0], amount: '' }]);
     setRepackModal({ isOpen: false, product: null });
     setIsAddModalOpen(false);
     setNewItem({ name: '', price: 0 as any, cost_price: 0 as any, weight: 50 as any, stock: 0 as any, min_stock_level: 10 as any });
@@ -944,7 +1054,49 @@ export default function RiceControl() {
       const { error: rpcError } = await supabase.rpc('process_stock_import', { p_payload: payload });
       if (rpcError) throw rpcError;
 
-      setImportForm({ supplier_id: '', product_id: '', qty: '0', unit_cost: '0', paid_amount: '0', payment_method: 'Cash ៛' });
+      // 🔔 AUTO-SEND TELEGRAM ALERT
+      try {
+        const botToken = TELEGRAM_CONFIG.botToken || process.env.NEXT_PUBLIC_TELEGRAM_BOT_TOKEN;
+        const masterChatId = TELEGRAM_CONFIG.chatId || process.env.NEXT_PUBLIC_TELEGRAM_CHAT_ID;
+        const targetThreadId = (TELEGRAM_CONFIG as any).reportTopics?.[activeBranchId];
+
+        if (botToken && masterChatId) {
+          const formatBal = (n: number) => new Intl.NumberFormat('en-US').format(n);
+          const { data: wallet } = await supabase.from('wallets').select('balance').eq('name', importForm.payment_method).eq('branch_id', activeBranchId).single();
+          
+          let msg = `🚚 *NEW STOCK IMPORT*\n`;
+          msg += `🏬 Branch ID: *${activeBranchId}*\n`;
+          msg += `📅 Date: ${new Date().toLocaleString('en-GB')}\n\n`;
+
+          msg += `🏢 *Supplier:* ${supplierName}\n`;
+          msg += `📦 *Product:* ${product.name} (x${qty})\n`;
+          msg += `💰 *Total Bill:* ${formatBal(totalCost)} ៛\n\n`;
+
+          msg += `📤 *Payment / Deduction:*\n`;
+          if (paidAmount > 0) {
+            const symbol = importForm.payment_method.includes('$') ? '$' : '៛';
+            msg += `• Wallet: ${importForm.payment_method}\n`;
+            msg += `• Amount Paid: -${formatBal(paidAmount)} ${symbol}\n`;
+            if (wallet) msg += `• Balance After: *${formatBal(wallet.balance)} ${symbol}*\n`;
+          } else {
+            msg += `• Amount Paid: 0 ៛\n`;
+          }
+
+          const debtAdded = totalCost - paidAmount;
+          if (debtAdded > 0) {
+            msg += `📉 *Debt Added:* ${formatBal(debtAdded)} ៛\n`;
+          }
+
+          const tgPayload: any = { chat_id: masterChatId, text: msg.trim(), parse_mode: 'Markdown' };
+          if (targetThreadId) tgPayload.message_thread_id = targetThreadId;
+
+          fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(tgPayload)
+          }).catch(console.error);
+        }
+      } catch (teleErr) { console.error("Telegram Import Alert Error", teleErr); }
+
+      setImportForm({ supplier_id: '', product_id: '', qty: '0', unit_cost: '0', paid_amount: '0', payment_method: COGS_PAYMENT_WALLETS[0] as string });
       showToast('success', 'Stock Received', `${qty} bags added to inventory. Batch logged.`);
       
       if (isPayLater) setActiveView('pending');
@@ -1010,14 +1162,57 @@ export default function RiceControl() {
         new_status: newStatus,
         total_usd_face: totalUsdFace,
         total_riel_face: totalRielFace,
-        method_strings: methodStrings.join(', ')
+        method_strings: methodStrings.join(', '),
+        // 🚀 NEW: Pass exact splits to backend for the Wallet Ledger
+        payments: pendingPaymentRows.filter(r => Number(String(r.amount).replace(/,/g, '')) > 0).map(r => ({
+          method: r.method,
+          amount: Number(String(r.amount).replace(/,/g, ''))
+        }))
       };
 
       const { error: rpcError } = await supabase.rpc('process_pending_payment', { p_payload: payload });
       if (rpcError) throw rpcError;
 
+      // 🔔 AUTO-SEND TELEGRAM ALERT
+      try {
+        const botToken = TELEGRAM_CONFIG.botToken || process.env.NEXT_PUBLIC_TELEGRAM_BOT_TOKEN;
+        const masterChatId = TELEGRAM_CONFIG.chatId || process.env.NEXT_PUBLIC_TELEGRAM_CHAT_ID;
+        const targetThreadId = (TELEGRAM_CONFIG as any).reportTopics?.[activeBranchId];
+
+        if (botToken && masterChatId) {
+          const formatBal = (n: number) => new Intl.NumberFormat('en-US').format(n);
+          const { data: liveWallets } = await supabase.from('wallets').select('name, balance').eq('branch_id', activeBranchId);
+          
+          let msg = `💸 *SUPPLIER DEBT PAYMENT*\n`;
+          msg += `🏬 Branch ID: *${activeBranchId}*\n`;
+          msg += `📅 Date: ${new Date().toLocaleString('en-GB')}\n\n`;
+
+          msg += `🏢 *Supplier:* ${supplier?.name || 'Unknown'}\n`;
+          msg += `🧾 *For Bill:* ${record.products?.name} (x${record.qty})\n\n`;
+
+          msg += `📤 *Deducted From:*\n`;
+          pendingPaymentRows.forEach(r => {
+            const amt = Number(String(r.amount).replace(/,/g, '')) || 0;
+            if (amt > 0) {
+              const symbol = r.method.includes('$') ? '$' : '៛';
+              const wallet = liveWallets?.find((w: any) => w.name === r.method);
+              msg += `• Wallet: ${r.method}\n`;
+              msg += `• Amount: -${formatBal(amt)} ${symbol}\n`;
+              if (wallet) msg += `• Balance After: *${formatBal(wallet.balance)} ${symbol}*\n\n`;
+            }
+          });
+
+          const tgPayload: any = { chat_id: masterChatId, text: msg.trim(), parse_mode: 'Markdown' };
+          if (targetThreadId) tgPayload.message_thread_id = targetThreadId;
+
+          fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(tgPayload)
+          }).catch(console.error);
+        }
+      } catch (teleErr) { console.error("Telegram Debt Payment Alert Error", teleErr); }
+
       setPayPendingModal({ isOpen: false, record: null, totalDue: 0 });
-      setPendingPaymentRows([{ id: Date.now(), method: 'Cash ៛', amount: '' }]);
+      setPendingPaymentRows([{ id: Date.now(), method: COGS_PAYMENT_WALLETS[0], amount: '' }]);
       
       if (newStatus === 'Paid') {
         showToast('success', 'Bill Cleared', 'The supplier debt has been fully settled.');
@@ -1630,6 +1825,7 @@ export default function RiceControl() {
           <button className={`saas-tab ${activeView === 'import' ? 'active' : ''}`} onClick={() => setActiveView('import')}>🚚 Receive Stock</button>
           <button className={`saas-tab ${activeView === 'pending' ? 'active' : ''}`} onClick={() => setActiveView('pending')}>⏳ Pending Payments {processedPending.length > 0 && `(${processedPending.length})`}</button>
           <button className={`saas-tab ${activeView === 'suppliers' ? 'active' : ''}`} onClick={() => setActiveView('suppliers')}>🏢 Suppliers</button>
+          <button className={`saas-tab ${activeView === 'returns' ? 'active' : ''}`} onClick={() => setActiveView('returns')}>🔄 Returns</button>
         </div>
         
         {(activeView === 'retail' || activeView === 'wholesale' || activeView === 'suppliers') && (
@@ -2070,6 +2266,18 @@ export default function RiceControl() {
         </React.Fragment>
       )}
 
+{/* 🔥 RETURNS & EXCHANGES TAB */}
+      {activeView === 'returns' && (
+        <div className="fade-in" style={{ flex: 1, overflowY: 'auto', padding: '0 16px 24px 16px' }}>
+          <ReturnExchangeTab 
+            products={products} 
+            suppliers={suppliers} 
+            activeBatchesMap={activeBatchesMap} 
+            activeBranchId={activeBranchId} 
+          />
+        </div>
+      )}
+
       {/* IMPORT FORM TAB */}
       {activeView === 'import' && (
         <div className="fade-in" style={{ display: 'flex', justifyContent: 'center', flex: 1, overflowY: 'auto' }}>
@@ -2207,16 +2415,14 @@ export default function RiceControl() {
                     />
                   </div>
                   <div style={{ flex: 1, minWidth: '120px' }}>
-                    <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '6px' }}>Payment Method</label>
-                    <select value={importForm.payment_method} onChange={e => setImportForm({...importForm, payment_method: e.target.value})} className="saas-input" style={{ cursor: 'pointer' }}>
-                      <option value="Cash ៛">💵 Cash ៛</option>
-                      <option value="Cash $">💵 Cash $</option>
-                      <option value="QR ៛">📱 QR ៛</option>
-                      <option value="QR $">📱 QR $</option>
-                      <option value="Mom QR ៛">👩 Mom QR ៛</option>
-                      <option value="Mom QR $">👩 Mom QR $</option>
-                    </select>
-                  </div>
+                      <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '6px' }}>Payment Method</label>
+                      <WalletDropdown 
+                        value={importForm.payment_method} 
+                        options={COGS_PAYMENT_WALLETS} 
+                        onChange={(val: string) => setImportForm({...importForm, payment_method: val})} 
+                        style={{ width: '100%', height: '42px' }} 
+                      />
+                    </div>
                 </div>
               </div>
 
@@ -2855,28 +3061,21 @@ export default function RiceControl() {
         <div style={{ marginBottom: '24px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
             <label className="saas-card-title" style={{ margin: 0 }}>Payment Method(s)</label>
-            <button onClick={() => setPendingPaymentRows([...pendingPaymentRows, { id: Date.now(), method: 'Cash ៛', amount: '' }])} className="saas-btn" style={{ background: '#e0f2fe', color: '#0284c7', padding: '6px 10px', fontSize: '12px' }}>+ Split</button>
+            <button onClick={() => setPendingPaymentRows([...pendingPaymentRows, { id: Date.now(), method: COGS_PAYMENT_WALLETS[0], amount: '' }])} className="saas-btn" style={{ background: '#e0f2fe', color: '#0284c7', padding: '6px 10px', fontSize: '12px' }}>+ Split</button>
           </div>
 
           {pendingPaymentRows.map((row, index) => (
             <div key={row.id} style={{ display: 'flex', gap: '8px', marginBottom: '12px', alignItems: 'center' }}>
-              <select 
+              <WalletDropdown 
                 value={row.method} 
-                onChange={e => {
+                options={COGS_PAYMENT_WALLETS} 
+                onChange={(val: string) => {
                   const newRows = [...pendingPaymentRows];
-                  newRows[index].method = e.target.value;
+                  newRows[index].method = val;
                   setPendingPaymentRows(newRows);
                 }}
-                className="saas-input"
-                style={{ width: '45%', cursor: 'pointer' }}
-              >
-                <option value="Cash ៛">💵 Cash ៛</option>
-                <option value="Cash $">💵 Cash $</option>
-                <option value="QR ៛">📱 QR ៛</option>
-                <option value="QR $">📱 QR $</option>
-                <option value="Mom QR ៛">👩 Mom QR ៛</option>
-                <option value="Mom QR $">👩 Mom QR $</option>
-              </select>
+                style={{ width: '55%', height: '42px' }} 
+              />
               
               <div style={{ flex: 1 }}>
                 <CurrencyInput 
@@ -3513,6 +3712,440 @@ export default function RiceControl() {
           }
         }
       `}</style>
+    </div>
+  );
+}
+// --- RETURN RICE COMPONENT ---
+function ReturnExchangeTab({ products, suppliers, activeBatchesMap, activeBranchId }: { products: Product[], suppliers: any[], activeBatchesMap: Record<number, InventoryBatch[]>, activeBranchId: number }) {
+  const [returnItems, setReturnItems] = useState<{ id: number, productId: string, batchId: number | null, bags: number | '', looseKg: number | '', unitPrice: number | '' }[]>([
+    { id: Date.now(), productId: '', batchId: null, bags: '', looseKg: '', unitPrice: '' }
+  ]);
+  
+  // Supplier Dropdown States
+  const [supplierId, setSupplierId] = useState('');
+  const [isSupplierDropdownOpen, setIsSupplierDropdownOpen] = useState(false);
+  const [supplierSearch, setSupplierSearch] = useState('');
+
+  // Dual Currency Refund States
+  const [refundDestination, setRefundDestination] = useState<string>(STOCK_RETURN_DESTINATIONS[0]);
+  const [refundKhr, setRefundKhr] = useState<number | ''>('');
+  const [refundUsd, setRefundUsd] = useState<number | ''>('');
+  const [isProcessing, setIsProcessing] = useState(false);
+
+  // Searchable Portals
+  const [activeProductSelectId, setActiveProductSelectId] = useState<number | null>(null);
+  const [activeBatchSelectId, setActiveBatchSelectId] = useState<number | null>(null);
+  const [productSearchStr, setProductSearchStr] = useState('');
+
+  const totals = useMemo(() => {
+    let returnTotal = 0;
+    returnItems.forEach(item => {
+      const prod = products.find(p => p.id.toString() === item.productId);
+      const bagPrice = Number(item.unitPrice) || (prod ? Number(prod.price) : 0);
+      const bagWeight = prod ? Number(prod.weight) : 50;
+      const pricePerKg = bagWeight > 0 ? bagPrice / bagWeight : 0;
+      returnTotal += ((Number(item.bags) || 0) * bagPrice) + ((Number(item.looseKg) || 0) * pricePerKg);
+    });
+    return { returnTotal };
+  }, [returnItems, products]);
+
+  // 🔥 AUTO-FILL EFFECT: Instantly updates the KHR refund box when bags/kg change
+  useEffect(() => {
+    if (totals.returnTotal > 0) {
+      setRefundKhr(Math.round(totals.returnTotal));
+      setRefundUsd(''); // Clear USD by default to prefer pure KHR auto-fill
+    } else {
+      setRefundKhr('');
+      setRefundUsd('');
+    }
+  }, [totals.returnTotal]);
+
+  const inputTotalRiel = (Number(refundKhr) || 0) + ((Number(refundUsd) || 0) * EXCHANGE_RATE);
+  const difference = Math.round(totals.returnTotal - inputTotalRiel);
+
+  const handleProcess = async () => {
+    if (!supplierId) return alert("Please select a Supplier!");
+    const validItems = returnItems.filter(i => i.productId);
+    if (validItems.length === 0) return alert("Please add at least one item to return!");
+    
+    // Check if any multi-batch items are missing a batch selection
+    if (validItems.some(i => (activeBatchesMap[Number(i.productId)]?.length > 1) && !i.batchId)) {
+      return alert("Please select a specific batch for all items marked in red!");
+    }
+
+    if (Math.abs(difference) > 100) return alert("Refund amounts do not match the expected total value!");
+    
+    setIsProcessing(true);
+    try {
+      const payload = {
+        branchId: activeBranchId,
+        supplierId: supplierId,
+        refundDestination: refundDestination,
+        refundKhr: Number(refundKhr) || 0,
+        refundUsd: Number(refundUsd) || 0,
+        totalRefundAmount: totals.returnTotal,
+        items: validItems.map(i => ({
+          productId: i.productId,
+          batchId: i.batchId,
+          bags: Number(i.bags) || 0,
+          looseKg: Number(i.looseKg) || 0,
+          unitPrice: Number(i.unitPrice) || 0
+        }))
+      };
+
+      // Send the payload to the SQL function we just created
+      const { error } = await supabase.rpc('process_stock_return', { p_payload: payload });
+      if (error) throw error;
+
+      // 🔔 AUTO-SEND TELEGRAM ALERT FOR STOCK RETURN
+      try {
+        const botToken = TELEGRAM_CONFIG.botToken || process.env.NEXT_PUBLIC_TELEGRAM_BOT_TOKEN;
+        const masterChatId = TELEGRAM_CONFIG.chatId || process.env.NEXT_PUBLIC_TELEGRAM_CHAT_ID;
+        const targetThreadId = (TELEGRAM_CONFIG as any).reportTopics?.[activeBranchId];
+
+        if (botToken && masterChatId) {
+          const formatBal = (n: number) => new Intl.NumberFormat('en-US').format(n);
+          const supName = suppliers.find((s: any) => String(s.id) === String(supplierId))?.name || 'Unknown Supplier';
+
+          let msg = `📤 *STOCK RETURNED TO SUPPLIER*\n`;
+          msg += `🏬 Branch ID: *${activeBranchId}*\n`;
+          msg += `📅 Date: ${new Date().toLocaleString('en-GB')}\n\n`;
+          
+          msg += `🏢 *Supplier:* ${supName}\n\n`;
+          
+          msg += `📦 *Items Returned:*\n`;
+          validItems.forEach((i: any) => {
+            const pName = products.find((p: any) => p.id.toString() === i.productId)?.name || 'Unknown Item';
+            const bags = Number(i.bags) || 0;
+            const loose = Number(i.looseKg) || 0;
+            let qtyStr = [];
+            if (bags > 0) qtyStr.push(`${bags} Bags`);
+            if (loose > 0) qtyStr.push(`${loose} Kg`);
+            msg += `• ${pName}: ${qtyStr.join(', ')}\n`;
+          });
+
+          msg += `\n🔄 *Refund / Settlement:*\n`;
+          msg += `• Destination: ${refundDestination}\n`;
+          if (Number(refundKhr) > 0) msg += `• Amount KHR: +${formatBal(Number(refundKhr))} ៛\n`;
+          if (Number(refundUsd) > 0) msg += `• Amount USD: +$${formatBal(Number(refundUsd))}\n`;
+          msg += `• Total Value: *${formatBal(totals.returnTotal)} ៛*`;
+
+          const tgPayload: any = { chat_id: masterChatId, text: msg.trim(), parse_mode: 'Markdown' };
+          if (targetThreadId) tgPayload.message_thread_id = targetThreadId;
+
+          fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(tgPayload)
+          }).catch(console.error);
+        }
+      } catch (teleErr) { console.error("Telegram Return Alert Error", teleErr); }
+
+      alert('✅ Return Processed successfully! Stock deducted and funds updated.');
+
+      // Clear the form so it's ready for the next return
+      setReturnItems([{ id: Date.now(), productId: '', batchId: null, bags: '', looseKg: '', unitPrice: '' }]);
+      setSupplierId('');
+      setRefundKhr('');
+      setRefundUsd('');
+      setRefundDestination(STOCK_RETURN_DESTINATIONS[0]);
+
+    } catch (error: any) {
+      console.error(error);
+      alert(`Error: ${error.message}`);
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handleSelectProduct = (itemId: number, productId: string) => {
+    const newItems = [...returnItems];
+    const index = newItems.findIndex(i => i.id === itemId);
+    if (index > -1) {
+      newItems[index].productId = productId;
+      
+      // Look up active batches for this rice
+      const pBatches = activeBatchesMap[Number(productId)] || [];
+      pBatches.sort((a,b) => a.id - b.id);
+      
+      if (pBatches.length === 1) {
+        // Auto-select if only 1 batch exists
+        newItems[index].batchId = pBatches[0].id;
+        newItems[index].unitPrice = pBatches[0].cost_price;
+      } else if (pBatches.length > 1) {
+        // Trigger the Batch Popup if multiple exist
+        newItems[index].batchId = null;
+        newItems[index].unitPrice = '';
+        setActiveBatchSelectId(itemId); 
+      } else {
+        // No active batches recorded (fallback to master cost)
+        newItems[index].batchId = null;
+        const p = products.find(prod => prod.id.toString() === productId);
+        if (p) newItems[index].unitPrice = p.cost_price || p.price;
+      }
+      
+      setReturnItems(newItems);
+    }
+    setActiveProductSelectId(null);
+  };
+
+  return (
+    <div className="saas-card fade-in" style={{ maxWidth: '900px', margin: '0 auto' }}>
+      
+      {/* HEADER & SUPPLIER SELECTION */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '24px', gap: '16px', flexWrap: 'wrap' }}>
+        <h2 className="saas-card-title" style={{ fontSize: '18px', margin: 0, color: '#0f172a', paddingTop: '10px' }}>
+          📤 Return Rice to Supplier
+        </h2>
+        
+        <div style={{ position: 'relative', flex: '1 1 250px', zIndex: isSupplierDropdownOpen ? 100 : 2 }}>
+          {isSupplierDropdownOpen ? (
+            <div style={{ position: 'relative' }}>
+              <input 
+                autoFocus className="saas-input" placeholder="Search Supplier..." 
+                value={supplierSearch} onChange={e => setSupplierSearch(e.target.value)} 
+                onBlur={() => setTimeout(() => setIsSupplierDropdownOpen(false), 200)} 
+                onKeyDown={e => e.key === 'Escape' && setIsSupplierDropdownOpen(false)} 
+              />
+              <div className="dropdown-results-tray">
+                {suppliers.filter(s => s.name.toLowerCase().includes(supplierSearch.toLowerCase())).map(s => (
+                  <div key={s.id} className="dropdown-row" onMouseDown={(e) => { e.stopPropagation(); setSupplierId(String(s.id)); setIsSupplierDropdownOpen(false); }}>
+                    <span style={{ fontWeight: 'normal', color: '#334155' }}>{s.name}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <div className="interactive-select-trigger" onClick={() => { setIsSupplierDropdownOpen(true); setSupplierSearch(''); }} style={{ width: '100%', padding: '10px 12px', fontSize: '14px', background: '#fff' }}>
+              {supplierId ? `🏢 ${suppliers.find(s => String(s.id) === supplierId)?.name}` : '🔍 Select Supplier...'}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* ITEMS TO RETURN LIST */}
+      <div style={{ background: '#f8fafc', padding: '20px', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
+        <h3 style={{ margin: '0 0 16px 0', color: '#334155', display: 'flex', justifyContent: 'space-between', fontSize: '15px' }}>
+          <span>🌾 Items to Return</span>
+        </h3>
+
+        {returnItems.map((item) => {
+          const selectedProduct = products.find(p => p.id.toString() === item.productId);
+          const pBatches = selectedProduct ? (activeBatchesMap[selectedProduct.id] || []).sort((a,b)=>a.id-b.id) : [];
+          
+          return (
+            <div key={item.id} style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '20px', paddingBottom: '20px', borderBottom: '1px dashed #cbd5e1' }}>
+              
+              <div style={{ display: 'flex', gap: '12px', alignItems: 'flex-start', flexWrap: 'wrap' }}>
+                
+                {/* SELECT PRODUCT & BATCH INFO */}
+                <div style={{ flex: '1 1 250px', minWidth: '200px' }}>
+                  <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '6px' }}>Select Rice</label>
+                  
+                  <div className="interactive-select-trigger" onClick={() => { setActiveProductSelectId(item.id); setProductSearchStr(''); }} style={{ width: '100%', background: '#fff', border: '1px solid #cbd5e1' }}>
+                     {selectedProduct ? `🌾 ${selectedProduct.name}` : '🔍 Search & Select Rice...'}
+                  </div>
+
+                  {/* PRODUCT SEARCH PORTAL */}
+                  {activeProductSelectId === item.id && typeof document !== 'undefined' && createPortal(
+                    <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(15, 23, 42, 0.4)', zIndex: 2147483647, display: 'flex', justifyContent: 'center', alignItems: 'flex-start', padding: 'max(16px, env(safe-area-inset-top, 16px)) 16px 16px 16px', backdropFilter: 'blur(2px)' }} onMouseDown={() => { setActiveProductSelectId(null); setProductSearchStr(''); }}>
+                      <div onMouseDown={(e) => e.stopPropagation()} style={{ backgroundColor: '#f8fafc', borderRadius: '12px', width: '100%', maxWidth: '500px', maxHeight: '100%', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1)', display: 'flex', flexDirection: 'column', overflow: 'hidden', animation: 'posPopupSlideDown 0.2s ease-out' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', padding: '12px 16px', borderBottom: '1px solid #e2e8f0', gap: '8px', backgroundColor: '#ffffff', flexShrink: 0 }}>
+                          <div style={{ position: 'relative', flex: 1 }}>
+                            <span style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: '#94a3b8', fontSize: '16px' }}>🔍</span>
+                            <input autoFocus type="text" placeholder="Search Wholesale bag..." value={productSearchStr} onChange={e => setProductSearchStr(e.target.value)} style={{ width: '100%', padding: '10px 12px 10px 36px', fontSize: '14px', border: '1px solid #3b82f6', borderRadius: '6px', outline: 'none', color: '#0f172a', boxSizing: 'border-box' }} />
+                          </div>
+                          <button onClick={(e) => { e.preventDefault(); setActiveProductSelectId(null); setProductSearchStr(''); }} style={{ background: 'none', border: 'none', color: '#94a3b8', fontSize: '24px', cursor: 'pointer', padding: '0 4px' }}>✕</button>
+                        </div>
+                        <div className="hide-scrollbar" style={{ flex: 1, overflowY: 'auto', padding: '16px', backgroundColor: '#f8fafc' }}>
+                          {(() => {
+                            const filteredList = products
+                              .filter(p => p.weight > 1)
+                              .filter(p => !supplierId || p.name.toLowerCase().includes((suppliers.find(s => String(s.id) === supplierId)?.name || '').toLowerCase()))
+                              .filter(p => p.name.toLowerCase().includes(productSearchStr.toLowerCase()))
+                              .sort((a, b) => riceCategoryComparator(a, b, 'cost_price'));
+                            if (filteredList.length === 0) return <div style={{ textAlign: 'center', padding: '16px', color: '#94a3b8', fontSize: '14px' }}>No bags found</div>;
+                            return (
+                              <div style={{ border: '1px solid #e2e8f0', borderRadius: '8px', overflow: 'hidden' }}>
+                                {filteredList.map((p, pIndex, arr) => (
+                                  <div key={p.id} onClick={(e) => { e.preventDefault(); handleSelectProduct(item.id, String(p.id)); }} style={{ padding: '12px 16px', cursor: 'pointer', backgroundColor: '#ffffff', borderBottom: pIndex === arr.length - 1 ? 'none' : '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                    <span style={{ fontWeight: 500, fontSize: '14px', color: '#0f172a' }}>{p.name}</span>
+                                    <span style={{ fontSize: '12px', color: '#64748b', fontWeight: 'bold' }}>Stock: {p.stock} | <span style={{ fontWeight: 'normal' }}>{formatRiel(Number(p.cost_price || p.price))} ៛</span></span>
+                                  </div>
+                                ))}
+                              </div>
+                            );
+                          })()}
+                        </div>
+                      </div>
+                    </div>, document.body
+                  )}
+
+                  {/* BATCH SELECTION PORTAL */}
+                  {activeBatchSelectId === item.id && typeof document !== 'undefined' && createPortal(
+                    <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(15, 23, 42, 0.4)', zIndex: 2147483647, display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '16px', backdropFilter: 'blur(2px)' }} onMouseDown={() => setActiveBatchSelectId(null)}>
+                      <div onMouseDown={(e) => e.stopPropagation()} style={{ backgroundColor: '#f8fafc', borderRadius: '12px', width: '100%', maxWidth: '400px', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1)', display: 'flex', flexDirection: 'column', overflow: 'hidden', animation: 'fadeIn 0.2s ease-out' }}>
+                        <div style={{ padding: '16px', borderBottom: '1px solid #e2e8f0', backgroundColor: '#ffffff', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <h3 style={{ margin: 0, fontSize: '16px', color: '#0f172a' }}>Select Target Batch</h3>
+                          <button onClick={() => setActiveBatchSelectId(null)} style={{ background: 'none', border: 'none', color: '#94a3b8', fontSize: '20px', cursor: 'pointer' }}>✕</button>
+                        </div>
+                        <div style={{ padding: '16px', maxHeight: '300px', overflowY: 'auto' }}>
+                           {pBatches.map((b, idx) => (
+                              <div key={b.id} onClick={() => {
+                                 const newItems = [...returnItems];
+                                 const iIdx = newItems.findIndex(i => i.id === item.id);
+                                 if (iIdx > -1) {
+                                    newItems[iIdx].batchId = b.id;
+                                    newItems[iIdx].unitPrice = b.cost_price;
+                                    setReturnItems(newItems);
+                                 }
+                                 setActiveBatchSelectId(null);
+                              }} style={{ padding: '12px 16px', border: '1px solid #e2e8f0', borderRadius: '8px', marginBottom: '8px', cursor: 'pointer', background: '#fff', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                 <div>
+                                   <div style={{ fontWeight: 'bold', color: '#0f172a', fontSize: '14px' }}>{idx === 0 ? '🟢 1st Batch (Oldest)' : `🟡 Batch #${idx+1}`}</div>
+                                   <div style={{ fontSize: '12px', color: '#64748b', marginTop: '4px' }}>Remaining: {b.remaining_qty} Bags</div>
+                                 </div>
+                                 <div style={{ textAlign: 'right', fontWeight: 'bold', color: '#b58a3d' }}>
+                                   {formatRiel(b.cost_price)} / bag
+                                 </div>
+                              </div>
+                           ))}
+                        </div>
+                      </div>
+                    </div>, document.body
+                  )}
+
+                  {/* 🔥 DISPLAY SELECTED STOCK, BATCH & COGS */}
+                  {selectedProduct && (
+                    <div style={{ fontSize: '12px', color: '#64748b', marginTop: '8px', lineHeight: '1.6', display: 'flex', flexWrap: 'wrap', alignItems: 'center' }}>
+                      <span style={{ fontWeight: 'bold', marginRight: '4px' }}>Stock:</span> 
+                      <span style={{ color: '#b58a3d', fontWeight: 'bold' }}>{selectedProduct.stock}</span> 
+                      <span style={{ margin: '0 4px' }}>({selectedProduct.weight}kg)</span>
+                      
+                      <span style={{ margin: '0 6px', color: '#cbd5e1' }}>|</span>
+                      
+                      {(() => {
+                         let displayCogs = selectedProduct.cost_price || selectedProduct.price;
+                         let batchNode = <span style={{ color: '#94a3b8', margin: '0 4px' }}>Default</span>;
+
+                         if (pBatches.length > 0) {
+                            const selectedBatch = pBatches.find(b => b.id === item.batchId);
+                            if (selectedBatch) {
+                               const bIdx = pBatches.findIndex(b => b.id === selectedBatch.id);
+                               displayCogs = selectedBatch.cost_price;
+                               batchNode = <span onClick={() => pBatches.length > 1 && setActiveBatchSelectId(item.id)} style={{ color: pBatches.length > 1 ? '#3b82f6' : '#15803d', cursor: pBatches.length > 1 ? 'pointer' : 'default', margin: '0 4px', textDecoration: pBatches.length > 1 ? 'underline' : 'none', fontWeight: 'bold' }}>#{bIdx+1} ({selectedBatch.remaining_qty} left)</span>;
+                            } else {
+                               batchNode = <span onClick={() => setActiveBatchSelectId(item.id)} style={{ color: '#ef4444', fontWeight: 'bold', cursor: 'pointer', margin: '0 4px', textDecoration: 'underline' }}>⚠️ Select Required</span>;
+                            }
+                         }
+
+                         return (
+                           <>
+                             <span style={{ fontWeight: 'bold' }}>Batch:</span> {batchNode}
+                             <span style={{ margin: '0 6px', color: '#cbd5e1' }}>|</span>
+                             <span style={{ fontWeight: 'bold', color: '#0f172a' }}>COGS:</span> 
+                             <span style={{ color: '#dc2626', fontWeight: 'bold', marginLeft: '4px' }}>{formatRiel(Number(displayCogs))} ៛</span>
+                           </>
+                         );
+                      })()}
+                    </div>
+                  )}
+                </div>
+
+                {/* BAGS */}
+                <div style={{ flex: '1 1 80px', minWidth: '80px' }}>
+                  <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '6px' }}>Bags</label>
+                  <CurrencyInput placeholder="0" value={item.bags} onChange={(v: any) => { const n = [...returnItems]; const idx = n.findIndex(i => i.id === item.id); if(idx > -1) n[idx].bags = v; setReturnItems(n); }} className="saas-input" style={{ textAlign: 'center' }} />
+                </div>
+
+                {/* LOOSE KG */}
+                <div style={{ flex: '1 1 80px', minWidth: '80px' }}>
+                  <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '6px' }}>Loose Kg</label>
+                  <CurrencyInput placeholder="0" value={item.looseKg} onChange={(v: any) => { const n = [...returnItems]; const idx = n.findIndex(i => i.id === item.id); if(idx > -1) n[idx].looseKg = v; setReturnItems(n); }} className="saas-input" style={{ textAlign: 'center' }} />
+                </div>
+
+                {/* REFUND AMOUNT */}
+                <div style={{ flex: '1 1 120px', minWidth: '120px' }}>
+                  <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '6px' }}>Refund/Bag (៛)</label>
+                  <CurrencyInput placeholder="0" value={item.unitPrice} onChange={(v: any) => { const n = [...returnItems]; const idx = n.findIndex(i => i.id === item.id); if(idx > -1) n[idx].unitPrice = v; setReturnItems(n); }} className="saas-input" style={{ textAlign: 'center', borderColor: '#bbf7d0', background: '#f0fdf4' }} />
+                </div>
+
+                {/* DELETE BUTTON */}
+                <div style={{ flex: '0 0 auto', paddingTop: '22px' }}>
+                  <button onClick={() => setReturnItems(returnItems.filter(i => i.id !== item.id))} style={{ padding: '10px 14px', background: '#fee2e2', borderRadius: '8px', border: 'none', color: '#dc2626', cursor: 'pointer', fontWeight: 'bold' }}>✕</button>
+                </div>
+              </div>
+
+            </div>
+          );
+        })}
+        <button onClick={() => setReturnItems([...returnItems, { id: Date.now(), productId: '', batchId: null, bags: '', looseKg: '', unitPrice: '' }])} className="saas-btn" style={{ background: '#f1f5f9', color: '#334155', width: '100%', border: '1px dashed #94a3b8' }}>+ Add Rice Item</button>
+      </div>
+
+      {/* THE FINANCIAL ROUTER */}
+      <div style={{ marginTop: '24px', padding: '24px', background: '#f0fdf4', borderRadius: '12px', border: '1px solid #bbf7d0' }}>
+        
+        <div style={{ fontSize: '13px', color: '#166534', textTransform: 'uppercase', fontWeight: 'bold', marginBottom: '16px' }}>
+          How is the {new Intl.NumberFormat('en-US').format(Math.round(totals.returnTotal))} ៛ being applied?
+        </div>
+
+        <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap', alignItems: 'flex-start' }}>
+          
+          <div style={{ flex: 1.5, minWidth: '200px' }}>
+            <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '6px' }}>Destination Vault</label>
+            <WalletDropdown 
+              value={refundDestination} 
+              options={STOCK_RETURN_DESTINATIONS} 
+              onChange={(val: string) => setRefundDestination(val)} 
+              style={{ width: '100%', height: '42px', border: '2px solid #10b981', borderRadius: '8px' }} 
+            />
+          </div>
+
+          <div style={{ flex: 1, minWidth: '140px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+              <label className="saas-card-title" style={{ fontSize: '11px', margin: 0 }}>Amount in KHR (៛)</label>
+              <button 
+                onClick={() => { setRefundKhr(Math.round(totals.returnTotal)); setRefundUsd(''); }} 
+                style={{ background: 'none', border: 'none', color: '#3b82f6', fontSize: '10px', cursor: 'pointer', padding: 0, fontWeight: 'bold' }}
+              >
+                Auto-fill
+              </button>
+            </div>
+            <CurrencyInput placeholder="0" value={refundKhr} onChange={(v: any) => setRefundKhr(v)} className="saas-input" style={{ background: '#fff' }} />
+          </div>
+
+          <div style={{ flex: 1, minWidth: '140px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+              <label className="saas-card-title" style={{ fontSize: '11px', margin: 0 }}>Amount in USD ($)</label>
+            </div>
+            <CurrencyInput placeholder="0" value={refundUsd} onChange={(v: any) => setRefundUsd(v)} className="saas-input" style={{ background: '#fff' }} />
+          </div>
+
+        </div>
+
+        {/* RECONCILIATION BAR */}
+        <div style={{ marginTop: '20px', paddingTop: '20px', borderTop: '1px dashed #bbf7d0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px' }}>
+          
+          <div style={{ display: 'flex', flexDirection: 'column' }}>
+            <span style={{ fontSize: '12px', color: '#15803d', fontWeight: 'bold' }}>Total Input Value: {formatRiel(inputTotalRiel)}</span>
+            {difference > 10 ? (
+              <span style={{ fontSize: '13px', color: '#ef4444', fontWeight: 'bold', marginTop: '4px' }}>⚠️ Short by {formatRiel(difference)}</span>
+            ) : difference < -10 ? (
+              <span style={{ fontSize: '13px', color: '#d97706', fontWeight: 'bold', marginTop: '4px' }}>⚠️ Over by {formatRiel(Math.abs(difference))}</span>
+            ) : (
+              <span style={{ fontSize: '13px', color: '#15803d', fontWeight: 'bold', marginTop: '4px' }}>✅ Perfectly Matched</span>
+            )}
+          </div>
+
+          <button 
+            onClick={handleProcess} 
+            disabled={isProcessing || totals.returnTotal === 0 || Math.abs(difference) > 100} 
+            className="saas-btn saas-btn-primary" 
+            style={{ padding: '14px 28px', fontSize: '15px', background: Math.abs(difference) > 100 ? '#9ca3af' : '#10b981', border: 'none', width: '100%' }}
+          >
+            {isProcessing ? 'Processing...' : `✅ Process Return & ${refundDestination.includes('Debt') ? 'Clear Debt' : 'Cash In'}`}
+          </button>
+
+        </div>
+      </div>
     </div>
   );
 }

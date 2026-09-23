@@ -292,7 +292,8 @@ export default function ReportControlPage() {
       const amtRiel = Number(p.amount_paid_riel || 0)
       const amtUsd = Number(p.amount_paid_usd || 0)
       const isUsd = methodStr.includes('$')
-      const isQr = methodStr.includes('qr')
+      // 🔥 MATH FIX: Recognizes new wallet names as digital/bank money
+      const isQr = methodStr.includes('qr') || methodStr.includes('aba') || methodStr.includes('radiant')
 
       if (isQr) {
         if (isUsd) qU += amtUsd; else qR += amtRiel
@@ -323,7 +324,8 @@ export default function ReportControlPage() {
       const isBiz = type === 'business' || type === 'biz' || type === 'staff'
 
       const processSplit = (m: string, aRiel: number, aUsd: number) => {
-        const isQr = m.includes('qr')
+        // 🔥 MATH FIX: Recognizes new wallet names as digital/bank money
+        const isQr = m.includes('qr') || m.includes('aba') || m.includes('radiant')
         if (isBiz) {
           if (aUsd > 0) { isQr ? bizQrUsd += aUsd : bizCashUsd += aUsd } else { isQr ? bizQrRiel += aRiel : bizCashRiel += aRiel }
         } else {
@@ -1152,11 +1154,11 @@ function ExpenseBreakdownCard({ title, cR = 0, cU = 0, qR = 0, qU = 0, color = '
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', borderTop: '1px solid #f1f5f9', paddingTop: '16px' }}>
         <div>
           <div style={{ fontSize: '12px', color: '#64748b', marginBottom: '4px', fontWeight: 'bold' }}>Cash: <span style={{fontWeight: 'bold', color: '#334155'}}>{formatRiel(cR)}</span></div>
-          <div style={{ fontSize: '12px', color: '#64748b', fontWeight: 'bold' }}>QR: <span style={{fontWeight: 'bold', color: '#334155'}}>{formatRiel(qR)}</span></div>
+          <div style={{ fontSize: '12px', color: '#64748b', fontWeight: 'bold' }}>Bank/QR: <span style={{fontWeight: 'bold', color: '#334155'}}>{formatRiel(qR)}</span></div>
         </div>
         <div>
           <div style={{ fontSize: '12px', color: '#64748b', marginBottom: '4px', fontWeight: 'bold' }}>Cash: <span style={{fontWeight: 'bold', color: '#334155'}}>{formatUSD(cU)}</span></div>
-          <div style={{ fontSize: '12px', color: '#64748b', fontWeight: 'bold' }}>QR: <span style={{fontWeight: 'bold', color: '#334155'}}>{formatUSD(qU)}</span></div>
+          <div style={{ fontSize: '12px', color: '#64748b', fontWeight: 'bold' }}>Bank/QR: <span style={{fontWeight: 'bold', color: '#334155'}}>{formatUSD(qU)}</span></div>
         </div>
       </div>
     </div>

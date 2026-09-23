@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useMemo, useCallback } from 'react'
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { supabase } from '@/lib/supabaseClient'
 import { useFocusRefresh } from '@/lib/useFocusRefresh'
 import { useToast } from '@/components/ToastProvider'
@@ -10,6 +10,118 @@ import Modal from '@/components/Modal'
 import TableSkeleton from '@/components/TableSkeleton'
 import EmptyState from '@/components/EmptyState'
 import { useBranch } from '@/components/BranchContext' // 🔥 GLOBAL MEMORY IMPORTED
+import { EXPENSE_WALLETS, STAFF_DEBT_WALLETS } from '@/lib/walletConstants'
+import { TELEGRAM_CONFIG } from '@/lib/telegramConfig'
+
+function WalletDropdown({ value, options, onChange, style }: any) {
+  const [isOpen, setIsOpen] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+  const [menuStyles, setMenuStyles] = useState<any>({});
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) setIsOpen(false);
+    };
+    
+    const handleScroll = (event: Event) => {
+      if (dropdownRef.current && dropdownRef.current.contains(event.target as Node)) return;
+      setIsOpen(false);
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    window.addEventListener('scroll', handleScroll, true); 
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      window.removeEventListener('scroll', handleScroll, true);
+    };
+  }, []);
+
+  const handleToggle = () => {
+    if (!isOpen && dropdownRef.current) {
+      const rect = dropdownRef.current.getBoundingClientRect();
+      const menuHeight = 220; 
+      const spaceBelow = window.innerHeight - rect.bottom;
+      
+      if (spaceBelow < menuHeight) {
+        setMenuStyles({
+          position: 'fixed',
+          bottom: window.innerHeight - rect.top + 4,
+          left: rect.left,
+          width: rect.width,
+          zIndex: 999999
+        });
+      } else {
+        setMenuStyles({
+          position: 'fixed',
+          top: rect.bottom + 4,
+          left: rect.left,
+          width: rect.width,
+          zIndex: 999999
+        });
+      }
+    }
+    setIsOpen(!isOpen);
+  };
+
+  const getIcon = (val: string) => {
+    if (val.includes('ABA')) return '📱';
+    if (val.includes('Chest')) return '🗄️';
+    if (val.includes('Cash')) return '💵';
+    if (val.includes('Availability') || val.includes('Mom')) return '👩';
+    if (val.includes('Write-off')) return '❌';
+    if (val.includes('Debt')) return '📉';
+    return '💳';
+  };
+
+  return (
+    <div ref={dropdownRef} style={{ position: 'relative', ...style }}>
+      <div 
+        onClick={handleToggle}
+        style={{ 
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          padding: '0 12px', background: '#fff', border: '1px solid #cbd5e1', 
+          borderRadius: '8px', cursor: 'pointer', height: '100%',
+          fontSize: '13px', fontWeight: 'bold', color: '#334155',
+          boxShadow: 'inset 0 1px 2px rgba(0,0,0,0.02)'
+        }}
+      >
+        <span style={{ display: 'flex', alignItems: 'center', gap: '8px', overflow: 'hidden', whiteSpace: 'nowrap' }}>
+          <span>{getIcon(value)}</span> {value}
+        </span>
+        <span style={{ fontSize: '10px', color: '#94a3b8', transform: isOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s', flexShrink: 0, marginLeft: '4px' }}>▼</span>
+      </div>
+      
+      {isOpen && (
+        <div className="hide-scrollbar" style={{ 
+          ...menuStyles,
+          background: '#fff', border: '1px solid #e2e8f0', borderRadius: '12px', 
+          boxShadow: '0 10px 25px -5px rgba(0,0,0,0.1), 0 8px 10px -6px rgba(0,0,0,0.1)', 
+          overflowY: 'auto', maxHeight: '220px',
+          display: 'flex', flexDirection: 'column', padding: '4px'
+        }}>
+          {options.map((opt: string) => (
+            <div 
+              key={opt}
+              onClick={(e) => { e.stopPropagation(); onChange(opt); setIsOpen(false); }}
+              style={{ 
+                padding: '10px 12px', cursor: 'pointer', fontSize: '13px',
+                display: 'flex', alignItems: 'center', gap: '8px',
+                background: value === opt ? '#f8fafc' : '#fff',
+                borderRadius: '8px', color: value === opt ? '#0f172a' : '#475569',
+                fontWeight: value === opt ? 'bold' : 'normal', transition: 'background 0.1s',
+                whiteSpace: 'nowrap'
+              }}
+              onMouseEnter={(e) => (e.currentTarget.style.background = '#f1f5f9')}
+              onMouseLeave={(e) => (e.currentTarget.style.background = value === opt ? '#f8fafc' : '#fff')}
+            >
+              <span>{getIcon(opt)}</span> {opt}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 // --- Interfaces ---
 interface PaymentSplit {
@@ -202,8 +314,8 @@ export default function ExpenseDashboard() {
   const createNewExpense = (): PendingExpense => ({
     id: Date.now().toString() + Math.random().toString().slice(2, 6),
     remarks: '',
-    spender: 'Pich',
-    payments: [{ id: Date.now(), method: 'QR ៛', amount: '' }]
+    spender: 'Both',
+    payments: [{ id: Date.now(), method: 'ABA Both ៛', amount: '' }]
   });
 
   const [pendingPersonal, setPendingPersonal] = useState<PendingExpense[]>([])
@@ -219,7 +331,7 @@ export default function ExpenseDashboard() {
   
   // 🟢 CLEAN MODAL STATES FOR COMPACT TABLE
   const [advanceModal, setAdvanceModal] = useState<{ isOpen: boolean, staff: any, amount: number | '', method: string }>({
-    isOpen: false, staff: null, amount: '', method: 'Cash ៛'
+    isOpen: false, staff: null, amount: '', method: STAFF_DEBT_WALLETS[0] as string
   })
 
   const [leaveModal, setLeaveModal] = useState<{ isOpen: boolean, staff: any, quota: number | '', days: number | '', reason: string }>({
@@ -227,7 +339,7 @@ export default function ExpenseDashboard() {
   })
 
   const [settleModal, setSettleModal] = useState<{ isOpen: boolean, staff: any, amount: number | '', method: string }>({
-    isOpen: false, staff: null, amount: '', method: 'Cash ៛'
+    isOpen: false, staff: null, amount: '', method: STAFF_DEBT_WALLETS[0] as string
   })
 
   const [historyModal, setHistoryModal] = useState<{ isOpen: boolean, staff: any, activeTab: 'debt' | 'leave', debtHistory: any[], leaveHistory: any[] }>({
@@ -241,6 +353,9 @@ export default function ExpenseDashboard() {
   const [dbExpenses, setDbExpenses] = useState<any[]>([])
   const [dbStaffDebt, setDbStaffDebt] = useState<any[]>([])
   
+  // 🚀 NEW: Connect to Live Treasury Wallets
+  const [liveWallets, setLiveWallets] = useState<any[]>([])
+
   const [dbTab, setDbTab] = useState<'personal' | 'business' | 'rice' | 'staff_debt' | 'insight'>('insight')
   const [dbTabOrder, setDbTabOrder] = useState(['insight', 'personal', 'business', 'rice', 'staff_debt'])
   
@@ -289,10 +404,15 @@ export default function ExpenseDashboard() {
     let debtQuery = supabase.from('staff_debt_history').select('*, staff:staff_id(name)').order('created_at', { ascending: false }).limit(2000);
     if (activeBranchId !== 0) debtQuery = debtQuery.eq('branch_id', activeBranchId); 
 
-    const [ {data: exp}, {data: debt} ] = await Promise.all([ expQuery, debtQuery ])
+    // 🚀 NEW: Fetch the live wallets for the dropdowns
+    let walletQuery = supabase.from('wallets').select('*').order('id', { ascending: true });
+    if (activeBranchId !== 0) walletQuery = walletQuery.eq('branch_id', activeBranchId);
+
+    const [ {data: exp}, {data: debt}, {data: wallets} ] = await Promise.all([ expQuery, debtQuery, walletQuery ])
     
     setDbExpenses(exp || []);
     setDbStaffDebt(debt || []);
+    setLiveWallets(wallets || []);
     setIsFetchingDb(false)
   }, [activeBranchId]);
 
@@ -320,9 +440,9 @@ export default function ExpenseDashboard() {
       else setPendingBusiness([createNewExpense()]);
 
       // 💣 SECURITY WIPE: Destroy all staff modals and inline edits
-      setAdvanceModal({ isOpen: false, staff: null, amount: '', method: 'Cash ៛' });
+      setAdvanceModal({ isOpen: false, staff: null, amount: '', method: STAFF_DEBT_WALLETS[0] as string });
       setLeaveModal({ isOpen: false, staff: null, quota: '', days: 1, reason: '' });
-      setSettleModal({ isOpen: false, staff: null, amount: '', method: 'Cash ៛' });
+      setSettleModal({ isOpen: false, staff: null, amount: '', method: STAFF_DEBT_WALLETS[0] as string });
       setHistoryModal({ isOpen: false, staff: null, activeTab: 'debt', debtHistory: [], leaveHistory: [] });
       setConfirmModal(false);
       setEditingCell(null);
@@ -378,7 +498,7 @@ export default function ExpenseDashboard() {
   const addPaymentSplit = (expId: string) => {
     setActiveList(getActiveList().map(exp => {
       if (exp.id === expId) {
-        return { ...exp, payments: [{ id: Date.now(), method: 'Cash ៛', amount: '' }, ...exp.payments] }
+        return { ...exp, payments: [{ id: Date.now(), method: 'ABA Both ៛', amount: '' }, ...exp.payments] }
       }
       return exp;
     }));
@@ -477,13 +597,77 @@ export default function ExpenseDashboard() {
         };
       });
 
-      const { error } = await supabase.from('expenses').insert(payloadArray.reverse()); 
+      // 1. Insert into Expense History
+      const { data: insertedExpenses, error: expError } = await supabase.from('expenses').insert(payloadArray.reverse()).select(); 
+      if (expError) throw expError;
 
-      if (error) throw error;
+      // 2. 🚀 NEW: Deduct the exact amounts from the Treasury Ledger!
+      const ledgerPromises: any[] = [];
+      validExpenses.forEach((exp, idx) => {
+        const matchingId = insertedExpenses?.[idx]?.id || Date.now();
+        exp.payments.forEach(p => {
+          const amt = Number(String(p.amount).replace(/,/g, '')) || 0;
+          if (amt > 0) {
+            ledgerPromises.push(
+              supabase.rpc('record_wallet_transaction', {
+                p_wallet_name: p.method,
+                p_amount: -Math.abs(amt), // Negative because we are SPENDING money
+                p_reference_type: 'EXPENSE',
+                p_reference_id: matchingId.toString(),
+                p_description: exp.remarks,
+                p_branch_id: activeBranchId
+              })
+            );
+          }
+        });
+      });
+      await Promise.all(ledgerPromises);
+
+      // 🔔 AUTO-SEND TELEGRAM ALERT
+      try {
+        const botToken = TELEGRAM_CONFIG.botToken;
+        const masterChatId = TELEGRAM_CONFIG.chatId;
+        const targetThreadId = (TELEGRAM_CONFIG as any).reportTopics?.[activeBranchId];
+
+        if (botToken && masterChatId) {
+          // Fetch real-time balances AFTER the transaction has processed
+          const { data: liveWallets } = await supabase.from('wallets').select('name, balance').eq('branch_id', activeBranchId);
+          const formatBal = (n: number) => new Intl.NumberFormat('en-US').format(n);
+
+          let msg = `💸 *NEW EXPENSE LOGGED*\n`;
+          msg += `🏬 Branch ID: *${activeBranchId}*\n`;
+          msg += `📅 Date: ${new Date().toLocaleString('en-GB')}\n\n`;
+
+          validExpenses.forEach(exp => {
+            msg += `👤 *Spender:* ${exp.spender}\n`;
+            msg += `📝 *Reason:* ${exp.remarks}\n\n`;
+            msg += `📤 *Deducted From:*\n`;
+
+            exp.payments.forEach(p => {
+              const amt = Number(String(p.amount).replace(/,/g, '')) || 0;
+              if (amt > 0) {
+                const symbol = p.method.includes('$') ? '$' : '៛';
+                const wallet = liveWallets?.find((w: any) => w.name === p.method);
+                msg += `• Wallet: ${p.method}\n`;
+                msg += `• Amount: -${formatBal(amt)} ${symbol}\n`;
+                if (wallet) msg += `• Balance After: *${formatBal(wallet.balance)} ${symbol}*\n`;
+                msg += `\n`;
+              }
+            });
+          });
+
+          const payload: any = { chat_id: masterChatId, text: msg.trim(), parse_mode: 'Markdown' };
+          if (targetThreadId) payload.message_thread_id = targetThreadId;
+
+          fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+          }).catch(console.error);
+        }
+      } catch (teleErr) { console.error("Telegram Error", teleErr); }
 
       showToast('success', 'Success', `${validExpenses.length} expense(s) recorded successfully!`);
       setActiveList([createNewExpense()]);
-      fetchDatabase(); 
+      fetchDatabase();
 
     } catch (err: any) {
       showToast('error', 'Save Failed', `Error saving entry: ${err.message}`);
@@ -544,7 +728,39 @@ export default function ExpenseDashboard() {
       const { error } = await supabase.rpc('process_staff_transaction', { p_payload: payload });
       if (error) throw error;
 
-      setAdvanceModal({ isOpen: false, staff: null, amount: '', method: 'Cash ៛' });
+      // 🔔 AUTO-SEND TELEGRAM ALERT
+      try {
+        const botToken = TELEGRAM_CONFIG.botToken;
+        const masterChatId = TELEGRAM_CONFIG.chatId;
+        const targetThreadId = (TELEGRAM_CONFIG as any).reportTopics?.[activeBranchId];
+
+        if (botToken && masterChatId) {
+          const { data: wallet } = await supabase.from('wallets').select('balance').eq('name', advanceModal.method).eq('branch_id', activeBranchId).single();
+          const formatBal = (n: number) => new Intl.NumberFormat('en-US').format(n);
+          const symbol = advanceModal.method.includes('$') ? '$' : '៛';
+
+          let msg = `💸 *STAFF ADVANCE LOGGED*\n`;
+          msg += `🏬 Branch ID: *${activeBranchId}*\n`;
+          msg += `📅 Date: ${new Date().toLocaleString('en-GB')}\n\n`;
+
+          msg += `👤 *Staff:* ${staff.name}\n`;
+          msg += `📝 *Reason:* Salary Advance\n\n`;
+
+          msg += `📤 *Deducted From:*\n`;
+          msg += `• Wallet: ${advanceModal.method}\n`;
+          msg += `• Amount: -${formatBal(rawAmount)} ${symbol}\n`;
+          if (wallet) msg += `• Balance After: *${formatBal(wallet.balance)} ${symbol}*\n`;
+
+          const payload: any = { chat_id: masterChatId, text: msg.trim(), parse_mode: 'Markdown' };
+          if (targetThreadId) payload.message_thread_id = targetThreadId;
+
+          fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+          }).catch(console.error);
+        }
+      } catch (teleErr) { console.error("Telegram Error", teleErr); }
+
+      setAdvanceModal({ isOpen: false, staff: null, amount: '', method: STAFF_DEBT_WALLETS[0] as string });
       showToast('success', 'Advance Added', `Advance added for ${staff.name}`);
       fetchStaff();
       fetchDatabase();
@@ -637,7 +853,43 @@ export default function ExpenseDashboard() {
       const { error } = await supabase.rpc('process_staff_transaction', { p_payload: payload });
       if (error) throw error;
 
-      setSettleModal({ isOpen: false, staff: null, amount: '', method: 'Cash ៛' });
+      // 🔔 AUTO-SEND TELEGRAM ALERT
+      try {
+        const botToken = TELEGRAM_CONFIG.botToken;
+        const masterChatId = TELEGRAM_CONFIG.chatId;
+        const targetThreadId = (TELEGRAM_CONFIG as any).reportTopics?.[activeBranchId];
+
+        if (botToken && masterChatId) {
+          const formatBal = (n: number) => new Intl.NumberFormat('en-US').format(n);
+          const symbol = settleModal.method.includes('$') ? '$' : '៛';
+
+          let msg = `💰 *STAFF DEBT SETTLED*\n`;
+          msg += `🏬 Branch ID: *${activeBranchId}*\n`;
+          msg += `📅 Date: ${new Date().toLocaleString('en-GB')}\n\n`;
+
+          msg += `👤 *Staff:* ${staff.name}\n`;
+          msg += `📝 *Reason:* ${isWriteOff ? 'Debt Forgiven (Write-off)' : 'Debt Repayment'}\n\n`;
+
+          if (!isWriteOff) {
+            const { data: wallet } = await supabase.from('wallets').select('balance').eq('name', settleModal.method).eq('branch_id', activeBranchId).single();
+            msg += `📥 *Added To:*\n`;
+            msg += `• Wallet: ${settleModal.method}\n`;
+            msg += `• Amount: +${formatBal(rawAmount)} ${symbol}\n`;
+            if (wallet) msg += `• Balance After: *${formatBal(wallet.balance)} ${symbol}*\n`;
+          } else {
+            msg += `📉 *Impact:* Debt written off, no cash collected.\n`;
+          }
+
+          const payload: any = { chat_id: masterChatId, text: msg.trim(), parse_mode: 'Markdown' };
+          if (targetThreadId) payload.message_thread_id = targetThreadId;
+
+          fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+          }).catch(console.error);
+        }
+      } catch (teleErr) { console.error("Telegram Error", teleErr); }
+
+      setSettleModal({ isOpen: false, staff: null, amount: '', method: STAFF_DEBT_WALLETS[0] as string });
       showToast('success', isWriteOff ? 'Debt Forgiven' : 'Settled', isWriteOff ? `Debt written off for ${staff.name}` : `Settlement recorded for ${staff.name}`);
       fetchStaff();
       fetchDatabase();
@@ -977,17 +1229,12 @@ export default function ExpenseDashboard() {
 
                         {exp.payments.map((row, rIndex) => (
                           <div key={row.id} className="payment-row" style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                            <select 
+                            <WalletDropdown 
                               value={row.method} 
-                              onChange={e => updatePaymentSplit(exp.id, row.id, 'method', e.target.value)}
-                              className="saas-input"
-                              style={{ flex: '0 0 110px', cursor: 'pointer', fontSize: '14px', margin: 0, height: '42px', padding: '0 8px', boxSizing: 'border-box' }}
-                            >
-                              <option value="QR ៛">📱 QR ៛</option>
-                              <option value="Cash ៛">💵 Cash ៛</option>
-                              <option value="Cash $">💵 Cash $</option>
-                              <option value="QR $">📱 QR $</option>
-                            </select>
+                              options={liveWallets.length > 0 ? liveWallets.map(w => w.name) : EXPENSE_WALLETS} 
+                              onChange={(val: string) => updatePaymentSplit(exp.id, row.id, 'method', val)}
+                              style={{ flex: '0 0 140px', height: '42px', margin: 0 }} 
+                            />
                             
                             <div id={rIndex === 0 ? `amount-wrapper-${exp.id}` : undefined} style={{ flex: 1 }}>
                               <CurrencyInput 
@@ -1172,7 +1419,7 @@ export default function ExpenseDashboard() {
                                     <button 
                                       onClick={() => {
                                         // 🔥 AUTO-FILL LOGIC: Detects which currency they owe and defaults the exact amount and method
-                                        const defaultMethod = totalDebtRiel > 0 ? 'Cash ៛' : 'Cash $';
+                                        const defaultMethod = totalDebtRiel > 0 ? STAFF_DEBT_WALLETS[0] as string : STAFF_DEBT_WALLETS.find(w => w.includes('$')) || STAFF_DEBT_WALLETS[0] as string;
                                         const defaultAmount = totalDebtRiel > 0 ? totalDebtRiel : totalDebtUsd;
                                         setSettleModal({ isOpen: true, staff: staff, amount: defaultAmount, method: defaultMethod });
                                       }} 
@@ -1491,12 +1738,12 @@ export default function ExpenseDashboard() {
 
         <div style={{ marginBottom: '24px' }}>
           <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '8px' }}>Payment Method</label>
-          <select value={advanceModal.method} onChange={e => setAdvanceModal({...advanceModal, method: e.target.value})} className="saas-input" style={{ cursor: 'pointer' }}>
-            <option value="Cash ៛">💵 Cash ៛</option>
-            <option value="Cash $">💵 Cash $</option>
-            <option value="QR ៛">📱 QR ៛</option>
-            <option value="QR $">📱 QR $</option>
-          </select>
+          <WalletDropdown 
+            value={advanceModal.method} 
+            options={liveWallets.length > 0 ? liveWallets.map(w => w.name) : STAFF_DEBT_WALLETS} 
+            onChange={(val: string) => setAdvanceModal({...advanceModal, method: val})} 
+            style={{ width: '100%', height: '42px' }} 
+          />
         </div>
 
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
@@ -1667,13 +1914,12 @@ export default function ExpenseDashboard() {
 
         <div style={{ marginBottom: '24px' }}>
           <label className="saas-card-title" style={{ display: 'block', fontSize: '11px', marginBottom: '8px' }}>Payment Received Into</label>
-          <select value={settleModal.method} onChange={e => setSettleModal({...settleModal, method: e.target.value})} className="saas-input" style={{ cursor: 'pointer' }}>
-            <option value="Cash ៛">💵 Cash ៛</option>
-            <option value="Cash $">💵 Cash $</option>
-            <option value="QR ៛">📱 QR ៛</option>
-            <option value="QR $">📱 QR $</option>
-            <option value="Write-off">❌ Bad Debt (Runaway / Write-off)</option>
-          </select>
+          <WalletDropdown 
+            value={settleModal.method} 
+            options={[...(liveWallets.length > 0 ? liveWallets.map(w => w.name) : STAFF_DEBT_WALLETS), 'Write-off']} 
+            onChange={(val: string) => setSettleModal({...settleModal, method: val})} 
+            style={{ width: '100%', height: '42px' }} 
+          />
         </div>
 
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
