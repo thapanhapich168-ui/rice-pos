@@ -882,27 +882,27 @@ export default function DashboardPage() {
                 <div className="saas-card mint">
                   <div className="saas-card-title" style={{ marginBottom: '4px' }}>💵 Total Net Worth</div>
                   <div style={{ fontSize: '12px', color: '#059669', fontWeight: 'bold', marginBottom: '12px' }}>Business + Personal Assets</div>
-                  <div style={{ display: 'flex', gap: '16px', alignItems: 'baseline' }}>
-                    <div style={{ fontSize: '28px', fontWeight: 'bold', color: '#10b981' }}>{formatRiel(assetData.netWorthRiel)}</div>
-                    <div style={{ fontSize: '28px', fontWeight: 'bold', color: '#34d399' }}>{formatUSD(assetData.netWorthUsd)}</div>
+                  <div style={{ display: 'flex', gap: '16px', alignItems: 'baseline', flexWrap: 'wrap' }}>
+                    <div style={{ fontSize: '28px', fontWeight: 'bold', color: '#10b981', whiteSpace: 'nowrap' }}>{formatRiel(assetData.netWorthRiel)}</div>
+                    <div style={{ fontSize: '28px', fontWeight: 'bold', color: '#34d399', whiteSpace: 'nowrap' }}>{formatUSD(assetData.netWorthUsd)}</div>
                   </div>
                 </div>
 
                 <div className="saas-card mint">
                   <div className="saas-card-title" style={{ marginBottom: '4px' }}>📦 Total Rice Stock Asset</div>
                   <div style={{ fontSize: '12px', color: '#059669', fontWeight: 'bold', marginBottom: '12px' }}>Live Inventory Valuation</div>
-                  <div style={{ fontSize: '28px', fontWeight: 'bold', color: '#10b981' }}>{formatRiel(assetData.riceStockValue)}</div>
+                  <div style={{ fontSize: '28px', fontWeight: 'bold', color: '#10b981', whiteSpace: 'nowrap' }}>{formatRiel(assetData.riceStockValue)}</div>
                 </div>
 
                 {/* LIVE WALLETS FROM SUPABASE */}
                 <div className="saas-card" style={{ background: '#f8fafc', border: '1px solid #e2e8f0' }}>
                   <div className="saas-card-title" style={{ color: '#475569', marginBottom: '4px' }}>💵 Cash on Hand</div>
                   <div style={{ fontSize: '12px', color: '#94a3b8', fontWeight: 'bold', marginBottom: '12px' }}>Operations & Chest Cash</div>
-                  <div style={{ display: 'flex', gap: '16px', alignItems: 'baseline' }}>
+                  <div style={{ display: 'flex', gap: '16px', alignItems: 'baseline', flexWrap: 'wrap' }}>
                     {isWalletsLoading ? <span style={{color: '#94a3b8'}}>...</span> : (
                       <>
-                        <div style={{ fontSize: '24px', color: '#334155', fontWeight: 'bold' }}>{formatRiel(getBalance(WALLET_NAMES.CASH_KHR) + getBalance(WALLET_NAMES.CASH_CHEST_KHR))}</div>
-                        <div style={{ fontSize: '24px', color: '#64748b', fontWeight: 'bold' }}>{formatUSD(getBalance(WALLET_NAMES.CASH_USD) + getBalance(WALLET_NAMES.CASH_CHEST_USD))}</div>
+                        <div style={{ fontSize: '24px', color: '#334155', fontWeight: 'bold', whiteSpace: 'nowrap' }}>{formatRiel(getBalance(WALLET_NAMES.CASH_KHR) + getBalance(WALLET_NAMES.CASH_CHEST_KHR))}</div>
+                        <div style={{ fontSize: '24px', color: '#64748b', fontWeight: 'bold', whiteSpace: 'nowrap' }}>{formatUSD(getBalance(WALLET_NAMES.CASH_USD) + getBalance(WALLET_NAMES.CASH_CHEST_USD))}</div>
                       </>
                     )}
                   </div>
@@ -911,11 +911,11 @@ export default function DashboardPage() {
                 <div className="saas-card" style={{ background: '#f8fafc', border: '1px solid #e2e8f0' }}>
                   <div className="saas-card-title" style={{ color: '#475569', marginBottom: '4px' }}>📱 ABA Radiant</div>
                   <div style={{ fontSize: '12px', color: '#94a3b8', fontWeight: 'bold', marginBottom: '12px' }}>Primary QR Receiving</div>
-                  <div style={{ display: 'flex', gap: '16px', alignItems: 'baseline' }}>
+                  <div style={{ display: 'flex', gap: '16px', alignItems: 'baseline', flexWrap: 'wrap' }}>
                     {isWalletsLoading ? <span style={{color: '#94a3b8'}}>...</span> : (
                       <>
-                        <div style={{ fontSize: '24px', color: '#3b82f6', fontWeight: 'bold' }}>{formatRiel(getBalance(WALLET_NAMES.ABA_RADIANT_KHR))}</div>
-                        <div style={{ fontSize: '24px', color: '#60a5fa', fontWeight: 'bold' }}>{formatUSD(getBalance(WALLET_NAMES.ABA_RADIANT_USD))}</div>
+                        <div style={{ fontSize: '24px', color: '#3b82f6', fontWeight: 'bold', whiteSpace: 'nowrap' }}>{formatRiel(getBalance(WALLET_NAMES.ABA_RADIANT_KHR))}</div>
+                        <div style={{ fontSize: '24px', color: '#60a5fa', fontWeight: 'bold', whiteSpace: 'nowrap' }}>{formatUSD(getBalance(WALLET_NAMES.ABA_RADIANT_USD))}</div>
                       </>
                     )}
                   </div>
@@ -924,9 +924,9 @@ export default function DashboardPage() {
                 <div className="saas-card" style={{ background: '#f0fdf4', border: '1px solid #bbf7d0' }}>
                   <div className="saas-card-title" style={{ color: '#047857', marginBottom: '4px' }}>👩 Radiant Availability</div>
                   <div style={{ fontSize: '12px', color: '#34d399', fontWeight: 'bold', marginBottom: '12px' }}>Held for COGS Settlements</div>
-                  <div style={{ display: 'flex', gap: '16px', alignItems: 'baseline' }}>
+                  <div style={{ display: 'flex', gap: '16px', alignItems: 'baseline', flexWrap: 'wrap' }}>
                     {isWalletsLoading ? <span style={{color: '#94a3b8'}}>...</span> : (
-                      <div style={{ fontSize: '24px', color: '#059669', fontWeight: 'bold' }}>{formatRiel(getBalance(WALLET_NAMES.RADIANT_AVAILABILITY))}</div>
+                      <div style={{ fontSize: '24px', color: '#059669', fontWeight: 'bold', whiteSpace: 'nowrap' }}>{formatRiel(getBalance(WALLET_NAMES.RADIANT_AVAILABILITY))}</div>
                     )}
                   </div>
                 </div>
@@ -934,11 +934,11 @@ export default function DashboardPage() {
                 <div className="saas-card" style={{ background: '#f8fafc', border: '1px solid #e2e8f0' }}>
                   <div className="saas-card-title" style={{ color: '#475569', marginBottom: '4px' }}>🏦 ABA Both</div>
                   <div style={{ fontSize: '12px', color: '#94a3b8', fontWeight: 'bold', marginBottom: '12px' }}>Operating & Spending Acct</div>
-                  <div style={{ display: 'flex', gap: '16px', alignItems: 'baseline' }}>
+                  <div style={{ display: 'flex', gap: '16px', alignItems: 'baseline', flexWrap: 'wrap' }}>
                     {isWalletsLoading ? <span style={{color: '#94a3b8'}}>...</span> : (
                       <>
-                        <div style={{ fontSize: '24px', color: '#334155', fontWeight: 'bold' }}>{formatRiel(getBalance(WALLET_NAMES.ABA_BOTH_KHR))}</div>
-                        <div style={{ fontSize: '24px', color: '#64748b', fontWeight: 'bold' }}>{formatUSD(getBalance(WALLET_NAMES.ABA_BOTH_USD))}</div>
+                        <div style={{ fontSize: '24px', color: '#334155', fontWeight: 'bold', whiteSpace: 'nowrap' }}>{formatRiel(getBalance(WALLET_NAMES.ABA_BOTH_KHR))}</div>
+                        <div style={{ fontSize: '24px', color: '#64748b', fontWeight: 'bold', whiteSpace: 'nowrap' }}>{formatUSD(getBalance(WALLET_NAMES.ABA_BOTH_USD))}</div>
                       </>
                     )}
                   </div>
@@ -949,29 +949,29 @@ export default function DashboardPage() {
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '16px', marginBottom: '32px' }}>
                 <div className="saas-card">
                   <div className="saas-card-title">📒 Accounts Receivable (AR)</div>
-                  <div style={{ display: 'flex', gap: '16px', margin: '12px 0' }}>
+                  <div style={{ display: 'flex', gap: '16px', margin: '12px 0', flexWrap: 'wrap' }}>
                     <div>
-                      <div style={{ fontSize: '24px', color: '#f59e0b', fontWeight: 'bold' }}>{formatRiel(assetData.totalArRiel)}</div>
+                      <div style={{ fontSize: '24px', color: '#f59e0b', fontWeight: 'bold', whiteSpace: 'nowrap' }}>{formatRiel(assetData.totalArRiel)}</div>
                     </div>
                     <div>
-                      <div style={{ fontSize: '24px', color: '#f59e0b', fontWeight: 'bold' }}>{formatUSD(assetData.totalArUsd)}</div>
+                      <div style={{ fontSize: '24px', color: '#f59e0b', fontWeight: 'bold', whiteSpace: 'nowrap' }}>{formatUSD(assetData.totalArUsd)}</div>
                     </div>
                   </div>
                   
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(100px, 1fr))', gap: '8px', borderTop: '1px dashed #e2e8f0', paddingTop: '12px' }}>
                     <div>
                       <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 'bold', textTransform: 'uppercase' }}>Biz AR</span>
-                      <div style={{ fontSize: '14px', color: '#334155', fontWeight: 'bold' }}>{formatRiel(assetData.bizCreditRiel)}</div>
+                      <div style={{ fontSize: '14px', color: '#334155', fontWeight: 'bold', whiteSpace: 'nowrap' }}>{formatRiel(assetData.bizCreditRiel)}</div>
                     </div>
                     <div>
                       <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 'bold', textTransform: 'uppercase' }}>Pers. AR</span>
-                      <div style={{ fontSize: '14px', color: '#334155', fontWeight: 'bold' }}>{formatRiel(assetData.familyOweRiel)}</div>
-                      <div style={{ fontSize: '14px', color: '#334155', fontWeight: 'bold' }}>{formatUSD(assetData.familyOweUsd)}</div>
+                      <div style={{ fontSize: '14px', color: '#334155', fontWeight: 'bold', whiteSpace: 'nowrap' }}>{formatRiel(assetData.familyOweRiel)}</div>
+                      <div style={{ fontSize: '14px', color: '#334155', fontWeight: 'bold', whiteSpace: 'nowrap' }}>{formatUSD(assetData.familyOweUsd)}</div>
                     </div>
                     <div>
                       <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 'bold', textTransform: 'uppercase' }}>Staff Debt</span>
-                      <div style={{ fontSize: '14px', color: '#334155', fontWeight: 'bold' }}>{formatRiel(assetData.staffDebtRiel)}</div>
-                      <div style={{ fontSize: '14px', color: '#334155', fontWeight: 'bold' }}>{formatUSD(assetData.staffDebtUsd)}</div>
+                      <div style={{ fontSize: '14px', color: '#334155', fontWeight: 'bold', whiteSpace: 'nowrap' }}>{formatRiel(assetData.staffDebtRiel)}</div>
+                      <div style={{ fontSize: '14px', color: '#334155', fontWeight: 'bold', whiteSpace: 'nowrap' }}>{formatUSD(assetData.staffDebtUsd)}</div>
                     </div>
                   </div>
                 </div>
@@ -982,25 +982,25 @@ export default function DashboardPage() {
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginTop: '16px' }}>
                     <div>
                       <span style={{ fontSize: '11px', color: '#059669', fontWeight: 'bold', textTransform: 'uppercase' }}>Owed by Customers</span>
-                      <div style={{ fontSize: '24px', color: '#10b981', fontWeight: 'bold', marginTop: '4px' }}>{formatRiel(assetData.momCustomerArRiel)}</div>
+                      <div style={{ fontSize: '24px', color: '#10b981', fontWeight: 'bold', marginTop: '4px', whiteSpace: 'nowrap' }}>{formatRiel(assetData.momCustomerArRiel)}</div>
                     </div>
                     <div>
                       <span style={{ fontSize: '11px', color: '#059669', fontWeight: 'bold', textTransform: 'uppercase' }}>COGS Owed to Biz</span>
-                      <div style={{ fontSize: '24px', color: '#10b981', fontWeight: 'bold', marginTop: '4px' }}>{formatRiel(assetData.momCogsArRiel)}</div>
+                      <div style={{ fontSize: '24px', color: '#10b981', fontWeight: 'bold', marginTop: '4px', whiteSpace: 'nowrap' }}>{formatRiel(assetData.momCogsArRiel)}</div>
                     </div>
                   </div>
                 </div>
                 
                 <div className="saas-card red">
                   <div className="saas-card-title">📉 Accounts Payable (Suppliers)</div>
-                  <div style={{ fontSize: '24px', margin: '8px 0 4px 0', color: '#e11d48', fontWeight: 'bold' }}>{formatRiel(assetData.totalSupplierAPRiel)}</div>
-                  <div style={{ fontSize: '20px', color: '#e11d48', fontWeight: 'bold' }}>{formatUSD(assetData.totalSupplierAPUsd)}</div>
+                  <div style={{ fontSize: '24px', margin: '8px 0 4px 0', color: '#e11d48', fontWeight: 'bold', whiteSpace: 'nowrap' }}>{formatRiel(assetData.totalSupplierAPRiel)}</div>
+                  <div style={{ fontSize: '20px', color: '#e11d48', fontWeight: 'bold', whiteSpace: 'nowrap' }}>{formatUSD(assetData.totalSupplierAPUsd)}</div>
                 </div>
 
                 <div className="saas-card red">
                   <div className="saas-card-title">📉 Personal Liability (Owe Mom)</div>
-                  <div style={{ fontSize: '24px', margin: '8px 0 4px 0', color: '#e11d48', fontWeight: 'bold' }}>{formatRiel(assetData.liveMomLiabilityRiel)}</div>
-                  <div style={{ fontSize: '20px', color: '#e11d48', fontWeight: 'bold' }}>{formatUSD(assetData.liveMomLiabilityUsd)}</div>
+                  <div style={{ fontSize: '24px', margin: '8px 0 4px 0', color: '#e11d48', fontWeight: 'bold', whiteSpace: 'nowrap' }}>{formatRiel(assetData.liveMomLiabilityRiel)}</div>
+                  <div style={{ fontSize: '20px', color: '#e11d48', fontWeight: 'bold', whiteSpace: 'nowrap' }}>{formatUSD(assetData.liveMomLiabilityUsd)}</div>
                 </div>
 
                 <div className="saas-card" style={{ gridColumn: '1 / -1' }}>
@@ -1010,24 +1010,24 @@ export default function DashboardPage() {
                     <div style={{ padding: '16px', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
                       <div style={{ fontSize: '12px', color: '#64748b', fontWeight: 'bold', marginBottom: '8px' }}>BUSINESS EXPENSES</div>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                        <div style={{ fontSize: '18px', color: '#ef4444', fontWeight: 'bold' }}>{formatRiel(assetData.bizExpRiel)}</div>
-                        <div style={{ fontSize: '18px', color: '#ef4444', fontWeight: 'bold' }}>{formatUSD(assetData.bizExpUsd)}</div>
+                        <div style={{ fontSize: '18px', color: '#ef4444', fontWeight: 'bold', whiteSpace: 'nowrap' }}>{formatRiel(assetData.bizExpRiel)}</div>
+                        <div style={{ fontSize: '18px', color: '#ef4444', fontWeight: 'bold', whiteSpace: 'nowrap' }}>{formatUSD(assetData.bizExpUsd)}</div>
                       </div>
                     </div>
 
                     <div style={{ padding: '16px', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
                       <div style={{ fontSize: '12px', color: '#64748b', fontWeight: 'bold', marginBottom: '8px' }}>PERSONAL EXPENSES</div>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                        <div style={{ fontSize: '18px', color: '#f59e0b', fontWeight: 'bold' }}>{formatRiel(assetData.persExpRiel)}</div>
-                        <div style={{ fontSize: '18px', color: '#f59e0b', fontWeight: 'bold' }}>{formatUSD(assetData.persExpUsd)}</div>
+                        <div style={{ fontSize: '18px', color: '#f59e0b', fontWeight: 'bold', whiteSpace: 'nowrap' }}>{formatRiel(assetData.persExpRiel)}</div>
+                        <div style={{ fontSize: '18px', color: '#f59e0b', fontWeight: 'bold', whiteSpace: 'nowrap' }}>{formatUSD(assetData.persExpUsd)}</div>
                       </div>
                     </div>
 
                     <div style={{ padding: '16px', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
                       <div style={{ fontSize: '12px', color: '#64748b', fontWeight: 'bold', marginBottom: '8px' }}>RICE / STOCK PURCHASES</div>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                        <div style={{ fontSize: '18px', color: '#3b82f6', fontWeight: 'bold' }}>{formatRiel(assetData.riceExpRiel)}</div>
-                        <div style={{ fontSize: '18px', color: '#3b82f6', fontWeight: 'bold' }}>{formatUSD(assetData.riceExpUsd)}</div>
+                        <div style={{ fontSize: '18px', color: '#3b82f6', fontWeight: 'bold', whiteSpace: 'nowrap' }}>{formatRiel(assetData.riceExpRiel)}</div>
+                        <div style={{ fontSize: '18px', color: '#3b82f6', fontWeight: 'bold', whiteSpace: 'nowrap' }}>{formatUSD(assetData.riceExpUsd)}</div>
                       </div>
                     </div>
 
@@ -1373,11 +1373,11 @@ function ComplexCard({ title, total, pich = 0, jing = 0, both = 0, mom = 0, hide
   return (
     <div className="saas-card">
       <h3 className="saas-card-title">{title}</h3>
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px' }}>
-        <h2 style={{ margin: '8px 0 4px 0', fontSize: '22px', color: color, fontWeight: 'bold' }}>{formatRiel(total)}</h2>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px', flexWrap: 'wrap' }}>
+        <h2 style={{ margin: '8px 0 4px 0', fontSize: '22px', color: color, fontWeight: 'bold', whiteSpace: 'nowrap' }}>{formatRiel(total)}</h2>
       </div>
       {!hideUsdEquiv && (
-        <div style={{ fontSize: '13px', color: '#94a3b8', marginBottom: '16px', fontWeight: 'bold' }}>{formatUSDEquiv(total)}</div>
+        <div style={{ fontSize: '13px', color: '#94a3b8', marginBottom: '16px', fontWeight: 'bold', whiteSpace: 'nowrap' }}>{formatUSDEquiv(total)}</div>
       )}
       {hideUsdEquiv && <div style={{ height: '16px', marginBottom: '16px' }}></div>}
       
@@ -1385,19 +1385,19 @@ function ComplexCard({ title, total, pich = 0, jing = 0, both = 0, mom = 0, hide
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '6px', borderTop: '1px solid #f1f5f9', paddingTop: '16px' }}>
           <div style={{ background: '#f8fafc', padding: '6px', borderRadius: '6px', textAlign: 'center' }}>
             <div style={{ fontSize: '10px', color: '#94a3b8', textTransform: 'uppercase', fontWeight: 'bold' }}>Pich</div>
-            <div style={{ fontSize: '12px', color: '#334155', marginTop: '2px', fontWeight: 'bold' }}>{formatRiel(pich)}</div>
+            <div style={{ fontSize: '12px', color: '#334155', marginTop: '2px', fontWeight: 'bold', whiteSpace: 'nowrap' }}>{formatRiel(pich)}</div>
           </div>
           <div style={{ background: '#f8fafc', padding: '6px', borderRadius: '6px', textAlign: 'center' }}>
             <div style={{ fontSize: '10px', color: '#94a3b8', textTransform: 'uppercase', fontWeight: 'bold' }}>Jing</div>
-            <div style={{ fontSize: '12px', color: '#334155', marginTop: '2px', fontWeight: 'bold' }}>{formatRiel(jing)}</div>
+            <div style={{ fontSize: '12px', color: '#334155', marginTop: '2px', fontWeight: 'bold', whiteSpace: 'nowrap' }}>{formatRiel(jing)}</div>
           </div>
           <div style={{ background: '#f8fafc', padding: '6px', borderRadius: '6px', textAlign: 'center' }}>
             <div style={{ fontSize: '10px', color: '#94a3b8', textTransform: 'uppercase', fontWeight: 'bold' }}>Both</div>
-            <div style={{ fontSize: '12px', color: '#334155', marginTop: '2px', fontWeight: 'bold' }}>{formatRiel(both)}</div>
+            <div style={{ fontSize: '12px', color: '#334155', marginTop: '2px', fontWeight: 'bold', whiteSpace: 'nowrap' }}>{formatRiel(both)}</div>
           </div>
           <div style={{ background: '#fefcf3', padding: '6px', borderRadius: '6px', textAlign: 'center', border: '1px solid #fde047' }}>
             <div style={{ fontSize: '10px', color: '#ca8a04', textTransform: 'uppercase', fontWeight: 'bold' }}>Mom</div>
-            <div style={{ fontSize: '12px', color: '#854d0e', marginTop: '2px', fontWeight: 'bold' }}>{formatRiel(mom)}</div>
+            <div style={{ fontSize: '12px', color: '#854d0e', marginTop: '2px', fontWeight: 'bold', whiteSpace: 'nowrap' }}>{formatRiel(mom)}</div>
           </div>
         </div>
       )}
@@ -1413,19 +1413,19 @@ function ExpenseBreakdownCard({ title, cR = 0, cU = 0, qR = 0, qU = 0, color = '
     <div className="saas-card">
       <h3 className="saas-card-title">{title}</h3>
       
-      <div style={{ display: 'flex', gap: '16px', margin: '12px 0 16px 0' }}>
-        <div style={{ fontSize: '22px', color: color, fontWeight: 'bold' }}>{formatRiel(totalRiel)}</div>
-        {totalUsd > 0 && <div style={{ fontSize: '22px', color: color, fontWeight: 'bold' }}>{formatUSD(totalUsd)}</div>}
+      <div style={{ display: 'flex', gap: '16px', margin: '12px 0 16px 0', flexWrap: 'wrap' }}>
+        <div style={{ fontSize: '22px', color: color, fontWeight: 'bold', whiteSpace: 'nowrap' }}>{formatRiel(totalRiel)}</div>
+        {totalUsd > 0 && <div style={{ fontSize: '22px', color: color, fontWeight: 'bold', whiteSpace: 'nowrap' }}>{formatUSD(totalUsd)}</div>}
       </div>
       
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', borderTop: '1px solid #f1f5f9', paddingTop: '16px' }}>
         <div>
-          <div style={{ fontSize: '12px', color: '#64748b', marginBottom: '4px', fontWeight: 'bold' }}>Cash: <span style={{fontWeight: 'bold', color: '#334155'}}>{formatRiel(cR)}</span></div>
-          <div style={{ fontSize: '12px', color: '#64748b', fontWeight: 'bold' }}>QR: <span style={{fontWeight: 'bold', color: '#334155'}}>{formatRiel(qR)}</span></div>
+          <div style={{ fontSize: '12px', color: '#64748b', marginBottom: '4px', fontWeight: 'bold' }}>Cash: <span style={{fontWeight: 'bold', color: '#334155', whiteSpace: 'nowrap'}}>{formatRiel(cR)}</span></div>
+          <div style={{ fontSize: '12px', color: '#64748b', fontWeight: 'bold' }}>QR: <span style={{fontWeight: 'bold', color: '#334155', whiteSpace: 'nowrap'}}>{formatRiel(qR)}</span></div>
         </div>
         <div>
-          <div style={{ fontSize: '12px', color: '#64748b', marginBottom: '4px', fontWeight: 'bold' }}>Cash: <span style={{fontWeight: 'bold', color: '#334155'}}>{formatUSD(cU)}</span></div>
-          <div style={{ fontSize: '12px', color: '#64748b', fontWeight: 'bold' }}>QR: <span style={{fontWeight: 'bold', color: '#334155'}}>{formatUSD(qU)}</span></div>
+          <div style={{ fontSize: '12px', color: '#64748b', marginBottom: '4px', fontWeight: 'bold' }}>Cash: <span style={{fontWeight: 'bold', color: '#334155', whiteSpace: 'nowrap'}}>{formatUSD(cU)}</span></div>
+          <div style={{ fontSize: '12px', color: '#64748b', fontWeight: 'bold' }}>QR: <span style={{fontWeight: 'bold', color: '#334155', whiteSpace: 'nowrap'}}>{formatUSD(qU)}</span></div>
         </div>
       </div>
     </div>
