@@ -25,7 +25,12 @@ function WalletDropdown({ value, options, onChange, style }: any) {
       if (document.getElementById('wallet-dropdown-portal')?.contains(event.target as Node)) return;
       if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) setIsOpen(false);
     };
-    const handleScroll = () => setIsOpen(false);
+    
+    const handleScroll = (event: Event) => {
+      // 🚀 FIX: Allow scrolling inside the portal menu without closing it!
+      if (document.getElementById('wallet-dropdown-portal')?.contains(event.target as Node)) return;
+      setIsOpen(false);
+    };
 
     if (isOpen) {
       document.addEventListener('mousedown', handleClickOutside);
