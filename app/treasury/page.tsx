@@ -6,6 +6,7 @@ import { CurrencyInput } from '@/components/Inputs';
 import { useBranch } from '@/components/BranchContext';
 import { useToast } from '@/components/ToastProvider';
 import { TELEGRAM_CONFIG } from '@/lib/telegramConfig';
+import Modal from '@/components/Modal';
 
 // --- CUSTOM TREASURY DROPDOWN ---
 function TreasuryWalletDropdown({ selectedId, wallets, onChange, placeholder }: any) {
@@ -103,26 +104,47 @@ export default function TreasuryPage() {
   // Tab State
   const [activeTab, setActiveTab] = useState<'balances' | 'transfer'>('balances');
   
-  // 🚀 BULK INITIALIZATION STATE
-  const [showStartingBalance, setShowStartingBalance] = useState(false);
+  // SETTINGS MODAL STATE
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [draftBalances, setDraftBalances] = useState<Record<string, number | ''>>({});
 
-  // 🚀 SYNC WITH LIVE BALANCES (Like the Dashboard Settings)
+  // SYNC WITH LIVE BALANCES
   useEffect(() => {
-    if (showStartingBalance) {
+    if (isSettingsOpen) {
       const currentBalances: Record<string, number | ''> = {};
       wallets.forEach(w => {
         currentBalances[w.id] = Number(w.balance) || 0;
       });
       setDraftBalances(currentBalances);
     }
-  }, [showStartingBalance, wallets]);
+  }, [isSettingsOpen, wallets]);
 
   // Transfer Form State
   const [fromWalletId, setFromWalletId] = useState('');
   const [toWalletId, setToWalletId] = useState('');
   const [transferAmount, setTransferAmount] = useState<number | ''>('');
   const [transferNotes, setTransferNotes] = useState('');
+
+  // TEST BUTTON STATE & LOGIC
+  const [isTestingTelegram, setIsTestingTelegram] = useState(false);
+  
+  const handleSendTestAlert = async () => {
+    setIsTestingTelegram(true);
+    try {
+      const res = await fetch('/api/cron/treasury');
+      const data = await res.json(); 
+      
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || `HTTP Error: ${res.status}`);
+      }
+      
+      showToast('success', 'Test Sent!', 'Check your Telegram app right now.');
+    } catch (err: any) {
+      showToast('error', 'Test Failed', err.message);
+    } finally {
+      setIsTestingTelegram(false);
+    }
+  };
 
   useEffect(() => {
     fetchWallets();
@@ -131,7 +153,6 @@ export default function TreasuryPage() {
   async function fetchWallets() {
     setIsLoading(true);
     
-    // 🔒 SECURITY FIX: Enforce branch isolation so tenants only see their own wallets
     let query = supabase.from('wallets').select('*').order('id', { ascending: true });
     if (activeBranchId !== 0) query = query.eq('branch_id', activeBranchId);
     
@@ -158,12 +179,11 @@ export default function TreasuryPage() {
         const difference = newBal - currentBal;
 
         if (difference !== 0) {
-          // 🔒 RLS FIX: Force the transaction to match the wallet's native branch
           const targetBranchId = w.branch_id || (activeBranchId === 0 ? 1 : activeBranchId);
 
           const { error } = await supabase.rpc('record_wallet_transaction', {
             p_wallet_name: w.name,
-            p_amount: difference, // 🚀 Applies exactly the difference so the wallet matches your typed number!
+            p_amount: difference, 
             p_reference_type: 'TREASURY',
             p_reference_id: 'MANUAL_SYNC',
             p_description: 'Manual Balance Sync / Adjustment',
@@ -175,7 +195,7 @@ export default function TreasuryPage() {
 
       await Promise.all(updatePromises);
       showToast('success', 'Balances Synced', 'Your accounts now exactly match the numbers you entered.');
-      setShowStartingBalance(false);
+      setIsSettingsOpen(false);
       fetchWallets();
     } catch (err: any) {
       showToast('error', 'Update Failed', err.message);
@@ -201,7 +221,6 @@ export default function TreasuryPage() {
       const transferVal = Number(transferAmount);
       const safeNotes = transferNotes.trim() || 'Internal Treasury Transfer';
 
-      // 🚀 ONE SECURE TRIP TO POSTGRES (100% Atomic Execution)
       const { error: transferErr } = await supabase.rpc('execute_treasury_transfer', {
           p_from_wallet: fromWallet.name,
           p_to_wallet: toWallet.name,
@@ -212,11 +231,9 @@ export default function TreasuryPage() {
       
       if (transferErr) throw transferErr;
 
-      // Calculate Balances for Telegram visually
       const fromBalAfter = Number(fromWallet.balance) - transferVal;
       const toBalAfter = Number(toWallet.balance) + transferVal;
 
-      // 🔔 AUTO-SEND TELEGRAM ALERT ON EVERY TRANSFER
       const botToken = TELEGRAM_CONFIG.botToken || process.env.NEXT_PUBLIC_TELEGRAM_BOT_TOKEN;
       const masterChatId = TELEGRAM_CONFIG.chatId || process.env.NEXT_PUBLIC_TELEGRAM_CHAT_ID;
       const targetThreadId = (TELEGRAM_CONFIG as any).treasuryTopics?.[activeBranchId];
@@ -228,28 +245,18 @@ export default function TreasuryPage() {
         let alertMsg = `🔄 *INTERNAL TREASURY TRANSFER*\n`;
         alertMsg += `🏬 Branch ID: *${activeBranchId}*\n`;
         alertMsg += `📅 Date: ${new Date().toLocaleString('en-GB')}\n\n`;
-
         alertMsg += `📤 *Deducted From:*\n`;
         alertMsg += `• Wallet: ${fromWallet.name}\n`;
         alertMsg += `• Amount: -${formatBal(transferVal)} ${symbol}\n`;
         alertMsg += `• Balance After: *${formatBal(fromBalAfter)} ${symbol}*\n\n`;
-
         alertMsg += `📥 *Added To:*\n`;
         alertMsg += `• Wallet: ${toWallet.name}\n`;
         alertMsg += `• Amount: +${formatBal(transferVal)} ${symbol}\n`;
         alertMsg += `• Balance After: *${formatBal(toBalAfter)} ${symbol}*\n\n`;
-
         alertMsg += `📝 *Reason:* ${safeNotes}`;
 
-        const tgPayload: any = {
-          chat_id: masterChatId,
-          text: alertMsg,
-          parse_mode: 'Markdown'
-        };
-
-        if (targetThreadId) {
-          tgPayload.message_thread_id = targetThreadId;
-        }
+        const tgPayload: any = { chat_id: masterChatId, text: alertMsg, parse_mode: 'Markdown' };
+        if (targetThreadId) tgPayload.message_thread_id = targetThreadId;
 
         fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
           method: 'POST',
@@ -259,11 +266,7 @@ export default function TreasuryPage() {
       }
 
       showToast('success', 'Transfer Complete', `Successfully moved funds from ${fromWallet?.name} to ${toWallet?.name}.`);
-      
-      setFromWalletId('');
-      setToWalletId('');
-      setTransferAmount('');
-      setTransferNotes('');
+      setFromWalletId(''); setToWalletId(''); setTransferAmount(''); setTransferNotes('');
       fetchWallets();
       setActiveTab('balances');
 
@@ -285,29 +288,56 @@ export default function TreasuryPage() {
   };
 
   return (
-    <div className="main-wrapper responsive-wrapper" style={{ height: '100dvh', overflowY: 'auto', backgroundColor: '#f8fafc' }}>
+    <div className="main-wrapper" style={{ display: 'flex', flexDirection: 'column', height: '100dvh', overflow: 'hidden', backgroundColor: '#f8fafc' }}>
       
-      {/* PERFECTLY ALIGNED HEADER (Matches the Burger Icon Middle) */}
-      <div className="header-container responsive-header" style={{ display: 'flex', alignItems: 'center', marginLeft: '54px', marginBottom: '24px' }}>
-        <h1 className="saas-page-title" style={{ fontSize: '22px', color: '#0f172a', margin: 0, padding: 0, display: 'flex', alignItems: 'center', lineHeight: '1.2' }}>
-          🏛️ Master Treasury
-        </h1>
+      {/* 🚀 HEADER (Flexbox frozen - perfectly aligns with global CSS and burger menu) */}
+      <div className="header-container" style={{ flexShrink: 0 }}>
+        <div className="header-left">
+          <h1 className="saas-page-title">🏛️ Treasury</h1>
+        </div>
+        
+        <div className="header-actions">
+          <button 
+            onClick={handleSendTestAlert} 
+            disabled={isTestingTelegram}
+            style={{
+              display: 'flex', alignItems: 'center', gap: '6px', padding: '8px 14px',
+              fontSize: '13px', fontWeight: 'bold', background: isTestingTelegram ? '#94a3b8' : '#3b82f6',
+              color: '#ffffff', border: 'none', borderRadius: '8px',
+              cursor: isTestingTelegram ? 'not-allowed' : 'pointer',
+              boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)', flexShrink: 0
+            }}
+          >
+            {isTestingTelegram ? '⏳ Sending...' : '📲 Send Test'}
+          </button>
+
+          {/* ⚙️ SETTINGS ICON BUTTON */}
+          <button 
+            onClick={() => setIsSettingsOpen(true)}
+            className="saas-btn"
+            style={{ background: '#ffffff', border: '1px solid #cbd5e1', color: '#475569', fontSize: '18px', padding: '6px 10px', borderRadius: '8px' }}
+            title="Treasury Settings"
+          >
+            ⚙️
+          </button>
+        </div>
       </div>
+
+      {/* 🚀 SCROLLABLE AREA (Flex handles scroll internally so nothing leaks behind the header!) */}
+      <div className="hide-scrollbar" style={{ flex: 1, overflowY: 'auto', paddingBottom: '80px' }}>
 
       {/* TABS - Hidden on Laptop, Visible on Mobile */}
       <div className="mobile-tabs-wrapper" style={{ width: '100%', justifyContent: 'center', marginBottom: '24px' }}>
         <div className="saas-tab-container hide-scrollbar" style={{ margin: 0, display: 'flex', flexWrap: 'nowrap', overflowX: 'auto', gap: '8px', background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '12px', padding: '6px', boxShadow: '0 4px 10px -2px rgba(0,0,0,0.05)' }}>
           <button 
-            type="button" 
-            onClick={() => setActiveTab('balances')} 
+            type="button" onClick={() => setActiveTab('balances')} 
             className={`saas-tab ${activeTab === 'balances' ? 'active' : ''}`} 
-            style={{ flexShrink: 0, padding: '10px 32px', fontSize: '14px', fontWeight: 'bold', background: activeTab === 'balances' ? '#0f172a' : 'transparent', color: activeTab === 'balances' ? '#ffffff' : '#64748b' }}
+            style={{ flexShrink: 0, padding: '10px 32px', fontSize: '14px', fontWeight: 'bold', background: activeTab === 'balances' ? '#3b82f6' : 'transparent', color: activeTab === 'balances' ? '#ffffff' : '#64748b' }}
           >
             💰 Live Balances
           </button>
           <button 
-            type="button" 
-            onClick={() => setActiveTab('transfer')} 
+            type="button" onClick={() => setActiveTab('transfer')} 
             className={`saas-tab ${activeTab === 'transfer' ? 'active' : ''}`} 
             style={{ flexShrink: 0, padding: '10px 32px', fontSize: '14px', fontWeight: 'bold', background: activeTab === 'transfer' ? '#3b82f6' : 'transparent', color: activeTab === 'transfer' ? '#ffffff' : '#64748b' }}
           >
@@ -316,90 +346,60 @@ export default function TreasuryPage() {
         </div>
       </div>
 
-      {/* RESPONSIVE CONTENT AREA (Mobile: Single Column Tab, Laptop: 2-Column Grid) */}
+      {/* RESPONSIVE CONTENT AREA */}
       <div className="content-grid" style={{ margin: '0 auto' }}>
         
-        {/* --- LEFT SIDE: COMPACT BULLET ROWS DASHBOARD --- */}
+        {/* --- LEFT SIDE: WALLET BALANCES --- */}
         <div className={`grid-item fade-in ${activeTab === 'balances' ? 'mobile-active' : ''}`}>
           
-          {/* 🚀 BULK INITIALIZATION ACCORDION */}
-          <div className="saas-card" style={{ padding: 0, marginBottom: '24px', overflow: 'hidden', border: '2px dashed #cbd5e1' }}>
-            <button 
-              onClick={() => setShowStartingBalance(!showStartingBalance)}
-              style={{ width: '100%', padding: '16px 24px', background: '#f8fafc', border: 'none', textAlign: 'left', fontWeight: 'bold', color: '#334155', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '14px' }}
-            >
-              <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <span>⚙️</span> Sync Live Balances (Like Dashboard)
-              </span>
-              <span style={{ fontSize: '12px', color: '#94a3b8' }}>{showStartingBalance ? '▲ CLOSE' : '▼ OPEN TO EDIT'}</span>
-            </button>
+          {/* 🚀 OPTION B: SIDE-BY-SIDE WALLET GRID */}
+          <div className="wallet-split-grid">
             
-            {showStartingBalance && (
-              <div style={{ padding: '24px', borderTop: '1px dashed #e2e8f0', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '16px', background: '#ffffff' }}>
-                <div style={{ gridColumn: '1 / -1', fontSize: '13px', color: '#64748b', marginBottom: '8px' }}>
-                  These boxes show the <b>exact current balance</b> of your accounts. Change a number and hit save to instantly sync the account to match your new amount.
-                </div>
-                {wallets.map(w => (
-                  <div key={w.id}>
-                    <label style={{ display: 'block', fontSize: '12px', color: '#475569', marginBottom: '6px', fontWeight: 'bold' }}>
-                      {w.name} ({w.currency === 'USD' ? '$' : '៛'})
-                    </label>
-                    <CurrencyInput 
-                      value={draftBalances[w.id] === undefined ? '' : draftBalances[w.id]} 
-                      onChange={(v: any) => setDraftBalances(prev => ({ ...prev, [w.id]: v }))} 
-                      className="saas-input" 
-                      style={{ width: '100%', textAlign: 'left', backgroundColor: '#f8fafc' }} 
-                    />
+            {/* COLUMN 1: KHR WALLETS */}
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginBottom: '12px' }}>
+                <h3 style={{ fontSize: '13px', color: '#64748b', textTransform: 'uppercase', fontWeight: 'bold', margin: 0, letterSpacing: '1px' }}>🇰🇭 Riel (KHR)</h3>
+                <div style={{ flex: 1, height: '1px', background: '#cbd5e1' }}></div>
+              </div>
+              
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '24px' }}>
+                {isLoading ? <div style={{ color: '#94a3b8', padding: '12px', textAlign: 'center' }}>Loading...</div> : khrWallets.length === 0 ? <div style={{ color: '#94a3b8', padding: '12px', textAlign: 'center' }}>No KHR wallets configured.</div> : khrWallets.map(w => (
+                  <div key={w.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#ffffff', padding: '12px 16px', borderRadius: '8px', border: '1px solid #e2e8f0', boxShadow: '0 1px 2px rgba(0,0,0,0.02)' }}>
+                    <div style={{ fontSize: '14px', color: '#334155', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '12px' }}>
+                      <span style={{ fontSize: '16px' }}>{getCardIcon(w.name)}</span> {w.name}
+                    </div>
+                    <div style={{ fontSize: '16px', fontWeight: 'bold', color: '#0f172a', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      {new Intl.NumberFormat('en-US').format(w.balance)} <span style={{ fontSize: '13px', color: '#64748b', fontWeight: 'normal' }}>៛</span>
+                    </div>
                   </div>
                 ))}
-                <div style={{ gridColumn: '1 / -1', display: 'flex', justifyContent: 'flex-end', marginTop: '12px' }}>
-                  <button onClick={handleSaveInitialBalances} disabled={isProcessing} className="saas-btn saas-btn-primary" style={{ padding: '12px 24px', fontSize: '14px' }}>
-                    {isProcessing ? 'Processing...' : '💾 Sync Balances'}
-                  </button>
-                </div>
               </div>
-            )}
-          </div>
+            </div>
 
-          {/* KHR WALLETS */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginBottom: '12px' }}>
-            <h3 style={{ fontSize: '13px', color: '#64748b', textTransform: 'uppercase', fontWeight: 'bold', margin: 0, letterSpacing: '1px' }}>🇰🇭 Riel (KHR)</h3>
-            <div style={{ flex: 1, height: '1px', background: '#cbd5e1' }}></div>
-          </div>
-          
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '24px' }}>
-            {isLoading ? <div style={{ color: '#94a3b8', padding: '12px', textAlign: 'center' }}>Loading...</div> : khrWallets.length === 0 ? <div style={{ color: '#94a3b8', padding: '12px', textAlign: 'center' }}>No KHR wallets configured.</div> : khrWallets.map(w => (
-              <div key={w.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#ffffff', padding: '12px 16px', borderRadius: '8px', border: '1px solid #e2e8f0', boxShadow: '0 1px 2px rgba(0,0,0,0.02)' }}>
-                <div style={{ fontSize: '14px', color: '#334155', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '12px' }}>
-                  <span style={{ fontSize: '16px' }}>{getCardIcon(w.name)}</span> {w.name}
-                </div>
-                <div style={{ fontSize: '16px', fontWeight: 'bold', color: '#0f172a', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  {new Intl.NumberFormat('en-US').format(w.balance)} <span style={{ fontSize: '13px', color: '#64748b', fontWeight: 'normal' }}>៛</span>
-                </div>
+            {/* COLUMN 2: USD WALLETS */}
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginBottom: '12px' }}>
+                <h3 style={{ fontSize: '13px', color: '#64748b', textTransform: 'uppercase', fontWeight: 'bold', margin: 0, letterSpacing: '1px' }}>🇺🇸 Dollar (USD)</h3>
+                <div style={{ flex: 1, height: '1px', background: '#cbd5e1' }}></div>
               </div>
-            ))}
-          </div>
 
-          {/* USD WALLETS */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginBottom: '12px' }}>
-            <h3 style={{ fontSize: '13px', color: '#64748b', textTransform: 'uppercase', fontWeight: 'bold', margin: 0, letterSpacing: '1px' }}>🇺🇸 Dollar (USD)</h3>
-            <div style={{ flex: 1, height: '1px', background: '#cbd5e1' }}></div>
-          </div>
-
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '32px' }}>
-            {isLoading ? <div style={{ color: '#94a3b8', padding: '12px', textAlign: 'center' }}>Loading...</div> : usdWallets.length === 0 ? <div style={{ color: '#94a3b8', padding: '12px', textAlign: 'center' }}>No USD wallets configured.</div> : usdWallets.map(w => (
-              <div key={w.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#f0fdf4', padding: '12px 16px', borderRadius: '8px', border: '1px solid #bbf7d0', boxShadow: '0 1px 2px rgba(0,0,0,0.02)' }}>
-                <div style={{ fontSize: '14px', color: '#166534', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '12px' }}>
-                  <span style={{ fontSize: '16px' }}>{getCardIcon(w.name)}</span> {w.name}
-                </div>
-                <div style={{ fontSize: '16px', fontWeight: 'bold', color: '#15803d', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <div style={{ display: 'flex', alignItems: 'baseline', gap: '2px' }}>
-                    <span style={{ fontSize: '13px', color: '#22c55e', fontWeight: 'normal', marginRight: '2px' }}>$</span>
-                    {new Intl.NumberFormat('en-US', { minimumFractionDigits: 2 }).format(w.balance)}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '32px' }}>
+                {isLoading ? <div style={{ color: '#94a3b8', padding: '12px', textAlign: 'center' }}>Loading...</div> : usdWallets.length === 0 ? <div style={{ color: '#94a3b8', padding: '12px', textAlign: 'center' }}>No USD wallets configured.</div> : usdWallets.map(w => (
+                  <div key={w.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#f0fdf4', padding: '12px 16px', borderRadius: '8px', border: '1px solid #bbf7d0', boxShadow: '0 1px 2px rgba(0,0,0,0.02)' }}>
+                    <div style={{ fontSize: '14px', color: '#166534', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '12px' }}>
+                      <span style={{ fontSize: '16px' }}>{getCardIcon(w.name)}</span> {w.name}
+                    </div>
+                    <div style={{ fontSize: '16px', fontWeight: 'bold', color: '#15803d', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <div style={{ display: 'flex', alignItems: 'baseline', gap: '2px' }}>
+                        <span style={{ fontSize: '13px', color: '#22c55e', fontWeight: 'normal', marginRight: '2px' }}>$</span>
+                        {new Intl.NumberFormat('en-US', { minimumFractionDigits: 2 }).format(w.balance)}
+                      </div>
+                    </div>
                   </div>
-                </div>
+                ))}
               </div>
-            ))}
+            </div>
+
           </div>
         </div>
 
@@ -416,10 +416,8 @@ export default function TreasuryPage() {
                   <span style={{ color: '#ef4444' }}>Deducting</span>
                 </label>
                 <TreasuryWalletDropdown 
-                  selectedId={fromWalletId} 
-                  wallets={wallets} 
-                  onChange={setFromWalletId} 
-                  placeholder="-- Select Source Wallet --" 
+                  selectedId={fromWalletId} wallets={wallets} 
+                  onChange={setFromWalletId} placeholder="-- Select Source Wallet --" 
                 />
               </div>
 
@@ -437,10 +435,8 @@ export default function TreasuryPage() {
                   <span style={{ color: '#10b981' }}>Adding</span>
                 </label>
                 <TreasuryWalletDropdown 
-                  selectedId={toWalletId} 
-                  wallets={wallets} 
-                  onChange={setToWalletId} 
-                  placeholder="-- Select Destination Wallet --" 
+                  selectedId={toWalletId} wallets={wallets} 
+                  onChange={setToWalletId} placeholder="-- Select Destination Wallet --" 
                 />
               </div>
 
@@ -448,9 +444,7 @@ export default function TreasuryPage() {
               <div style={{ background: '#eff6ff', padding: '20px', borderRadius: '12px', border: '2px solid #bfdbfe', marginTop: '8px' }}>
                 <label style={{ display: 'block', fontSize: '13px', fontWeight: 'bold', color: '#1e3a8a', marginBottom: '12px', textAlign: 'center', textTransform: 'uppercase', letterSpacing: '1px' }}>Amount to Move</label>
                 <CurrencyInput 
-                  placeholder="0" 
-                  value={transferAmount} 
-                  onChange={(v: any) => setTransferAmount(v)} 
+                  placeholder="0" value={transferAmount} onChange={(v: any) => setTransferAmount(v)} 
                   className="saas-input" 
                   style={{ width: '100%', borderColor: '#60a5fa', padding: '16px', fontSize: '24px', fontWeight: 'bold', textAlign: 'center', color: '#1e3a8a', background: '#ffffff' }} 
                 />
@@ -460,11 +454,8 @@ export default function TreasuryPage() {
               <div>
                 <label style={{ display: 'block', fontSize: '12px', fontWeight: 'bold', color: '#64748b', marginBottom: '8px', textTransform: 'uppercase' }}>📝 Reason (Optional)</label>
                 <input 
-                  type="text" 
-                  value={transferNotes} 
-                  onChange={e => setTransferNotes(e.target.value)} 
-                  placeholder="e.g. Daily cash float setup" 
-                  className="saas-input" 
+                  type="text" value={transferNotes} onChange={e => setTransferNotes(e.target.value)} 
+                  placeholder="e.g. Daily cash float setup" className="saas-input" 
                   style={{ width: '100%', padding: '14px', fontSize: '15px' }} 
                 />
               </div>
@@ -482,17 +473,85 @@ export default function TreasuryPage() {
         </div>
 
       </div>
+      </div> {/* 🚀 CLOSING TAG FOR THE NEW SCROLLABLE AREA */}
+      <Modal 
+        isOpen={isSettingsOpen} 
+        onClose={() => setIsSettingsOpen(false)} 
+        title="Treasury Settings" 
+        icon="⚙️"
+        maxWidth="600px"
+      >
+        <div style={{ fontSize: '13px', color: '#64748b', marginBottom: '16px' }}>
+          These boxes show the <b>exact current balance</b> of your accounts. Change a number and hit save to manually adjust and overwrite the database.
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px', background: '#f8fafc', padding: '16px', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
+          {wallets.map(w => (
+            <div key={w.id}>
+              <label style={{ display: 'block', fontSize: '12px', color: '#475569', marginBottom: '6px', fontWeight: 'bold' }}>
+                {w.name} ({w.currency === 'USD' ? '$' : '៛'})
+              </label>
+              <CurrencyInput 
+                value={draftBalances[w.id] === undefined ? '' : draftBalances[w.id]} 
+                onChange={(v: any) => setDraftBalances(prev => ({ ...prev, [w.id]: v }))} 
+                className="saas-input" 
+                style={{ width: '100%', textAlign: 'left', backgroundColor: '#ffffff' }} 
+              />
+            </div>
+          ))}
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '24px', gap: '12px' }}>
+          <button onClick={() => setIsSettingsOpen(false)} disabled={isProcessing} className="saas-btn saas-btn-secondary">
+            Cancel
+          </button>
+          <button onClick={handleSaveInitialBalances} disabled={isProcessing} className="saas-btn saas-btn-primary">
+            {isProcessing ? 'Processing...' : '💾 Sync Balances'}
+          </button>
+        </div>
+      </Modal>
       
       <style jsx global>{`
         .fade-in { animation: fadeIn 0.3s ease-in-out; }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
-        .hide-scrollbar::-webkit-scrollbar { display: none; }
-        .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
         
-        /* RESPONSIVE ALIGNMENT FIX */
-        .responsive-wrapper { padding: 0 24px 24px 24px; }
-        .responsive-header { margin-top: 0; min-height: 44px; }
-        
+        /* 🔥 RESTORED HEADER ALIGNMENT (Matches Rice Page exactly) */
+        .header-container { 
+          display: flex;
+          justify-content: space-between;
+          align-items: center; 
+          margin-bottom: 24px; 
+          margin-top: 0;
+          margin-left: 60px; /* Bumper to clear desktop sidebar */
+          gap: 12px;
+          min-height: 48px; 
+          width: calc(100% - 60px);
+          padding-right: 24px; 
+        }
+        .header-left {
+          display: flex;
+          align-items: center; 
+          gap: 12px;
+        }
+        .header-actions {
+          display: flex;
+          gap: 10px;
+          margin-left: auto; 
+        }
+
+        @media (max-width: 1023px) {
+          .header-container { 
+            margin-left: 54px !important; /* Bumper to clear mobile burger */
+            margin-right: 0 !important;
+            margin-bottom: 16px !important; 
+            display: flex !important;
+            flex-direction: row !important; /* Forces side-by-side */
+            justify-content: space-between !important;
+            align-items: center !important; 
+            min-height: 44px !important;
+            width: calc(100% - 54px) !important;
+            padding-right: 16px !important;
+          }
+        }
+
         /* MOBILE TABS & LAYOUT */
         .mobile-tabs-wrapper { display: flex; }
         .content-grid {
@@ -502,30 +561,40 @@ export default function TreasuryPage() {
           flex-direction: column;
         }
         .grid-item {
-          display: none; /* Hide both blocks by default on mobile */
+          display: none; 
           width: 100%;
         }
         .grid-item.mobile-active {
-          display: block; /* Show only the active block on mobile */
+          display: block; 
+        }
+        
+        /* OPTION B: WALLET SPLIT GRID (Mobile Default) */
+        .wallet-split-grid {
+          display: grid;
+          grid-template-columns: 1fr;
+          gap: 24px;
         }
         
         /* LAPTOP/DESKTOP OVERRIDE (For side-by-side view) */
         @media (min-width: 1024px) {
-          .responsive-wrapper { padding: 24px; }
-          .responsive-header { margin-top: -4px; min-height: 40px; }
-          
-          .mobile-tabs-wrapper { display: none !important; } /* Hide the tab buttons */
+          .mobile-tabs-wrapper { display: none !important; }
           
           .content-grid {
-            max-width: 1000px; /* Widen the container to fit both */
+            max-width: 1300px; 
             display: grid;
-            grid-template-columns: 1fr 1fr; /* Split into 2 columns */
-            gap: 40px; /* Spacing between the columns */
+            grid-template-columns: 1.8fr 1fr; /* Balances takes slightly more space than Transfer */
+            gap: 40px; 
             align-items: start;
           }
           
           .grid-item {
-            display: block !important; /* Force both blocks to show side-by-side */
+            display: block !important; 
+          }
+
+          /* OPTION B: Splitting KHR and USD side-by-side */
+          .wallet-split-grid {
+            grid-template-columns: 1fr 1fr;
+            gap: 32px;
           }
         }
       `}</style>
