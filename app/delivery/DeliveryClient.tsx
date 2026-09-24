@@ -368,7 +368,7 @@ export default function DeliveryPage() {
         amount_paid_usd: isUsd ? amt : 0,
         payment_method: r.method,
         recorded_by: validSpender,
-        payment_date: new Date().toISOString(), 
+        // Let Postgres handle the timestamp securely using DEFAULT now()
         remarks: `Inline Delivery Settlement`
       });
     }
@@ -603,7 +603,7 @@ export default function DeliveryPage() {
                 amount_paid_usd: fund.isUsd ? applyFace : 0,
                 payment_method: fund.method,
                 recorded_by: validSpender,
-                payment_date: new Date().toISOString(), 
+                // Let Postgres handle the timestamp securely using DEFAULT now()
                 remarks: `Bulk Credit Settlement`
             });
 
