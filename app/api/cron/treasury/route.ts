@@ -22,6 +22,7 @@ export async function GET(request: Request) {
     const { data: wallets, error } = await supabase
       .from('wallets')
       .select('*')
+      .eq('branch_id', branchId) // 🔥 FIX 1: Isolate specifically to this branch!
       .order('id', { ascending: true });
 
     if (error) throw error;
@@ -31,6 +32,9 @@ export async function GET(request: Request) {
     const combinedWallets: Record<string, { khr: number, usd: number }> = {};
 
     wallets.forEach((w: any) => {
+      // 🔥 FIX 2: Filter out "Accounts Receivable" just like the frontend UI does
+      if ((w.name || '').toLowerCase().includes('receiv')) return;
+
       // Remove the ៛ or $ symbols to get the base name (e.g., "ABA Both")
       const cleanName = w.name.replace(/[៛\$]/g, '').trim();
       
