@@ -27,23 +27,26 @@ export async function GET(request: Request) {
     const khrList = wallets.filter((w: any) => w.currency === 'KHR');
     const usdList = wallets.filter((w: any) => w.currency === 'USD');
 
-    // 3. Format the Daily Telegram Message
+    // 3. Format the Daily Telegram Message (🔥 Switched to HTML tags to protect the $ symbol)
     const dateStr = new Date().toLocaleString('en-GB', { timeZone: 'Asia/Phnom_Penh' });
     
-    let msg = `🏛️ *DAILY TREASURY CLOSING SNAPSHOT*\n`;
-    msg += `🏬 Branch: *SMC (Branch ${branchId})*\n`;
+    let msg = `🏛️ <b>DAILY TREASURY CLOSING SNAPSHOT</b>\n`;
+    msg += `🏬 Branch: <b>SMC (Branch ${branchId})</b>\n`;
     msg += `📅 Date: ${dateStr}\n\n`;
 
-    msg += `🇰🇭 *RIEL WALLETS (KHR)*\n`;
+    msg += `🇰🇭 <b>RIEL WALLETS (KHR)</b>\n`;
     if (khrList.length === 0) msg += `- None\n`;
     khrList.forEach((w: any) => {
-      msg += `• ${w.name}: *${new Intl.NumberFormat('en-US').format(w.balance)} ៛*\n`;
+      const cleanName = w.name.replace(/[៛\$]/g, '').trim();
+      msg += `• ${cleanName}: <b>${new Intl.NumberFormat('en-US').format(w.balance)} ៛</b>\n`;
     });
 
-    msg += `\n🇺🇸 *DOLLAR WALLETS (USD)*\n`;
+    msg += `\n🇺🇸 <b>DOLLAR WALLETS (USD)</b>\n`;
     if (usdList.length === 0) msg += `- None\n`;
     usdList.forEach((w: any) => {
-      msg += `• ${w.name}: *\$${new Intl.NumberFormat('en-US', { minimumFractionDigits: 2 }).format(w.balance)}*\n`;
+      const cleanName = w.name.replace(/[៛\$]/g, '').trim();
+      // 🔥 The $ symbol is now perfectly safe to use
+      msg += `• ${cleanName}: <b>$${new Intl.NumberFormat('en-US', { minimumFractionDigits: 2 }).format(w.balance)}</b>\n`;
     });
 
     // 4. Dispatch to Telegram Thread 88
@@ -55,7 +58,7 @@ export async function GET(request: Request) {
     const payload: any = {
       chat_id: masterChatId,
       text: msg,
-      parse_mode: 'Markdown'
+      parse_mode: 'HTML' // 🔥 Changed from Markdown to HTML
     };
 
     if (targetThreadId) {
