@@ -56,13 +56,13 @@ export default function DashboardPage() {
     if (!silent) setIsLoading(true);
 
     const buildQ = (table: string) => {
-      let q = supabase.from(table).select('*').limit(100000);
+      let q = supabase.from(table).select('*').limit(2000);
       if (activeBranchId !== 0) q = q.eq('branch_id', activeBranchId);
       return q;
     }
     
     const buildQNarrow = (table: string, columns: string) => {
-      let q = supabase.from(table).select(columns).limit(100000);
+      let q = supabase.from(table).select(columns).limit(2000);
       if (activeBranchId !== 0) q = q.eq('branch_id', activeBranchId);
       return q;
     }
@@ -473,7 +473,16 @@ export default function DashboardPage() {
 
     retailSales.forEach((rs: any) => {
        const methodStr = (rs.payment_method || 'Cash ៛').toLowerCase();
-       const totalRiel = Number(rs.total_sales || 0);
+       
+       // 🛡️ ARCHITECTURE FIX: Mathematically calculate retail revenue natively to prevent missing 'total_sales' column bugs
+       const qty = Number(rs.qty || 0);
+       const price = Number(rs.price_per_bag || 0);
+       let totalRiel = Math.round(qty * price);
+       
+       const desc = (rs.custom_rice_type || rs.rice_type || '').toLowerCase();
+       if (desc.includes('ដូរ') || desc.includes('បញ្ចុះតម្លៃ') || desc.includes('កក់')) {
+           totalRiel = -Math.abs(totalRiel);
+       }
 
        if (isBusinessMethod(methodStr)) {
            // 1. Proper split parsing (You did this correctly!)

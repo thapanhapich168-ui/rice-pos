@@ -871,7 +871,8 @@ export default function POSPage() {
       .select('*')
       .eq('branch_id', activeBranchId)
       .eq('is_hidden', false) 
-      .order('created_at', { ascending: true });
+      .order('created_at', { ascending: true })
+      .limit(10000); // 🛡️ LIMIT FIX: Prevents oldest active batches from vanishing
 
     if (data) {
       const batchMap: Record<number, InventoryBatch[]> = {};
@@ -920,7 +921,7 @@ export default function POSPage() {
   const loadMtdSales = useCallback(async () => {
     const today = new Date();
     const firstDay = new Date(today.getFullYear(), today.getMonth(), 1).toISOString();
-    const { data } = await supabase.from('sales').select('product_id, qty').gte('created_at', firstDay).eq('branch_id', activeBranchId);
+    const { data } = await supabase.from('sales').select('product_id, qty').gte('created_at', firstDay).eq('branch_id', activeBranchId).limit(100000); // 🛡️ LIMIT FIX: Prevents Hot Category freeze
     if (data) {
       const stats: Record<number, number> = {};
       data.forEach((s: any) => {
@@ -1051,6 +1052,7 @@ export default function POSPage() {
   }
 
   async function handleProcessImport(isPayLater: boolean) {
+    if (activeBranchId === 0) return showToast('error', 'HQ Locked', 'Cannot import stock in Global HQ.');
     // 🔥 HSR FIX: Check strictly for empty strings so typing '0' is completely allowed!
     if (!importForm.supplier_id || !importForm.product_id || importForm.qty === '' || importForm.unit_cost === '') {
       return showToast('error', 'Missing Data', 'Please fill in Supplier, Product, Qty, and Cost.');
@@ -1143,6 +1145,10 @@ export default function POSPage() {
   }
 
   async function handleExecuteInventorySync() {
+    if (activeBranchId === 0) {
+      showToast('error', 'HQ Locked', 'Cannot mix rice in Global HQ.');
+      return;
+    }
     if (!calcResult || !rice1 || !rice2) return;
     const qtyToDeduct1 = Number(rice1Qty) || 0, qtyToDeduct2 = Number(rice2Qty) || 0, qtyToDeduct3 = showThirdRice ? (Number(rice3Qty) || 0) : 0, qtyToDeductBag = Number(bagQty) || 0;
     if (!bagId || qtyToDeductBag <= 0) return showToast('error', 'Missing Bag', 'Please select a packaging bag and enter the quantity.');
@@ -1819,6 +1825,10 @@ export default function POSPage() {
     latestBatchesOverride?: Record<number, InventoryBatch[]>,
     preCheckoutStockParams?: Record<number, { stock: number, cost_price: number }>
   ) {
+    if (activeBranchId === 0) {
+      showToast('error', 'HQ Locked', 'Cannot process sales in Global HQ.');
+      return;
+    }
     setIsProcessing(true);
 
     const localBatchUsage: Record<number, number> = {};
@@ -1853,33 +1863,33 @@ export default function POSPage() {
 
       if (activePayments.length === 0) {
         if (!isSimpleCustomer) {
-          effectiveSplits.push({ method: 'Unpaid / Debt', amount_usd: 0, amount_riel: currentTotalRiel, face_amount: currentTotalRiel });
+          effectiveSplits.push({ method: 'Unpaid / Debt', amount_usd: 0, amount_riel: Math.round(currentTotalRiel), face_amount: Math.round(currentTotalRiel) });
         } else {
-          effectiveSplits.push({ method: 'Cash ៛', amount_usd: 0, amount_riel: currentTotalRiel, face_amount: currentTotalRiel });
+          effectiveSplits.push({ method: 'Cash ៛', amount_usd: 0, amount_riel: Math.round(currentTotalRiel), face_amount: Math.round(currentTotalRiel) });
         }
       } else {
         activePayments.forEach(p => {
             let amtFace = Number(p.amount);
             if (p.method.includes('$')) {
-               effectiveSplits.push({ method: p.method, amount_usd: amtFace, amount_riel: 0, face_amount: amtFace });
+               effectiveSplits.push({ method: p.method, amount_usd: Number(amtFace.toFixed(2)), amount_riel: 0, face_amount: amtFace });
             } else {
-               effectiveSplits.push({ method: p.method, amount_usd: 0, amount_riel: amtFace, face_amount: amtFace });
+               effectiveSplits.push({ method: p.method, amount_usd: 0, amount_riel: Math.round(amtFace), face_amount: Math.round(amtFace) });
             }
         });
 
         if (actualRemaining > 0 && !isSimpleCustomer) {
-            effectiveSplits.push({ method: 'Unpaid / Debt', amount_usd: 0, amount_riel: actualRemaining, face_amount: actualRemaining });
+            effectiveSplits.push({ method: 'Unpaid / Debt', amount_usd: 0, amount_riel: Math.round(actualRemaining), face_amount: Math.round(actualRemaining) });
         }
 
         if (actualRemaining < 0) {
-           const changeAmountRiel = Math.abs(actualRemaining);
+           const changeAmountRiel = Math.round(Math.abs(actualRemaining));
            effectiveSplits.push({ method: 'Cash ៛', amount_usd: 0, amount_riel: -changeAmountRiel, face_amount: -changeAmountRiel });
         }
       }
 
       // 🟢 Inject Deposit as Payment
       if (depositTotalRiel > 0) {
-          effectiveSplits.push({ method: depositMethod, amount_usd: 0, amount_riel: depositTotalRiel, face_amount: depositTotalRiel });
+          effectiveSplits.push({ method: depositMethod, amount_usd: 0, amount_riel: Math.round(depositTotalRiel), face_amount: Math.round(depositTotalRiel) });
       }
 
       // 🔥 Generate a collision-proof ID
@@ -2092,8 +2102,9 @@ export default function POSPage() {
           insert_retail_sales: activeTab === 'retail' ? rowsWithoutId : [],
           update_retail_sales: activeTab === 'retail' ? rowsWithId : [],
           payments: mappedPayments,
-          stock_updates: Object.entries(stockUpdates).map(([id, delta]) => ({ product_id: id, delta })),
-          batch_updates: Object.entries(fifoUpdates).map(([id, delta]) => ({ batch_id: id, delta })),
+          // 🛡️ ARCHITECTURE FIX: Explicitly cast 'id' back to Number to prevent Postgres JSONB BigInt crashes!
+          stock_updates: Object.entries(stockUpdates).map(([id, delta]) => ({ product_id: Number(id), delta })),
+          batch_updates: Object.entries(fifoUpdates).map(([id, delta]) => ({ batch_id: Number(id), delta })),
           new_batches: newBatchesToCreate,
           customer_update: customerUpdatePayload
       };

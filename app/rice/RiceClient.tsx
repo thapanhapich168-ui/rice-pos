@@ -585,6 +585,10 @@ export default function RiceControl() {
   }
 
   const handleConfirmRepack = async () => {
+    if (activeBranchId === 0) {
+      showToast('error', 'HQ Locked', 'Cannot repack products in Global HQ.');
+      return;
+    }
     if (!repackModal.product || !repackModal.product.linked_wholesale_id) return;
     setIsProcessing(true);
     
@@ -699,13 +703,13 @@ export default function RiceControl() {
 
   async function fetchProducts() {
     // 🔥 FILTERED BY BRANCH
-    const { data } = await supabase.from('products').select('*').eq('is_archived', false).eq('branch_id', activeBranchId).order('id', { ascending: true })
+    const { data } = await supabase.from('products').select('*').eq('is_archived', false).eq('branch_id', activeBranchId).order('id', { ascending: true }).limit(2000)
     if (data) setProducts(data)
   }
 
   async function fetchSuppliers() {
     // 🔥 FILTERED BY BRANCH
-    const { data } = await supabase.from('suppliers').select('*').eq('is_archived', false).eq('branch_id', activeBranchId).order('name', { ascending: true })
+    const { data } = await supabase.from('suppliers').select('*').eq('is_archived', false).eq('branch_id', activeBranchId).order('name', { ascending: true }).limit(2000)
     if (data) setSuppliers(data)
     
     // 🚀 NEW: Fetch dynamic wallets
@@ -715,7 +719,7 @@ export default function RiceControl() {
 
   async function fetchImports() {
     // 🔥 FILTERED BY BRANCH
-    const { data } = await supabase.from('imports').select(`*, suppliers (name), products (name)`).eq('branch_id', activeBranchId).order('created_at', { ascending: false })
+    const { data } = await supabase.from('imports').select(`*, suppliers (name), products (name)`).eq('branch_id', activeBranchId).order('created_at', { ascending: false }).limit(2000)
     if (data) setImports(data)
   }
 
@@ -725,7 +729,8 @@ export default function RiceControl() {
       .select('*')
       .eq('branch_id', activeBranchId)
       .eq('is_hidden', false) // 🔥 HSR FIX: Allow negative stock, filter by visibility
-      .order('id', { ascending: true });
+      .order('id', { ascending: true })
+      .limit(2000);
 
     if (data) {
       const bMap: Record<number, InventoryBatch[]> = {}
@@ -759,6 +764,11 @@ export default function RiceControl() {
   }
 
   const handleSaveHistory = async (batchId: number) => {
+    if (activeBranchId === 0) {
+      showToast('error', 'HQ Locked', 'Cannot edit batch history in Global HQ.');
+      setEditingHistoryId(null);
+      return;
+    }
     const edits = historyEdits[batchId];
     if (!edits) return setEditingHistoryId(null);
 
@@ -836,6 +846,10 @@ export default function RiceControl() {
   }
 
   const handleDeleteHistory = async (batchId: number) => {
+    if (activeBranchId === 0) {
+      showToast('error', 'HQ Locked', 'Cannot delete batches in Global HQ.');
+      return;
+    }
     const originalBatch = historyModal.activeBatches.find(b => b.id === batchId);
     if (!originalBatch) return;
     
@@ -883,6 +897,10 @@ export default function RiceControl() {
 
   // 🔥 HSR FIX: Manual Hide/Unhide Function
   const handleToggleBatchVisibility = async (batchId: number, currentStatus: boolean) => {
+    if (activeBranchId === 0) {
+      showToast('error', 'HQ Locked', 'Cannot toggle batch visibility in Global HQ.');
+      return;
+    }
     setIsProcessing(true);
     const { error } = await supabase.from('inventory_batches')
       .update({ is_hidden: !currentStatus })
@@ -903,6 +921,10 @@ export default function RiceControl() {
   }
 
   const handleVoidImport = async (importId: number) => {
+    if (activeBranchId === 0) {
+      showToast('error', 'HQ Locked', 'Cannot void imports in Global HQ.');
+      return;
+    }
     if (!confirm(`🚨 Are you sure you want to VOID this import?\n\nThis will instantly:\n1. Remove the bags from stock\n2. Delete the linked batch\n3. Reverse supplier debt & expenses\n4. Permanently erase this import record`)) return;
 
     setIsProcessing(true);
@@ -982,6 +1004,10 @@ export default function RiceControl() {
   }
 
   async function handleAddSupplier() {
+    if (activeBranchId === 0) {
+      showToast('error', 'HQ Locked', 'Cannot add suppliers in Global HQ.');
+      return;
+    }
     if (!newSupplier.name) return showToast('error', 'Validation Error', 'Supplier name is required');
     setIsProcessing(true);
     try {
@@ -1013,6 +1039,10 @@ export default function RiceControl() {
   }
 
   async function handleProcessImport(isPayLater: boolean) {
+    if (activeBranchId === 0) {
+      showToast('error', 'HQ Locked', 'Cannot import stock in Global HQ.');
+      return;
+    }
     if (isImportingRef.current) return;
 
     // 🔥 HSR FIX: 0-Qty Import Unlock. Strictly check for empty strings instead of falsy values.
@@ -1040,7 +1070,12 @@ export default function RiceControl() {
       if (!product) throw new Error("Product ID mismatch");
 
       let amtUsd = 0, amtRiel = paidAmount;
-      if (importForm.payment_method.includes('$')) { amtUsd = paidAmount; amtRiel = paidAmount * EXCHANGE_RATE; }
+      if (importForm.payment_method.includes('$')) { 
+         amtUsd = Number(paidAmount.toFixed(2)); 
+         amtRiel = Math.round(paidAmount * EXCHANGE_RATE); 
+      } else {
+         amtRiel = Math.round(paidAmount);
+      }
 
       const payload = {
         branch_id: activeBranchId,
@@ -1123,6 +1158,10 @@ export default function RiceControl() {
   }
 
   async function handlePayPendingSubmit() {
+    if (activeBranchId === 0) {
+      showToast('error', 'HQ Locked', 'Cannot pay bills in Global HQ.');
+      return;
+    }
     if (isPayingRef.current) return;
 
     const record = payPendingModal.record;
@@ -1142,7 +1181,7 @@ export default function RiceControl() {
         totalUsdFace += amt;
       } else {
         totalRielEq += Math.round(amt);
-        totalRielFace += amt;
+        totalRielFace += Math.round(amt); // 🔥 Force integer
       }
       methodStrings.push(`${r.method}: ${amt}`);
     }
@@ -1167,14 +1206,17 @@ export default function RiceControl() {
         total_riel_eq: totalRielEq,
         new_paid_amount: newPaidAmount,
         new_status: newStatus,
-        total_usd_face: totalUsdFace,
+        total_usd_face: Number(totalUsdFace.toFixed(2)), // 🔥 Force 2 decimals
         total_riel_face: totalRielFace,
         method_strings: methodStrings.join(', '),
-        // 🚀 NEW: Pass exact splits to backend for the Wallet Ledger
-        payments: pendingPaymentRows.filter(r => Number(String(r.amount).replace(/,/g, '')) > 0).map(r => ({
-          method: r.method,
-          amount: Number(String(r.amount).replace(/,/g, ''))
-        }))
+        // 🚀 NEW: Pass exact splits to backend for the Wallet Ledger safely rounded
+        payments: pendingPaymentRows.filter(r => Number(String(r.amount).replace(/,/g, '')) > 0).map(r => {
+           const rawAmt = Number(String(r.amount).replace(/,/g, ''));
+           return {
+             method: r.method,
+             amount: r.method.includes('$') ? Number(rawAmt.toFixed(2)) : Math.round(rawAmt)
+           };
+        })
       };
 
       const { error: rpcError } = await supabase.rpc('process_pending_payment', { p_payload: payload });
@@ -1240,6 +1282,10 @@ export default function RiceControl() {
 
   // 🔥 NEW: CORE ENGINE FOR EDITING PENDING IMPORTS
   const handleEditImportSubmit = async () => {
+    if (activeBranchId === 0) {
+      showToast('error', 'HQ Locked', 'Cannot edit imports in Global HQ.');
+      return;
+    }
     if (!editImportModal.record) return;
     setIsProcessing(true);
     try {
@@ -1327,6 +1373,11 @@ export default function RiceControl() {
   };
 
   const handleSaveRecord = async (id: number) => {
+    if (activeBranchId === 0) {
+      showToast('error', 'HQ Locked', 'Cannot edit products in Global HQ.');
+      setEditingCell(null);
+      return;
+    }
     if (!edits[id]) return;
     const payload = { ...edits[id] } as any;
     
@@ -1388,6 +1439,10 @@ export default function RiceControl() {
   }
 
   const handleDelete = async () => {
+    if (activeBranchId === 0) {
+      showToast('error', 'HQ Locked', 'Cannot delete products in Global HQ.');
+      return;
+    }
     if (!confirm(`Are you sure you want to delete ${selectedToDelete.size} item(s)?`)) return
     // 🔥 SECURITY FIX: Lock product mass-archiving to the active branch
     const { error } = await supabase.from('products').update({ is_archived: true }).in('id', Array.from(selectedToDelete)).eq('branch_id', activeBranchId)
@@ -1399,6 +1454,10 @@ export default function RiceControl() {
   }
 
   const handleDeleteSuppliers = async () => {
+    if (activeBranchId === 0) {
+      showToast('error', 'HQ Locked', 'Cannot delete suppliers in Global HQ.');
+      return;
+    }
     if (!confirm(`Are you sure you want to delete ${selectedSuppliersToDelete.size} supplier(s)?`)) return
     // 🔥 SECURITY FIX: Lock supplier mass-archiving to the active branch
     const { error } = await supabase.from('suppliers').update({ is_archived: true }).in('id', Array.from(selectedSuppliersToDelete)).eq('branch_id', activeBranchId)
@@ -3773,6 +3832,7 @@ function ReturnExchangeTab({ products, suppliers, activeBatchesMap, activeBranch
   const difference = Math.round(totals.returnTotal - inputTotalRiel);
 
   const handleProcess = async () => {
+    if (activeBranchId === 0) return alert("HQ Locked: Cannot process returns in Global HQ.");
     if (!supplierId) return alert("Please select a Supplier!");
     const validItems = returnItems.filter(i => i.productId);
     if (validItems.length === 0) return alert("Please add at least one item to return!");
@@ -3790,9 +3850,9 @@ function ReturnExchangeTab({ products, suppliers, activeBatchesMap, activeBranch
         branchId: activeBranchId,
         supplierId: supplierId,
         refundDestination: refundDestination,
-        refundKhr: Number(refundKhr) || 0,
-        refundUsd: Number(refundUsd) || 0,
-        totalRefundAmount: totals.returnTotal,
+        refundKhr: Math.round(Number(refundKhr) || 0), // 🔥 Force Integer
+        refundUsd: Number((Number(refundUsd) || 0).toFixed(2)), // 🔥 Force 2 Decimals
+        totalRefundAmount: Math.round(totals.returnTotal),
         items: validItems.map(i => ({
           productId: i.productId,
           batchId: i.batchId,

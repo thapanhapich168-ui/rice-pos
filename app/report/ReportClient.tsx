@@ -35,7 +35,7 @@ export default function ReportControlPage() {
       const firstDayOfLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1).toISOString()
 
       const buildQNarrow = (table: string, columns: string) => {
-        let q = supabase.from(table).select(columns);
+        let q = supabase.from(table).select(columns).limit(2000); // 🛡️ Safe limit to prevent RAM crashes
         if (activeBranchId !== 0) q = q.eq('branch_id', activeBranchId);
         return q;
       }
@@ -48,7 +48,7 @@ export default function ReportControlPage() {
         { data: payData }
       ] = await Promise.all([
         buildQNarrow('sales', 'id, created_at, qty, price_per_bag, cogs_price, owner, custom_rice_type, rice_type').gte('created_at', firstDayOfLastMonth),
-        buildQNarrow('invoice_summaries', 'invoice_id, created_at, owner, total_sales, total_profit, delivery_status').gte('created_at', firstDayOfLastMonth),
+        buildQNarrow('invoice_summaries', 'invoice_id, created_at, owner, total_sales, total_profit, delivery_status, balance_due').gte('created_at', firstDayOfLastMonth), // 🔥 Added balance_due
         buildQNarrow('retail_sales', 'id, created_at, qty, price_per_bag, cogs_price, owner, custom_rice_type, rice_type').gte('created_at', firstDayOfLastMonth),
         buildQNarrow('expenses', 'id, created_at, amount_riel, amount_usd, spender, remarks, description, expense_date').gte('created_at', firstDayOfLastMonth),
         buildQNarrow('invoice_payments', 'invoice_id, amount_paid_usd, amount_paid_riel, payment_method, payment_date').gte('payment_date', firstDayOfLastMonth)
@@ -131,10 +131,13 @@ export default function ReportControlPage() {
         const owner = parseOwner(inv.owner);
         if (owner === 'mom') return; // 🚫 Completely exclude Mom
 
-        const sales = Number(inv.total_sales) || 0
-        const profit = Number(inv.total_profit) || 0
-        totalSales += sales
-        totalProfit += profit
+        const sales = Number(inv.total_sales) || 0;
+        const balanceDue = Number(inv.balance_due) || 0; // 🔥 Fetch unpaid debt
+        const paidSales = sales - balanceDue; // 🛡️ FINANCIAL FIX: Only count money actually received
+        
+        const profit = Number(inv.total_profit) || 0;
+        totalSales += paidSales; // Use paidSales instead of gross sales
+        totalProfit += profit;
 
         if (owner === 'pich') profitByOwner.Pich += profit;
         else if (owner === 'jing') profitByOwner.Jing += profit;
