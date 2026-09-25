@@ -91,6 +91,7 @@ export default function CustomerDatabasePage() {
       .eq('is_archived', false)
       .eq('branch_id', activeBranchId) 
       .order('created_at', { ascending: false })
+      .limit(10000)
       
     if (!error && data) {
       setCustomers(data as Customer[])
@@ -119,6 +120,10 @@ export default function CustomerDatabasePage() {
 
   // --- RECORD OPERATIONS ---
   const handleSaveRecord = async (id: string): Promise<boolean> => {
+    if (activeBranchId === 0) {
+      showToast('error', 'HQ Locked', 'Cannot edit customer records in Global HQ.');
+      return false;
+    }
     if (!edits[id]) return true;
     
     if (edits[id].name !== undefined && edits[id].name?.trim() === '') {
@@ -144,6 +149,10 @@ export default function CustomerDatabasePage() {
   }
 
   const handleDelete = async () => {
+    if (activeBranchId === 0) {
+      showToast('error', 'HQ Locked', 'Cannot delete customer records in Global HQ.');
+      return;
+    }
     if (!confirm(`Are you sure you want to archive ${selectedToDelete.size} customer(s)?`)) return
     
     setIsProcessing(true);
@@ -165,6 +174,10 @@ export default function CustomerDatabasePage() {
 
   async function handleAddCustomer(e: React.FormEvent) {
     e.preventDefault()
+    if (activeBranchId === 0) {
+      showToast('error', 'HQ Locked', 'Cannot add new customers in Global HQ.');
+      return;
+    }
     if (!newCustomer.name.trim() || isProcessing) return
 
     setIsProcessing(true);
@@ -641,6 +654,10 @@ export default function CustomerDatabasePage() {
 
             <div style={{ marginTop: '16px', display: 'flex', justifyContent: 'space-between', gap: '12px' }}>
                <button onClick={async () => {
+                  if (activeBranchId === 0) {
+                     showToast('error', 'HQ Locked', 'Cannot delete customer records in Global HQ.');
+                     return;
+                  }
                   if (!confirm('Are you sure you want to delete this customer?')) return;
                   setIsProcessing(true);
                   await supabase.from('customers').update({ is_archived: true }).eq('id', mobileEditCustomer.id).eq('branch_id', activeBranchId);

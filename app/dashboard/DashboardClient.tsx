@@ -56,13 +56,13 @@ export default function DashboardPage() {
     if (!silent) setIsLoading(true);
 
     const buildQ = (table: string) => {
-      let q = supabase.from(table).select('*');
+      let q = supabase.from(table).select('*').limit(100000);
       if (activeBranchId !== 0) q = q.eq('branch_id', activeBranchId);
       return q;
     }
     
     const buildQNarrow = (table: string, columns: string) => {
-      let q = supabase.from(table).select(columns);
+      let q = supabase.from(table).select(columns).limit(100000);
       if (activeBranchId !== 0) q = q.eq('branch_id', activeBranchId);
       return q;
     }
@@ -132,8 +132,10 @@ export default function DashboardPage() {
   useFocusRefresh(() => loadData(true));
 
   async function updateSetting(key: string, val: number) {
+    if (activeBranchId === 0) return; // 🛑 STRICT HQ WRITE LOCK
+
     // 🔥 SECURITY FIX: Append branch_id to settings key to isolate global table mutations per tenant
-    const branchKey = activeBranchId === 0 ? key : `${key}_${activeBranchId}`;
+    const branchKey = `${key}_${activeBranchId}`;
     const { error } = await supabase.from('app_settings').upsert({ setting_key: branchKey, setting_value: val }, { onConflict: 'setting_key' })
     if (error) {
       showToast('error', 'Sync Error', 'Failed to update setting.');
@@ -1047,22 +1049,8 @@ export default function DashboardPage() {
                   return (
                     <button
                       key={tab}
-                      draggable
-                      onDragStart={(e) => { e.dataTransfer.setData('text/invtab', tab); }}
-                      onDragOver={(e) => e.preventDefault()}
-                      onDrop={(e) => {
-                        e.preventDefault();
-                        const sourceTab = e.dataTransfer.getData('text/invtab');
-                        if (!sourceTab || sourceTab === tab) return;
-                        setInvTabOrder(prev => {
-                          const newOrder = prev.filter(t => t !== sourceTab);
-                          newOrder.splice(newOrder.indexOf(tab), 0, sourceTab);
-                          return newOrder;
-                        });
-                      }}
                       onClick={() => setInvTab(tab as any)}
                       className={`saas-tab ${invTab === tab ? 'active' : ''}`}
-                      style={{ cursor: 'grab' }}
                     >
                       {labels[tab]}
                     </button>

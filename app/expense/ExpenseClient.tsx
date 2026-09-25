@@ -400,11 +400,11 @@ export default function ExpenseDashboard() {
   const fetchDatabase = useCallback(async () => {
     setIsFetchingDb(true)
     
-    let expQuery = supabase.from('expenses').select('*').order('created_at', { ascending: false }).limit(2000);
+    let expQuery = supabase.from('expenses').select('*').order('created_at', { ascending: false }).limit(100000);
     if (activeBranchId !== 0) expQuery = expQuery.eq('branch_id', activeBranchId); 
 
-    let debtQuery = supabase.from('staff_debt_history').select('*, staff:staff_id(name)').order('created_at', { ascending: false }).limit(2000);
-    if (activeBranchId !== 0) debtQuery = debtQuery.eq('branch_id', activeBranchId); 
+    let debtQuery = supabase.from('staff_debt_history').select('*, staff:staff_id(name)').order('created_at', { ascending: false }).limit(100000);
+    if (activeBranchId !== 0) debtQuery = debtQuery.eq('branch_id', activeBranchId);
 
     // 🚀 NEW: Fetch the live wallets for the dropdowns
     let walletQuery = supabase.from('wallets').select('*').order('id', { ascending: true });
@@ -554,6 +554,11 @@ export default function ExpenseDashboard() {
   async function handleSubmit(e?: React.FormEvent) {
     if (e) e.preventDefault()
     setConfirmModal(false)
+
+    if (activeBranchId === 0) {
+      showToast('error', 'HQ Locked', 'Cannot log expenses while viewing Global HQ.');
+      return;
+    }
 
     const list = getActiveList();
     const validExpenses = list.filter(exp => exp.remarks.trim() !== '' && exp.payments.some(p => Number(p.amount) > 0));
@@ -920,6 +925,12 @@ export default function ExpenseDashboard() {
   }
 
   async function saveInlineEdit(id: number, field: string) {
+    if (activeBranchId === 0) {
+      showToast('error', 'HQ Locked', 'Cannot edit staff records in Global HQ.');
+      setEditingCell(null);
+      return;
+    }
+    
     if (!editValue && editValue !== '0' && field !== 'name') { setEditingCell(null); return; }
     
     // 🛡️ DASHBOARD FIX: Block direct edits to debt fields. Debt must ONLY be changed via Advance/Settle buttons to preserve Cash-to-AR ledger symmetry.

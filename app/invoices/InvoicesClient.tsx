@@ -160,7 +160,8 @@ export default function InvoiceGallery() {
     const now = new Date()
 
     // --- 1. FETCH WHOLESALE & STANDARD INVOICES ---
-    let query = supabase.from('invoice_summaries').select('*').eq('branch_id', activeBranchId) // 🔥 FILTERED BY BRANCH
+    // 🛡️ FINANCIAL FIX: Added limit(10000) to base query so high-volume months don't hit the 1000-row Supabase cap
+    let query = supabase.from('invoice_summaries').select('*').eq('branch_id', activeBranchId).limit(10000) // 🔥 FILTERED BY BRANCH
 
     if (filterTab === 'Today') {
       const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString()
@@ -187,7 +188,8 @@ export default function InvoiceGallery() {
     }
 
     // --- 2. FETCH WALK-IN RETAIL SALES (Grouped into single rows per transaction_id) ---
-    let retailQuery = supabase.from('retail_sales').select('*').eq('branch_id', activeBranchId) // 🔥 FILTERED BY BRANCH
+    // 🛡️ FINANCIAL FIX: Added limit(10000) to base query so high-volume months don't hit the 1000-row Supabase cap
+    let retailQuery = supabase.from('retail_sales').select('*').eq('branch_id', activeBranchId).limit(10000) // 🔥 FILTERED BY BRANCH
     
     if (filterTab === 'Today') {
       const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString()
@@ -275,9 +277,13 @@ export default function InvoiceGallery() {
 
   // --- 🔥 BULLETPROOF VOID AUTOMATION (ATOMIC RPC) ---
   const handleVoidInvoice = async (invoiceId: string) => {
+    if (activeBranchId === 0) {
+      showToast('error', 'HQ Locked', 'Cannot void invoices in Global HQ.');
+      return;
+    }
     if (!confirm(`🚨 Are you sure you want to VOID transaction ${invoiceId}?\n\nThis will instantly:\n1. Verify and permanently delete the record\n2. Safely restore stock\n3. Reverse dashboard numbers`)) return;
 
-    setIsProcessing(true); 
+    setIsProcessing(true);
     
     try {
       const targetInvoice = invoices.find(inv => inv.invoice_id === invoiceId);
@@ -372,6 +378,10 @@ export default function InvoiceGallery() {
   }
 
   const deleteSelected = async () => {
+    if (activeBranchId === 0) {
+      showToast('error', 'HQ Locked', 'Cannot delete invoice records or image files from Global HQ.');
+      return;
+    }
     if (!confirm(`Are you sure you want to permanently delete the image files for ${selectedInvoices.size} invoice(s)?`)) return;
     
     setIsLoading(true);
