@@ -160,8 +160,8 @@ export default function InvoiceGallery() {
     const now = new Date()
 
     // --- 1. FETCH WHOLESALE & STANDARD INVOICES ---
-    // 🛡️ FINANCIAL FIX: Added limit(10000) to base query so high-volume months don't hit the 1000-row Supabase cap
-    let query = supabase.from('invoice_summaries').select('*').eq('branch_id', activeBranchId).limit(10000) // 🔥 FILTERED BY BRANCH
+    // 🛡️ Safe UI Cap: Limit 2000 prevents mobile browser RAM crashes
+    let query = supabase.from('invoice_summaries').select('*').eq('branch_id', activeBranchId).limit(2000) // 🔥 FILTERED BY BRANCH
 
     if (filterTab === 'Today') {
       const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString()
@@ -188,8 +188,8 @@ export default function InvoiceGallery() {
     }
 
     // --- 2. FETCH WALK-IN RETAIL SALES (Grouped into single rows per transaction_id) ---
-    // 🛡️ FINANCIAL FIX: Added limit(10000) to base query so high-volume months don't hit the 1000-row Supabase cap
-    let retailQuery = supabase.from('retail_sales').select('*').eq('branch_id', activeBranchId).limit(10000) // 🔥 FILTERED BY BRANCH
+    // 🛡️ Safe UI Cap: Limit 2000 prevents mobile browser RAM crashes
+    let retailQuery = supabase.from('retail_sales').select('*').eq('branch_id', activeBranchId).limit(2000) // 🔥 FILTERED BY BRANCH
     
     if (filterTab === 'Today') {
       const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString()

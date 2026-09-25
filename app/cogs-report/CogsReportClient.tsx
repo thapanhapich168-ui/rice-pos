@@ -127,10 +127,10 @@ export default function CogsReportPage() {
       { data: cDataView }, 
       { data: liabilityData }
     ] = await Promise.all([
-        // 🔥 VIEW DATA: Bypasses the 1000-row limit to ensure A4 PDF totals are mathematically flawless
-        supabase.from('sales').select('*').gte('created_at', queryStart).lte('created_at', queryEnd).eq('branch_id', activeBranchId).order('created_at', { ascending: false }).limit(10000),
-        supabase.from('retail_sales').select('*').gte('created_at', queryStart).lte('created_at', queryEnd).eq('branch_id', activeBranchId).order('created_at', { ascending: false }).limit(10000),
-        supabase.from('cogs_settlements').select('*').gte('settlement_date', startJustDate).lte('settlement_date', endJustDate).eq('branch_id', activeBranchId).order('created_at', { ascending: false }).limit(10000),
+        // 🔥 VIEW DATA: Safe 2000 limit prevents RAM crashes while keeping UI fast
+        supabase.from('sales').select('*').gte('created_at', queryStart).lte('created_at', queryEnd).eq('branch_id', activeBranchId).order('created_at', { ascending: false }).limit(2000),
+        supabase.from('retail_sales').select('*').gte('created_at', queryStart).lte('created_at', queryEnd).eq('branch_id', activeBranchId).order('created_at', { ascending: false }).limit(2000),
+        supabase.from('cogs_settlements').select('*').gte('settlement_date', startJustDate).lte('settlement_date', endJustDate).eq('branch_id', activeBranchId).order('created_at', { ascending: false }).limit(2000),
         
         // ⚖️ LIABILITY DATA: Offloaded entirely to Postgres for instant calculation!
         supabase.rpc('get_mom_liability', { p_branch_id: activeBranchId })
@@ -495,13 +495,24 @@ export default function CogsReportPage() {
          const allocatedUsd = Number((totalUsdFace * pctOfTotal).toFixed(2));
          const allocatedRiel = Math.round(totalRielFace * pctOfTotal);
 
+         // 🛡️ ARCHITECTURE FIX: Calculate exact proportions for the string so the Dashboard ledger parses it accurately!
+         const proportionalMethodStrings = rows.map(r => {
+             const rawAmt = Number(String(r.amount).replace(/,/g, '')) || 0;
+             if (rawAmt <= 0) return null;
+             const isUsd = r.method.includes('$');
+             const allocatedFace = isUsd 
+                  ? Number((rawAmt * pctOfTotal).toFixed(2)) 
+                  : Math.round(rawAmt * pctOfTotal);
+             return `${r.method}: ${allocatedFace}`;
+         }).filter(Boolean);
+
          settlesToInsert.push({
            settlement_date: day.date,
            owner_name: day.owner,
            source_type: 'Batch',
            paid_amount_usd: allocatedUsd,
            paid_amount_riel: allocatedRiel,
-           payment_method: methodStrings.join(', '),
+           payment_method: proportionalMethodStrings.join(', '), // 👈 Unique, accurate string for this exact row
            status: apply >= owed ? 'Settled' : 'Partial',
            remarks: isBulk ? `Bulk via COGS Dashboard` : `Inline via COGS Dashboard`,
            branch_id: activeBranchId // 🔥 STAMPED
@@ -522,7 +533,8 @@ export default function CogsReportPage() {
       // 🔥 CRITICAL FIX: PHYSICALLY DEDUCT MONEY FROM THE WALLETS
       // Because the RPC receives a concatenated string, it cannot update wallets natively.
       // We must explicitly hit the ledger. Amounts are NEGATIVE because COGS is an outflow!
-      const walletPromises = rows.map(async (r) => {
+      // 🛡️ AUDIT FIX: Inject the loop index so lightning-fast splits get unique Reference IDs
+      const walletPromises = rows.map(async (r, index) => {
          const amt = Number(String(r.amount).replace(/,/g, '')) || 0;
          if (amt <= 0) return;
          
@@ -532,7 +544,7 @@ export default function CogsReportPage() {
             p_wallet_name: r.method,
             p_amount: isUsd ? -Number(Math.abs(amt).toFixed(2)) : -Math.round(Math.abs(amt)), // 📉 NEGATIVE: Rounded outflow
             p_reference_type: 'COGS Settlement',
-            p_reference_id: `COGS-${Date.now()}`,
+            p_reference_id: `COGS-${Date.now()}-${index}`, // 👈 Appended index prevents collision
             p_description: isBulk ? `Bulk Settle COGS to ${Array.from(new Set(targetDays.map(d=>d.owner))).join(', ')}` : `Inline Settle COGS to ${targetDays[0]?.owner}`,
             p_branch_id: activeBranchId
          });

@@ -211,7 +211,12 @@ export default function TreasuryPage() {
 
     setIsProcessing(true);
     try {
-      const transferVal = Number(transferAmount);
+      const rawTransferVal = Number(transferAmount);
+      // 🔥 MATH FIX: Prevent Postgres decimal crashes on KHR transfers
+      const transferVal = fromWallet.currency === 'USD' 
+        ? Number(rawTransferVal.toFixed(2)) 
+        : Math.round(rawTransferVal);
+        
       const safeNotes = transferNotes.trim() || 'Internal Treasury Transfer';
 
       const { error: transferErr } = await supabase.rpc('execute_treasury_transfer', {
@@ -439,9 +444,8 @@ export default function TreasuryPage() {
                   <WalletDropdown 
                     value={fromWalletName} 
                     options={transferableWallets.map(w => w.name)} 
-                    onChange={setFromWalletName} 
-                    placeholder="-- Select Source Wallet --" 
-                    disabled={activeBranchId === 0}
+                    onChange={(val: string) => setFromWalletName(val)} 
+                    style={{ width: '100%', height: '48px' }}
                   />
                 </div>
 
@@ -461,9 +465,8 @@ export default function TreasuryPage() {
                   <WalletDropdown 
                     value={toWalletName} 
                     options={transferableWallets.map(w => w.name)} 
-                    onChange={setToWalletName} 
-                    placeholder="-- Select Destination Wallet --" 
-                    disabled={activeBranchId === 0}
+                    onChange={(val: string) => setToWalletName(val)} 
+                    style={{ width: '100%', height: '48px' }}
                   />
                 </div>
 

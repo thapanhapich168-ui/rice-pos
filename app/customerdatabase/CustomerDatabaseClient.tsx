@@ -91,7 +91,7 @@ export default function CustomerDatabasePage() {
       .eq('is_archived', false)
       .eq('branch_id', activeBranchId) 
       .order('created_at', { ascending: false })
-      .limit(10000)
+      .limit(2000)
       
     if (!error && data) {
       setCustomers(data as Customer[])
