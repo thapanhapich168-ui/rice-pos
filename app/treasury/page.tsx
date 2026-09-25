@@ -7,91 +7,7 @@ import { useBranch } from '@/components/BranchContext';
 import { useToast } from '@/components/ToastProvider';
 import { TELEGRAM_CONFIG } from '@/lib/telegramConfig';
 import Modal from '@/components/Modal';
-
-// --- CUSTOM TREASURY DROPDOWN ---
-function TreasuryWalletDropdown({ selectedId, wallets, onChange, placeholder }: any) {
-  const [isOpen, setIsOpen] = useState(false);
-  const dropdownRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) setIsOpen(false);
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
-
-  const selectedWallet = wallets.find((w: any) => w.id.toString() === selectedId);
-
-  const getIcon = (name: string) => {
-    if (name.includes('ABA')) return '📱';
-    if (name.includes('Chest')) return '🗄️';
-    if (name.includes('Mom')) return '👩';
-    return '💵';
-  };
-
-  return (
-    <div ref={dropdownRef} style={{ position: 'relative', width: '100%' }}>
-      <div 
-        onClick={() => setIsOpen(!isOpen)}
-        style={{ 
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-          padding: '14px 16px', background: '#fff', border: '1px solid #cbd5e1', 
-          borderRadius: '8px', cursor: 'pointer', height: '50px', boxSizing: 'border-box',
-          fontSize: '15px', color: '#0f172a', transition: 'all 0.2s',
-          boxShadow: 'inset 0 1px 2px rgba(0,0,0,0.02)'
-        }}
-      >
-        {selectedWallet ? (
-          <span style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 'bold' }}>
-            <span>{getIcon(selectedWallet.name)}</span> {selectedWallet.name} 
-            <span style={{ color: '#64748b', fontWeight: 'normal', fontSize: '13px', marginLeft: '4px' }}>
-              ({new Intl.NumberFormat('en-US').format(selectedWallet.balance)} {selectedWallet.currency === 'USD' ? '$' : '៛'})
-            </span>
-          </span>
-        ) : (
-          <span style={{ color: '#94a3b8' }}>{placeholder}</span>
-        )}
-        <span style={{ fontSize: '10px', color: '#94a3b8', transform: isOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }}>▼</span>
-      </div>
-      
-      {isOpen && (
-        <div className="hide-scrollbar" style={{ 
-          position: 'absolute', top: 'calc(100% + 6px)', left: 0, right: 0, zIndex: 100,
-          background: '#fff', border: '1px solid #e2e8f0', borderRadius: '12px', 
-          boxShadow: '0 10px 25px -5px rgba(0,0,0,0.1)', overflowY: 'auto', maxHeight: '250px',
-          display: 'flex', flexDirection: 'column', padding: '6px'
-        }}>
-          {wallets.length === 0 ? (
-            <div style={{ padding: '12px', textAlign: 'center', color: '#94a3b8', fontSize: '13px' }}>No wallets found</div>
-          ) : (
-            wallets.map((w: any) => (
-              <div 
-                key={w.id}
-                onClick={() => { onChange(w.id.toString()); setIsOpen(false); }}
-                style={{ 
-                  padding: '12px 14px', cursor: 'pointer', fontSize: '14px',
-                  display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                  background: selectedId === w.id.toString() ? '#f8fafc' : '#fff',
-                  borderRadius: '8px', color: '#0f172a', transition: 'background 0.1s'
-                }}
-                onMouseEnter={(e) => (e.currentTarget.style.background = '#f1f5f9')}
-                onMouseLeave={(e) => (e.currentTarget.style.background = selectedId === w.id.toString() ? '#f8fafc' : '#fff')}
-              >
-                <span style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: selectedId === w.id.toString() ? 'bold' : 'normal' }}>
-                  <span>{getIcon(w.name)}</span> {w.name}
-                </span>
-                <span style={{ fontWeight: 'bold', color: w.currency === 'USD' ? '#15803d' : '#b58a3d' }}>
-                  {new Intl.NumberFormat('en-US').format(w.balance)} {w.currency === 'USD' ? '$' : '៛'}
-                </span>
-              </div>
-            ))
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
+import WalletDropdown from '@/components/WalletDropdown';
 
 export default function TreasuryPage() {
   const { activeBranchId } = useBranch();
@@ -127,8 +43,8 @@ export default function TreasuryPage() {
   }, [isSettingsOpen, wallets]);
 
   // Transfer Form State
-  const [fromWalletId, setFromWalletId] = useState('');
-  const [toWalletId, setToWalletId] = useState('');
+  const [fromWalletName, setFromWalletName] = useState('');
+  const [toWalletName, setToWalletName] = useState('');
   const [transferAmount, setTransferAmount] = useState<number | ''>('');
   const [transferNotes, setTransferNotes] = useState('');
 
@@ -154,6 +70,12 @@ export default function TreasuryPage() {
   };
 
   useEffect(() => {
+    // 💣 SECURITY WIPE: Clear drafts to prevent transferring Branch 1 money to Branch 2 wallets
+    setFromWalletName('');
+    setToWalletName('');
+    setTransferAmount('');
+    setDraftBalances({});
+    
     fetchWallets();
     fetchAccountsReceivable();
   }, [activeBranchId]);
@@ -235,6 +157,10 @@ export default function TreasuryPage() {
   }
 
   const handleSaveInitialBalances = async () => {
+    if (activeBranchId === 0) {
+      showToast('error', 'HQ Locked', 'Cannot modify live balances while viewing Global HQ.');
+      return;
+    }
     setIsProcessing(true);
     try {
       const updatePromises = transferableWallets.map(async (w) => {
@@ -245,7 +171,7 @@ export default function TreasuryPage() {
         const difference = newBal - currentBal;
 
         if (difference !== 0) {
-          const targetBranchId = w.branch_id || (activeBranchId === 0 ? 1 : activeBranchId);
+          const targetBranchId = activeBranchId; // 🔥 FIX: Strictly enforced target branch
 
           const { error } = await supabase.rpc('record_wallet_transaction', {
             p_wallet_name: w.name,
@@ -271,12 +197,13 @@ export default function TreasuryPage() {
   };
 
   const handleTransfer = async () => {
-    if (!fromWalletId || !toWalletId) return showToast('error', 'Missing Data', 'Select both origin and destination wallets.');
-    if (fromWalletId === toWalletId) return showToast('error', 'Invalid', 'Cannot transfer to the same wallet.');
+    if (activeBranchId === 0) return showToast('error', 'HQ Locked', 'Cannot execute transfers in Global HQ.');
+    if (!fromWalletName || !toWalletName) return showToast('error', 'Missing Data', 'Select both origin and destination wallets.');
+    if (fromWalletName === toWalletName) return showToast('error', 'Invalid', 'Cannot transfer to the same wallet.');
     if (!transferAmount || transferAmount <= 0) return showToast('error', 'Invalid Amount', 'Enter a valid transfer amount.');
 
-    const fromWallet = transferableWallets.find(w => w.id.toString() === fromWalletId);
-    const toWallet = transferableWallets.find(w => w.id.toString() === toWalletId);
+    const fromWallet = transferableWallets.find(w => w.name === fromWalletName);
+    const toWallet = transferableWallets.find(w => w.name === toWalletName);
 
     if (fromWallet?.currency !== toWallet?.currency) {
       return showToast('error', 'Currency Mismatch', 'Cannot transfer KHR directly to USD without a dedicated exchange action.');
@@ -332,7 +259,7 @@ export default function TreasuryPage() {
       }
 
       showToast('success', 'Transfer Complete', `Successfully moved funds from ${fromWallet?.name} to ${toWallet?.name}.`);
-      setFromWalletId(''); setToWalletId(''); setTransferAmount(''); setTransferNotes('');
+      setFromWalletName(''); setToWalletName(''); setTransferAmount(''); setTransferNotes('');
       fetchWallets();
       setActiveTab('balances');
 
@@ -509,11 +436,12 @@ export default function TreasuryPage() {
                     <span>📤 From Wallet</span>
                     <span style={{ color: '#ef4444' }}>Deducting</span>
                   </label>
-                  <TreasuryWalletDropdown 
-                    selectedId={fromWalletId} 
-                    wallets={transferableWallets} 
-                    onChange={setFromWalletId} 
+                  <WalletDropdown 
+                    value={fromWalletName} 
+                    options={transferableWallets.map(w => w.name)} 
+                    onChange={setFromWalletName} 
                     placeholder="-- Select Source Wallet --" 
+                    disabled={activeBranchId === 0}
                   />
                 </div>
 
@@ -530,11 +458,12 @@ export default function TreasuryPage() {
                     <span>📥 To Wallet</span>
                     <span style={{ color: '#10b981' }}>Adding</span>
                   </label>
-                  <TreasuryWalletDropdown 
-                    selectedId={toWalletId} 
-                    wallets={transferableWallets} 
-                    onChange={setToWalletId} 
+                  <WalletDropdown 
+                    value={toWalletName} 
+                    options={transferableWallets.map(w => w.name)} 
+                    onChange={setToWalletName} 
                     placeholder="-- Select Destination Wallet --" 
+                    disabled={activeBranchId === 0}
                   />
                 </div>
 
@@ -560,11 +489,11 @@ export default function TreasuryPage() {
 
                 <button 
                   onClick={handleTransfer} 
-                  disabled={isProcessing || !fromWalletId || !toWalletId || !transferAmount} 
+                  disabled={isProcessing || activeBranchId === 0 || !fromWalletName || !toWalletName || !transferAmount} 
                   className="saas-btn saas-btn-primary" 
-                  style={{ width: '100%', padding: '18px', fontSize: '16px', fontWeight: 'bold', marginTop: '12px', background: (!fromWalletId || !toWalletId || !transferAmount) ? '#cbd5e1' : '#10b981', boxShadow: (!fromWalletId || !toWalletId || !transferAmount) ? 'none' : '0 10px 15px -3px rgba(16, 185, 129, 0.4)' }}
+                  style={{ width: '100%', padding: '18px', fontSize: '16px', fontWeight: 'bold', marginTop: '12px', background: (!fromWalletName || !toWalletName || !transferAmount || activeBranchId === 0) ? '#cbd5e1' : '#10b981', boxShadow: (!fromWalletName || !toWalletName || !transferAmount || activeBranchId === 0) ? 'none' : '0 10px 15px -3px rgba(16, 185, 129, 0.4)', opacity: activeBranchId === 0 ? 0.5 : 1, cursor: activeBranchId === 0 ? 'not-allowed' : 'pointer' }}
                 >
-                  {isProcessing ? 'Moving Funds...' : '✅ Execute Transfer'}
+                  {isProcessing ? 'Moving...' : activeBranchId === 0 ? 'HQ Locked' : '✅ Execute Transfer'}
                 </button>
               </div>
             </div>
@@ -603,8 +532,8 @@ export default function TreasuryPage() {
           <button onClick={() => setIsSettingsOpen(false)} disabled={isProcessing} className="saas-btn saas-btn-secondary">
             Cancel
           </button>
-          <button onClick={handleSaveInitialBalances} disabled={isProcessing} className="saas-btn saas-btn-primary">
-            {isProcessing ? 'Processing...' : '💾 Sync Balances'}
+          <button onClick={handleSaveInitialBalances} disabled={isProcessing || activeBranchId === 0} className="saas-btn saas-btn-primary" style={{ opacity: activeBranchId === 0 ? 0.5 : 1, cursor: activeBranchId === 0 ? 'not-allowed' : 'pointer' }}>
+            {isProcessing ? 'Processing...' : activeBranchId === 0 ? 'HQ Locked' : '💾 Sync Balances'}
           </button>
         </div>
       </Modal>

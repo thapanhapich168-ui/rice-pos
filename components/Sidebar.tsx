@@ -166,7 +166,12 @@ export default function Sidebar() {
 
   // 🔥 NEW DND-KIT SENSORS AND HANDLERS
   const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }), 
+    useSensor(PointerSensor, { 
+      activationConstraint: { 
+        delay: 250, // 🔥 FIX: Requires a 250ms "hold/long-press" before dragging starts
+        tolerance: 5 // Allows a tiny 5px wiggle room while holding so it doesn't cancel easily
+      } 
+    }), 
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
   );
 

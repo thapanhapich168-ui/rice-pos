@@ -14,115 +14,7 @@ import EmptyState from '@/components/EmptyState'
 import { useBranch } from '@/components/BranchContext' 
 import { COGS_PAYMENT_WALLETS } from '@/lib/walletConstants'
 import { TELEGRAM_CONFIG } from '@/lib/telegramConfig'
-
-function WalletDropdown({ value, options, onChange, style }: any) {
-  const [isOpen, setIsOpen] = useState(false);
-  const dropdownRef = useRef<HTMLDivElement>(null);
-  const [menuStyles, setMenuStyles] = useState<any>({});
-
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      // Allow clicking inside the menu without closing it
-      if (document.getElementById('wallet-dropdown-portal')?.contains(event.target as Node)) return;
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) setIsOpen(false);
-    };
-    const handleScroll = (event: Event) => {
-      // Allow scrolling inside the portal menu without closing it!
-      if (document.getElementById('wallet-dropdown-portal')?.contains(event.target as Node)) return;
-      setIsOpen(false);
-    };
-
-    if (isOpen) {
-      document.addEventListener('mousedown', handleClickOutside);
-      window.addEventListener('scroll', handleScroll, true); 
-    }
-    
-    return () => {
-      document.removeEventListener('mousedown', handleClickOutside);
-      window.removeEventListener('scroll', handleScroll, true);
-    };
-  }, [isOpen]);
-
-  const handleToggle = (e: React.MouseEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    if (!isOpen && dropdownRef.current) {
-      const rect = dropdownRef.current.getBoundingClientRect();
-      const menuHeight = 220; 
-      const spaceBelow = window.innerHeight - rect.bottom;
-      
-      setMenuStyles({
-        position: 'fixed',
-        top: spaceBelow < menuHeight ? rect.top - menuHeight - 4 : rect.bottom + 4,
-        left: rect.left,
-        width: rect.width,
-        zIndex: 2147483647 // 🚀 Maximum z-index to break out of mobile modals
-      });
-    }
-    setIsOpen(!isOpen);
-  };
-
-  const getIcon = (val: string) => {
-    if (!val) return '💳';
-    if (val.includes('ABA')) return '📱';
-    if (val.includes('Chest')) return '🗄️';
-    if (val.includes('Cash')) return '💵';
-    if (val.includes('Availability') || val.includes('Mom')) return '👩';
-    if (val.includes('Debt')) return '📉';
-    return '💳';
-  };
-
-  return (
-    <div ref={dropdownRef} style={{ position: 'relative', ...style }}>
-      <div 
-        onClick={handleToggle}
-        style={{ 
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-          padding: '0 12px', background: '#fff', border: '1px solid #cbd5e1', 
-          borderRadius: '8px', cursor: 'pointer', height: '100%',
-          fontSize: '13px', fontWeight: 'bold', color: '#334155',
-          boxShadow: 'inset 0 1px 2px rgba(0,0,0,0.02)'
-        }}
-      >
-        <span style={{ display: 'flex', alignItems: 'center', gap: '8px', overflow: 'hidden', whiteSpace: 'nowrap' }}>
-          <span>{getIcon(value || '')}</span> {value}
-        </span>
-        <span style={{ fontSize: '10px', color: '#94a3b8', transform: isOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s', flexShrink: 0, marginLeft: '4px' }}>▼</span>
-      </div>
-      
-      {isOpen && typeof document !== 'undefined' && createPortal(
-        <div id="wallet-dropdown-portal" style={{ 
-          ...menuStyles,
-          background: '#fff', border: '1px solid #e2e8f0', borderRadius: '12px', 
-          boxShadow: '0 10px 25px -5px rgba(0,0,0,0.1), 0 8px 10px -6px rgba(0,0,0,0.1)', overflow: 'hidden',
-          display: 'flex', flexDirection: 'column', padding: '4px'
-        }}>
-          <div className="hide-scrollbar" style={{ maxHeight: '210px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '2px' }}>
-            {options.map((opt: string) => (
-              <div 
-                key={opt}
-                onClick={(e) => { e.stopPropagation(); onChange(opt); setIsOpen(false); }}
-                style={{ 
-                  padding: '10px 12px', cursor: 'pointer', fontSize: '13px',
-                  display: 'flex', alignItems: 'center', gap: '8px',
-                  background: value === opt ? '#f8fafc' : '#fff',
-                  borderRadius: '8px', color: value === opt ? '#0f172a' : '#475569',
-                  fontWeight: value === opt ? 'bold' : 'normal', transition: 'background 0.1s',
-                  whiteSpace: 'nowrap'
-                }}
-                onMouseEnter={(e) => (e.currentTarget.style.background = '#f1f5f9')}
-                onMouseLeave={(e) => (e.currentTarget.style.background = value === opt ? '#f8fafc' : '#fff')}
-              >
-                <span>{getIcon(opt)}</span> {opt}
-              </div>
-            ))}
-          </div>
-        </div>,
-        document.body
-      )}
-    </div>
-  );
-}
+import WalletDropdown from '@/components/WalletDropdown'
 
 export default function CogsReportPage() {
   const { showToast } = useToast();
@@ -137,7 +29,13 @@ export default function CogsReportPage() {
   const [persOweRiel, setPersOweRiel] = useState<number>(0)
   const [persOweUsd, setPersOweUsd] = useState<number>(0)
   const [liveMomLiability, setLiveMomLiability] = useState<number>(0) 
-  const [liveWallets, setLiveWallets] = useState<any[]>([]) // 🚀 NEW LIVE WALLETS LIST
+  const [liveWallets, setLiveWallets] = useState<any[]>([])
+
+  // 🔥 FETCH LIVE WALLETS FOR THIS BRANCH
+  async function fetchLiveWallets() {
+    const { data } = await supabase.from('wallets').select('*').eq('branch_id', activeBranchId).order('id', { ascending: true });
+    if (data) setLiveWallets(data);
+  }
 
   // Navigation States
   const [activeMainTab, setActiveMainTab] = useState<'report' | 'pending' | 'history'>('report')
@@ -220,16 +118,19 @@ export default function CogsReportPage() {
     });
 
     // 2. Fetch Visual Data (Only what we explicitly need to render the screen)
+    // Also fetch live wallets simultaneously!
+    await fetchLiveWallets();
+
     const [
       { data: sData }, 
       { data: rDataView }, 
       { data: cDataView }, 
       { data: liabilityData }
     ] = await Promise.all([
-        // 🔥 VIEW DATA: Only fetches exact date range required
-        supabase.from('sales').select('*').gte('created_at', queryStart).lte('created_at', queryEnd).eq('branch_id', activeBranchId).order('created_at', { ascending: false }),
-        supabase.from('retail_sales').select('*').gte('created_at', queryStart).lte('created_at', queryEnd).eq('branch_id', activeBranchId).order('created_at', { ascending: false }),
-        supabase.from('cogs_settlements').select('*').gte('settlement_date', startJustDate).lte('settlement_date', endJustDate).eq('branch_id', activeBranchId).order('created_at', { ascending: false }),
+        // 🔥 VIEW DATA: Bypasses the 1000-row limit to ensure A4 PDF totals are mathematically flawless
+        supabase.from('sales').select('*').gte('created_at', queryStart).lte('created_at', queryEnd).eq('branch_id', activeBranchId).order('created_at', { ascending: false }).limit(10000),
+        supabase.from('retail_sales').select('*').gte('created_at', queryStart).lte('created_at', queryEnd).eq('branch_id', activeBranchId).order('created_at', { ascending: false }).limit(10000),
+        supabase.from('cogs_settlements').select('*').gte('settlement_date', startJustDate).lte('settlement_date', endJustDate).eq('branch_id', activeBranchId).order('created_at', { ascending: false }).limit(10000),
         
         // ⚖️ LIABILITY DATA: Offloaded entirely to Postgres for instant calculation!
         supabase.rpc('get_mom_liability', { p_branch_id: activeBranchId })
@@ -522,6 +423,12 @@ export default function CogsReportPage() {
 
   async function processPayments(rows: PaymentRow[], targetDays: any[], isBulk: boolean) {
     if (isProcessing) return;
+    
+    // 🛑 PROTOCOL ENFORCEMENT: Block Global HQ Execution
+    if (activeBranchId === 0) {
+      showToast('error', 'HQ Locked', 'Cannot process COGS settlements while viewing Global HQ.');
+      return;
+    }
 
     let totalAppliedRielEq = 0;
     let liabilityUsedRiel = 0;
@@ -585,8 +492,8 @@ export default function CogsReportPage() {
          const apply = Math.min(owed, remainingToDistribute);
 
          const pctOfTotal = apply / totalAppliedRielEq;
-         const allocatedUsd = totalUsdFace * pctOfTotal;
-         const allocatedRiel = totalRielFace * pctOfTotal;
+         const allocatedUsd = Number((totalUsdFace * pctOfTotal).toFixed(2));
+         const allocatedRiel = Math.round(totalRielFace * pctOfTotal);
 
          settlesToInsert.push({
            settlement_date: day.date,
@@ -611,6 +518,28 @@ export default function CogsReportPage() {
         } 
       });
       if (error) throw error;
+
+      // 🔥 CRITICAL FIX: PHYSICALLY DEDUCT MONEY FROM THE WALLETS
+      // Because the RPC receives a concatenated string, it cannot update wallets natively.
+      // We must explicitly hit the ledger. Amounts are NEGATIVE because COGS is an outflow!
+      const walletPromises = rows.map(async (r) => {
+         const amt = Number(String(r.amount).replace(/,/g, '')) || 0;
+         if (amt <= 0) return;
+         
+         const isUsd = r.method.includes('$');
+         
+         const { error: wErr } = await supabase.rpc('record_wallet_transaction', {
+            p_wallet_name: r.method,
+            p_amount: isUsd ? -Number(Math.abs(amt).toFixed(2)) : -Math.round(Math.abs(amt)), // 📉 NEGATIVE: Rounded outflow
+            p_reference_type: 'COGS Settlement',
+            p_reference_id: `COGS-${Date.now()}`,
+            p_description: isBulk ? `Bulk Settle COGS to ${Array.from(new Set(targetDays.map(d=>d.owner))).join(', ')}` : `Inline Settle COGS to ${targetDays[0]?.owner}`,
+            p_branch_id: activeBranchId
+         });
+         
+         if (wErr) console.error("Wallet deduction failed:", wErr);
+      });
+      await Promise.all(walletPromises);
 
       // 🔔 AUTO-SEND TELEGRAM ALERT ON COGS PAYMENT
       const botToken = TELEGRAM_CONFIG.botToken || process.env.NEXT_PUBLIC_TELEGRAM_BOT_TOKEN;
@@ -1011,10 +940,18 @@ export default function CogsReportPage() {
                 </div>
                 <button 
                   onClick={() => setBulkModalOpen(true)}
+                  disabled={activeBranchId === 0}
                   className="saas-btn saas-btn-primary"
-                  style={{ borderRadius: '30px', boxShadow: '0 4px 10px rgba(16,185,129,0.3)', padding: '12px 24px', fontSize: '15px' }}
+                  style={{ 
+                    borderRadius: '30px', 
+                    boxShadow: activeBranchId === 0 ? 'none' : '0 4px 10px rgba(16,185,129,0.3)', 
+                    padding: '12px 24px', 
+                    fontSize: '15px', 
+                    opacity: activeBranchId === 0 ? 0.5 : 1, 
+                    cursor: activeBranchId === 0 ? 'not-allowed' : 'pointer' 
+                  }}
                 >
-                  Settle Selected
+                  {activeBranchId === 0 ? 'HQ Locked' : 'Settle Selected'}
                 </button>
               </div>
             )}
@@ -1109,10 +1046,16 @@ export default function CogsReportPage() {
                             {!isDone && (
                               <button 
                                 onClick={() => handleProcessCreditPayment(d, paymentState)}
+                                disabled={isProcessing || activeBranchId === 0}
                                 className="saas-btn saas-btn-primary"
-                                style={{ width: '100%', padding: '8px 12px' }}
+                                style={{ 
+                                  width: '100%', 
+                                  padding: '8px 12px', 
+                                  opacity: activeBranchId === 0 ? 0.5 : 1, 
+                                  cursor: activeBranchId === 0 ? 'not-allowed' : 'pointer' 
+                                }}
                               >
-                                ✔ Done
+                                {isProcessing ? '...' : activeBranchId === 0 ? 'Locked' : '✔ Done'}
                               </button>
                             )}
                           </td>
@@ -1221,8 +1164,18 @@ export default function CogsReportPage() {
 
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
               <button onClick={() => setBulkModalOpen(false)} className="saas-btn saas-btn-secondary" style={{ padding: '12px 16px', fontSize: '15px' }}>Cancel</button>
-              <button onClick={() => processPayments(bulkPaymentRows, selectedDays.map(k => dailyMap[k]), true)} disabled={isProcessing} className="saas-btn saas-btn-primary" style={{ padding: '12px 16px', fontSize: '15px' }}>
-                {isProcessing ? 'Processing...' : 'Confirm Bulk Settle'}
+              <button 
+                onClick={() => processPayments(bulkPaymentRows, selectedDays.map(k => dailyMap[k]), true)} 
+                disabled={isProcessing || activeBranchId === 0} 
+                className="saas-btn saas-btn-primary" 
+                style={{ 
+                  padding: '12px 16px', 
+                  fontSize: '15px',
+                  opacity: activeBranchId === 0 ? 0.5 : 1, 
+                  cursor: activeBranchId === 0 ? 'not-allowed' : 'pointer' 
+                }}
+              >
+                {isProcessing ? 'Processing...' : activeBranchId === 0 ? 'HQ Locked' : 'Confirm Bulk Settle'}
               </button>
             </div>
           </div>

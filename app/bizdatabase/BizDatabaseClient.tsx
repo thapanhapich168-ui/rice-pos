@@ -180,7 +180,7 @@ export default function BizDatabase() {
 
     // 🔥 INFINITE FETCH FIX: Only download records that match our actual time filter!
     const fetchTable = async (table: string) => {
-      let q = supabase.from(table).select('*').eq('branch_id', activeBranchId);
+      let q = supabase.from(table).select('*').eq('branch_id', activeBranchId).order('created_at', { ascending: false }).limit(1000);
       if (queryStart) q = q.gte('created_at', queryStart);
       const { data, error } = await q;
       if (error) console.warn(`${table} fetch error`, error);
@@ -520,7 +520,6 @@ export default function BizDatabase() {
       document.removeEventListener('mousemove', handleMove)
       document.removeEventListener('mouseup', handleUp)
       document.removeEventListener('touchmove', handleMove)
-      document.removeEventListener('touchmove', handleMove)
       document.removeEventListener('touchend', handleUp)
       
       const branchSuffix = activeBranchId === 0 ? '' : `_${activeBranchId}`;
@@ -530,8 +529,7 @@ export default function BizDatabase() {
     document.addEventListener('mousemove', handleMove)
     document.addEventListener('mouseup', handleUp)
     document.addEventListener('touchmove', handleMove, { passive: false })
-    document.addEventListener('touchmove', handleMove, { passive: false })
-    document.addEventListener('touchmove', handleUp)
+    document.addEventListener('touchend', handleUp)
   }
 
   // --- DATA PROCESSING (USING DEBOUNCED SEARCH!) ---
@@ -543,7 +541,7 @@ export default function BizDatabase() {
 
         if (debouncedSearch) {
           const query = debouncedSearch.toLowerCase()
-          const searchableText = `${t.invoice_id || ''} ${t.transaction_id || ''} ${t.customer_name || ''} ${t.rice_types || ''} ${t.rice_type || ''} ${t.description || ''} ${t.category || ''}`.toLowerCase()
+          const searchableText = `${t.invoice_id || ''} ${t.transaction_id || ''} ${t.customer_name || ''} ${t.rice_types || ''} ${t.rice_type || ''} ${t.description || ''} ${t.category || ''} ${t.total_sales || ''} ${t.amount_usd || ''} ${t.amount_riel || ''}`.toLowerCase()
           if (!searchableText.includes(query)) return false
         }
 

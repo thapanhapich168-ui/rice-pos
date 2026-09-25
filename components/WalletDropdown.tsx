@@ -30,8 +30,11 @@ export default function WalletDropdown({
       if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) setIsOpen(false);
     };
     
-    // Close on any background scroll to keep the floating portal anchored properly
-    const handleScroll = () => setIsOpen(false);
+    // Close on background scroll, but ALLOW scrolling inside the portal itself!
+    const handleScroll = (event: Event) => {
+      if (document.getElementById('universal-wallet-portal')?.contains(event.target as Node)) return;
+      setIsOpen(false);
+    };
 
     if (isOpen) {
       document.addEventListener('mousedown', handleClickOutside);
@@ -51,15 +54,20 @@ export default function WalletDropdown({
 
     if (!isOpen && dropdownRef.current) {
       const rect = dropdownRef.current.getBoundingClientRect();
-      const menuHeight = Math.min(options.length * 45 + 16, 250); 
-      const spaceBelow = window.innerHeight - rect.bottom;
+      const spaceBelow = window.innerHeight - rect.bottom - 16; // Leave a safe 16px buffer from screen bottom
+      const spaceAbove = rect.top - 16;
       
+      // If space below is tight, figure out whether to flip up or clamp the height
+      const showAbove = spaceBelow < 200 && spaceAbove > spaceBelow;
+      const calculatedMaxHeight = showAbove ? Math.min(spaceAbove, 220) : Math.min(spaceBelow, 220);
+
       setMenuStyles({
         position: 'fixed',
-        top: spaceBelow < menuHeight ? rect.top - menuHeight - 8 : rect.bottom + 8,
+        top: showAbove ? rect.top - calculatedMaxHeight - 6 : rect.bottom + 6,
         left: rect.left,
         width: rect.width,
-        zIndex: 2147483647 // Maximum z-index to overlay on top of any mobile modal
+        maxHeight: `${calculatedMaxHeight}px`,
+        zIndex: 2147483647 // Maximum z-index to break out of any mobile modal
       });
     }
     setIsOpen(!isOpen);
@@ -104,13 +112,11 @@ export default function WalletDropdown({
       {isOpen && typeof document !== 'undefined' && createPortal(
         <div id="universal-wallet-portal" style={{ 
           ...menuStyles,
-          background: 'rgba(255, 255, 255, 0.85)', backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)',
-          border: '1px solid rgba(226, 232, 240, 0.8)', borderRadius: '14px', 
-          boxShadow: '0 20px 40px -10px rgba(0,0,0,0.15), 0 10px 15px -5px rgba(0,0,0,0.05)', 
-          overflow: 'hidden', display: 'flex', flexDirection: 'column', padding: '6px',
-          animation: 'dropdownPop 0.2s cubic-bezier(0.16, 1, 0.3, 1)'
+          background: '#fff', border: '1px solid #e2e8f0', borderRadius: '12px', 
+          boxShadow: '0 10px 25px -5px rgba(0,0,0,0.1), 0 8px 10px -6px rgba(0,0,0,0.1)', 
+          display: 'flex', flexDirection: 'column', padding: '4px', overflow: 'hidden'
         }}>
-          <div className="hide-scrollbar" style={{ maxHeight: '240px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '2px' }}>
+          <div className="hide-scrollbar" style={{ flex: 1, maxHeight: '100%', overflowY: 'auto', WebkitOverflowScrolling: 'touch', display: 'flex', flexDirection: 'column', gap: '2px', paddingRight: '2px' }}>
             {options.map((opt: string) => (
               <div 
                 key={opt}
