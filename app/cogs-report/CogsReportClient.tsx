@@ -533,7 +533,8 @@ export default function CogsReportPage() {
       // 🔥 CRITICAL FIX: PHYSICALLY DEDUCT MONEY FROM THE WALLETS
       // Because the RPC receives a concatenated string, it cannot update wallets natively.
       // We must explicitly hit the ledger. Amounts are NEGATIVE because COGS is an outflow!
-      const walletPromises = rows.map(async (r) => {
+      // 🛡️ AUDIT FIX: Inject the loop index so lightning-fast splits get unique Reference IDs
+      const walletPromises = rows.map(async (r, index) => {
          const amt = Number(String(r.amount).replace(/,/g, '')) || 0;
          if (amt <= 0) return;
          
@@ -543,7 +544,7 @@ export default function CogsReportPage() {
             p_wallet_name: r.method,
             p_amount: isUsd ? -Number(Math.abs(amt).toFixed(2)) : -Math.round(Math.abs(amt)), // 📉 NEGATIVE: Rounded outflow
             p_reference_type: 'COGS Settlement',
-            p_reference_id: `COGS-${Date.now()}`,
+            p_reference_id: `COGS-${Date.now()}-${index}`, // 👈 Appended index prevents collision
             p_description: isBulk ? `Bulk Settle COGS to ${Array.from(new Set(targetDays.map(d=>d.owner))).join(', ')}` : `Inline Settle COGS to ${targetDays[0]?.owner}`,
             p_branch_id: activeBranchId
          });

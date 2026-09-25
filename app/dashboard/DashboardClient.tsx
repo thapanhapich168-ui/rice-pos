@@ -42,6 +42,7 @@ export default function DashboardPage() {
   const [familyOweUsd, setFamilyOweUsd] = useState<number>(0)
   const [persOweRiel, setPersOweRiel] = useState<number>(0) 
   const [persOweUsd, setPersOweUsd] = useState<number>(0) 
+  const [liveMomLiability, setLiveMomLiability] = useState<number>(0) // 🔥 NEW: Server-synced liability
 
   const [activeTab, setActiveTab] = useState<'summary' | 'wholesale' | 'retail' | 'asset'>('summary')
   const [assetFilter, setAssetFilter] = useState<any>('month')
@@ -68,22 +69,22 @@ export default function DashboardPage() {
     }
 
     // 🔥 PHASE 4 PAYLOAD OPTIMIZATION: Narrowed columns slash RAM usage by 80%
-    // 🛡️ FINANCIAL FIX: Removed date limits from ledger tables so calculateAssets() computes accurate LIFETIME Cash, QR, and Net Worth. 
     const [
       {data: salesData}, {data: sumData}, {data: retData}, {data: expData}, 
       {data: staffData}, {data: prodData}, {data: apData}, {data: cogsData}, 
-      {data: batchData}, {data: invPayData}
+      {data: batchData}, {data: invPayData}, {data: momLiabilityData}
     ] = await Promise.all([
-      buildQNarrow('sales', 'id, created_at, qty, price_per_bag, cogs_price, owner, custom_rice_type, rice_type, invoice_id').eq('is_voided', false),
-      buildQNarrow('invoice_summaries', 'invoice_id, owner, balance_due').eq('is_done', false),
-      buildQNarrow('retail_sales', 'id, created_at, qty, price_per_bag, cogs_price, owner, custom_rice_type, rice_type, transaction_id, payment_method, total_sales').eq('is_voided', false),
-      buildQNarrow('expenses', 'id, created_at, amount_riel, amount_usd, payment_method, spender, description, remarks'),
+      buildQNarrow('sales', 'id, created_at, qty, price_per_bag, cogs_price, owner, custom_rice_type, rice_type, invoice_id').eq('is_voided', false).order('created_at', { ascending: false }),
+      buildQNarrow('invoice_summaries', 'invoice_id, owner, balance_due').eq('is_done', false).order('created_at', { ascending: false }),
+      buildQNarrow('retail_sales', 'id, created_at, qty, price_per_bag, cogs_price, owner, custom_rice_type, rice_type, transaction_id, payment_method, total_sales').eq('is_voided', false).order('created_at', { ascending: false }),
+      buildQNarrow('expenses', 'id, created_at, amount_riel, amount_usd, payment_method, spender, description, remarks').order('created_at', { ascending: false }),
       buildQ('staff'),
       buildQNarrow('products', 'id, name, stock, cost_price, weight, linked_wholesale_id').order('id'),
       buildQNarrow('accounts_payable', 'id, amount_riel, amount_usd, status').eq('status', 'Unpaid'),
-      buildQNarrow('cogs_settlements', 'payment_method, paid_amount_riel, paid_amount_usd, owner_name'),
-      buildQNarrow('inventory_batches', 'id, product_id, remaining_qty, cost_price, created_at').eq('is_hidden', false), // 🔥 HSR FIX: Fetch all active batches (even negative ones), completely ignoring hidden ones
-      buildQNarrow('invoice_payments', 'invoice_id, payment_method, amount_paid_riel, amount_paid_usd, recorded_by, payment_date').eq('is_voided', false)
+      buildQNarrow('cogs_settlements', 'payment_method, paid_amount_riel, paid_amount_usd, owner_name').order('created_at', { ascending: false }),
+      buildQNarrow('inventory_batches', 'id, product_id, remaining_qty, cost_price, created_at').eq('is_hidden', false).order('created_at', { ascending: false }), 
+      buildQNarrow('invoice_payments', 'invoice_id, payment_method, amount_paid_riel, amount_paid_usd, recorded_by, payment_date').eq('is_voided', false).order('created_at', { ascending: false }),
+      supabase.rpc('get_mom_liability', { p_branch_id: activeBranchId }) // 👈 🛡️ Pull accurate lifetime liability from server
     ]);
 
     setWholesaleSales(salesData || []); 
@@ -96,6 +97,7 @@ export default function DashboardPage() {
     setCogsSettlements(cogsData || []); 
     setPriceHistory(batchData || []); 
     setInvoicePayments(invPayData || []);
+    setLiveMomLiability(Number(momLiabilityData) || 0);
 
     const baseKeys = ['base_capital', 'initial_cash_riel', 'initial_cash_usd', 'initial_qr_riel', 'initial_qr_usd', 'personal_owe_riel', 'personal_owe_usd', 'family_owe_riel', 'family_owe_usd'];
     // 🔥 SECURITY FIX: Isolate app settings fetches by branch to prevent global cross-tenant data leaks
@@ -674,20 +676,32 @@ export default function DashboardPage() {
        }
     });
 
-    const liveMomLiabilityRiel = Math.max(0, persOweRiel + momCollectedRiel - momPaidOutRiel - liabilityOffsetUsedRiel);
-    const liveMomLiabilityUsd = Math.max(0, persOweUsd + momCollectedUsd - momPaidOutUsd - liabilityOffsetUsedUsd);
+    // 🛡️ ARCHITECTURE FIX: Because transactional arrays are now safely capped to the newest 2000 rows to prevent RAM crashes, 
+    // manual loop calculations for Lifetime Assets will miss years of historical data.
+    // We override them here with the exact values from the Live Wallets and Server RPCs to guarantee perfect Net Worth!
+    
+    const trueLiveCashRiel = getBalance(WALLET_NAMES.CASH_KHR) + getBalance(WALLET_NAMES.CASH_CHEST_KHR);
+    const trueLiveCashUsd = getBalance(WALLET_NAMES.CASH_USD) + getBalance(WALLET_NAMES.CASH_CHEST_USD);
+    const trueLiveQrRiel = getBalance(WALLET_NAMES.ABA_BOTH_KHR) + getBalance(WALLET_NAMES.ABA_RADIANT_KHR);
+    const trueLiveQrUsd = getBalance(WALLET_NAMES.ABA_BOTH_USD) + getBalance(WALLET_NAMES.ABA_RADIANT_USD);
+
+    const trueLiveMomLiabilityRiel = liveMomLiability; // Exact server-calculated value
+    const trueLiveMomLiabilityUsd = 0; // Consolidated strictly into KHR to prevent desync
 
     const momCogsArRiel = Math.max(0, momTotalCogsRiel - momTotalPaidRiel);
 
-    const netWorthRiel = baseCapital + liveCashRiel + liveQrRiel + bizCreditRiel + familyOweRiel + momCogsArRiel + staffDebtRiel - totalSupplierAPRiel - liveMomLiabilityRiel;
-    const netWorthUsd = liveCashUsd + liveQrUsd + familyOweUsd + staffDebtUsd - totalSupplierAPUsd - liveMomLiabilityUsd;
+    const netWorthRiel = baseCapital + trueLiveCashRiel + trueLiveQrRiel + bizCreditRiel + familyOweRiel + momCogsArRiel + staffDebtRiel - totalSupplierAPRiel - trueLiveMomLiabilityRiel;
+    const netWorthUsd = trueLiveCashUsd + trueLiveQrUsd + familyOweUsd + staffDebtUsd - totalSupplierAPUsd - trueLiveMomLiabilityUsd;
 
     const totalArRiel = bizCreditRiel + familyOweRiel + staffDebtRiel; 
     const totalArUsd = familyOweUsd + staffDebtUsd;
 
     return {
-      liveCashRiel, liveCashUsd, liveQrRiel, liveQrUsd,
-      bizCreditRiel, bizCreditUsd, momCogsArRiel, momCustomerArRiel, liveMomLiabilityRiel, liveMomLiabilityUsd, totalSupplierAPRiel, totalSupplierAPUsd, staffDebtRiel, staffDebtUsd,
+      liveCashRiel: trueLiveCashRiel, liveCashUsd: trueLiveCashUsd, 
+      liveQrRiel: trueLiveQrRiel, liveQrUsd: trueLiveQrUsd,
+      bizCreditRiel, bizCreditUsd, momCogsArRiel, momCustomerArRiel, 
+      liveMomLiabilityRiel: trueLiveMomLiabilityRiel, liveMomLiabilityUsd: trueLiveMomLiabilityUsd, 
+      totalSupplierAPRiel, totalSupplierAPUsd, staffDebtRiel, staffDebtUsd,
       familyOweRiel, familyOweUsd,
       netWorthRiel, netWorthUsd, totalArRiel, totalArUsd, riceStockValue, productValuations,
       bizExpRiel, bizExpUsd, persExpRiel, persExpUsd, riceExpRiel, riceExpUsd
@@ -707,7 +721,7 @@ export default function DashboardPage() {
   }), [activeSalesData, activeInvoicePayments, expenses]);
 
   // 🔥 PERFORMANCE FIX: Memoize massive math calculations to stop typing lag
-  const assetData = useMemo(() => calculateAssets(), [initCashRiel, initCashUsd, initQrRiel, initQrUsd, baseCapital, staffList, inventoryList, priceHistory, accountsPayable, invoicePayments, wholesaleSales, retailSales, cogsSettlements, expenses, persOweRiel, persOweUsd, familyOweRiel, familyOweUsd, assetFilter]);
+  const assetData = useMemo(() => calculateAssets(), [initCashRiel, initCashUsd, initQrRiel, initQrUsd, baseCapital, staffList, inventoryList, priceHistory, accountsPayable, invoicePayments, wholesaleSales, retailSales, cogsSettlements, expenses, persOweRiel, persOweUsd, familyOweRiel, familyOweUsd, assetFilter, liveMomLiability, getBalance]);
 
   // --- 🔥 NEW: Filter and Sort Detailed Inventory ---
   const filteredAndSortedInventory = useMemo(() => {
